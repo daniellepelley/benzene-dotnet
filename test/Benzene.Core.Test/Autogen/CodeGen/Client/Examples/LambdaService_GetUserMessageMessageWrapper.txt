@@ -1,0 +1,11 @@
+using System;
+using System.Diagnostics.CodeAnalysis;
+
+namespace Benzene.Service.Clients.User
+{
+    [ExcludeFromCodeCoverage]
+    public class GetUserMessageMessageWrapper
+    {
+        public GetUserMessage Message { get; set; }
+    }
+}
