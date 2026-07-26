@@ -31,20 +31,33 @@ tf_import() {
   fi
   echo "· import: $addr  <-  $id"
   # A deterministic-id resource that doesn't exist in AWS yet (e.g. a brand-new service on its first
-  # deploy) isn't an error — apply will create it. Terraform reports that specific case as "Cannot
-  # import non-existent remote object"; swallow only that, and re-raise anything else so real failures
-  # still abort under set -e.
+  # deploy) isn't an error — apply will create it. Swallow only that case, and re-raise anything else
+  # so real failures (bad credentials, throttling, a malformed id) still abort under set -e.
   local out
   if out="$(terraform import -input=false -var "region=$REGION" "$addr" "$id" 2>&1)"; then
     printf '%s\n' "$out"
     return 0
   fi
-  if printf '%s\n' "$out" | grep -q "Cannot import non-existent remote object"; then
+  if is_not_found "$out"; then
     echo "· skip (not in AWS yet — apply will create it): $addr"
     return 0
   fi
   printf '%s\n' "$out" >&2
   return 1
+}
+
+# "Doesn't exist yet" reaches us in several different wordings, because it depends on how each
+# resource's importer signals a miss:
+#   - "Cannot import non-existent remote object" — Terraform core, when the post-import read is empty.
+#     Most resources here take this path.
+#   - "couldn't find resource" — the AWS provider's NotFoundError with no message set. This is what
+#     aws_lambda_permission returns, and matching only the core wording above meant the very first
+#     deploy into a clean account aborted on the first permission it tried to adopt.
+#   - a service-level not-found exception surfaced verbatim (IAM, S3, API Gateway).
+# Deliberately an explicit list rather than a catch-all: an unrecognised failure must still abort.
+is_not_found() {
+  printf '%s\n' "$1" | grep -Eqi \
+    "Cannot import non-existent remote object|couldn't find resource|ResourceNotFound|NoSuchEntity|NoSuchBucket|NotFoundException"
 }
 
 # All HTTP API ids with a given name (a failed run can leave duplicate names).
