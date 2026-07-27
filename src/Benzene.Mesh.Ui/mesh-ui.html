@@ -1,4 +1,24 @@
 <!doctype html>
+<!--
+  ============================================================================
+  Benzene Mesh UI — CANONICAL, CROSS-LANGUAGE SOURCE OF TRUTH
+  ----------------------------------------------------------------------------
+  This file lives in the cross-language benzene repo (mesh-ui/mesh-ui.html) and
+  is the ONE holistic Mesh UI for every Benzene language port. It is spec-driven:
+  it renders the language-neutral mesh catalog artifacts (manifest / topics /
+  topology / usage / annotations / per-service snapshots) that every conforming
+  aggregator produces — the same shapes in benzene-dotnet, benzene-typescript,
+  and future benzene-go. See docs/guides/mesh-ui.md for the aims, the functional
+  spec, the data contract, and the vendor-a-copy consumption plan.
+
+  Provenance / vendoring: every consumer (a language port's Benzene.Mesh.Ui
+  package, the website demo) vendors a VERBATIM copy of this file and does not
+  fork it — same discipline as the conformance fixtures. If you are reading a
+  copy, do not edit it here; change docs/guides/mesh-ui.md's canonical and
+  re-vendor. Self-contained: inline CSS/JS only, no CDN, no build step, no
+  network calls except the relative mesh JSON artifacts it renders.
+  ============================================================================
+-->
 <html lang="en">
 <head>
 <meta charset="utf-8" />
