@@ -27,7 +27,7 @@ public class ApiGatewaySourceGenSerializerTest
     // A representative API Gateway (payload format 1.0) proxy event as it arrives on the wire.
     private const string ProxyRequestJson =
         "{\"resource\":\"/orders\",\"path\":\"/orders\",\"httpMethod\":\"POST\"," +
-        "\"headers\":{\"content-type\":\"application/json\",\"benzene-topic\":\"orders:create\"}," +
+        "\"headers\":{\"content-type\":\"application/json\",\"topic\":\"orders:create\"}," +
         "\"queryStringParameters\":{\"dryRun\":\"true\"}," +
         "\"body\":\"{\\\"item\\\":\\\"Espresso Machine\\\",\\\"quantity\\\":2}\"," +
         "\"isBase64Encoded\":false}";
@@ -56,7 +56,7 @@ public class ApiGatewaySourceGenSerializerTest
         Assert.Equal(reflection.Body, sourceGen.Body);
         Assert.Equal(reflection.IsBase64Encoded, sourceGen.IsBase64Encoded);
         Assert.Equal(reflection.Headers["content-type"], sourceGen.Headers["content-type"]);
-        Assert.Equal(reflection.Headers["benzene-topic"], sourceGen.Headers["benzene-topic"]);
+        Assert.Equal(reflection.Headers["topic"], sourceGen.Headers["topic"]);
         Assert.Equal(reflection.QueryStringParameters["dryRun"], sourceGen.QueryStringParameters["dryRun"]);
     }
 

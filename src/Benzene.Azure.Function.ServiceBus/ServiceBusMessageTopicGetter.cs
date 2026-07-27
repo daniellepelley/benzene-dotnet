@@ -1,6 +1,7 @@
 using Benzene.Abstractions.MessageHandlers.Mappers;
 using Benzene.Abstractions.Messages;
 using Benzene.Core.Messages;
+using Benzene.Abstractions;
 
 namespace Benzene.Azure.Function.ServiceBus;
 
@@ -16,7 +17,7 @@ public class ServiceBusMessageTopicGetter : IMessageTopicGetter<ServiceBusContex
     /// <c>UseServiceBus(..., topicPropertyKey)</c>) to consume messages a non-Benzene producer routes
     /// on another application property.
     /// </summary>
-    public const string DefaultTopicProperty = "benzene-topic";
+    public const string DefaultTopicProperty = BenzeneWireNames.DefaultTopic;
 
     private readonly string _topicPropertyKey;
 
@@ -25,7 +26,7 @@ public class ServiceBusMessageTopicGetter : IMessageTopicGetter<ServiceBusContex
     /// </summary>
     /// <param name="topicPropertyKey">
     /// The application property the topic is carried on. Defaults to
-    /// <see cref="DefaultTopicProperty"/> (<c>benzene-topic</c>).
+    /// <see cref="DefaultTopicProperty"/> (<c>topic</c>).
     /// </param>
     public ServiceBusMessageTopicGetter(string topicPropertyKey = DefaultTopicProperty)
     {

@@ -1,6 +1,7 @@
 using Benzene.Abstractions.MessageHandlers.Mappers;
 using Benzene.Abstractions.Messages;
 using Benzene.Core.Messages;
+using Benzene.Abstractions;
 
 namespace Benzene.Aws.Lambda.Sqs;
 
@@ -15,7 +16,7 @@ public class SqsMessageTopicGetter : IMessageTopicGetter<SqsMessageContext>
     /// <c>DependencyInjectionExtensions.AddSqs(topicAttributeKey)</c> / <c>Extensions.UseSqs(...,
     /// topicAttributeKey)</c>) to consume messages a non-Benzene producer routes on another attribute.
     /// </summary>
-    public const string DefaultTopicAttribute = "benzene-topic";
+    public const string DefaultTopicAttribute = BenzeneWireNames.DefaultTopic;
 
     private readonly string _topicAttributeKey;
 
@@ -24,7 +25,7 @@ public class SqsMessageTopicGetter : IMessageTopicGetter<SqsMessageContext>
     /// </summary>
     /// <param name="topicAttributeKey">
     /// The message attribute the topic is carried on. Defaults to
-    /// <see cref="DefaultTopicAttribute"/> (<c>benzene-topic</c>).
+    /// <see cref="DefaultTopicAttribute"/> (<c>topic</c>).
     /// </param>
     public SqsMessageTopicGetter(string topicAttributeKey = DefaultTopicAttribute)
     {

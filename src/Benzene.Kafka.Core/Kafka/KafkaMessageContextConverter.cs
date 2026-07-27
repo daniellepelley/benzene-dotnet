@@ -8,6 +8,7 @@ using Benzene.Core.MessageHandlers;
 using Benzene.Core.Messages;
 using Benzene.Results;
 using Confluent.Kafka;
+using Benzene.Abstractions;
 
 namespace Benzene.Kafka.Core.Kafka;
 
@@ -18,7 +19,11 @@ public class KafkaMessageContextConverter<TContext> : IContextConverter<TContext
     // a Benzene SQS/SNS source surfaces its routing topic as a header, and forwarding it here would
     // re-route the produced message to the consumed topic - an infinite loop if this service consumes
     // it. An outbound topic is always explicit, never inherited from the handled message's headers.
-    private const string TopicHeaderKey = "benzene-topic";
+    /// <summary>
+    /// The default header key the topic is read from. Public like every sibling binding's: a key that
+    /// only this class can see is a key no conformance test can check, which is how one drifts.
+    /// </summary>
+    public const string DefaultTopicHeader = BenzeneWireNames.DefaultTopic;
 
     private readonly IMessageTopicGetter<TContext> _messageTopicGetter;
     private readonly IMessageBodyGetter<TContext> _messageBodyGetter;
@@ -42,7 +47,7 @@ public class KafkaMessageContextConverter<TContext> : IContextConverter<TContext
 
         // Forward headers onto the produced message, matching KafkaContextConverter. Previously
         // dropped here, which silently lost correlation-id / W3C trace-context on this produce path.
-        // The routing-topic key is excluded (see TopicHeaderKey) so the inbound topic can't leak onto
+        // The routing-topic key is excluded (see DefaultTopicHeader) so the inbound topic can't leak onto
         // the outbound message and re-route it to the topic being consumed.
         var headers = new Headers();
         var messageHeaders = _messageHeadersGetter.GetHeaders(contextIn);
@@ -50,7 +55,7 @@ public class KafkaMessageContextConverter<TContext> : IContextConverter<TContext
         {
             foreach (var header in messageHeaders)
             {
-                if (string.Equals(header.Key, TopicHeaderKey, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(header.Key, DefaultTopicHeader, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }

@@ -7,6 +7,7 @@ using Benzene.Abstractions.Serialization;
 using Benzene.Clients;
 using Benzene.Results;
 using Void = Benzene.Abstractions.Results.Void;
+using Benzene.Abstractions;
 
 namespace Benzene.Clients.Aws.Sns;
 
@@ -28,7 +29,7 @@ public class OutboundSnsContextConverter : IContextConverter<OutboundContext, Sn
     /// default, not a hard-coded value — pass a different key to interoperate with a consumer that
     /// routes on another attribute. Keep it in sync with the consumer's attribute key.
     /// </summary>
-    public const string DefaultTopicAttribute = "benzene-topic";
+    public const string DefaultTopicAttribute = BenzeneWireNames.DefaultTopic;
 
     private readonly ISerializer _serializer;
     private readonly string _topicArn;

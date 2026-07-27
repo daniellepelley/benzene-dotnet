@@ -18,7 +18,7 @@ public class SnsMessageMapperTests
                 Message = "some-message",
                 MessageAttributes = new Dictionary<string, SNSEvent.MessageAttribute>
                 {
-                    {"benzene-topic", new SNSEvent.MessageAttribute { Value = "some-topic"}}
+                    {"topic", new SNSEvent.MessageAttribute { Value = "some-topic"}}
                 }
             }
         });

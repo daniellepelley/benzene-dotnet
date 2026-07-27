@@ -16,7 +16,7 @@ public class SqsMessageMapperTests
             Body = "some-message",
             MessageAttributes = new Dictionary<string, SQSEvent.MessageAttribute>
             {
-                { "benzene-topic", new SQSEvent.MessageAttribute { StringValue = "some-topic" } }
+                { "topic", new SQSEvent.MessageAttribute { StringValue = "some-topic" } }
             }
         });
 

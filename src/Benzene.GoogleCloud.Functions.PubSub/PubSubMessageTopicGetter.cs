@@ -1,11 +1,12 @@
 using Benzene.Abstractions.MessageHandlers.Mappers;
 using Benzene.Abstractions.Messages;
 using Benzene.Core.Messages;
+using Benzene.Abstractions;
 
 namespace Benzene.GoogleCloud.Functions.PubSub;
 
 /// <summary>
-/// Extracts the message topic from a Pub/Sub message's <c>benzene-topic</c> attribute - the same
+/// Extracts the message topic from a Pub/Sub message's <c>topic</c> attribute - the same
 /// "topic in a custom attribute/property" convention already used by
 /// <c>Benzene.Aws.Sqs</c>/<c>Benzene.Aws.Lambda.Sqs</c>/<c>Benzene.Aws.Lambda.Sns</c>/
 /// <c>Benzene.Azure.Function.ServiceBus</c>, since Pub/Sub has no native per-message "topic"
@@ -20,7 +21,7 @@ public class PubSubMessageTopicGetter : IMessageTopicGetter<PubSubContext>
     /// <c>UsePubSub(..., topicAttributeKey)</c>) to consume messages a non-Benzene producer routes on
     /// another attribute.
     /// </summary>
-    public const string DefaultTopicAttribute = "benzene-topic";
+    public const string DefaultTopicAttribute = BenzeneWireNames.DefaultTopic;
 
     private readonly string _topicAttributeKey;
 
@@ -29,7 +30,7 @@ public class PubSubMessageTopicGetter : IMessageTopicGetter<PubSubContext>
     /// </summary>
     /// <param name="topicAttributeKey">
     /// The message attribute the topic is carried on. Defaults to
-    /// <see cref="DefaultTopicAttribute"/> (<c>benzene-topic</c>).
+    /// <see cref="DefaultTopicAttribute"/> (<c>topic</c>).
     /// </param>
     public PubSubMessageTopicGetter(string topicAttributeKey = DefaultTopicAttribute)
     {

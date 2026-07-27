@@ -30,7 +30,7 @@ public class SqsContextConverterTest
         var result = await converter.CreateRequestAsync(context);
 
         Assert.Empty(result.Request.MessageAttributes);
-        Assert.False(result.Request.MessageAttributes.ContainsKey("benzene-topic"));
+        Assert.False(result.Request.MessageAttributes.ContainsKey("topic"));
     }
 
     [Fact]
@@ -47,8 +47,8 @@ public class SqsContextConverterTest
 
         var result = await converter.CreateRequestAsync(context);
 
-        Assert.True(result.Request.MessageAttributes.ContainsKey("benzene-topic"));
-        Assert.Equal("some-topic", result.Request.MessageAttributes["benzene-topic"].StringValue);
+        Assert.True(result.Request.MessageAttributes.ContainsKey("topic"));
+        Assert.Equal("some-topic", result.Request.MessageAttributes["topic"].StringValue);
     }
 
     [Fact]

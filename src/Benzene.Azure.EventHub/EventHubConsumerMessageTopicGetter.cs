@@ -1,6 +1,7 @@
 using Benzene.Abstractions.MessageHandlers.Mappers;
 using Benzene.Abstractions.Messages;
 using Benzene.Core.Messages;
+using Benzene.Abstractions;
 
 namespace Benzene.Azure.EventHub;
 
@@ -16,7 +17,7 @@ public class EventHubConsumerMessageTopicGetter : IMessageTopicGetter<EventHubCo
     /// <c>DependencyInjectionExtensions.AddEventHubConsumer(topicPropertyKey)</c>) to consume events a
     /// non-Benzene producer routes on another property.
     /// </summary>
-    public const string DefaultTopicProperty = "benzene-topic";
+    public const string DefaultTopicProperty = BenzeneWireNames.DefaultTopic;
 
     private readonly string _topicPropertyKey;
 
@@ -25,7 +26,7 @@ public class EventHubConsumerMessageTopicGetter : IMessageTopicGetter<EventHubCo
     /// </summary>
     /// <param name="topicPropertyKey">
     /// The event property the topic is carried on. Defaults to
-    /// <see cref="DefaultTopicProperty"/> (<c>benzene-topic</c>).
+    /// <see cref="DefaultTopicProperty"/> (<c>topic</c>).
     /// </param>
     public EventHubConsumerMessageTopicGetter(string topicPropertyKey = DefaultTopicProperty)
     {

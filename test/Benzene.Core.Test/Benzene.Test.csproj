@@ -18,6 +18,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The vendored conformance fixtures, so the transport-metadata keys can be asserted against
+         the language-neutral truth in the project that references every binding. -->
+    <None Include="..\conformance-fixtures\*.json" LinkBase="conformance" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="ByteBard.AsyncAPI.NET.Readers" Version="3.0.0" />
     <PackageReference Include="coverlet.msbuild" Version="6.0.2">
       <PrivateAssets>all</PrivateAssets>
@@ -127,6 +133,7 @@
     <ProjectReference Include="..\..\src\Benzene.HealthChecks.Schema\Benzene.HealthChecks.Schema.csproj" />
     <ProjectReference Include="..\..\src\Benzene.GoogleCloud.Functions.Http\Benzene.GoogleCloud.Functions.Http.csproj" />
     <ProjectReference Include="..\..\src\Benzene.GoogleCloud.Functions.PubSub\Benzene.GoogleCloud.Functions.PubSub.csproj" />
+    <ProjectReference Include="..\..\src\Benzene.Clients.GoogleCloud.PubSub\Benzene.Clients.GoogleCloud.PubSub.csproj" />
     <ProjectReference Include="..\..\src\Benzene.GoogleCloud.Functions.PubSub.TestHelpers\Benzene.GoogleCloud.Functions.PubSub.TestHelpers.csproj" />
     <ProjectReference Include="..\..\src\Benzene.HealthChecks\Benzene.HealthChecks.csproj" />
     <ProjectReference Include="..\..\src\Benzene.HealthChecks.EntityFramework\Benzene.HealthChecks.EntityFramework.csproj" />

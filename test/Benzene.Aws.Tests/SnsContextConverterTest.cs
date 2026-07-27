@@ -33,7 +33,7 @@ public class SnsContextConverterTest
         var result = await converter.CreateRequestAsync(context);
 
         Assert.Empty(result.Request.MessageAttributes);
-        Assert.False(result.Request.MessageAttributes.ContainsKey("benzene-topic"));
+        Assert.False(result.Request.MessageAttributes.ContainsKey("topic"));
     }
 
     [Fact]
@@ -50,8 +50,8 @@ public class SnsContextConverterTest
 
         var result = await converter.CreateRequestAsync(context);
 
-        Assert.True(result.Request.MessageAttributes.ContainsKey("benzene-topic"));
-        Assert.Equal("order:created", result.Request.MessageAttributes["benzene-topic"].StringValue);
+        Assert.True(result.Request.MessageAttributes.ContainsKey("topic"));
+        Assert.Equal("order:created", result.Request.MessageAttributes["topic"].StringValue);
     }
 
     [Fact]
@@ -207,7 +207,7 @@ public class SnsContextConverterTest
         var result = await converter.CreateRequestAsync(context);
 
         Assert.Empty(result.Request.MessageAttributes);
-        Assert.False(result.Request.MessageAttributes.ContainsKey("benzene-topic"));
+        Assert.False(result.Request.MessageAttributes.ContainsKey("topic"));
     }
 
     [Fact]
@@ -222,7 +222,7 @@ public class SnsContextConverterTest
 
         var result = await converter.CreateRequestAsync(context);
 
-        Assert.True(result.Request.MessageAttributes.ContainsKey("benzene-topic"));
-        Assert.Equal("order:created", result.Request.MessageAttributes["benzene-topic"].StringValue);
+        Assert.True(result.Request.MessageAttributes.ContainsKey("topic"));
+        Assert.Equal("order:created", result.Request.MessageAttributes["topic"].StringValue);
     }
 }

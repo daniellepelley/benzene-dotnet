@@ -1,6 +1,7 @@
 using Benzene.Abstractions.MessageHandlers.Mappers;
 using Benzene.Abstractions.Messages;
 using Benzene.Core.Messages;
+using Benzene.Abstractions;
 
 namespace Benzene.Azure.Function.EventHub.Function;
 
@@ -15,9 +16,9 @@ public class EventHubMessageTopicGetter : IMessageTopicGetter<EventHubContext>
 {
     /// <summary>
     /// The default event-property key the topic is read from. Kept in sync with the sender's
-    /// <c>OutboundEventHubContextConverter.DefaultTopicProperty</c> (<c>benzene-topic</c>).
+    /// <c>OutboundEventHubContextConverter.DefaultTopicProperty</c> (<c>topic</c>).
     /// </summary>
-    public const string DefaultTopicProperty = "benzene-topic";
+    public const string DefaultTopicProperty = BenzeneWireNames.DefaultTopic;
 
     private readonly string _topicPropertyKey;
 

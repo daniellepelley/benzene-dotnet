@@ -9,7 +9,7 @@ public static class MessageExtensions
 {
     public static string GetTopic(this Message message)
     {
-        return message.GetHeader("benzene-topic");
+        return message.GetHeader("topic");
     }
 
     public static string GetStatus(this Message message)

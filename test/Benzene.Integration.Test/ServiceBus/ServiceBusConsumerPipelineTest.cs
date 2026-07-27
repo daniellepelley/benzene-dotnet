@@ -58,7 +58,7 @@ public class ServiceBusConsumerPipelineTest
             try
             {
                 var message = new ServiceBusMessage(Defaults.Message);
-                message.ApplicationProperties["benzene-topic"] = Defaults.Topic;
+                message.ApplicationProperties["topic"] = Defaults.Topic;
 
                 await sender.SendMessageAsync(message);
                 return;

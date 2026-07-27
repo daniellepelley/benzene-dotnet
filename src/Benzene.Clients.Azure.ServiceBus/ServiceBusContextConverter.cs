@@ -11,6 +11,7 @@ using Benzene.Abstractions.Serialization;
 using Benzene.Clients;
 using Benzene.Results;
 using Void = Benzene.Abstractions.Results.Void;
+using Benzene.Abstractions;
 
 namespace Benzene.Clients.Azure.ServiceBus;
 
@@ -26,7 +27,7 @@ public class ServiceBusContextConverter<T> : IContextConverter<IBenzeneClientCon
     /// hard-coded value — pass a different key to interoperate with a consumer that routes on another
     /// application property. Keep it in sync with the consumer's property key.
     /// </summary>
-    public const string DefaultTopicProperty = "benzene-topic";
+    public const string DefaultTopicProperty = BenzeneWireNames.DefaultTopic;
 
     private readonly ISerializer _serializer;
     private readonly string _topicPropertyKey;

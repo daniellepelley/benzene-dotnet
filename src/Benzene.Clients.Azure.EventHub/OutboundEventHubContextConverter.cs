@@ -6,6 +6,7 @@ using Benzene.Abstractions.Serialization;
 using Benzene.Clients;
 using Benzene.Results;
 using Void = Benzene.Abstractions.Results.Void;
+using Benzene.Abstractions;
 
 namespace Benzene.Clients.Azure.EventHub;
 
@@ -27,7 +28,7 @@ public class OutboundEventHubContextConverter : IContextConverter<OutboundContex
     /// hard-coded value — pass a different key to interoperate with a consumer that routes on another
     /// property. Keep it in sync with the consumer's property key.
     /// </summary>
-    public const string DefaultTopicProperty = "benzene-topic";
+    public const string DefaultTopicProperty = BenzeneWireNames.DefaultTopic;
 
     private readonly ISerializer _serializer;
     private readonly string _topicPropertyKey;

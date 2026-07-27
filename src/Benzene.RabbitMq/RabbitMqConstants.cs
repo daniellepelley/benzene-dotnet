@@ -1,3 +1,4 @@
+using Benzene.Abstractions;
 namespace Benzene.RabbitMq;
 
 /// <summary>
@@ -16,5 +17,5 @@ public static class RabbitMqConstants
     /// <see cref="RabbitMqSendMessage.RabbitMqBenzeneMessageClient"/>, or the
     /// <see cref="RabbitMqSendMessage.RabbitMqContextConverter{T}"/> constructor.
     /// </summary>
-    public const string DefaultTopicHeader = "benzene-topic";
+    public const string DefaultTopicHeader = BenzeneWireNames.DefaultTopic;
 }

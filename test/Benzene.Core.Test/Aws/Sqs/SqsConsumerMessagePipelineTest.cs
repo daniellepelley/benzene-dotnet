@@ -409,7 +409,7 @@ public class SqsConsumerMessagePipelineTest
             Body = Defaults.Message,
             MessageAttributes = new Dictionary<string, MessageAttributeValue>
             {
-                {"benzene-topic", new MessageAttributeValue { StringValue = Defaults.Topic}}
+                {"topic", new MessageAttributeValue { StringValue = Defaults.Topic}}
             }
         });
 
