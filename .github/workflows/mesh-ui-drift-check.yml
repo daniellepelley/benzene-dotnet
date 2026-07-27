@@ -26,7 +26,7 @@ jobs:
           set -euo pipefail
           git clone --depth 1 --filter=blob:none --sparse \
             https://github.com/daniellepelley/Benzene.git /tmp/benzene
-          git -C /tmp/benzene sparse-checkout set mesh-ui/mesh-ui.html
+          git -C /tmp/benzene sparse-checkout set mesh-ui
 
       - name: Diff the vendored copy against the canonical
         run: |
