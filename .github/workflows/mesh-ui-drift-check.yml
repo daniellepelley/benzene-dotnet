@@ -1,0 +1,49 @@
+name: mesh-ui-drift-check
+
+# The Benzene Mesh UI is OWNED by the cross-language `benzene` repo (mesh-ui/mesh-ui.html) and is the
+# one holistic, cross-language UI — see benzene's docs/guides/mesh-ui.md. This repo carries a VENDORED
+# verbatim copy at src/Benzene.Mesh.Ui/mesh-ui.html, which Benzene.Mesh.Ui's middleware serves and
+# every .NET mesh example renders. This job keeps the copy honest: it fetches the canonical UI from
+# benzene and fails if the vendored copy has drifted. Fixes and features land in benzene; re-vendor here.
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 6 * * 1'   # weekly, catches drift introduced on the benzene side
+  workflow_dispatch:
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch the canonical Mesh UI from benzene
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --filter=blob:none --sparse \
+            https://github.com/daniellepelley/Benzene.git /tmp/benzene
+          git -C /tmp/benzene sparse-checkout set mesh-ui/mesh-ui.html
+
+      - name: Diff the vendored copy against the canonical
+        run: |
+          set -euo pipefail
+          canonical=/tmp/benzene/mesh-ui/mesh-ui.html
+          vendored=src/Benzene.Mesh.Ui/mesh-ui.html
+          if [ ! -f "$canonical" ]; then
+            echo "::error::Canonical mesh-ui/mesh-ui.html not found in benzene — has it moved?"
+            exit 1
+          fi
+          if ! diff -u "$canonical" "$vendored" > /tmp/diff.txt; then
+            echo "::error file=$vendored::The vendored Mesh UI has drifted from the benzene canonical"
+            cat /tmp/diff.txt
+            echo ""
+            echo "The Mesh UI is owned by benzene (mesh-ui/mesh-ui.html) and vendored here verbatim."
+            echo "Do not edit the copy: land the change in benzene (with docs/guides/mesh-ui.md updated),"
+            echo "then re-vendor here: cp <benzene>/mesh-ui/mesh-ui.html src/Benzene.Mesh.Ui/mesh-ui.html"
+            exit 1
+          fi
+          echo "Vendored Mesh UI matches the benzene canonical."
