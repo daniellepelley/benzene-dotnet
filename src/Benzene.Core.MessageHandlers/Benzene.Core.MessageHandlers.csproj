@@ -14,6 +14,33 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- BENZ001 (duplicate topic) and BENZ002 ([HttpEndpoint] with no [Message]) were written,
+         tested, and reaching nobody: the analyzer shipped as its own package that nothing referenced,
+         so two mistakes the compiler can state outright were instead left to surface as a
+         first-message exception and a silent 404. Referencing it here delivers them to every project
+         that uses message handlers at all.
+
+         Each attribute is load-bearing, and each was checked against the produced .nupkg rather than
+         assumed:
+
+         - PrivateAssets="none" — the repo's other ProjectReferences pack as exclude="Build,Analyzers"
+           (NuGet's default PrivateAssets), which would strip the analyzer at the package boundary and
+           leave the rules applying to this project alone. That is the situation being fixed, so the
+           default has to be overridden. The dependency now packs as include="All".
+         - No ReferenceOutputAssembly="false" — it suppresses the nuspec dependency entirely, so
+           consumers would get nothing.
+         - Private="false" — keeps the analyzer assembly out of build output, so a Roslyn component
+           doesn't end up beside the application in every publish folder.
+
+         The analyzer package sets IncludeBuildOutput=false, so there is no lib/ and nothing extra
+         lands at runtime either way. -->
+    <ProjectReference Include="..\Benzene.CodeGen.SourceGenerators\Benzene.CodeGen.SourceGenerators.csproj"
+                      OutputItemType="Analyzer"
+                      PrivateAssets="none"
+                      Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="Benzene.Test" />
   </ItemGroup>
 

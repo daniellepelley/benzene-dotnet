@@ -1,0 +1,18 @@
+<Project>
+
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)..'))" />
+
+  <ItemGroup>
+    <!-- The examples reference Benzene by ProjectReference, and analyzer assets do not flow along a
+         ProjectReference chain the way they flow through a NuGet dependency. A user who installs
+         Benzene.Core.MessageHandlers gets BENZ001/BENZ002; without this line the examples — the code
+         most likely to be copied — would be the one place in the world they don't apply.
+
+         The templates need no equivalent: they reference Benzene by PackageReference, so they pick the
+         analyzer up transitively. -->
+    <ProjectReference Include="$(MSBuildThisFileDirectory)..\src\Benzene.CodeGen.SourceGenerators\Benzene.CodeGen.SourceGenerators.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+</Project>

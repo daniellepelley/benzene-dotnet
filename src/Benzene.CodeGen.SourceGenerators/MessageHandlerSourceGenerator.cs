@@ -18,6 +18,25 @@ namespace Benzene.CodeGen.SourceGenerators
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);
 
+        /// <summary>
+        /// A handler with an HTTP route and no topic. Handler discovery keys on <c>[Message]</c>, so
+        /// such a handler is skipped entirely and its route never exists — a 404 at runtime with
+        /// nothing to say why.
+        /// </summary>
+        /// <remarks>
+        /// <c>UnroutedHttpEndpointCheck</c> in Benzene.Http catches the same mistake, but only when the
+        /// route table is first built, which is the first request. The rule is purely syntactic, so
+        /// the compiler can say it before the code is ever run. The runtime check stays as the
+        /// belt-and-braces path for handlers registered explicitly, which an analyzer cannot see.
+        /// </remarks>
+        public static readonly DiagnosticDescriptor HttpEndpointWithoutMessage = new(
+            id: "BENZ002",
+            title: "[HttpEndpoint] handler has no topic",
+            messageFormat: "'{0}' has [HttpEndpoint] but no [Message] attribute, so handler discovery skips it and its HTTP route will not exist. Add [Message(\"topic\")], or register the handler explicitly with a topic.",
+            category: "Benzene",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
+
         public void Initialize(IncrementalGeneratorInitializationContext context)
         {
             var provider = context.SyntaxProvider
@@ -26,6 +45,17 @@ namespace Benzene.CodeGen.SourceGenerators
                     transform: (ctx, _) => GetMessageHandlerInfo(ctx))
                 .Where(t => t is not null);
 
+            var unrouted = context.SyntaxProvider
+                .CreateSyntaxProvider(
+                    predicate: (s, _) => s is ClassDeclarationSyntax { AttributeLists.Count: > 0 },
+                    transform: (ctx, _) => GetUnroutedHttpEndpoint(ctx))
+                .Where(t => t is not null);
+
+            // Reported per handler rather than off a Collect(), so one handler gaining or losing an
+            // attribute doesn't invalidate the diagnostic for every other handler in the compilation.
+            context.RegisterSourceOutput(unrouted, (spc, handler) => spc.ReportDiagnostic(
+                Diagnostic.Create(HttpEndpointWithoutMessage, handler!.Location, handler.HandlerFullType)));
+
             // Drive the output straight off the collected handlers. Combining with CompilationProvider
             // (as this used to) re-runs the whole output on every compilation - i.e. every keystroke -
             // defeating the incremental generator's caching, and the Compilation was never even used by
@@ -33,6 +63,38 @@ namespace Benzene.CodeGen.SourceGenerators
             // produces an equal collected array, so RegisterSourceOutput's cache short-circuits.
             context.RegisterSourceOutput(provider.Collect(), (spc, handlers) => Execute(spc, handlers!));
         }
+
+        private static UnroutedHttpEndpointInfo? GetUnroutedHttpEndpoint(GeneratorSyntaxContext context)
+        {
+            var classDeclaration = (ClassDeclarationSyntax)context.Node;
+
+            if (context.SemanticModel.GetDeclaredSymbol(classDeclaration) is not INamedTypeSymbol typeSymbol
+                || typeSymbol.IsAbstract)
+            {
+                return null;
+            }
+
+            var attributes = typeSymbol.GetAttributes();
+
+            if (!attributes.Any(IsAttributeNamed("HttpEndpoint")) || attributes.Any(IsAttributeNamed("Message")))
+            {
+                return null;
+            }
+
+            // Only a message handler is affected: an [HttpEndpoint] on anything else is not something
+            // Benzene's discovery was ever going to route.
+            var isHandler = typeSymbol.AllInterfaces.Any(i =>
+                i.IsGenericType && (
+                    i.ConstructedFrom.ToString() == "Benzene.Abstractions.MessageHandlers.IMessageHandler<TRequest, TResponse>" ||
+                    i.ConstructedFrom.ToString() == "Benzene.Abstractions.MessageHandlers.IMessageHandler<TRequest>"));
+
+            return isHandler
+                ? new UnroutedHttpEndpointInfo(typeSymbol.ToDisplayString(), classDeclaration.Identifier.GetLocation())
+                : null;
+        }
+
+        private static Func<AttributeData, bool> IsAttributeNamed(string name) =>
+            attribute => attribute.AttributeClass?.Name == name || attribute.AttributeClass?.Name == name + "Attribute";
 
         private static MessageHandlerInfo? GetMessageHandlerInfo(GeneratorSyntaxContext context)
         {
@@ -88,17 +150,22 @@ namespace Benzene.CodeGen.SourceGenerators
                 }
             }
 
-            var requestType = handlerInterface.TypeArguments[0].ToDisplayString();
-            var responseType = handlerInterface.TypeArguments.Length > 1 
-                ? handlerInterface.TypeArguments[1].ToDisplayString() 
-                : "Benzene.Abstractions.Results.Void";
+            // Fully qualified, global:: and all. The generated file sits in namespace
+            // Benzene.Core.MessageHandlers.DI with Benzene usings in scope, so an unqualified name can
+            // be captured by something else that is visible from there - a request type called Request
+            // in the global namespace resolved to the Benzene.Core.MessageHandlers.Request *namespace*
+            // and the generated file stopped compiling.
+            var requestType = handlerInterface.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+            var responseType = handlerInterface.TypeArguments.Length > 1
+                ? handlerInterface.TypeArguments[1].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+                : "global::Benzene.Abstractions.Results.Void";
 
             return new MessageHandlerInfo(
                 topic,
                 version,
                 requestType,
                 responseType,
-                typeSymbol.ToDisplayString(),
+                typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                 classDeclaration.Identifier.GetLocation()
             );
         }
@@ -115,7 +182,9 @@ namespace Benzene.CodeGen.SourceGenerators
             foreach (var group in duplicateGroups)
             {
                 var versionText = string.IsNullOrEmpty(group.Key.Version) ? "" : $" (version '{group.Key.Version}')";
-                var handlerNames = string.Join(", ", group.Select(h => h.HandlerFullType));
+                // Names are stored fully qualified for codegen; "global::" is noise in a message a
+                // developer reads.
+                var handlerNames = string.Join(", ", group.Select(h => h.HandlerFullType.Replace("global::", "")));
                 foreach (var handler in group)
                 {
                     context.ReportDiagnostic(Diagnostic.Create(
@@ -127,21 +196,30 @@ namespace Benzene.CodeGen.SourceGenerators
             sb.AppendLine("using Benzene.Abstractions.DI;");
             sb.AppendLine("using Benzene.Abstractions.MessageHandlers;");
             sb.AppendLine("using Benzene.Core.MessageHandlers;");
-            sb.AppendLine("using Microsoft.Extensions.DependencyInjection;");
             sb.AppendLine("");
             sb.AppendLine("namespace Benzene.Core.MessageHandlers.DI");
             sb.AppendLine("{");
-            sb.AppendLine("    public static class BenzeneGeneratedHandlersExtensions");
+            // internal, not public. The generator now runs in every assembly that references
+            // Benzene.Core.MessageHandlers, so a solution with two handler-carrying projects — one
+            // referencing the other — would otherwise end up with two public
+            // BenzeneGeneratedHandlersExtensions in the same namespace and an ambiguous call at the
+            // composition root. Internal gives each assembly its own copy, which is the right scope
+            // anyway: the generated registrations only describe that assembly's handlers.
+            sb.AppendLine("    internal static class BenzeneGeneratedHandlersExtensions");
             sb.AppendLine("    {");
-            sb.AppendLine("        public static IBenzeneServiceContainer AddGeneratedMessageHandlers(this IBenzeneServiceContainer services)");
+            sb.AppendLine("        internal static IBenzeneServiceContainer AddGeneratedMessageHandlers(this IBenzeneServiceContainer services)");
             sb.AppendLine("        {");
-            sb.AppendLine("            var list = services.GetService<MessageHandlersList>();");
-            sb.AppendLine("            if (list == null)");
-            sb.AppendLine("            {");
-            sb.AppendLine("                list = new MessageHandlersList();");
-            sb.AppendLine("                services.AddSingleton<MessageHandlersList>(list);");
-            sb.AppendLine("                services.AddSingleton<IMessageHandlersList>(list);");
-            sb.AppendLine("            }");
+            // Register the dispatch infrastructure through the ordinary no-reflection overload, then
+            // hand each handler over as an IMessageHandlerDefinition — the seam
+            // DependencyMessageHandlersFinder already reads, and the same one a library shipping its
+            // own handlers uses.
+            //
+            // This used to open with `services.GetService<MessageHandlersList>()`, which
+            // IBenzeneServiceContainer does not have (it registers services, it does not resolve
+            // them), so the generated file did not compile. Nothing caught it because nothing
+            // referenced the analyzer; wiring it into Benzene.Core.MessageHandlers turned it into a
+            // build break in every example on the first try.
+            sb.AppendLine("            services.AddMessageHandlers();");
             sb.AppendLine("");
 
             foreach (var handler in handlers)
@@ -152,7 +230,7 @@ namespace Benzene.CodeGen.SourceGenerators
                 var topicLiteral = SymbolDisplay.FormatLiteral(handler.Topic, quote: true);
                 var versionLiteral = SymbolDisplay.FormatLiteral(handler.Version, quote: true);
                 sb.AppendLine($"            services.AddScoped<{handler.HandlerFullType}>();");
-                sb.AppendLine($"            list.Add(MessageHandlerDefinition.CreateInstance({topicLiteral}, {versionLiteral}, typeof({handler.RequestFullType}), typeof({handler.ResponseFullType}), typeof({handler.HandlerFullType})));");
+                sb.AppendLine($"            services.AddSingleton<IMessageHandlerDefinition>(_ => MessageHandlerDefinition.CreateInstance({topicLiteral}, {versionLiteral}, typeof({handler.RequestFullType}), typeof({handler.ResponseFullType}), typeof({handler.HandlerFullType})));");
             }
 
             sb.AppendLine("");
@@ -162,6 +240,34 @@ namespace Benzene.CodeGen.SourceGenerators
             sb.AppendLine("}");
 
             context.AddSource("BenzeneGeneratedHandlers.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
+        }
+    }
+
+    // Value equality, same reason as MessageHandlerInfo below: without it every syntax pass produces a
+    // "different" instance and the diagnostic is recomputed on every keystroke.
+    internal sealed class UnroutedHttpEndpointInfo : IEquatable<UnroutedHttpEndpointInfo>
+    {
+        public UnroutedHttpEndpointInfo(string handlerFullType, Location location)
+        {
+            HandlerFullType = handlerFullType;
+            Location = location;
+        }
+
+        public string HandlerFullType { get; }
+
+        public Location Location { get; }
+
+        public bool Equals(UnroutedHttpEndpointInfo? other) =>
+            other is not null && HandlerFullType == other.HandlerFullType && Location.Equals(other.Location);
+
+        public override bool Equals(object? obj) => Equals(obj as UnroutedHttpEndpointInfo);
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                return (HandlerFullType.GetHashCode() * 31) + Location.GetHashCode();
+            }
         }
     }
 
