@@ -1,3 +1,4 @@
+using Benzene.Core.MessageHandlers.StartUpChecks;
 using Benzene.Core.Middleware;
 using Benzene.Microsoft.Dependencies;
 using Benzene.SelfHost;
@@ -24,7 +25,13 @@ public static class HostBuilderExtensions
             startUp.Configure(builder, configuration);
 
             services.AddSingleton<IHostedService>(provider =>
-                new BenzeneHostedServiceAdapter(builder.CreateWorker(new MicrosoftServiceResolverFactory(provider))));
+            {
+                var serviceResolverFactory = new MicrosoftServiceResolverFactory(provider);
+                // Check the wiring before the worker starts consuming, so a registration mistake is a
+                // start-up failure rather than every message failing to route once the loop is live.
+                serviceResolverFactory.RunStartUpChecks();
+                return new BenzeneHostedServiceAdapter(builder.CreateWorker(serviceResolverFactory));
+            });
         });
     }
 }

@@ -1,4 +1,5 @@
 using Benzene.Azure.Function.Core;
+using Benzene.Core.MessageHandlers.StartUpChecks;
 using Benzene.Microsoft.Dependencies;
 using Benzene.Testing;
 
@@ -29,7 +30,7 @@ public static class BenzeneTestHostExtensions
 
             startUp.Configure(appBuilder, configuration);
 
-            return appBuilder.Create(new MicrosoftServiceResolverFactory(services));
+            return appBuilder.Create(new MicrosoftServiceResolverFactory(services).WithStartUpChecks());
         });
     }
 }

@@ -10,6 +10,7 @@ using Benzene.Abstractions.MessageHandlers.Request;
 using Benzene.Abstractions.MessageHandlers.Response;
 using Benzene.Abstractions.Messages.Mappers;
 using Benzene.Abstractions.Serialization;
+using Benzene.Abstractions.StartUpChecks;
 using Benzene.Core.DI;
 using Benzene.Core.MessageHandlers.BenzeneMessage;
 using Benzene.Core.MessageHandlers.Info;
@@ -17,6 +18,7 @@ using Benzene.Core.MessageHandlers.MediaFormats;
 using Benzene.Core.MessageHandlers.Request;
 using Benzene.Core.MessageHandlers.Response;
 using Benzene.Core.MessageHandlers.Serialization;
+using Benzene.Core.MessageHandlers.StartUpChecks;
 using Benzene.Core.Messages.BenzeneMessage;
 using Benzene.Core.Middleware;
 
@@ -185,6 +187,12 @@ public static class Extensions
                 x.GetService<MessageHandlersList>(),
                 x.GetService<DependencyMessageHandlersFinder>()));
         services.TryAddSingleton<MessageHandlerDefinitionIndex>();
+
+        // Registered here rather than in AddBenzene() so a check arrives with the finder it inspects:
+        // a container that never registered handler discovery has nothing for these to look at.
+        // TryAdd so overlapping AddMessageHandlers calls don't run each check several times.
+        services.TryAddSingleton<IStartUpCheck, DuplicateTopicStartUpCheck>();
+        services.TryAddSingleton<IStartUpCheck, EmptyHandlerRegistryStartUpCheck>();
     }
 
     /// <summary>

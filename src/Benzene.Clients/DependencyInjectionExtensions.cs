@@ -29,6 +29,9 @@ public static class DependencyInjectionExtensions
 
         services.AddScoped<IBenzeneMessageSender>(resolver => new DefaultBenzeneMessageSender(routes, resolver));
         services.AddSingleton(new OutboundRoutingTopics(routes.Keys));
+        // ValidateOutboundRouting has always existed and nothing ever called it. Registered here so it
+        // simply runs, at start-up, on every host.
+        services.TryAddSingleton<Benzene.Abstractions.StartUpChecks.IStartUpCheck, OutboundRoutingStartUpCheck>();
 
         return services;
     }

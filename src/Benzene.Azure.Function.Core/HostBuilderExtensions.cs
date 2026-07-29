@@ -1,3 +1,4 @@
+using Benzene.Core.MessageHandlers.StartUpChecks;
 using Benzene.Microsoft.Dependencies;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -33,7 +34,14 @@ public static class HostBuilderExtensions
             startUp.Configure(builder, configuration);
 
             services.AddScoped<IAzureFunctionApp>(serviceProvider =>
-                builder.Create(new MicrosoftServiceResolverFactory(serviceProvider)));
+            {
+                var serviceResolverFactory = new MicrosoftServiceResolverFactory(serviceProvider);
+                // Azure Functions resolves IAzureFunctionApp per invocation, so unlike the Lambda host
+                // there is no separate INIT hook to hang this on. Running it here still moves the
+                // failure off the message path and onto the trigger's own construction.
+                serviceResolverFactory.RunStartUpChecks();
+                return builder.Create(serviceResolverFactory);
+            });
         });
     }
 }

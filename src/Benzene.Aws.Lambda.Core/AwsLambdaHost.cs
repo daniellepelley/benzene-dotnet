@@ -2,6 +2,7 @@ using System.IO;
 using System.Threading.Tasks;
 using Amazon.Lambda.Core;
 using Benzene.Aws.Lambda.Core.AwsEventStream;
+using Benzene.Core.MessageHandlers.StartUpChecks;
 using Benzene.Core.MessageHandlers.WarmUp;
 using Benzene.Core.Middleware;
 using Benzene.Microsoft.Dependencies;
@@ -41,6 +42,12 @@ public class AwsLambdaHost<TStartUp> : IAwsLambdaEntryPoint where TStartUp : Ben
         // the first invocation isn't the one that pays for them. A no-op unless the StartUp opted in via
         // AddBenzeneWarmUp; never dispatches a message, so it's invisible to logging/metrics/tracing.
         serviceResolverFactory.WarmUp();
+
+        // Then check the wiring, with failures that survive. Warm-up swallows exceptions — right for
+        // warming, fatal for checking — so a wiring bug it happened to discover was thrown away and
+        // re-thrown later on the message path. On by default; soften or silence every check at once
+        // with .AddBenzeneStartUpChecks(BenzeneStartUpCheckMode.Advisory).
+        serviceResolverFactory.RunStartUpChecks();
     }
 
     /// <summary>

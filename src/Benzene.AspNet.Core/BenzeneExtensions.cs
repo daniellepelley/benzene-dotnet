@@ -5,6 +5,7 @@ using Benzene.Core;
 using Benzene.Core.MessageHandlers.DI;
 using Benzene.Core.Middleware;
 using Benzene.Http.RequestBody;
+using Benzene.Core.MessageHandlers.StartUpChecks;
 using Benzene.Microsoft.Dependencies;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -118,6 +119,11 @@ public static class BenzeneExtensions
         var aspApplicationBuilder = new AspApplicationBuilder(app);
         aspApplicationBuilder.Register(x => x.AddBenzene());
         holder.StartUp.Configure(aspApplicationBuilder, holder.Configuration);
+
+        // Check the wiring while the app is still being built, so a registration mistake fails
+        // start-up instead of turning into a 404 or a 500 on the first request that reaches it.
+        new MicrosoftServiceResolverFactory(app.ApplicationServices).RunStartUpChecks();
+
         return app;
     }
 

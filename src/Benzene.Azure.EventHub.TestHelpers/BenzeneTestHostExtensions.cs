@@ -1,3 +1,4 @@
+using Benzene.Core.MessageHandlers.StartUpChecks;
 using Benzene.Microsoft.Dependencies;
 using Benzene.SelfHost;
 using Benzene.Testing;
@@ -26,7 +27,7 @@ public static class BenzeneTestHostExtensions
             var container = new MicrosoftBenzeneServiceContainer(services);
             startUp.Configure(new WorkerApplicationBuilder(container), configuration);
 
-            var serviceResolverFactory = new MicrosoftServiceResolverFactory(services);
+            var serviceResolverFactory = new MicrosoftServiceResolverFactory(services).WithStartUpChecks();
             using var scope = serviceResolverFactory.CreateScope();
             var application = scope.GetService<EventHubConsumerApplication>();
 

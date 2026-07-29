@@ -1,6 +1,7 @@
 using Benzene.Aws.Lambda.Core;
 using Benzene.Aws.Lambda.Core.AwsEventStream;
 using Benzene.Core.Middleware;
+using Benzene.Core.MessageHandlers.StartUpChecks;
 using Benzene.Microsoft.Dependencies;
 using Benzene.Testing;
 
@@ -31,7 +32,7 @@ public static class BenzeneTestHostExtensions
 
             startUp.Configure(new AwsLambdaApplicationBuilder(eventPipeline, container), configuration);
 
-            return new AwsLambdaEntryPoint(eventPipeline.Build(), new MicrosoftServiceResolverFactory(services));
+            return new AwsLambdaEntryPoint(eventPipeline.Build(), new MicrosoftServiceResolverFactory(services).WithStartUpChecks());
         });
     }
 

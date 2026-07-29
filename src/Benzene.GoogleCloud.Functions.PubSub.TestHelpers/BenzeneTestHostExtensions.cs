@@ -1,4 +1,5 @@
 using Benzene.Abstractions.Middleware;
+using Benzene.Core.MessageHandlers.StartUpChecks;
 using Benzene.Microsoft.Dependencies;
 using Benzene.Testing;
 using CloudNative.CloudEvents;
@@ -31,7 +32,7 @@ public static class BenzeneTestHostExtensions
 
             startUp.Configure(appBuilder, configuration);
 
-            var app = appBuilder.Build(new MicrosoftServiceResolverFactory(services));
+            var app = appBuilder.Build(new MicrosoftServiceResolverFactory(services).WithStartUpChecks());
 
             return new TestGooglePubSubFunction(app);
         });
