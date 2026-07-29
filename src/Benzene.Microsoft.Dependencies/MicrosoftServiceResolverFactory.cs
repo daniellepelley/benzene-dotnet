@@ -32,11 +32,14 @@ public class MicrosoftServiceResolverFactory : IServiceResolverFactory, IAsyncDi
         // Turn it on for a fully-composed application, where an unresolvable registration is a
         // genuine wiring error.
         //
-        // ValidateScopes stays off separately: Benzene's own HealthCheckBuilder registers
-        // IHealthCheckFinder as a singleton consuming scoped IDependencyHealthCheck, so enabling it
-        // needs that fixed first.
+        // ValidateScopes rides along with it. It catches a different and nastier class of bug — a
+        // singleton capturing a scoped service, which does not fail, it just silently serves the first
+        // scope's instance forever. Benzene had one (HealthCheckBuilder registering IHealthCheckFinder
+        // as a singleton over scoped IDependencyHealthCheck); that is fixed, so the check no longer
+        // fails Benzene's own flagship example and there is no reason to hold it back from anyone who
+        // opts in.
         _serviceProvider = validateOnBuild
-            ? container.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true })
+            ? container.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true })
             : container.BuildServiceProvider();
         // We built this provider, so we own its disposal.
         _ownsServiceProvider = true;

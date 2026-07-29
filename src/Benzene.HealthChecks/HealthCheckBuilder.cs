@@ -7,7 +7,7 @@ namespace Benzene.HealthChecks;
 /// <summary>
 /// Default <see cref="IHealthCheckBuilder"/> implementation. Health checks registered via the
 /// <c>THealthCheck</c> overload are registered as scoped services against <see cref="IHealthCheckFinder"/>
-/// (constructing an <see cref="HealthCheckFinder"/> and wiring it as a singleton on first use); health
+/// (constructing an <see cref="HealthCheckFinder"/> and wiring it as a scoped service on first use); health
 /// checks registered via the factory-function overload are held in-memory and wrapped as
 /// <see cref="InlineHealthCheck"/>s at resolution time.
 /// </summary>
@@ -16,12 +16,17 @@ public class HealthCheckBuilder : IHealthCheckBuilder
     private readonly List<Func<IServiceResolver, IHealthCheck>> _healthCheckBuilders = new();
     private readonly IRegisterDependency _register;
 
-    /// <summary>Initializes a new instance of the <see cref="HealthCheckBuilder"/> class, registering the <see cref="IHealthCheckFinder"/> singleton used to discover container-resolved checks.</summary>
+    /// <summary>Initializes a new instance of the <see cref="HealthCheckBuilder"/> class, registering the scoped <see cref="IHealthCheckFinder"/> used to discover container-resolved checks.</summary>
     /// <param name="register">The dependency registry checks/services are registered against.</param>
     public HealthCheckBuilder(IRegisterDependency register)
     {
         _register = register;
-        _register.Register(x => x.AddSingleton<IHealthCheckFinder, HealthCheckFinder>());
+        // Scoped, not singleton. HealthCheckFinder takes IEnumerable<IHealthCheck> and
+        // IEnumerable<IDependencyHealthCheck>, both registered scoped — as a singleton it captured the
+        // first scope's checks for the life of the process. That is a captive dependency, and the
+        // reason ServiceProviderOptions.ValidateScopes could not be turned on. Its only consumer is
+        // GetHealthChecks(resolver), which already has a scope in hand.
+        _register.Register(x => x.AddScoped<IHealthCheckFinder, HealthCheckFinder>());
         // Registered with TryAdd so a consumer can register their own IHealthCheckProcessor first
         // (e.g. with a non-default timeout) and have it win.
         _register.Register(x => x.TryAddSingleton<IHealthCheckProcessor>(_ => new HealthCheckProcessor()));
