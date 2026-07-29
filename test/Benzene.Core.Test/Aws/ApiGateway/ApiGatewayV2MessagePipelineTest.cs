@@ -5,6 +5,7 @@ using Amazon.Lambda.APIGatewayEvents;
 using Benzene.Aws.Lambda.ApiGateway;
 using Benzene.Aws.Lambda.ApiGateway.TestHelpers;
 using Benzene.Aws.Lambda.Core;
+using Benzene.Core.Exceptions;
 using Benzene.Core.MessageHandlers;
 using Benzene.Core.MessageHandlers.Request;
 using Benzene.Core.MessageHandlers.Serialization;
@@ -95,12 +96,15 @@ public class ApiGatewayV2MessagePipelineTest
                 .UseApiGateway(apiGateway => apiGateway.UseMessageHandlers()))
             .BuildHost();
 
-        // The v1 router declines a v2-shaped event (no top-level HttpMethod), so nothing writes a
-        // response — the empty response stream deserializes to null rather than a handled 200.
-        var response = await host.SendEventAsync<APIGatewayHttpApiV2ProxyResponse>(
-            CreateV2Request("GET", Defaults.Path, Defaults.MessageAsObject));
+        // The v1 router declines a v2-shaped event (no top-level HttpMethod), so nothing claims it.
+        // That is now an error rather than an empty response: forgetting UseApiGatewayV2 on a function
+        // fronted by an HTTP API is a setup mistake, and it used to surface as a blank 200 that looked
+        // like a routing problem in the application.
+        var exception = await Assert.ThrowsAsync<BenzeneException>(() =>
+            host.SendEventAsync<APIGatewayHttpApiV2ProxyResponse>(
+                CreateV2Request("GET", Defaults.Path, Defaults.MessageAsObject)));
 
-        Assert.Null(response);
+        Assert.Contains("has not been recognized", exception.Message);
     }
 
     [Fact]

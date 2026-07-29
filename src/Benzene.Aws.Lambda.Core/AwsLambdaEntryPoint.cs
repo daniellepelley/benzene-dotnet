@@ -45,7 +45,7 @@ public class AwsLambdaEntryPoint : IAwsLambdaEntryPoint
         var context = new AwsEventStreamContext(stream, lambdaContext);
         await _app.HandleAsync(context, scope);
 
-        if (context.Response != null)
+        if (context.Handled)
         {
             return context.Response;
         }

@@ -78,5 +78,7 @@ public abstract class AwsLambdaMiddlewareRouter<TRequest> : MiddlewareRouter<TRe
         {
             context.Response.Position = 0;
         }
+
+        context.MarkHandled();
     }
 }

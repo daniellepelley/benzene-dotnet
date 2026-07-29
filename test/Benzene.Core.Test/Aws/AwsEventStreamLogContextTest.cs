@@ -32,6 +32,14 @@ public class AwsEventStreamLogContextTest
                 .UsingBenzene(b => b.AddBenzene()))
             .Configure(app => app
                 .UseLogResult(action)
+                // This pipeline deliberately registers no binding — it exists to inspect the log
+                // scope, not to route. Something still has to claim the event, or the entry point
+                // reports it as unrecognised, which for a binding-less pipeline is exactly right.
+                .Use("ClaimEvent", _ => (context, _) =>
+                {
+                    context.MarkHandled();
+                    return Task.CompletedTask;
+                })
             )
             .BuildHost();
     }

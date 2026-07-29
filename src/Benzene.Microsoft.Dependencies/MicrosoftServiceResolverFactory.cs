@@ -17,9 +17,27 @@ public class MicrosoftServiceResolverFactory : IServiceResolverFactory, IAsyncDi
         _ownsServiceProvider = false;
     }
 
-    public MicrosoftServiceResolverFactory(IServiceCollection container)
+    public MicrosoftServiceResolverFactory(IServiceCollection container, bool validateOnBuild = false)
     {
-        _serviceProvider = container.BuildServiceProvider();
+        // ValidateOnBuild resolves every registration's constructor dependencies at container build,
+        // rather than leaving a missing one to surface when a message first reaches the middleware
+        // that needs it — the pipeline resolves middleware inside its per-link closure, so nothing is
+        // constructed until dispatch and a missing registration is invisible until then.
+        //
+        // It is OPT-IN, and the reason is measured rather than assumed: switching it on by default
+        // failed 67 tests across four projects, and every one was a *legitimately partial* container
+        // — a test that registers only what it exercises, leaving e.g. IMessageHandlersFinder
+        // unresolvable because nothing on that path asks for it. Partial composition is a supported
+        // arrangement here, and a check that rejects a valid one is worse than the bug it catches.
+        // Turn it on for a fully-composed application, where an unresolvable registration is a
+        // genuine wiring error.
+        //
+        // ValidateScopes stays off separately: Benzene's own HealthCheckBuilder registers
+        // IHealthCheckFinder as a singleton consuming scoped IDependencyHealthCheck, so enabling it
+        // needs that fixed first.
+        _serviceProvider = validateOnBuild
+            ? container.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true })
+            : container.BuildServiceProvider();
         // We built this provider, so we own its disposal.
         _ownsServiceProvider = true;
     }

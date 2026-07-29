@@ -33,6 +33,38 @@ public class AwsEventStreamContext
     public Stream Stream { get; }
 
     /// <summary>
+    /// Gets whether some middleware claimed this invocation.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A plain null check on <see cref="Response"/> cannot answer this: it is assigned in the
+    /// constructor and every binding writes into that same stream, so it is never null — which is why
+    /// <see cref="AwsLambdaEntryPoint"/>'s "event type has not been recognized" error was unreachable
+    /// and an unroutable event returned an empty body with no error at all.
+    /// </para>
+    /// <para>
+    /// Two things count as a claim. Every built-in binding calls <see cref="MarkHandled"/> from
+    /// <c>AwsLambdaMiddlewareRouter.MapResponse</c>, so a binding that legitimately produced a
+    /// zero-byte response is still recognised. Custom middleware that simply writes bytes into
+    /// <see cref="Response"/> counts too, without having to know about this flag — a response body
+    /// that exists is a claim by definition. What is left over is the case the error is actually
+    /// about: nothing wrote anything, and nothing said it had handled the event.
+    /// </para>
+    /// </remarks>
+    public bool Handled => _markedHandled || Response is { CanSeek: true, Length: > 0 };
+
+    private bool _markedHandled;
+
+    /// <summary>
+    /// Marks this invocation as claimed, even if the response body is empty.
+    /// </summary>
+    /// <remarks>
+    /// Middleware only needs this when it handles an event without producing a response body —
+    /// writing bytes to <see cref="Response"/> already counts as a claim.
+    /// </remarks>
+    public void MarkHandled() => _markedHandled = true;
+
+    /// <summary>
     /// Gets the AWS Lambda execution context for this invocation.
     /// </summary>
     public ILambdaContext LambdaContext { get; }
