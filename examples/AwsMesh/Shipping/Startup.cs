@@ -1,5 +1,4 @@
 using Benzene.Abstractions.Hosting;
-using Benzene.Aws.Lambda.Core;
 using Benzene.Examples.AwsMesh.Shared;
 using Benzene.Examples.AwsMesh.Shipping.Handlers;
 using Benzene.Examples.AwsMesh.Shipping.HealthChecks;

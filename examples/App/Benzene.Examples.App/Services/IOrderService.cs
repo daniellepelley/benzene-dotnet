@@ -4,7 +4,6 @@ using Benzene.Abstractions.Results;
 using Benzene.Examples.App.Data.Pagination;
 using Benzene.Examples.App.Model;
 using Benzene.Examples.App.Model.Messages;
-using Benzene.Results;
 
 namespace Benzene.Examples.App.Services;
 

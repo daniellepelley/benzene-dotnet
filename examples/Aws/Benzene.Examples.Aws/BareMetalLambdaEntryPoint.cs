@@ -33,14 +33,6 @@ public class BareMetalLambdaEntryPoint
         services.UsingBenzene(x => x
             .AddMessageHandlers(Assembly.GetAssembly(typeof(OrderDto))));
 
-        // services.AddScoped<IOrderDbClient, OrderDbClient>();
-        // services.AddScoped<IOrderService, OrderService>();
-
-        // services.AddDbContext<DataContext>(x => x.UseNpgsql(configuration["DB_CONNECTION_STRING"],
-        //     pgOptions => pgOptions.ProvidePasswordCallback(DbConnectionStringFactory.PasswordCallback())));
-
-        // services.AddScoped<IDataContext>(x => new OrderDataContext(x.GetService<DataContext>()));
-
         _microsoftServiceResolverFactory = new MicrosoftServiceResolverFactory(services.BuildServiceProvider());
         _pipeline = middlewarePipelineBuilder.Build();
     }

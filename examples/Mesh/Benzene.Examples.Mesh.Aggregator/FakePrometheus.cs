@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Http;
 
 /// <summary>
 /// A tiny in-process stand-in for a real Prometheus-compatible endpoint, so this example can

@@ -37,10 +37,6 @@ public class HealthCheckTest : InMemoryOrdersTestBase
         var snsEvent = AwsEventBuilder.CreateSnsEvent(HealthCheckTopic, null);
 
         await TestLambdaHosting.SendEventAsync(snsEvent);
-
-        // var messages = await SqsSetUp.GetAllMessagesAsync();
-        // Assert.Equal($"{GetOrder}:result", messages[0].GetTopic());
-        // Assert.Equal("200", messages[0].GetStatus());
     }
 
     [Fact]
@@ -49,12 +45,7 @@ public class HealthCheckTest : InMemoryOrdersTestBase
         var sqsEvent = AwsEventBuilder.CreateSqsEvent(HealthCheckTopic, null);
 
         await TestLambdaHosting.SendEventAsync(sqsEvent);
-
-        // var messages = await SqsSetUp.GetAllMessagesAsync();
-        // Assert.Equal($"{GetOrder}:result", messages[0].GetTopic());
-        // Assert.Equal("200", messages[0].GetStatus());
     }
-
 
     [Fact]
     public async Task HealthCheck_ApiGateway()
@@ -65,7 +56,6 @@ public class HealthCheckTest : InMemoryOrdersTestBase
         var response = await TestLambdaHosting.SendEventAsync<APIGatewayProxyResponse>(apiGatewayProxyRequest);
             
         Assert.Equal(200, response.StatusCode);
-
     }
 
     [Fact]
@@ -97,11 +87,5 @@ public class HealthCheckTest : InMemoryOrdersTestBase
         {
             thread.Join();
         }
-    
-        // await Task.Delay(2000);
-    
-        // var messages = await SqsSetUp.GetAllMessagesAsync();
-        // Assert.Equal($"{GetOrder}:result", messages[0].GetTopic());
-        // Assert.Equal(20, messages.Length);
     }
 }

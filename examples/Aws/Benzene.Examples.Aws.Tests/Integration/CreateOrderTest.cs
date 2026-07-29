@@ -48,16 +48,6 @@ public class CreateOrderTest : InMemoryOrdersTestBase
         Assert.Single(orders);
         Assert.Equal(Defaults.Order.Status, orders[0].Status);
         Assert.Equal(Defaults.Order.Name, orders[0].Name);
-            
-        // var messages = await SqsSetUp.GetAllMessagesAsync();
-        // Assert.Equal($"{CreateOrder}:result", messages[0].GetTopic());
-        // Assert.True(messages[0].BodyIsGuid());
-        //     
-        // Assert.Equal($"{CreateOrder}d", messages[1].GetTopic());
-        // Assert.Null(messages[1].GetStatus());
-        // var payload = messages[1].Body<OrderDto>();
-        // Assert.Equal(SomeStatus, payload.Status);
-        // Assert.Equal(SomeName, payload.Name);
     }
 
     [Fact]
@@ -75,16 +65,6 @@ public class CreateOrderTest : InMemoryOrdersTestBase
         Assert.Single(orders);
         Assert.Equal(Defaults.Order.Status, orders[0].Status);
         Assert.Equal(Defaults.Order.Name, orders[0].Name);
-            
-        // var messages = await SqsSetUp.GetAllMessagesAsync();
-        // Assert.Equal($"{CreateOrder}:result", messages[0].GetTopic());
-        // Assert.True(messages[0].BodyIsGuid());
-        //     
-        // Assert.Equal($"{CreateOrder}d", messages[1].GetTopic());
-        // Assert.Null(messages[1].GetStatus());
-        // var payload = messages[1].Body<OrderDto>();
-        // Assert.Equal(SomeStatus, payload.Status);
-        // Assert.Equal(SomeName, payload.Name);
     }
 
     [Fact]
@@ -99,16 +79,6 @@ public class CreateOrderTest : InMemoryOrdersTestBase
         Assert.Single(orders);
         Assert.Equal(Defaults.Order.Status, orders[0].Status);
         Assert.Equal(Defaults.Order.Name, orders[0].Name);
-
-        // var messages = await SqsSetUp.GetAllMessagesAsync();
-        // Assert.Equal($"{CreateOrder}:result", messages[0].GetTopic());
-        // Assert.True(messages[0].BodyIsGuid());
-        //
-        // Assert.Equal($"{CreateOrder}d", messages[1].GetTopic());
-        // Assert.Null(messages[1].GetStatus());
-        // var payload = messages[1].Body<OrderDto>();
-        // Assert.Equal(SomeStatus, payload.Status);
-        // Assert.Equal(SomeName, payload.Name);
     }
 
     [Fact]
@@ -126,16 +96,6 @@ public class CreateOrderTest : InMemoryOrdersTestBase
         Assert.Single(orders);
         Assert.Equal(Defaults.Order.Status, orders[0].Status);
         Assert.Equal(Defaults.Order.Name, orders[0].Name);
-
-        // var messages = await SqsSetUp.GetAllMessagesAsync();
-        // Assert.Equal($"{CreateOrder}:result", messages[0].GetTopic());
-        // Assert.True(messages[0].BodyIsGuid());
-        //
-        // Assert.Equal($"{CreateOrder}d", messages[1].GetTopic());
-        // Assert.Null(messages[1].GetStatus());
-        // var payload = messages[1].Body<OrderDto>();
-        // Assert.Equal(SomeStatus, payload.Status);
-        // Assert.Equal(SomeName, payload.Name);
     }
 
     [Fact]
@@ -152,13 +112,6 @@ public class CreateOrderTest : InMemoryOrdersTestBase
         Assert.Equal(Defaults.Order.Name, orders[0].Name);
 
         Assert.Equal(BenzeneResultStatus.Created, response.StatusCode);
-
-        // var messages = await SqsSetUp.GetAllMessagesAsync();
-        // Assert.Equal($"{CreateOrder}d", messages[0].GetTopic());
-        // Assert.Null(messages[0].GetStatus());
-        // var payload = messages[0].Body<OrderDto>();
-        // Assert.Equal(SomeStatus, payload.Status);
-        // Assert.Equal(SomeName, payload.Name);
     }
 
     [Fact]
@@ -178,13 +131,6 @@ public class CreateOrderTest : InMemoryOrdersTestBase
 
         Assert.Equal(201, response.StatusCode);
         Assert.NotNull(response.Body);
-
-        // var messages = await SqsSetUp.GetAllMessagesAsync();
-        // Assert.Equal($"{CreateOrder}d", messages[0].GetTopic());
-        // Assert.Null(messages[0].GetStatus());
-        // var payload = messages[0].Body<OrderDto>();
-        // Assert.Equal(SomeStatus, payload.Status);
-        // Assert.Equal(SomeName, payload.Name);
     }
 
     [Fact]
@@ -212,13 +158,6 @@ public class CreateOrderTest : InMemoryOrdersTestBase
 
         Assert.Equal(201, response.StatusCode);
         Assert.NotNull(response.Body);
-
-        // var messages = await SqsSetUp.GetAllMessagesAsync();
-        // Assert.Equal($"{CreateOrder}d", messages[0].GetTopic());
-        // Assert.Null(messages[0].GetStatus());
-        // var payload = messages[0].Body<OrderDto>();
-        // Assert.Equal(SomeStatus, payload.Status);
-        // Assert.Equal(SomeName, payload.Name);
     }
 
     [Fact]
@@ -243,15 +182,7 @@ public class CreateOrderTest : InMemoryOrdersTestBase
         var result = new XmlSerializer().Deserialize<OrderDto>(response.Body);
        
         Assert.Equal(Defaults.Order.Name, result.Name);
-
-        // var messages = await SqsSetUp.GetAllMessagesAsync();
-        // Assert.Equal($"{CreateOrder}d", messages[0].GetTopic());
-        // Assert.Null(messages[0].GetStatus());
-        // var payload = messages[0].Body<OrderDto>();
-        // Assert.Equal(SomeStatus, payload.Status);
-        // Assert.Equal(SomeName, payload.Name);
     }
-
 
     [Fact]
     public async Task CreateOrder_ValidationFailure()

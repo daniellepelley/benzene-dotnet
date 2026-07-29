@@ -6,7 +6,6 @@ using Benzene.Core.MessageHandlers;
 using Benzene.HealthChecks.Core;
 using Benzene.Http;
 using Benzene.Results;
-using Microsoft.Extensions.Logging;
 using V1 = Benzene.Examples.K8sMesh.Service.Model.V1;
 using V2 = Benzene.Examples.K8sMesh.Service.Model.V2;
 

@@ -72,7 +72,6 @@ public class AwsEventBuilder
                                 {
                                     Value =
                                         "[{  \"sent\": \"2021-06-20T15:38:27.966443Z\",    \"received\": \"0001-01-01T00:00:00\",    \"sender\": \"platform-eventbus-example-dotnet-svc\",    \"receiver\": null,    \"channel\": \"SQS\",    \"elapse\": \"n/a\"}]"
-
                                 }
                             }
                         }.Concat(_headers.Select(x => new KeyValuePair<string, SNSEvent.MessageAttribute>(x.Key,
@@ -126,7 +125,6 @@ public class AwsEventBuilder
                                 StringValue =
                                     "[{  \"sent\": \"2021-06-20T15:38:27.966443Z\",    \"received\": \"0001-01-01T00:00:00\",    \"sender\": \"platform-eventbus-example-dotnet-svc\",    \"receiver\": null,    \"channel\": \"SQS\",    \"elapse\": \"n/a\"}]",
                                 DataType = "String"
-
                             }
                         }
 
@@ -149,8 +147,6 @@ public class AwsEventBuilder
             .WithTopic(topic)
             .WithJsonBody(message)
             .CreateSnsEvent();
-        // return CreateSnsEventFromString(topic,
-        // JsonConvert.SerializeObject(message));
     }
 
     public static SNSEvent CreateSnsEventFromString(string topic, string message)
@@ -196,7 +192,6 @@ public class AwsEventBuilder
                                 {
                                     Value =
                                         "[{  \"sent\": \"2021-06-20T15:38:27.966443Z\",    \"received\": \"0001-01-01T00:00:00\",    \"sender\": \"platform-eventbus-example-dotnet-svc\",    \"receiver\": null,    \"channel\": \"SQS\",    \"elapse\": \"n/a\"}]"
-
                                 }
                             }
                         },
@@ -249,7 +244,6 @@ public class AwsEventBuilder
                             {
                                 StringValue =
                                     "[{  \"sent\": \"2021-06-20T15:38:27.966443Z\",    \"received\": \"0001-01-01T00:00:00\",    \"sender\": \"platform-eventbus-example-dotnet-svc\",    \"receiver\": null,    \"channel\": \"SQS\",    \"elapse\": \"n/a\"}]"
-
                             }
                         }
                     },

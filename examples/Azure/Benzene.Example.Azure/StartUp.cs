@@ -5,7 +5,6 @@ using Benzene.Azure.Function.ServiceBus;
 using Benzene.Core.MessageHandlers;
 using Benzene.Core.Middleware;
 using Benzene.Diagnostics;
-using Benzene.Example.Azure;
 using Benzene.FluentValidation;
 using Benzene.Http.Cors;
 using Benzene.Microsoft.Dependencies;

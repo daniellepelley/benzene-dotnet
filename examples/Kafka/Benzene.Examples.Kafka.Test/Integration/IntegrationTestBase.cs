@@ -22,7 +22,6 @@ public abstract class InMemoryOrdersTestBase : IDisposable
 
     private void SetUp()
     {
-        //EnvironmentSetUp.SetUp();
         KafkaSetUp.SetUpAsync().Wait();
         WorkerSetUp.SetUp();
         InMemoryOrderDbClient.Orders.Clear();

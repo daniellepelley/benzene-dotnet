@@ -38,8 +38,6 @@ public static class SqsSetUp
     public static async Task TearDown()
     {
         await GetAllMessagesAsync();
-        // var client = CreateClient();
-        // await client.DeleteQueueAsync(QueueUrl);
     }
 
     public static async Task<Message[]> GetAllMessagesAsync()

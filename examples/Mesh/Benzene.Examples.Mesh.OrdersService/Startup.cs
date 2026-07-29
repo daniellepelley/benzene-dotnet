@@ -8,8 +8,6 @@ using Benzene.HealthChecks;
 using Benzene.Http.Routing;
 using Benzene.Microsoft.Dependencies;
 using Benzene.ResponseEvents;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 
 public class Startup

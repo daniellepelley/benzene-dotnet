@@ -1,4 +1,3 @@
-using Benzene.Examples.Kafka;
 using Benzene.HostedService;
 using Microsoft.Extensions.Hosting;
 
@@ -27,7 +26,5 @@ public static class WorkerSetUp
     {
         await _host.StopAsync(_cancellationTokenSource.Token);
         _cancellationTokenSource.Cancel();
-        // _thread.Interrupt();
-        // _thread.Join();
     }
 }

@@ -53,16 +53,6 @@ public class UpdateOrderTest : InMemoryOrdersTestBase
         Assert.Single(updatedOrders);
         Assert.Equal(UpdatedStatus, updatedOrders[0].Status);
         Assert.Equal(UpdatedName, updatedOrders[0].Name);
-
-        // var messages = await SqsSetUp.GetAllMessagesAsync();
-        // Assert.Equal("204", messages[2].GetStatus());
-        // Assert.Equal($"{UpdateOrder}:result", messages[2].GetTopic());
-        //
-        // Assert.Equal($"{UpdateOrder}d", messages[3].GetTopic());
-        // Assert.Null(messages[3].GetStatus());
-        // var payload = messages[3].Body<OrderDto>();
-        // Assert.Equal(UpdatedStatus, payload.Status);
-        // Assert.Equal(UpdatedName, payload.Name);
     }
 
     [Fact]
@@ -82,16 +72,6 @@ public class UpdateOrderTest : InMemoryOrdersTestBase
         Assert.Single(updatedOrders);
         Assert.Equal(UpdatedStatus, updatedOrders[0].Status);
         Assert.Equal(UpdatedName, updatedOrders[0].Name);
-
-        // var messages = await SqsSetUp.GetAllMessagesAsync();
-        // Assert.Equal("204", messages[2].GetStatus());
-        // Assert.Equal($"{UpdateOrder}:result", messages[2].GetTopic());
-        //
-        // Assert.Equal($"{UpdateOrder}d", messages[3].GetTopic());
-        // Assert.Null(messages[3].GetStatus());
-        // var payload = messages[3].Body<OrderDto>();
-        // Assert.Equal(UpdatedStatus, payload.Status);
-        // Assert.Equal(UpdatedName, payload.Name);
     }
 
     [Fact]

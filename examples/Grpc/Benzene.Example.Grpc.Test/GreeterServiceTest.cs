@@ -2,7 +2,6 @@ using Benzene.Example.Grpc.Services;
 using Grpc.Net.Client;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Xunit;
-using Client = Benzene.Example.Grpc.Client;
 
 namespace Benzene.Example.Grpc.Test;
 

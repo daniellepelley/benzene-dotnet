@@ -1,4 +1,3 @@
-using Benzene.Examples.Google;
 using Benzene.GoogleCloud.Functions.Http.TestHelpers;
 using Benzene.Testing;
 using Google.Cloud.Functions.Framework;

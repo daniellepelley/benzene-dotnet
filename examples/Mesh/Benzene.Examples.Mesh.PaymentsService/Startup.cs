@@ -10,7 +10,6 @@ using Benzene.Examples.Mesh.PaymentsService.Model;
 using Benzene.Http;
 using Benzene.Http.Routing;
 using Benzene.Microsoft.Dependencies;
-using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using V1 = Benzene.Examples.Mesh.PaymentsService.Model.V1;

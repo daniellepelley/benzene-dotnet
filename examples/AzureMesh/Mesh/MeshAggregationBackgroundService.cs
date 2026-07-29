@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Hosting;
 
 namespace Benzene.Examples.AzureMesh.Mesh;
 

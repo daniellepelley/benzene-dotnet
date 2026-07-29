@@ -90,11 +90,6 @@ public class Startup
             .UseHttp(asp => asp
                 .UseSpec()
                 .UseSpecUi()          // browse the spec at GET /spec-ui (fetches /spec?type=benzene)
-                // .UseCors(new CorsSettings
-                // {
-                    // AllowedDomains = ["https://editor-next.swagger.io"],
-                    // AllowedHeaders = Array.Empty<string>()
-                // })
                 .UseMessageHandlers(x => x.UseFluentValidation())
             )
         );

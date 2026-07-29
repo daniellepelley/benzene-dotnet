@@ -2,7 +2,6 @@ using Benzene.AspNet.Core;
 using Benzene.CloudService;
 using Benzene.Examples.Mesh.ShippingService.HealthChecks;
 using Benzene.Microsoft.Dependencies;
-using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 

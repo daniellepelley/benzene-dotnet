@@ -42,11 +42,6 @@ public class GetAllOrderTest : InMemoryOrdersTestBase
         var snsEvent = AwsEventBuilder.CreateSnsEvent(GetAllOrders, CreateGetAllOrdersMessage());
 
         await TestLambdaHosting.SendEventAsync(snsEvent);
-            
-        // var messages = await SqsSetUp.GetAllMessagesAsync();
-        // Assert.Equal($"{GetAllOrders}:result", messages[0].GetTopic());
-        // Assert.True(messages[0].BodyContains(_id1.ToString()));
-        // Assert.True(messages[0].BodyContains(_id2.ToString()));
     }
 
     [Fact]
@@ -57,13 +52,7 @@ public class GetAllOrderTest : InMemoryOrdersTestBase
         var sqsEvent = AwsEventBuilder.CreateSqsEvent(GetAllOrders, CreateGetAllOrdersMessage());
 
         await TestLambdaHosting.SendEventAsync(sqsEvent);
-            
-        // var messages = await SqsSetUp.GetAllMessagesAsync();
-        // Assert.Equal($"{GetAllOrders}:result", messages[0].GetTopic());
-        // Assert.True(messages[0].BodyContains(_id1.ToString()));
-        // Assert.True(messages[0].BodyContains(_id2.ToString()));
     }
-
 
     [Fact]
     public async Task GetAllOrders_ApiGateway()
@@ -93,9 +82,6 @@ public class GetAllOrderTest : InMemoryOrdersTestBase
         var sqsEvent = AwsEventBuilder.CreateSqsEvent(GetAllOrders, CreateGetAllOrdersMessage());
 
         await TestLambdaHosting.SendEventAsync(sqsEvent);
-
-        // var messages = await SqsSetUp.GetAllMessagesAsync();
-        // Assert.Equal($"{GetAllOrders}:result", messages[0].GetTopic());
     }
 
     [Fact]
@@ -136,10 +122,6 @@ public class GetAllOrderTest : InMemoryOrdersTestBase
         }
 
         await Task.Delay(2000);
-
-        // var messages = await SqsSetUp.GetAllMessagesAsync();
-        // Assert.Equal($"{GetAllOrders}:result", messages[0].GetTopic());
-        // Assert.Equal(20, messages.Length);
     }
 
     private void SetUpDatabase()

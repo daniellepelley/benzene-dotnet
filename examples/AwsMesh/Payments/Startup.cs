@@ -1,5 +1,4 @@
 using Benzene.Abstractions.Hosting;
-using Benzene.Aws.Lambda.Core;
 using Benzene.Examples.AwsMesh.Payments.Handlers;
 using Benzene.Examples.AwsMesh.Payments.HealthChecks;
 using Benzene.Examples.AwsMesh.Payments.Model;

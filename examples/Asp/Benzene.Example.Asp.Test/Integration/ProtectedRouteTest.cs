@@ -35,8 +35,6 @@ public class ProtectedRouteTest : InMemoryOrdersTestBase
     [Fact]
     public async Task ProtectedPing_WithAGarbageToken_IsRejectedUnauthorized()
     {
-        // A malformed bearer token fails validation (and never leaks why - see the package's CLAUDE.md);
-        // either way an unauthenticated caller must not reach the protected handler.
         _client.DefaultRequestHeaders.Add("Authorization", "Bearer not-a-real-jwt");
         var response = await _client.GetAsync("/protected/ping");
 

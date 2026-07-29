@@ -1,4 +1,3 @@
-using System.Threading.Tasks;
 using Benzene.Abstractions.MessageHandlers;
 using Benzene.Abstractions.Results;
 using Benzene.Clients;

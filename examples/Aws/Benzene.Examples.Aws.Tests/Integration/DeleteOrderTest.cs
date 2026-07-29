@@ -52,13 +52,6 @@ public class DeleteOrderTest : InMemoryOrdersTestBase
         var orders =GetPersistedOrders().ToArray();
 
         Assert.Empty(orders);
-
-        // var messages = await SqsSetUp.GetAllMessagesAsync();
-        // Assert.Equal($"{DeleteOrder}:result", messages[2].GetTopic());
-        //
-        // Assert.Equal($"{DeleteOrder}d", messages[3].GetTopic());
-        // Assert.Null(messages[3].GetStatus());
-        // Assert.True(messages[3].BodyIsGuid());
     }
 
     [Fact]
@@ -76,13 +69,6 @@ public class DeleteOrderTest : InMemoryOrdersTestBase
         var orders = GetPersistedOrders();
 
         Assert.Empty(orders);
-
-        // var messages = await SqsSetUp.GetAllMessagesAsync();
-        // Assert.Equal($"{DeleteOrder}:result", messages[2].GetTopic());
-        //     
-        // Assert.Equal($"{DeleteOrder}d", messages[3].GetTopic());
-        // Assert.Null(messages[3].GetStatus());
-        // Assert.True(messages[3].BodyIsGuid());
     }
 
     [Fact]
@@ -108,57 +94,6 @@ public class DeleteOrderTest : InMemoryOrdersTestBase
         var orders = GetPersistedOrders();
 
         Assert.Empty(orders);
-
-        // var messages = await SqsSetUp.GetAllMessagesAsync();
-        // Assert.Equal($"{DeleteOrder}d", messages[1].GetTopic());
-        // Assert.Null(messages[1].GetStatus());
-        // Assert.True(messages[1].BodyIsGuid());
     }
 
-    // [Fact]
-    // public async Task DeleteOrder_SQSEvent_WhenDoesNotExist()
-    // {
-    //     var orderId = Guid.NewGuid();
-    //
-    //     var sqsDeleteEvent = AwsEventBuilder.CreateSqsEvent(DeleteOrder, CreateDeleteOrderMessage(orderId.ToString()));
-    //     await TestLambdaHosting.SendEventAsync(sqsDeleteEvent);
-    //
-    //     var messages = await SqsSetUp.GetAllMessagesAsync();
-    //     Assert.Equal($"{DeleteOrder}:result", messages[0].GetTopic());
-    //
-    //     var errorPayload = messages[0].Body<ErrorPayload>();
-    //     Assert.Equal(Defaults.ErrorStatus.NotFound, errorPayload.Status);
-    //
-    //     Assert.Single(messages);
-    // }
-
-    // [Fact]
-    // public async Task DeleteOrder_SQSEvent_WhenAlreadyDeleted()
-    // {
-    //     var orderId = Guid.NewGuid();
-    //
-    //     var sqsDeleteEvent = AwsEventBuilder.CreateSqsEvent(DeleteOrder, CreateDeleteOrderMessage(orderId.ToString()));
-    //     await TestLambdaHosting.SendEventAsync(sqsDeleteEvent);
-    //
-    //     var messages = await SqsSetUp.GetAllMessagesAsync();
-    //     Assert.Equal($"{DeleteOrder}:result", messages[0].GetTopic());
-    //     
-    //     var errorPayload = messages[0].Body<ErrorPayload>();
-    //     Assert.Equal(Defaults.ErrorStatus.NotFound, errorPayload.Status);
-    // }
-    //
-    // [Fact]
-    // public async Task DeleteOrder_ValidationFailure()
-    // {
-    //     //Update Order event
-    //     var snsDeleteEvent = AwsEventBuilder.CreateSqsEvent(DeleteOrder, new CreateOrderMessage());
-    //     await TestLambdaHosting.SendEventAsync(snsDeleteEvent);
-    //     
-    //     var messages = await SqsSetUp.GetAllMessagesAsync();
-    //     Assert.Equal($"{DeleteOrder}:result", messages[0].GetTopic());
-    //     
-    //     var errorPayload = messages[0].Body<ErrorPayload>();
-    //     Assert.Equal(Defaults.ErrorStatus.ValidationError, errorPayload.Status);
-    //     Assert.NotEmpty(errorPayload.Errors);
-    // }
 }

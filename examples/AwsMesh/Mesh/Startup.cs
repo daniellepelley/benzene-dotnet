@@ -1,4 +1,3 @@
-using System;
 using Benzene.Abstractions.Hosting;
 using Benzene.Aws.Lambda.ApiGateway;
 using Benzene.Aws.Lambda.Core;

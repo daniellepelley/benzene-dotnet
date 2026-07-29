@@ -56,7 +56,6 @@ public class InMemoryOrderDbClient : IOrderDbClient
         {
             _logger.LogError(ex, "Database error");
             return BenzeneResult.ServiceUnavailable<OrderDto>().AsTask();
-
         }
     }
 

@@ -10,7 +10,6 @@ using Benzene.FluentValidation;
 using Benzene.Http;
 using Benzene.Microsoft.Dependencies;
 using FluentValidation;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Benzene.Examples.Google;

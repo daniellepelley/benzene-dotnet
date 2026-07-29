@@ -13,7 +13,6 @@ using Benzene.Mesh.Ui;
 using Benzene.Mesh.Usage.ApplicationInsights;
 using Benzene.Microsoft.Dependencies;
 using Benzene.OpenTelemetry;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;

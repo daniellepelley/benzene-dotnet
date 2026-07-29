@@ -1,4 +1,3 @@
-using Benzene.Abstractions.DI;
 using Benzene.Abstractions.MessageHandlers.Response;
 using Benzene.Abstractions.Middleware;
 using Benzene.Http;

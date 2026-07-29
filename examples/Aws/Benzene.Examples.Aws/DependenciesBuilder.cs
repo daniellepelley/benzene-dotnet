@@ -69,19 +69,9 @@ public static class DependenciesBuilder
         services.AddLogging(x => x.AddConsole().AddSerilog());
         services.AddTransient(_ => configuration.GetAWSOptions());
         services.AddSingleton(awsOptions.CreateServiceClient<IAmazonSQS>());
-        // services.AddScoped<ISqsClient>(x => new SqsClient(x.GetService<IAmazonSQS>(), configuration["MY_QUEUE_URL"] ));
 
         services.AddScoped<IOrderDbClient, InMemoryOrderDbClient>();
         services.AddScoped<IOrderService, OrderService>();
-
-        //Custom 
-        // services.AddScoped<IResponsePayloadMapper<ApiGatewayContext>, CustomResponsePayloadMapper<ApiGatewayContext>>();
-        // services.AddScoped<IResponsePayloadMapper<BenzeneMessageContext>, CustomResponsePayloadMapper<BenzeneMessageContext>>();
-        // services.AddScoped<IResponsePayloadMapper<SqsMessageContext>, CustomResponsePayloadMapper<SqsMessageContext>>();
-        // services.AddScoped<IResponsePayloadMapper<SnsRecordContext>, CustomResponsePayloadMapper<SnsRecordContext>>();
-        //
-        
-        // services.AddSingleton<ISerializerOption<BenzeneMessageContext>>(new SerializerOption<BenzeneMessageContext, JsonSerializer>(x => true));
 
         services.AddValidatorsFromAssemblyContaining<GetOrderMessageValidator>();
         services.UsingBenzene(x => x
@@ -91,9 +81,6 @@ public static class DependenciesBuilder
             // below - see docs/diagnosing-failures.md.
             .AddActivityPerMiddleware()
             .AddBenzeneMessage()
-            // .AddXml()
-            // .AddSerializer<XmlSerializer>("application/xml")
-            // .AddCorrelationId()
             // Both the shared App domain's handlers AND this host's own (PublishOrderCreatedMessageHandler
             // below) - AddMessageHandlers only registers handlers from the assemblies it's given, and
             // the finder it registers is locked in via TryAddSingleton, so a later broader
@@ -108,23 +95,9 @@ public static class DependenciesBuilder
             .AddOutboundRouting(routing => routing
                 .Route(MessageTopicNames.OrderCreated, pipeline => pipeline.UseSqs(configuration["MY_QUEUE_URL"]))));
         
-        // services.AddScoped<IMiddlewareFactory>(_ => new TimerMiddlewareFactory(
-        //     new DebugTimerFactory()
-        //     // new XRayProcessTimerFactory()
-        //     ));
-        //
-        // services.AddScoped<IProcessTimerFactory, NullProcessTimerFactory>();
-        
         services.AddScoped<IProcessTimerFactory>(x =>
             new CompositeProcessTimerFactory(
                 new LoggingProcessTimerFactory(x.GetService<ILogger<LoggingProcessTimer>>())
-                // new XRayProcessTimerFactory()
                 ));
-
-        // services.AddScoped<IOrderDbClient, OrderDbClient>();
-        // services.AddDbContext<DataContext>(x => x.UseNpgsql(configuration["DB_CONNECTION_STRING"],
-        //     pgOptions => pgOptions.ProvidePasswordCallback(DbConnectionStringFactory.PasswordCallback())));
-        //
-        // services.AddScoped<IDataContext>(x => new OrderDataContext(x.GetService<DataContext>()));
     }
 }

@@ -1,4 +1,3 @@
-using System;
 using System.Globalization;
 using Benzene.Aws.Lambda.Core;
 using Benzene.Microsoft.Dependencies;

@@ -48,7 +48,6 @@ public static class DependenciesBuilder
             .AddMessageHandlers(typeof(CreateOrderMessage).Assembly)
             .AddKafka<Ignore, string>()
         );
-        // services.AddValidatorsFromAssemblyContaining<GetOrderMessageValidator>();
 
         services.AddScoped<IProcessTimerFactory>(x =>
             new CompositeProcessTimerFactory(
