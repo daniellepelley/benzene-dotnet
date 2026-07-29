@@ -16,7 +16,12 @@ public abstract class RegistrationsBase : IRegistrations
     /// <summary>
     /// Gets the package name from the assembly containing the registration implementation.
     /// </summary>
-    public string PackageName => Assembly.GetAssembly(GetType())!.FullName;
+    /// <remarks>
+    /// The simple assembly name, which is also the NuGet package id. It appears verbatim in the
+    /// missing-registration diagnostic, and the full name's version/culture/public-key-token tail is
+    /// noise in a message whose job is to name a package the developer should reference.
+    /// </remarks>
+    public string PackageName => Assembly.GetAssembly(GetType())!.GetName().Name!;
 
     /// <summary>
     /// Gets the collection of registrations grouped by registration method name.

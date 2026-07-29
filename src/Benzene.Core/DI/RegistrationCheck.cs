@@ -66,17 +66,23 @@ public class RegistrationCheck : IRegistrationCheck
     /// <summary>
     /// Best-effort, container-agnostic enrichment for a resolve failure: scans the exception and its
     /// inner exceptions for any type name Benzene knows how to register, and returns registration
-    /// guidance for the first match. Unlike matching a single container's exact message wording, this
-    /// works across DI containers, framework versions, and cultures. It never throws - a diagnostic aid
-    /// must not be able to surface its own failure in place of the real resolution error.
+    /// guidance for the innermost match. Unlike matching a single container's exact message wording,
+    /// this works across DI containers, framework versions, and cultures. It never throws - a
+    /// diagnostic aid must not be able to surface its own failure in place of the real resolution
+    /// error.
     /// </summary>
+    /// <remarks>
+    /// The chain is walked innermost-first because that end of it is the root cause. An outer frame
+    /// names the type whose construction was <em>attempted</em>; the innermost names the one that was
+    /// actually missing, which is the one the developer has to register.
+    /// </remarks>
     /// <param name="exception">The resolve exception thrown by the underlying container.</param>
     /// <returns>Registration guidance, or an empty string if nothing recognizable was found.</returns>
     public string CheckException(Exception exception)
     {
         try
         {
-            for (var current = exception; current != null; current = current.InnerException)
+            foreach (var current in ChainInnermostFirst(exception))
             {
                 foreach (var candidate in ExtractCandidateTypeNames(current.Message))
                 {
@@ -97,11 +103,25 @@ public class RegistrationCheck : IRegistrationCheck
     }
 
     /// <summary>
-    /// Registration guidance for a failed resolve, preferring the requested type itself - which the
-    /// caller always knows, so this branch is reliable on <em>any</em> container regardless of its
-    /// exception wording - and falling back to a type named in the exception chain, which additionally
-    /// catches a missing <em>transitive</em> dependency. Never throws.
+    /// Registration guidance for a failed resolve, leading with the root cause found in the exception
+    /// chain and offering the requested type's own registration only as secondary context. Never throws.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The requested type is the reliable branch — the caller always knows it, on any container,
+    /// regardless of exception wording — but preferring it was a false-positive machine. A transitive
+    /// failure (the requested type is registered; something it needs is not) produced a confident hint
+    /// naming a call the developer had already made, and suppressed the one that would have fixed it.
+    /// The observed case: resolving <c>MessageRouter&lt;ApiGatewayContext&gt;</c> fails on
+    /// <c>IDefaultStatuses</c>, and the developer was told to add <c>.AddMessageHandlers(...)</c>,
+    /// which was already there, instead of <c>.AddBenzene()</c>, which was not.
+    /// </para>
+    /// <para>
+    /// So the chain wins when it has an answer, and the direct hint follows it clearly marked as the
+    /// weaker one. It is kept rather than dropped because the chain branch depends on parsing a
+    /// container's message and can come back empty on a container whose wording nothing recognises.
+    /// </para>
+    /// </remarks>
     /// <param name="requestedType">The type the caller was trying to resolve.</param>
     /// <param name="exception">The resolve exception thrown by the underlying container.</param>
     /// <returns>Registration guidance, or an empty string if nothing recognizable was found.</returns>
@@ -109,13 +129,54 @@ public class RegistrationCheck : IRegistrationCheck
     {
         try
         {
+            var rootCause = CheckException(exception);
             var direct = requestedType?.FullName is { } name ? CheckType(name) : string.Empty;
-            return !string.IsNullOrEmpty(direct) ? direct : CheckException(exception);
+
+            if (string.IsNullOrEmpty(rootCause))
+            {
+                return direct;
+            }
+
+            if (string.IsNullOrEmpty(direct) || direct == rootCause)
+            {
+                return rootCause;
+            }
+
+            return new StringBuilder(rootCause)
+                .AppendLine()
+                .AppendLine($"If that call is already there, {DisplayName(requestedType!)} itself comes from:")
+                .Append(direct)
+                .ToString();
         }
         catch
         {
             return string.Empty;
         }
+    }
+
+    // "MessageRouter<ApiGatewayContext>", not "MessageRouter`1" — this appears in a sentence a
+    // developer reads, and CLR arity notation is noise there.
+    private static string DisplayName(Type type)
+    {
+        if (!type.IsGenericType)
+        {
+            return type.Name;
+        }
+
+        var name = type.Name.Split('`')[0];
+        return $"{name}<{string.Join(", ", type.GetGenericArguments().Select(DisplayName))}>";
+    }
+
+    private static List<Exception> ChainInnermostFirst(Exception exception)
+    {
+        var chain = new List<Exception>();
+        for (var current = exception; current != null; current = current.InnerException)
+        {
+            chain.Add(current);
+        }
+
+        chain.Reverse();
+        return chain;
     }
 
     // Pulls likely type names out of a container's error message without assuming any one container's
@@ -156,11 +217,14 @@ public class RegistrationCheck : IRegistrationCheck
         }
     }
 
-    private static RegistrationMatch[] GetMatches(string type, string typeNameToMatch, KeyValuePair<string, string[]> typeRegistrations)
+    // package is the assembly the registration call lives in; methodRegistrations maps one registration
+    // call (".AddBenzene()") to the types it registers. The two used to be handed to RegistrationMatch
+    // the wrong way round, so the message read "<assembly> is registered in .AddX() from <type>".
+    private static RegistrationMatch[] GetMatches(string package, string typeNameToMatch, KeyValuePair<string, string[]> methodRegistrations)
     {
-        return typeRegistrations.Value
+        return methodRegistrations.Value
             .Where(registeredType => IsMatch(typeNameToMatch, registeredType))
-            .Select(package => new RegistrationMatch(type, typeRegistrations.Key, package))
+            .Select(registeredType => new RegistrationMatch(registeredType, methodRegistrations.Key, package))
             .ToArray();
     }
 
@@ -186,12 +250,19 @@ public class RegistrationCheck : IRegistrationCheck
     private static string FormatResponse(RegistrationMatch[] matches)
     {
         var stringBuilder = new StringBuilder();
+
+        // Several registration calls can supply the same type. Saying "one of" is the honest framing:
+        // a hint stated with more confidence than it deserves costs more than no hint at all.
+        var lead = matches.Length > 1
+            ? "You might be missing one of these in your dependency registration"
+            : "You might be missing this in your dependency registration";
+
         foreach (var item in matches)
         {
             stringBuilder.AppendLine();
             stringBuilder.AppendLine($"{item.Type} is registered in {item.Method} from {item.Package}");
             stringBuilder.AppendLine();
-            stringBuilder.AppendLine("You might be missing this in your dependency registration");
+            stringBuilder.AppendLine(lead);
             stringBuilder.AppendLine();
             stringBuilder.AppendLine($"    .UsingBenzene(x => x{item.Method})");
             stringBuilder.AppendLine();
