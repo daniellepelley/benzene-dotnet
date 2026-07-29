@@ -34,6 +34,7 @@ Benzene is a hexagonal framework designed for services running in serverless env
   - **AWS**
     - [AWS Lambda Setup](getting-started-aws.md)
     - [AWS IAM Permissions Reference](aws-iam-permissions.md)
+    - [ASP.NET Core + SQS + SNS in one Lambda](cookbooks/aspnet-with-sqs-and-sns.md) — serve HTTP through an existing ASP.NET Core app while the same function consumes queues and topics through Benzene
   - **Azure**
     - [Azure Functions Setup](azure-functions.md) — HTTP plus every non-HTTP trigger (Event Hubs, Kafka, Service Bus, Cosmos DB Change Feed, Queue/Blob Storage, Event Grid, Timer)
     - [Self-hosted Azure workers](getting-started-worker.md#part-b-built-in-workers-kafka-http-service-bus-event-hub-cosmos-db) — Service Bus, Event Hubs, and Cosmos DB Change Feed consumers without Azure Functions

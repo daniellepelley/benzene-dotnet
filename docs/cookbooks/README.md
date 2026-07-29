@@ -18,6 +18,7 @@ Cookbooks are step-by-step guides that show you how to solve specific problems w
 ### AWS
 - [Handling SQS Message Failures](handling-sqs-failures.md) - Implement retry and DLQ patterns for SQS
 - [SNS Fan-Out Pattern](sns-fan-out.md) - Broadcast events to multiple Lambda functions
+- [ASP.NET Core + SQS + SNS in one Lambda](aspnet-with-sqs-and-sns.md) - Serve HTTP through an existing ASP.NET Core app while the same function consumes queues and topics through Benzene, on one DI container
 - [S3 Event Processing](../getting-started-aws.md) - React to S3 object creation/deletion via `Benzene.Aws.Lambda.S3` (see the "S3" section)
 - API Gateway Custom Authorizers *(planned - `Benzene.Aws.Lambda.ApiGateway`'s `ApiGatewayCustomAuthorizer` support exists in source but isn't cookbook-documented yet)*
 - [Lambda Cold Start Optimization](lambda-cold-start-optimization.md) - Reduce cold start times
