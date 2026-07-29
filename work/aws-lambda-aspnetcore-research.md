@@ -1,6 +1,6 @@
 # Running ASP.NET Core and Benzene in one Lambda — research
 
-**Status:** RESEARCH — feasibility established, one open question needs a spike before committing.
+**Status:** RESEARCH — **feasibility proven by a working spike** (2026-07-27). Ready to build.
 **Date:** 2026-07-27
 **Question:** Can a single Lambda serve HTTP through a real ASP.NET Core application while the same
 function handles SQS/SNS/EventBridge through Benzene's pipelines? If so, does that justify a
@@ -84,21 +84,68 @@ So the full stack in one Lambda is:
 One set of handlers, reachable over HTTP through ASP.NET and over queues directly — which is
 Benzene's central promise, extended to teams that cannot give up ASP.NET.
 
-## 5. Open question — the one thing to spike first
+## 5. Open question — RESOLVED by spike
 
-`AbstractAspNetCoreFunction(IServiceProvider)` expects a provider whose `IServer` is AWS's
-`LambdaServer` (that is what `MarshallRequest` → `_server.Application.CreateContext(features)`
-drives). `AddAWSLambdaHosting` normally registers it, and that is the package we are avoiding.
+The doubt was whether AWS's `LambdaServer` could be registered outside their hosting package, since
+`AbstractAspNetCoreFunction(IServiceProvider)` needs it as the `IServer` and `AddAWSLambdaHosting` is
+the package a mixed function must avoid.
 
-**Spike:** build a `WebApplication` manually, register `LambdaServer` as `IServer`, hand
-`app.Services` to both the ASP.NET function and `MicrosoftServiceResolverFactory`, and confirm an
-API Gateway v2 payload round-trips. If registering `LambdaServer` outside AWS's hosting package
-turns out to be impractical, the fallback is to let the ASP.NET function build its own host and give
-Benzene that provider instead (the reverse direction) — worse ergonomically, since the app's
-composition root then lives inside `Init(IWebHostBuilder)`, but still one container.
+**It can.** Reflection over the shipped assembly confirms `LambdaServer` is a **public type with a
+public parameterless constructor** (namespace `Amazon.Lambda.AspNetCoreServer.Internal`), and
+`FunctionHandlerAsync` is **public virtual** on `AbstractAspNetCoreFunction<TREQUEST,TRESPONSE>`,
+which also exposes a **protected `ctor(IServiceProvider)`** — inherited by
+`APIGatewayHttpApiV2ProxyFunction`, so a two-line subclass is all it takes.
 
-Everything else in this document is verified against the two libraries' source; this is the only
-step I could not confirm without compiling against `Amazon.Lambda.AspNetCoreServer`.
+A spike drove a real API Gateway v2 payload into ASP.NET and a real SQS event into Benzene, in one
+process off one provider:
+
+```
+HTTP  -> 200 {"greeting":"Hello benzene"}
+SQS   -> {"batchItemFailures":[]}
+SQS   -> handler saw [ABC]
+SHARED PROVIDER -> aspnet and benzene same instance: True
+```
+
+### The verified recipe
+
+```csharp
+var builder = WebApplication.CreateBuilder();
+
+// 1. LambdaServer replaces Kestrel. Registered after CreateBuilder so it wins the IServer resolve.
+builder.Services.AddSingleton<IServer, LambdaServer>();
+
+// 2. Benzene registers into the SAME IServiceCollection.
+builder.Services.UsingBenzene(x => x
+    .AddBenzene()                                     // see the gotcha below
+    .AddMessageHandlers(typeof(OrderHandler).Assembly)
+    .AddSqs());
+
+var container = new MicrosoftBenzeneServiceContainer(builder.Services);
+var eventPipeline = new MiddlewarePipelineBuilder<AwsEventStreamContext>(container);
+eventPipeline.UseSqs(sqs => sqs.UseMessageHandlers());
+
+var app = builder.Build();
+app.MapGet("/hello/{name}", (string name) => new { greeting = $"Hello {name}" });
+await app.StartAsync();          // 3. LambdaServer captures the IHttpApplication here — required
+
+// 4. Both sides take the SAME provider.
+var aspNet  = new MyAspNetFunction(app.Services);     // : APIGatewayHttpApiV2ProxyFunction(provider)
+var benzene = new AwsLambdaEntryPoint(
+    eventPipeline.Build(), new MicrosoftServiceResolverFactory(app.Services));
+```
+
+### Three things the spike caught that the design would not have
+
+1. **`await app.StartAsync()` is mandatory.** `LambdaServer` captures the `IHttpApplication` in
+   `StartAsync`; skip it and the ASP.NET path has nothing to dispatch into. It is a no-op otherwise —
+   no socket is opened.
+2. **`AddBenzene()` must be called explicitly.** The Lambda hosts call it for you via their startup
+   path; composing by hand does not, and the failure is remote from the cause — an SQS record fails
+   with `Unable to resolve service for type 'IDefaultStatuses'` from inside `MessageHandlerFactory`.
+   A composition helper in the package should call it, which is most of the case for shipping one.
+3. **Errors surface only through `ILogger`.** `SqsApplication` catches per-record exceptions, logs
+   them, and reports a batch-item failure. With logging cleared, a broken pipeline looks exactly like
+   a message that simply did not route. Worth stating in the package docs.
 
 ## 6. Costs to weigh
 
@@ -124,5 +171,6 @@ Worth building, as a **new package `Benzene.Aws.Lambda.AspNetCore`** containing:
 3. The shared-provider composition helper (§2), which is the part users would otherwise get wrong.
 4. A TestHelpers sibling, matching every other binding, so a mixed function can be tested in memory.
 
-Sequence: spike §5 first. It is the only thing that can invalidate the design, and it is a day's
-work rather than a package's.
+The spike (§5) is done and the design holds, so this can be built directly. Its composition helper
+should encapsulate the four steps in §5's recipe — particularly `AddBenzene()` and `StartAsync()`,
+which are the two a hand-composer gets wrong and which fail far from their cause.
