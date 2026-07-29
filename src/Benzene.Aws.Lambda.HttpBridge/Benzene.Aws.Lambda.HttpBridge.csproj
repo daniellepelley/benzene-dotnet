@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Benzene.Aws.Lambda.HttpBridge</AssemblyName>
+    <RootNamespace>Benzene.Aws.Lambda.HttpBridge</RootNamespace>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<!-- Event POCOs only. This package deliberately references neither ASP.NET Core nor
+		     Amazon.Lambda.AspNetCoreServer: it defines the port, the application supplies the adapter. -->
+		<PackageReference Include="Amazon.Lambda.APIGatewayEvents" Version="2.6.0" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <ProjectReference Include="..\Benzene.Aws.Lambda.Core\Benzene.Aws.Lambda.Core.csproj" />
+	</ItemGroup>
+</Project>

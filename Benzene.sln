@@ -372,6 +372,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Mesh.Fleet.Tempo", 
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Mesh.Fleet.Jaeger", "src\Benzene.Mesh.Fleet.Jaeger\Benzene.Mesh.Fleet.Jaeger.csproj", "{6DFF6406-4CBB-411A-9771-7A0F19238DE8}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Aws.Lambda.HttpBridge", "src\Benzene.Aws.Lambda.HttpBridge\Benzene.Aws.Lambda.HttpBridge.csproj", "{C221FA4F-38C0-45BF-955A-6901EF075EB1}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -2326,6 +2328,18 @@ Global
 		{6DFF6406-4CBB-411A-9771-7A0F19238DE8}.Release|x64.Build.0 = Release|Any CPU
 		{6DFF6406-4CBB-411A-9771-7A0F19238DE8}.Release|x86.ActiveCfg = Release|Any CPU
 		{6DFF6406-4CBB-411A-9771-7A0F19238DE8}.Release|x86.Build.0 = Release|Any CPU
+		{C221FA4F-38C0-45BF-955A-6901EF075EB1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C221FA4F-38C0-45BF-955A-6901EF075EB1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C221FA4F-38C0-45BF-955A-6901EF075EB1}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{C221FA4F-38C0-45BF-955A-6901EF075EB1}.Debug|x64.Build.0 = Debug|Any CPU
+		{C221FA4F-38C0-45BF-955A-6901EF075EB1}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{C221FA4F-38C0-45BF-955A-6901EF075EB1}.Debug|x86.Build.0 = Debug|Any CPU
+		{C221FA4F-38C0-45BF-955A-6901EF075EB1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C221FA4F-38C0-45BF-955A-6901EF075EB1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C221FA4F-38C0-45BF-955A-6901EF075EB1}.Release|x64.ActiveCfg = Release|Any CPU
+		{C221FA4F-38C0-45BF-955A-6901EF075EB1}.Release|x64.Build.0 = Release|Any CPU
+		{C221FA4F-38C0-45BF-955A-6901EF075EB1}.Release|x86.ActiveCfg = Release|Any CPU
+		{C221FA4F-38C0-45BF-955A-6901EF075EB1}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -2492,6 +2506,7 @@ Global
 		{7D776F17-ABD6-411E-95FE-8C8DB1EB7630} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{79AD5157-2A3A-407E-9DBB-3455ABA930C2} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{6DFF6406-4CBB-411A-9771-7A0F19238DE8} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{C221FA4F-38C0-45BF-955A-6901EF075EB1} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {B4E68A9C-300A-490A-B3A5-1F1D5A0A3260}
