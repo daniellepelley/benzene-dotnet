@@ -98,7 +98,10 @@ public class AspNetBridge : APIGatewayHttpApiV2ProxyFunction,
 ```
 
 For a REST API (payload format 1.0) derive from `APIGatewayProxyFunction` and implement
-`IAwsHttpBridge<APIGatewayProxyRequest, APIGatewayProxyResponse>` instead.
+`IAwsHttpBridge<APIGatewayProxyRequest, APIGatewayProxyResponse>` instead. For an Application Load
+Balancer, derive from `ApplicationLoadBalancerFunction` and implement
+`IAwsHttpBridge<ApplicationLoadBalancerRequest, ApplicationLoadBalancerResponse>`, registering it
+with `UseHttpBridgeAlb()` — see [Fronting the function with an ALB](#fronting-the-function-with-an-alb).
 
 ### 3. Compose the function
 
@@ -246,10 +249,28 @@ if you are on Benzene's binding today, this is not an upgrade. See
 (`app.UseBenzene(b => b.UseHttp(...))`), so the same handlers stay reachable over HTTP and over
 queues. See [ASP.NET Core](../asp-net-core.md).
 
-## Limitations
+## Fronting the function with an ALB
 
-ALB (`ApplicationLoadBalancerRequest`) is not wired up yet — the bridge currently covers API Gateway
-payload formats 1.0 and 2.0. It is the same shape to add.
+An Application Load Balancer target works the same way, with `UseHttpBridgeAlb()`:
+
+```csharp
+eventPipeline
+    .UseHttpBridgeAlb()                          // ALB   -> ASP.NET
+    .UseSqs(sqs => sqs.UseMessageHandlers())
+    .UseSns(sns => sns.UseMessageHandlers());
+```
+
+ALB is a **distinct payload pair, not a flavour of API Gateway**. The request carries
+`requestContext.elb`, and the response *requires* `statusDescription` — a field the API Gateway
+response type does not have. An ALB target that answers in the API Gateway shape returns 502.
+
+That matters for one specific case: **if a single function is fronted by both an ALB and a REST API,
+register `UseHttpBridgeAlb()` before `UseHttpBridge()`.** An ALB payload also deserializes into an
+`APIGatewayProxyRequest` with `HttpMethod` populated, and the REST rule — inherited unchanged from
+Benzene's own API Gateway router — accepts exactly that, so whichever is registered first claims it.
+Get it backwards and the REST bridge answers ALB traffic without `statusDescription`, which is a 502
+in production and completely silent in a unit test. Most functions are fronted by one or the other
+and never meet this.
 
 ## See Also
 

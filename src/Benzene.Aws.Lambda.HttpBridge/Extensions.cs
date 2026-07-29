@@ -1,6 +1,7 @@
 using System;
 using System.Threading.Tasks;
 using Amazon.Lambda.APIGatewayEvents;
+using Amazon.Lambda.ApplicationLoadBalancerEvents;
 using Amazon.Lambda.Core;
 using Benzene.Abstractions.Middleware;
 using Benzene.Aws.Lambda.Core.AwsEventStream;
@@ -98,6 +99,54 @@ public static class Extensions
                     .HandleAsync(request, context)));
     }
 
+    /// <summary>
+    /// Bridges Application Load Balancer invocations to an external HTTP application.
+    /// </summary>
+    /// <param name="app">The AWS event-stream pipeline builder.</param>
+    /// <param name="handle">Hands the request to the bridged application.</param>
+    /// <returns>The pipeline builder, for chaining.</returns>
+    /// <remarks>
+    /// <para>
+    /// ALB is a distinct payload pair, not a flavour of API Gateway: the request carries
+    /// <c>requestContext.elb</c>, and the response <b>requires</b> <c>statusDescription</c>, which the
+    /// API Gateway response type has no field for — an ALB target answering with an API Gateway
+    /// response shape returns 502.
+    /// </para>
+    /// <para>
+    /// <b>Register this before <c>UseHttpBridge</c> if one function serves both.</b> An ALB payload
+    /// also deserializes into an <see cref="APIGatewayProxyRequest"/> with <c>HttpMethod</c>
+    /// populated, and the REST rule — inherited unchanged from Benzene's own API Gateway router —
+    /// accepts exactly that, so whichever is registered first claims it. Most functions are fronted
+    /// by one or the other and never meet this.
+    /// </para>
+    /// </remarks>
+    public static IMiddlewarePipelineBuilder<AwsEventStreamContext> UseHttpBridgeAlb(
+        this IMiddlewarePipelineBuilder<AwsEventStreamContext> app,
+        Func<ApplicationLoadBalancerRequest, ILambdaContext, Task<ApplicationLoadBalancerResponse>> handle)
+    {
+        return app.Use(resolver =>
+            new HttpBridgeLambdaHandler<ApplicationLoadBalancerRequest, ApplicationLoadBalancerResponse>(
+                resolver, IsAlb, handle));
+    }
+
+    /// <summary>
+    /// Bridges Application Load Balancer invocations to a registered
+    /// <see cref="IAwsHttpBridge{TRequest, TResponse}"/>, resolved per invocation.
+    /// </summary>
+    /// <param name="app">The AWS event-stream pipeline builder.</param>
+    /// <returns>The pipeline builder, for chaining.</returns>
+    public static IMiddlewarePipelineBuilder<AwsEventStreamContext> UseHttpBridgeAlb(
+        this IMiddlewarePipelineBuilder<AwsEventStreamContext> app)
+    {
+        return app.Use(resolver =>
+            new HttpBridgeLambdaHandler<ApplicationLoadBalancerRequest, ApplicationLoadBalancerResponse>(
+                resolver,
+                IsAlb,
+                (request, context) => resolver
+                    .GetService<IAwsHttpBridge<ApplicationLoadBalancerRequest, ApplicationLoadBalancerResponse>>()
+                    .HandleAsync(request, context)));
+    }
+
     // Same rules as ApiGatewayV2LambdaHandler/ApiGatewayLambdaHandler, so bridging changes who serves
     // an event and never which events are served.
     private static bool IsHttpApiV2(APIGatewayHttpApiV2ProxyRequest request)
@@ -105,4 +154,9 @@ public static class Extensions
 
     private static bool IsRestApi(APIGatewayProxyRequest request)
         => request.HttpMethod != null;
+
+    // Benzene has no ALB binding to inherit a rule from, so this one is derived from the payload:
+    // requestContext.elb is on every ALB invocation and on nothing else.
+    private static bool IsAlb(ApplicationLoadBalancerRequest request)
+        => request.RequestContext?.Elb != null;
 }

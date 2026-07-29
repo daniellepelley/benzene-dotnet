@@ -21,8 +21,9 @@ which already has ASP.NET on hand.
 - `IAwsHttpBridge<TRequest, TResponse>` — the port. One method: `HandleAsync(request, ILambdaContext)`.
 - `HttpBridgeLambdaHandler<TRequest, TResponse>` — the `AwsEventStreamContext` middleware that claims
   HTTP-shaped invocations and delegates. Same chain as `SqsLambdaHandler` and friends.
-- `Extensions.UseHttpBridgeV2(...)` / `UseHttpBridge(...)` — registration, in delegate and
-  DI-resolved forms, for API Gateway payload formats 2.0 and 1.0 respectively.
+- `Extensions.UseHttpBridgeV2(...)` / `UseHttpBridge(...)` / `UseHttpBridgeAlb(...)` — registration,
+  in delegate and DI-resolved forms, for API Gateway payload format 2.0, format 1.0, and Application
+  Load Balancer respectively.
 
 ## When to use this package
 - A Lambda that must serve an existing ASP.NET app (controllers, auth middleware, static files) *and*
@@ -53,6 +54,13 @@ logging pipeline makes a broken handler look like a message that simply did not 
 - **Benzene.Aws.Lambda.Core** — the event-stream pipeline and router base.
 
 ## Important conventions
-- Detection reuses the rules of `ApiGatewayV2LambdaHandler`/`ApiGatewayLambdaHandler`, so bridging
-  changes *who serves* an event, never *which events are served*.
-- ALB (`ApplicationLoadBalancerRequest`) is not wired up yet; it is the same shape to add.
+- API Gateway detection reuses the rules of `ApiGatewayV2LambdaHandler`/`ApiGatewayLambdaHandler`,
+  so bridging changes *who serves* an event, never *which events are served*.
+- **ALB's rule is derived, not inherited** — Benzene has no ALB binding to copy. It keys on
+  `requestContext.elb`, which is on every ALB invocation and nothing else.
+- **Register `UseHttpBridgeAlb()` before `UseHttpBridge()`** if one function serves both. An ALB
+  payload also deserializes into an `APIGatewayProxyRequest` with `HttpMethod` set, and the REST rule
+  (inherited unchanged) accepts exactly that, so registration order decides. Getting it wrong is not
+  subtle in production and is silent in a unit test: the REST bridge answers without
+  `statusDescription`, which a real ALB rejects with a 502. Both orderings are pinned in
+  `HttpBridgeAlbTest`.
