@@ -27,7 +27,7 @@ public static class MessageBuilderExtensions
             MessageId = Guid.NewGuid().ToString()
         };
 
-        message.Attributes["topic"] = source.Topic;
+        message.Attributes[BenzeneWireNames.DefaultTopic] = source.Topic;
         foreach (var header in source.Headers)
         {
             message.Attributes[header.Key] = header.Value;

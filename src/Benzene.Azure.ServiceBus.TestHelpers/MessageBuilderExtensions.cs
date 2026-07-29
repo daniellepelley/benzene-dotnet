@@ -34,7 +34,7 @@ public static class MessageBuilderExtensions
     /// <returns>The Service Bus message.</returns>
     public static ServiceBusReceivedMessage AsAzureServiceBusMessage<T>(this IMessageBuilder<T> source, ISerializer serializer)
     {
-        var properties = new Dictionary<string, object> { { "topic", source.Topic } };
+        var properties = new Dictionary<string, object> { { BenzeneWireNames.DefaultTopic, source.Topic } };
         foreach (var header in source.Headers)
         {
             properties[header.Key] = header.Value;

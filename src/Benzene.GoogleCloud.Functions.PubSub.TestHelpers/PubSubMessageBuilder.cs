@@ -1,5 +1,5 @@
+using Benzene.Abstractions;
 using System.Text.Json;
-using Benzene.GoogleCloud.Functions.PubSub;
 using Google.Events.Protobuf.Cloud.PubSub.V1;
 using Google.Protobuf;
 
@@ -49,7 +49,7 @@ public class PubSubMessageBuilder
     /// <summary>Sets the <c>topic</c> attribute <see cref="PubSubMessageTopicGetter"/> reads for routing.</summary>
     /// <param name="topic">The topic to route this message to.</param>
     /// <returns>This instance, for method chaining.</returns>
-    public PubSubMessageBuilder WithTopic(string topic) => WithAttribute("topic", topic);
+    public PubSubMessageBuilder WithTopic(string topic) => WithAttribute(BenzeneWireNames.DefaultTopic, topic);
 
     /// <summary>Sets the Pub/Sub message ID.</summary>
     /// <param name="messageId">The message ID.</param>
