@@ -50,6 +50,7 @@ Business logic lives in message handlers, not in the Lambda entry point — this
 testable and portable across hosts. See [Message Handlers](message-handlers.md) for the full
 picture; the minimal shape is:
 
+<!-- compile: quickstart -->
 ```csharp
 using Benzene.Abstractions.MessageHandlers;
 using Benzene.Abstractions.Results;
@@ -91,6 +92,7 @@ you'd write for Azure Functions or the .NET generic host. Configure the AWS-spec
 pipeline via `UseAwsLambda(...)`, which hands you an
 `IMiddlewarePipelineBuilder<AwsEventStreamContext>` to wire up event sources on:
 
+<!-- compile: quickstart -->
 ```csharp
 using Benzene.Abstractions.Hosting;
 using Benzene.Aws.Lambda.ApiGateway;
@@ -115,8 +117,8 @@ public class StartUp : BenzeneStartUp
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
         services.UsingBenzene(x => x
-            .AddMessageHandlers(typeof(HelloWorldMessageHandler).Assembly)
-            .AddHttpMessageHandlers());
+            .AddBenzene()
+            .AddMessageHandlers(typeof(HelloWorldMessageHandler).Assembly));
     }
 
     public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration)
@@ -128,6 +130,11 @@ public class StartUp : BenzeneStartUp
 }
 ```
 
+`.AddBenzene()` registers the core pipeline services every host needs — routing, result statuses,
+serialization. It comes first, and leaving it out is the single most common setup mistake: nothing
+complains until the first message arrives, and the failure then names an internal type rather than
+the missing call.
+
 > This is the platform-neutral pattern used by every Benzene host — the
 > [`examples/Aws`](../examples/Aws) project follows exactly this shape. Only the AWS-specific event
 > wiring lives inside `UseAwsLambda(...)`; the same `StartUp` runs unchanged on other Benzene hosts
@@ -138,6 +145,7 @@ public class StartUp : BenzeneStartUp
 Subclass `AwsLambdaHost<TStartUp>` — it builds the pipeline once on cold start and implements
 the Lambda entry point for you, so there's no separate handler method to write:
 
+<!-- compile: quickstart -->
 ```csharp
 using Benzene.Aws.Lambda.Core;
 

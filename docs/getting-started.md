@@ -69,6 +69,7 @@ guide.
 Create `HelloWorldMessageHandler.cs`. This is where your logic lives — and the only file
 you'd carry over verbatim if you later moved to Lambda or Azure Functions:
 
+<!-- compile: quickstart sdk=web -->
 ```csharp
 using Benzene.Abstractions.MessageHandlers;
 using Benzene.Abstractions.Results;
@@ -115,6 +116,7 @@ The return type — `Task<IBenzeneResult<HelloWorldResponse>>` — is the respon
 
 Replace the generated `Program.cs` with this:
 
+<!-- compile: quickstart sdk=web -->
 ```csharp
 using Benzene.AspNet.Core;
 using Benzene.Core.MessageHandlers;
@@ -126,6 +128,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Register Benzene and discover message handlers in this assembly.
 builder.Services.UsingBenzene(x => x
+    .AddBenzene()
     .AddMessageHandlers(typeof(HelloWorldMessageHandler).Assembly));
 
 var app = builder.Build();
@@ -140,9 +143,11 @@ app.Run();
 
 There are only two Benzene calls:
 
-- `UsingBenzene(x => x.AddMessageHandlers(...))` registers Benzene's services and scans the
-  given assembly for handlers. Pass any type from the assembly you want scanned —
-  `typeof(HelloWorldMessageHandler).Assembly` here.
+- `UsingBenzene(x => x.AddBenzene().AddMessageHandlers(...))` registers Benzene's services and
+  scans the given assembly for handlers. Pass any type from the assembly you want scanned —
+  `typeof(HelloWorldMessageHandler).Assembly` here. `AddBenzene()` comes first and supplies the
+  core pipeline services (routing, result statuses, serialization); leaving it out is the most
+  common setup mistake, and nothing complains until the first request arrives.
 - `app.UseBenzene(benzene => benzene.UseHttp(http => http.UseMessageHandlers()))` inserts
   Benzene into the ASP.NET Core request pipeline. `UseHttp` registers the HTTP-specific
   services for you; `UseMessageHandlers()` is the step that routes a matched request to its

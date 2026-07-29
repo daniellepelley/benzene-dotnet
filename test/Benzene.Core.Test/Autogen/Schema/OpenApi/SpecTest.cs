@@ -1,4 +1,5 @@
-﻿using System.Threading.Tasks;
+﻿using System;
+using System.Threading.Tasks;
 using Benzene.Aws.Lambda.Core;
 using Benzene.Aws.Lambda.Core.BenzeneMessage;
 using Benzene.Core.MessageHandlers;
@@ -8,6 +9,7 @@ using Benzene.Http;
 using Benzene.Microsoft.Dependencies;
 using Benzene.Schema.OpenApi;
 using Benzene.Schema.OpenApi.EventService;
+using Benzene.Test.Examples;
 using Benzene.Testing;
 using Benzene.Aws.Lambda.Core.TestHelpers;
 using ByteBard.AsyncAPI.Readers;
@@ -18,6 +20,26 @@ namespace Benzene.Test.Autogen.Schema.OpenApi;
 
 public class SpecTest
 {
+    // The handlers these specs are generated from, named rather than scanned for.
+    //
+    // UseMessageHandlers() with no arguments scans AppDomain.CurrentDomain.GetAssemblies(), so the
+    // schema counts below used to be a count of every [Message] handler anywhere in the test process.
+    // Adding one for an unrelated feature broke six assertions here with "Expected: 6, Actual: 8", and
+    // loading any assembly at all — the docs tests compile and load one — could break them depending
+    // on which test ran first. The assertions were the symptom; the ambient scan was the disease.
+    private static readonly Type[] SpecHandlers =
+    {
+        typeof(ExampleMessageHandler),
+        typeof(ExampleMessageHandlerV2),
+        typeof(ExampleMessageWithGuidHandler),
+        typeof(ExampleNoResponseMessageHandler),
+        typeof(Benzene.Test.Aws.DynamoDb.ExampleOrderInsertedHandler),
+        typeof(Benzene.Test.Diagnostics.FailDiagNotFoundHandler),
+        typeof(Benzene.Test.Diagnostics.FailDiagThrowHandler),
+        typeof(Benzene.Test.Diagnostics.LogLevelOkHandler),
+        typeof(Benzene.Test.ResponseEvents.ResponseEventsCreateOrderHandler)
+    };
+
     private AwsLambdaBenzeneTestHost CreateStandardHost()
     {
         return new InlineAwsLambdaStartUp()
@@ -32,7 +54,7 @@ public class SpecTest
             {
                 app.UseBenzeneMessage(x => x
                     .UseSpec()
-                    .UseMessageHandlers()
+                    .UseMessageHandlers(SpecHandlers)
                 );
             })
             .BuildHost();
@@ -51,7 +73,7 @@ public class SpecTest
             {
                 app.UseBenzeneMessage(x => x
                     .UseSpec()
-                    .UseMessageHandlers()
+                    .UseMessageHandlers(SpecHandlers)
                 );
             })
             .BuildHost();

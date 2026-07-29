@@ -68,6 +68,7 @@ Business logic lives in message handlers, not in the trigger function — this k
 and portable across hosts. See [Message Handlers](message-handlers.md) for the full picture; the
 minimal shape is:
 
+<!-- compile: quickstart -->
 ```csharp
 using Benzene.Abstractions.MessageHandlers;
 using Benzene.Abstractions.Results;
@@ -117,6 +118,7 @@ public abstract class BenzeneStartUp
 
 Configure the HTTP pipeline via `UseHttp`:
 
+<!-- compile: quickstart -->
 ```csharp
 using Benzene.Abstractions.Hosting;
 using Benzene.Azure.Function.AspNet;
@@ -140,6 +142,7 @@ public class StartUp : BenzeneStartUp
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
         services.UsingBenzene(x => x
+            .AddBenzene()
             .AddMessageHandlers(typeof(HelloWorldMessageHandler).Assembly)
             .AddHttpMessageHandlers());
     }
@@ -160,6 +163,7 @@ the same `UseHttp` method used in a plain ASP.NET Core app.
 
 `Program.cs` registers `StartUp` with the isolated worker's `IHostBuilder`:
 
+<!-- compile: quickstart -->
 ```csharp
 using Benzene.Azure.Function.Core;
 using Microsoft.Extensions.Hosting;
@@ -208,6 +212,7 @@ in your csproj, since `buildTransitive` props don't flow across project referenc
 The generator only *adds* a path — a hand-written `[Function]` still works, and both can coexist.
 Reach for this when you need a binding shape the attribute doesn't expose:
 
+<!-- compile: explicit-function -->
 ```csharp
 using Benzene.Azure.Function.AspNet;
 using Benzene.Azure.Function.Core;

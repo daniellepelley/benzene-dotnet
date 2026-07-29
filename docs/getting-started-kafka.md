@@ -62,6 +62,7 @@ name** against the handler's `[Message("...")]` value — there's no colon-separ
 convention here the way there is for HTTP/SQS/SNS; whatever you pass in `[Message(...)]` must be
 exactly the Kafka topic string:
 
+<!-- compile: quickstart sdk=worker -->
 ```csharp
 using Benzene.Abstractions.MessageHandlers;
 using Benzene.Core.MessageHandlers;
@@ -94,6 +95,7 @@ Kafka consumption uses the same platform-neutral `BenzeneStartUp` as AWS/Azure/A
 the worker-specific builder that `UseWorker(...)` hands you — so you wire Kafka up inside
 `app.UseWorker(worker => worker.UseKafka(...))`:
 
+<!-- compile: quickstart sdk=worker -->
 ```csharp
 using Benzene.Abstractions.Hosting;
 using Benzene.Core.MessageHandlers;
@@ -117,6 +119,7 @@ public class StartUp : BenzeneStartUp
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
         services.UsingBenzene(x => x
+            .AddBenzene()
             .AddMessageHandlers(typeof(HelloWorldMessageHandler).Assembly)
             .AddKafka<Ignore, string>());
     }
@@ -158,6 +161,7 @@ public class StartUp : BenzeneStartUp
 `Benzene.HostedService`'s `UseBenzene<StartUp>()` registers the Kafka worker as an `IHostedService`,
 so it starts and stops with the host:
 
+<!-- compile: quickstart sdk=worker -->
 ```csharp
 using Benzene.HostedService;
 

@@ -54,6 +54,7 @@ handler's `[Message("...")]` value. The topic comes from the `topic` header, fal
 routing key when that header isn't present (so a message published by a Benzene client routes by
 header, and a message from a non-Benzene producer routes by its natural routing key):
 
+<!-- compile: quickstart sdk=worker -->
 ```csharp
 using Benzene.Abstractions.MessageHandlers;
 using Benzene.Core.MessageHandlers;
@@ -84,6 +85,7 @@ RabbitMQ consumption uses the same platform-neutral `BenzeneStartUp` as every ot
 worker-specific builder that `UseWorker(...)` hands you — so you wire it up inside
 `app.UseWorker(worker => worker.UseRabbitMq(...))`:
 
+<!-- compile: quickstart sdk=worker -->
 ```csharp
 using Benzene.Abstractions.Hosting;
 using Benzene.Core.MessageHandlers;
@@ -107,6 +109,7 @@ public class StartUp : BenzeneStartUp
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
         services.UsingBenzene(x => x
+            .AddBenzene()
             .AddMessageHandlers(typeof(OrderCreatedMessageHandler).Assembly));
     }
 
@@ -150,6 +153,7 @@ public class StartUp : BenzeneStartUp
 `IHostedService`, so it starts and stops with the host (a graceful stop cancels the consumer, drains
 in-flight handlers, then closes the channel and connection):
 
+<!-- compile: quickstart sdk=worker -->
 ```csharp
 using Benzene.HostedService;
 
