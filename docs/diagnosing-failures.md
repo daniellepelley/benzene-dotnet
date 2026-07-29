@@ -9,6 +9,49 @@ failure shows up across logs, traces, and metrics. For *setting up* observabilit
 [Monitoring & Diagnostics](monitoring.md); for catching exceptions and mapping them to responses see
 [Global Error Handling](cookbooks/global-error-handling.md).
 
+## Wiring problems are caught before any message arrives
+
+Most of what follows is about diagnosing a message that failed. A whole class of problem is not that
+at all: the *wiring* is wrong, and every message will fail the same way for the same reason. Those
+are checked once, at start-up, before the first message.
+
+Every host runs the checks — AWS Lambda, ASP.NET Core, the generic host, Azure Functions — and so
+does `BenzeneTestHost`, which means a wiring mistake is a red unit test rather than something you
+meet on a deployed function.
+
+| Check | Behaviour | What it catches |
+|---|---|---|
+| `duplicate-topic` | fails start-up | Two handlers claiming the same topic and version. Only one can ever run, and which one depends on registration order. |
+| `empty-handler-registry` | logs an error | No handlers discovered at all — almost always `AddMessageHandlers(...)` given the wrong assembly. It logs rather than fails, because a probe- or collector-only service with no handlers is legitimate. |
+| `http-routes` | fails start-up | An `[HttpEndpoint]` handler with no `[Message]`, so discovery skips it and its route never exists. Also compiles the route table at start-up, so the first request no longer pays for it. |
+| `outbound-routing` | fails start-up | A topic a generated client will send to with no outbound route registered. |
+| `unmapped-response-handlers` | logs a warning | Handlers returning a payload on a topic no response-event mapping covers. Advisory only — a handler that legitimately publishes nothing looks identical. |
+
+If a check is wrong for your application, one switch covers all of them:
+
+```csharp
+services.UsingBenzene(x => x
+    .AddBenzene()
+    .AddBenzeneStartUpChecks(BenzeneStartUpCheckMode.Advisory)   // log and continue
+    .AddMessageHandlers(typeof(Program).Assembly));
+```
+
+`BenzeneStartUpCheckMode.Disabled` turns them off entirely. There is deliberately one switch rather
+than one per check: an escape hatch you have to go looking for is not an escape hatch.
+
+Two related checks are worth knowing about but are not part of this phase:
+
+- **Container validation.** `new MicrosoftServiceResolverFactory(services, validateOnBuild: true)`
+  turns on `ValidateOnBuild` and `ValidateScopes`, which catch an unconstructible registration (a
+  missing `.AddBenzene()`, a handler dependency you forgot) at container-build time with a better
+  message than the runtime path. It is opt-in because a partially-composed container is a supported
+  arrangement here — one codebase often builds several deployables that each mount a subset — and a
+  check that rejects a valid one is worse than the bug it catches. Turn it on for a fully-composed
+  application.
+- **Compile-time.** `BENZ001` (duplicate `[Message]` topic) and `BENZ002` (`[HttpEndpoint]` with no
+  `[Message]`) are compiler errors, delivered with `Benzene.Core.MessageHandlers`. They catch the
+  attribute-declared half of the same two mistakes before you run anything at all.
+
 ## Two kinds of failure
 
 Benzene distinguishes between two failure modes, and they surface differently:

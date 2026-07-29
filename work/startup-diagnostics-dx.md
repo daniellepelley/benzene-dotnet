@@ -452,6 +452,57 @@ distinguish the three cases the maintainer named. All three are knowable at that
 
 ---
 
+## Implementation status (2026-07-29)
+
+All eight recommendations were taken. Six landed as written, one landed differently on measured
+grounds, and one was deliberately not implemented because this document itself says it needs a
+decision it cannot make. Two claims in the analysis above turned out to be wrong when tested; both
+are corrected here rather than quietly edited out.
+
+| # | Status | Notes |
+|---|---|---|
+| 1. Fix the docs | **Done** | All five guides gained `.AddBenzene()`; the AWS quickstart lost the `.AddHttpMessageHandlers()` it did not need. A directive-driven check compiles every snippet marked as complete code, and the AWS quickstart is also *loaded and run* against a real API Gateway request — compiling alone would never have caught this bug. Removing `.AddBenzene()` from the markdown reproduces the reported failure verbatim. |
+| 2. `ValidateOnBuild` | **Done, opt-in** | Default-on failed **67 tests across four projects**, and every one was a legitimately partial container. Partial composition is supported here, so a check that rejects one is worse than the bug it catches. Opt-in via `new MicrosoftServiceResolverFactory(services, validateOnBuild: true)`. `ValidateScopes` rides with it, after the `HealthCheckFinder` fix. |
+| 3. `RegistrationCheck` bugs + dead guard | **Done** | Chain-first precedence, untransposed type/package, and `AwsEventStreamContext.Handled` so the "event type has not been recognized" message can finally fire. |
+| 4. Ship the analyzer | **Done** | Referenced by `Benzene.Core.MessageHandlers`, plus `examples/Directory.Build.props` (analyzer assets do not flow along a ProjectReference chain). BENZ002 added. |
+| 5. Warm-up as a check phase | **Done** | `IStartUpCheck`, on by default, run from every host and every `Build*` test-host extension, with one kill switch. Four checks wired: duplicate-topic (throws), empty-handler-registry (logs), http-routes, outbound-routing, plus the advisory unmapped-response-handlers. |
+| 6. Pipeline-introspection seam | **Not done** | The one item that adds surface area, and the one this document scopes at "a week, needs a plan". The dry-resolve and terminal-middleware checks (B1) are blocked on it and are noted as such in the check phase's commit. |
+| 7. Classify infra vs business exceptions | **Not done, by design** | §5.7 flags rather than prescribes: it needs a product decision on SQS batch semantics (fail the whole invocation vs DLQ each record). Implementing it unilaterally would be making that decision by accident. |
+| 8. Test-suite hygiene | **Done** | `SpecTest` names its nine handlers instead of scanning the AppDomain; six TestHelpers builders now reference `BenzeneWireNames.DefaultTopic`, with per-transport round-trip assertions that hold whether they do or not. |
+
+### Two corrections to the analysis above
+
+**§2.2 is wrong that `ValidateScopes = true` fails `examples/Aws` today.** It does not. The captive
+dependency is real — `HealthCheckFinder` was a singleton over scoped `IEnumerable<IHealthCheck>` —
+but the check only fires once a scoped health check is actually *registered*, and that example
+registers none, so the enumerable resolves empty and nothing scoped is captured. Reproducing it took
+a container with a scoped check in it. That repro is now a test.
+
+**§5.4's `PrivateAssets="all"` analyzer dependency would not have delivered the analyzer.**
+`PrivateAssets="all"` applies the rules to `Benzene.Core.MessageHandlers`'s own compilation and stops
+them at the package boundary — the exact situation being fixed. The reference needs
+`PrivateAssets="none"` (NuGet's default packs ProjectReferences as `exclude="Build,Analyzers"`), no
+`ReferenceOutputAssembly="false"` (it suppresses the nuspec dependency outright), and
+`Private="false"` (so a Roslyn component does not land in every publish folder). Each was checked
+against the produced `.nupkg`.
+
+### What delivering the analyzer turned up
+
+Two bugs nobody could have hit while nobody consumed it. The generated
+`AddGeneratedMessageHandlers` opened with `services.GetService<MessageHandlersList>()`, which
+`IBenzeneServiceContainer` has never had — it registers services, it does not resolve them — so the
+generated file did not compile, and every example failed to build on the first try. And generated
+type names were unqualified, so a request type named `Request` resolved to the
+`Benzene.Core.MessageHandlers.Request` *namespace* instead. Both fixed, with a test that compiles
+the generated output.
+
+The generated class is now `internal`: the generator runs in every consuming assembly, so two
+handler-carrying projects in one solution would otherwise produce two public
+`BenzeneGeneratedHandlersExtensions` in the same namespace and an ambiguous call at the composition
+root.
+
+---
+
 ## 5. Recommendation, sequenced
 
 Opinionated, ordered by (time-to-diagnose saved) ÷ effort. Items 1–4 are days, not weeks, and need no
