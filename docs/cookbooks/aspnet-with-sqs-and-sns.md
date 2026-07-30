@@ -226,27 +226,28 @@ queues. See [ASP.NET Core](../asp-net-core.md).
 
 ## Fronting the function with a REST API or an ALB
 
-`AddBenzeneAwsLambdaHosting`'s built-in bridge is for API Gateway **HTTP API (payload format 2.0)**,
-the common case. For a REST API (format 1.0) or an Application Load Balancer, register the matching
-bridge yourself against the `Benzene.Aws.Lambda.HttpBridge` port and use its no-arg registration —
-everything else stays the same:
+The built-in bridges cover all three front-door shapes — API Gateway **HTTP API (payload format
+2.0)**, API Gateway **REST API (payload format 1.0)**, and **Application Load Balancer** — so switching
+is a one-word change in the `events` pipeline, with no adapter class either way:
 
 ```csharp
-// REST API (payload format 1.0)
-builder.Services.AddSingleton<IAwsHttpBridge<APIGatewayProxyRequest, APIGatewayProxyResponse>>(
-    sp => new RestBridge(sp));       // : APIGatewayProxyFunction, IAwsHttpBridge<APIGatewayProxyRequest, APIGatewayProxyResponse>
-
 builder.Services.AddBenzeneAwsLambdaHosting(events => events
-    .UseHttpBridge()                 // format 1.0, resolves the bridge above
+    .UseHttpBridge()                            // REST API (payload format 1.0)
+    .UseSqs(sqs => sqs.UseMessageHandlers()));
+
+// ...or, behind an ALB:
+builder.Services.AddBenzeneAwsLambdaHosting(events => events
+    .UseHttpBridgeAlb()                         // Application Load Balancer
     .UseSqs(sqs => sqs.UseMessageHandlers()));
 ```
 
+`AddBenzeneAwsLambdaHosting` registers all three built-in bridges; each is only constructed if its
+`UseHttpBridge*()` is in the pipeline, so picking a front door is just which line you write.
+
 ALB is a **distinct payload pair, not a flavour of API Gateway**. The request carries
 `requestContext.elb`, and the response *requires* `statusDescription` — a field the API Gateway
-response type does not have, so an ALB target answering in the API Gateway shape returns 502. Derive
-the bridge from `ApplicationLoadBalancerFunction`, implement
-`IAwsHttpBridge<ApplicationLoadBalancerRequest, ApplicationLoadBalancerResponse>`, and register it with
-`UseHttpBridgeAlb()`.
+response type does not have, so an ALB target answering in the API Gateway shape returns 502. The
+built-in `UseHttpBridgeAlb()` uses the ALB response type, so that is handled for you.
 
 **If a single function is fronted by both an ALB and a REST API, register `UseHttpBridgeAlb()` before
 `UseHttpBridge()`.** An ALB payload also deserializes into an `APIGatewayProxyRequest` with
@@ -263,8 +264,9 @@ a unit test. Most functions are fronted by one or the other and never meet this.
   `IAwsHttpBridge<TRequest, TResponse>`, that Benzene hands HTTP-shaped invocations to, plus the
   `UseHttpBridge*` registrations. It references only `Benzene.Aws.Lambda.Core` and the API Gateway
   event POCOs — no ASP.NET — so it never drags the hosting stack into anything. The AspNet package
-  supplies the ASP.NET *adapter* (`BenzeneAspNetBridge`, a two-line `APIGatewayHttpApiV2ProxyFunction`
-  subclass) so you do not have to.
+  supplies the ASP.NET *adapters* (`BenzeneAspNetBridge`, `BenzeneAspNetRestBridge`,
+  `BenzeneAspNetAlbBridge` — two-line `AbstractAspNetCoreFunction` subclasses, one per payload shape)
+  so you do not have to write any.
 - **`Benzene.Aws.Lambda.Hosting`** — the ASP.NET-free bootstrap loop
   (`AwsLambdaBootstrap.RunAsync<StartUp>()`), for a pure-Benzene function with no ASP.NET at all. The
   AspNet package drives the same loop from inside `app.Run()`.

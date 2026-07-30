@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using Amazon.Lambda.APIGatewayEvents;
+using Amazon.Lambda.ApplicationLoadBalancerEvents;
 using Amazon.Lambda.AspNetCoreServer.Internal;
 using Benzene.Aws.Lambda.AspNet;
 using Benzene.Aws.Lambda.HttpBridge;
@@ -42,12 +43,18 @@ public class AddBenzeneAwsLambdaHostingTest
     }
 
     [Fact]
-    public void RegistersTheBuiltInBridge()
+    public void RegistersTheBuiltInBridge_ForEveryFrontDoorShape()
     {
         var services = Compose();
 
+        // HTTP API v2 (the pipeline above opts into this one via UseHttpBridgeV2)...
         Assert.Contains(services, d => d.ServiceType
             == typeof(IAwsHttpBridge<APIGatewayHttpApiV2ProxyRequest, APIGatewayHttpApiV2ProxyResponse>));
+        // ...plus REST v1 and ALB, so UseHttpBridge()/UseHttpBridgeAlb() resolve without an adapter class.
+        Assert.Contains(services, d => d.ServiceType
+            == typeof(IAwsHttpBridge<APIGatewayProxyRequest, APIGatewayProxyResponse>));
+        Assert.Contains(services, d => d.ServiceType
+            == typeof(IAwsHttpBridge<ApplicationLoadBalancerRequest, ApplicationLoadBalancerResponse>));
     }
 
     [Fact]

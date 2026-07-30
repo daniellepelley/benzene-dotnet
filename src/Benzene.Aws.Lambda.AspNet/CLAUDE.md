@@ -26,11 +26,16 @@ from its cause.
 ## How it works
 - **`AddBenzeneAwsLambdaHosting(events => …)`** — configures the AWS event pipeline against the app's
   service collection (so `UseSqs`/`UseSns` register their services before the container is built),
-  registers the built-in bridge, calls `AddBenzene()` for you, and — only inside Lambda — registers the
+  registers the built-in bridges, calls `AddBenzene()` for you, and — only inside Lambda — registers the
   Benzene-driven `IServer`.
-- **`BenzeneAspNetBridge`** — the built-in `IAwsHttpBridge`, so a mixed function needs no adapter class.
-  Derives from `APIGatewayHttpApiV2ProxyFunction` purely to be *called* (its `FunctionHandlerAsync` is
-  `public virtual`, its `ctor(IServiceProvider)` `protected`). Resolved by `UseHttpBridgeV2()`'s no-arg form.
+- **Built-in bridges — one per front-door shape**, so a mixed function needs no adapter class whichever
+  it is fronted by: `BenzeneAspNetBridge` (API Gateway HTTP API v2, resolved by `UseHttpBridgeV2()`),
+  `BenzeneAspNetRestBridge` (API Gateway REST v1, `UseHttpBridge()`), and `BenzeneAspNetAlbBridge`
+  (Application Load Balancer, `UseHttpBridgeAlb()`). Each derives from the matching
+  `AbstractAspNetCoreFunction` subclass purely to be *called* (its `FunctionHandlerAsync` is
+  `public virtual`, its `ctor(IServiceProvider)` `protected`). `AddBenzeneAwsLambdaHosting` registers all
+  three; each is constructed only if its `UseHttpBridge*()` is in the event pipeline, so the front-door
+  choice stays in that pipeline.
 - **`BenzeneLambdaServer`** — a native re-creation of `Amazon.Lambda.AspNetCoreServer.Hosting`'s internal
   `LambdaRuntimeSupportServer`, with the handler swapped from ASP.NET's HTTP-only one to the Benzene entry
   point. Its `StartAsync` lets the base `LambdaServer` capture the ASP.NET `IHttpApplication`, then runs

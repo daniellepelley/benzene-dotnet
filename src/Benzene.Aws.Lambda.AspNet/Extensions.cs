@@ -1,5 +1,6 @@
 using System;
 using Amazon.Lambda.APIGatewayEvents;
+using Amazon.Lambda.ApplicationLoadBalancerEvents;
 using Benzene.Abstractions.Middleware;
 using Benzene.Aws.Lambda.Core;
 using Benzene.Aws.Lambda.Core.AwsEventStream;
@@ -74,10 +75,16 @@ public static class Extensions
         var eventPipeline = new MiddlewarePipelineBuilder<AwsEventStreamContext>(container);
         configureEvents(eventPipeline);
 
-        // The built-in bridge, resolved per invocation by UseHttpBridgeV2()'s no-arg form — so a mixed
-        // function needs no adapter class of its own.
+        // The built-in bridges, one per front-door payload shape — so a mixed function needs no adapter
+        // class of its own whichever it is fronted by. Each is resolved per invocation only if the event
+        // pipeline opts into it: UseHttpBridgeV2() -> v2, UseHttpBridge() -> REST v1, UseHttpBridgeAlb() ->
+        // ALB. Registering all three is free until resolved, so the choice stays in the events pipeline.
         services.TryAddSingleton<IAwsHttpBridge<APIGatewayHttpApiV2ProxyRequest, APIGatewayHttpApiV2ProxyResponse>>(
             sp => new BenzeneAspNetBridge(sp));
+        services.TryAddSingleton<IAwsHttpBridge<APIGatewayProxyRequest, APIGatewayProxyResponse>>(
+            sp => new BenzeneAspNetRestBridge(sp));
+        services.TryAddSingleton<IAwsHttpBridge<ApplicationLoadBalancerRequest, ApplicationLoadBalancerResponse>>(
+            sp => new BenzeneAspNetAlbBridge(sp));
 
         // Take over the IServer only inside Lambda; locally leave Kestrel in place.
         if (IsRunningInLambda())
