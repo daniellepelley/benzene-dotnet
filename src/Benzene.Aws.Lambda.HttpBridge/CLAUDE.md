@@ -26,14 +26,19 @@ which already has ASP.NET on hand.
   Load Balancer respectively.
 
 ## When to use this package
-- A Lambda that must serve an existing ASP.NET app (controllers, auth middleware, static files) *and*
-  consume queues/events through Benzene.
-- Any case where something other than Benzene should own the HTTP front door of a mixed function.
+This is the **port**, referenced directly when you need to own the composition — a bridge to a
+non-ASP.NET HTTP stack, a hand-written HTTP handler, or a custom `IServer`.
 
-Not needed if Benzene serves the HTTP itself — use `Benzene.Aws.Lambda.ApiGateway`. Its routers and
-this bridge claim the same payload shapes, so register **one or the other**, never both.
+**For the common ASP.NET-Core-in-one-Lambda case, reach for `Benzene.Aws.Lambda.AspNet` instead.** It
+references this port and supplies the ASP.NET adapter (`BenzeneAspNetBridge`), the Benzene-driven
+`IServer`, and a one-call `AddBenzeneAwsLambdaHosting(events => …)` that drives the whole thing from
+`app.Run()` — none of the hand-composition below. This package stays the ASP.NET-free port underneath it.
 
-## Composition (the part that is easy to get wrong)
+Not needed at all if Benzene serves the HTTP itself — use `Benzene.Aws.Lambda.ApiGateway`. Its routers
+and this bridge claim the same payload shapes, so register **one or the other**, never both.
+
+## Composition (the part that is easy to get wrong — done for you by `Benzene.Aws.Lambda.AspNet`)
+Hand-composed, a mixed function is:
 ```csharp
 builder.Services.AddSingleton<IServer, LambdaServer>();      // replaces Kestrel
 builder.Services.UsingBenzene(x => x.AddBenzene()…);         // AddBenzene() is required by hand
@@ -48,7 +53,9 @@ Three failure modes worth knowing, all remote from their cause and all recorded 
 `work/aws-lambda-aspnetcore-research.md`: skipping `StartAsync()` leaves the HTTP path with nothing
 to dispatch into; skipping `AddBenzene()` surfaces as `IDefaultStatuses` unresolvable from inside
 `MessageHandlerFactory`; and per-record SQS errors surface only through `ILogger`, so a cleared
-logging pipeline makes a broken handler look like a message that simply did not route.
+logging pipeline makes a broken handler look like a message that simply did not route. The first two
+are exactly what `AddBenzeneAwsLambdaHosting` removes — it captures the pipeline and calls
+`AddBenzene()` for you; the third is inherent to the SQS transport and stated in its docs.
 
 ## Dependencies on other Benzene packages
 - **Benzene.Aws.Lambda.Core** — the event-stream pipeline and router base.

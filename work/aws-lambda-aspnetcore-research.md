@@ -1,6 +1,15 @@
 # Running ASP.NET Core and Benzene in one Lambda — research
 
-**Status:** RESEARCH — **feasibility proven by a working spike** (2026-07-27). Ready to build.
+**Status:** DELIVERED (2026-07-30) — shipped as a layered pair rather than the single package §7
+proposed: `Benzene.Aws.Lambda.HttpBridge` (the ASP.NET-free port), `Benzene.Aws.Lambda.Hosting` (the
+ASP.NET-free custom-runtime bootstrap loop), and `Benzene.Aws.Lambda.AspNet` (the ASP.NET adapter:
+`BenzeneAspNetBridge`, the Benzene-driven `IServer`, and one-call `AddBenzeneAwsLambdaHosting`). The
+end-user recipe collapsed further than §5 — `app.Run()` instead of a hand-built entry point — because
+`AddBenzeneAwsLambdaHosting` re-creates `Amazon.Lambda.AspNetCoreServer.Hosting`'s runtime-support
+server natively with Benzene as the dispatcher. See `docs/cookbooks/aspnet-with-sqs-and-sns.md`.
+Original research below, kept for the rationale.
+
+**Was:** RESEARCH — **feasibility proven by a working spike** (2026-07-27). Ready to build.
 **Date:** 2026-07-27
 **Question:** Can a single Lambda serve HTTP through a real ASP.NET Core application while the same
 function handles SQS/SNS/EventBridge through Benzene's pipelines? If so, does that justify a
