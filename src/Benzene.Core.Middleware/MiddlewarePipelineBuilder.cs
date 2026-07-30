@@ -1,5 +1,6 @@
 ﻿using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Middleware;
+using Benzene.Abstractions.Pipelines;
 
 namespace Benzene.Core.Middleware;
 
@@ -77,7 +78,31 @@ public class MiddlewarePipelineBuilder<TContext> : IMiddlewarePipelineBuilder<TC
     /// <returns>The constructed middleware pipeline ready for execution.</returns>
     public IMiddlewarePipeline<TContext> Build()
     {
-        return new MiddlewarePipeline<TContext>(GetItems());
+        var items = GetItems();
+
+        // Publish the pipeline's shape into the shared container as it is built. Build() is the only
+        // moment both facts are in hand — the middleware factories, and a container to put them in —
+        // because the builder is discarded immediately afterwards and the returned pipeline exposes no
+        // way to enumerate itself. A start-up check can then walk every pipeline in the process,
+        // including each transport's per-message sub-pipeline, without changing how any of them run.
+        //
+        // Registering the factories does not call them: construction happens only when a check (or a
+        // message) asks for it.
+        _registerDependency.Register(x =>
+        {
+            // An outbound client pipeline is built against the null-object container out of instances
+            // the client already holds. It has nothing to register into and nothing to check.
+            if (!x.SupportsRegistration)
+            {
+                return;
+            }
+
+            x.AddSingleton(new PipelineDescriptor(
+            typeof(TContext),
+                items.Select(item => (Func<IServiceResolver, object>)(resolver => item(resolver))).ToArray()));
+        });
+
+        return new MiddlewarePipeline<TContext>(items);
     }
 
     /// <summary>

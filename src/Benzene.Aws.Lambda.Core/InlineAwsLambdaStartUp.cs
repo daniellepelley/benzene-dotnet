@@ -1,6 +1,7 @@
 using System;
 using Benzene.Abstractions.Middleware;
 using Benzene.Aws.Lambda.Core.AwsEventStream;
+using Benzene.Core.MessageHandlers.StartUpChecks;
 using Benzene.Core.Middleware;
 using Benzene.Microsoft.Dependencies;
 using Microsoft.Extensions.DependencyInjection;
@@ -56,6 +57,13 @@ public class InlineAwsLambdaStartUp : IAwsEntryPointBuilder
         _servicesAction(services);
 
         var serviceResolverFactory = new MicrosoftServiceResolverFactory(services);
-        return new AwsLambdaEntryPoint(app.Build(), serviceResolverFactory);
+        var entryPoint = new AwsLambdaEntryPoint(app.Build(), serviceResolverFactory);
+
+        // The same start-up checks AwsLambdaHost runs for a real deployment. Without this the
+        // in-repo test host was the one place a wiring bug could not be caught, which is exactly
+        // backwards — a test is the cheapest place to find one.
+        serviceResolverFactory.RunStartUpChecks();
+
+        return entryPoint;
     }
 }

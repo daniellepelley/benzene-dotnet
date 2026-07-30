@@ -190,6 +190,36 @@ public static class BenzeneServiceContainerExtensions
     /// <typeparam name="TImplementation">The implementation type.</typeparam>
     /// <param name="source">The service container.</param>
     /// <returns>The service container for method chaining.</returns>
+    /// <summary>
+    /// Registers one more implementation of a service that legitimately has several, unless this exact
+    /// implementation is already registered.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="TryAddSingleton{TService, TImplementation}"/> is the wrong tool for a collection
+    /// service. It de-duplicates by <em>service</em> type, so the first implementation registered wins
+    /// and every later one is silently dropped — the second and third <c>IStartUpCheck</c> simply never
+    /// existed, and nothing anywhere said so.
+    /// </para>
+    /// <para>
+    /// This de-duplicates by implementation instead, so repeated registration (two
+    /// <c>AddMessageHandlers</c> calls, say) stays idempotent while genuinely different
+    /// implementations all survive. It is the equivalent of Microsoft DI's <c>TryAddEnumerable</c>.
+    /// </para>
+    /// </remarks>
+    /// <typeparam name="TService">The collection service type.</typeparam>
+    /// <typeparam name="TImplementation">The implementation to add.</typeparam>
+    /// <param name="source">The container to register into.</param>
+    /// <returns>The same container, for chaining.</returns>
+    public static IBenzeneServiceContainer TryAddSingletonImplementation<TService, TImplementation>(this IBenzeneServiceContainer source)
+        where TService : class
+        where TImplementation : class, TService
+    {
+        return source.IsTypeRegistered<TImplementation>()
+            ? source
+            : source.AddSingleton<TImplementation>().AddSingleton<TService>(x => x.GetService<TImplementation>());
+    }
+
     public static IBenzeneServiceContainer TryAddSingleton<TService, TImplementation>(this IBenzeneServiceContainer source)
         where TService : class
         where TImplementation : class, TService

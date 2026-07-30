@@ -29,7 +29,7 @@ public static class Extensions
     {
         // Compiles the route table at start-up, so UnroutedHttpEndpointCheck's error arrives at INIT
         // rather than on the first request that would have used the missing route.
-        services.TryAddSingleton<Benzene.Abstractions.StartUpChecks.IStartUpCheck, Routing.HttpRouteStartUpCheck>();
+        services.TryAddSingletonImplementation<Benzene.Abstractions.StartUpChecks.IStartUpCheck, Routing.HttpRouteStartUpCheck>();
         services.TryAddSingleton<ReflectionHttpEndpointFinder>();
         services.TryAddSingleton<ListHttpEndpointFinder>();
         services.TryAddSingleton<DependencyHttpEndpointFinder>();

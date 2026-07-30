@@ -7,6 +7,20 @@
 public interface IBenzeneServiceContainer
 {
     /// <summary>
+    /// Whether this container accepts registrations at all. True for every real container.
+    /// </summary>
+    /// <remarks>
+    /// The outbound message clients (SNS, Service Bus, RabbitMQ, …) build a small self-contained
+    /// pipeline out of instances they already hold, against a null-object container that throws on
+    /// any registration. Such a pipeline has no container to be checked against and is not part of
+    /// the application's inbound pipeline tree, so infrastructure that publishes registrations while
+    /// building — <c>MiddlewarePipelineBuilder.Build()</c> and its pipeline descriptor — asks first
+    /// rather than registering and catching. Making it explicit keeps a genuine misuse of the null
+    /// object throwing, which is what it is for.
+    /// </remarks>
+    bool SupportsRegistration => true;
+
+    /// <summary>
     /// Checks whether a service type is already registered in the container.
     /// </summary>
     /// <typeparam name="TService">The service type to check.</typeparam>

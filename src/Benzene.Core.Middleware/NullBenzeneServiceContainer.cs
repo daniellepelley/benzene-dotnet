@@ -13,6 +13,9 @@ namespace Benzene.Core.Middleware;
 /// </remarks>
 public class NullBenzeneServiceContainer : IBenzeneServiceContainer
 {
+    /// <summary>Always false — every registration on this container throws.</summary>
+    public bool SupportsRegistration => false;
+
     private const string NotSupportedMessage =
         "NullBenzeneServiceContainer is a null-object placeholder and does not support service registration.";
 

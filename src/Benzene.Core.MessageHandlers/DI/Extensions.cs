@@ -199,8 +199,11 @@ public static class Extensions
         // Registered here rather than in AddBenzene() so a check arrives with the finder it inspects:
         // a container that never registered handler discovery has nothing for these to look at.
         // TryAdd so overlapping AddMessageHandlers calls don't run each check several times.
-        services.TryAddSingleton<IStartUpCheck, DuplicateTopicStartUpCheck>();
-        services.TryAddSingleton<IStartUpCheck, EmptyHandlerRegistryStartUpCheck>();
+        services.TryAddSingletonImplementation<IStartUpCheck, DuplicateTopicStartUpCheck>();
+        services.TryAddSingletonImplementation<IStartUpCheck, EmptyHandlerRegistryStartUpCheck>();
+        // Constructs every middleware in every pipeline at start-up — see
+        // PipelineResolutionStartUpCheck for why that is not something the container can do for us.
+        services.TryAddSingletonImplementation<IStartUpCheck, PipelineResolutionStartUpCheck>();
     }
 
     /// <summary>

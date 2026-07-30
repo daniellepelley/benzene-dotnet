@@ -60,7 +60,7 @@ public static class ResponseEventsExtensions
     private static void AddResponseEventCatalog(IBenzeneServiceContainer services)
     {
         // Advisory only — see UnmappedResponseHandlerStartUpCheck for why this one never throws.
-        services.TryAddSingleton<Benzene.Abstractions.StartUpChecks.IStartUpCheck, UnmappedResponseHandlerStartUpCheck>();
+        services.TryAddSingletonImplementation<Benzene.Abstractions.StartUpChecks.IStartUpCheck, UnmappedResponseHandlerStartUpCheck>();
         services.TryAddSingleton<ResponseEventCatalog>();
         services.TryAddSingleton<IResponseEventCatalog>(resolver => resolver.GetService<ResponseEventCatalog>());
         services.TryAddSingleton<IMessageDefinitionFinder<IMessageDefinition>>(resolver => resolver.GetService<ResponseEventCatalog>());
