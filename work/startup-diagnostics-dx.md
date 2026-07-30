@@ -466,9 +466,22 @@ are corrected here rather than quietly edited out.
 | 3. `RegistrationCheck` bugs + dead guard | **Done** | Chain-first precedence, untransposed type/package, and `AwsEventStreamContext.Handled` so the "event type has not been recognized" message can finally fire. |
 | 4. Ship the analyzer | **Done** | Referenced by `Benzene.Core.MessageHandlers`, plus `examples/Directory.Build.props` (analyzer assets do not flow along a ProjectReference chain). BENZ002 added. |
 | 5. Warm-up as a check phase | **Done** | `IStartUpCheck`, on by default, run from every host and every `Build*` test-host extension, with one kill switch. Four checks wired: duplicate-topic (throws), empty-handler-registry (logs), http-routes, outbound-routing, plus the advisory unmapped-response-handlers. |
-| 6. Pipeline-introspection seam | **Not done** | The one item that adds surface area, and the one this document scopes at "a week, needs a plan". The dry-resolve and terminal-middleware checks (B1) are blocked on it and are noted as such in the check phase's commit. |
-| 7. Classify infra vs business exceptions | **Not done, by design** | §5.7 flags rather than prescribes: it needs a product decision on SQS batch semantics (fail the whole invocation vs DLQ each record). Implementing it unilaterally would be making that decision by accident. |
+| 6. Pipeline-introspection seam | **Done (dry-resolve)** | `PipelineDescriptor` published at `Build()`; `pipeline-resolution` check constructs every middleware in every pipeline at start-up. ~16ms on `examples/Aws`, measured. **Correction:** this document says `BenzeneApplicationBuilder.Create<TContext>` "fragments this" by minting a fresh `RegisterDependency` — it does not. That type is a stateless adapter over the container, so a fresh one over the same container fragments nothing, and sub-pipelines already share the outer builder's registration path. No change to `BenzeneApplicationBuilder` was needed. The terminal-middleware check (B1) is still outstanding — it needs an `ITerminalMiddleware` marker and a rule that does not false-positive on the outer event-stream pipeline, whose terminals are transport routers rather than `MessageRouter<>`. |
+| 7. Classify infra vs business exceptions | **Done** | Decision taken: an infrastructure failure fails the whole SQS invocation rather than dead-lettering one record at a time. **Two things this document got out of date on:** the "fail the whole invocation" mechanism already existed (`SqsBatchFailureMode.FailWholeBatch` + `SqsBatchProcessingException`) as a static config choice, so the work was deciding *when* to trigger it, not building it; and a classification vocabulary already existed in `MeshIssueClassification` (`config-wiring`/`dependency`/`exception`/`validation`) for mesh issue feeds, though it never reached the transport's retry decision. |
 | 8. Test-suite hygiene | **Done** | `SpecTest` names its nine handlers instead of scanning the AppDomain; six TestHelpers builders now reference `BenzeneWireNames.DefaultTopic`, with per-transport round-trip assertions that hold whether they do or not. |
+
+### A third correction, found while implementing 6 and 7
+
+**The start-up check phase shipped mostly inert.** `TryAddSingleton<IStartUpCheck, X>` de-duplicates
+by *service* type, so of the five checks registered across five packages, only the first was ever in
+the container. Two of the three core checks silently did not exist and nothing said so. Fixed with
+`TryAddSingletonImplementation`, which de-duplicates by implementation the way Microsoft DI's
+`TryAddEnumerable` does; a test now asserts all three core checks are present.
+
+**`InlineAwsLambdaStartUp.BuildHost()` never ran the checks.** That is the in-repo test host behind
+hundreds of tests, so the one place a wiring bug was guaranteed *not* to be caught was the cheapest
+place to catch it. It runs them now — which also means the suite is real evidence that the checks
+pass, where before it was evidence of nothing.
 
 ### Two corrections to the analysis above
 

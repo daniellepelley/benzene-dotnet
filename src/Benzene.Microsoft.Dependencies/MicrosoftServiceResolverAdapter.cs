@@ -58,7 +58,7 @@ public sealed class MicrosoftServiceResolverAdapter : IServiceResolver
             // failure, which is preserved as the InnerException either way.
             var hint = RegistrationErrorHandler.Describe(typeof(T), ex);
             Debug.WriteLine($"Unable to resolve type {typeof(T).FullName}{hint}, Exception: {ex}");
-            throw new BenzeneException($"Unable to resolve type {typeof(T).FullName}{hint}", ex);
+            throw new BenzeneResolutionException($"Unable to resolve type {typeof(T).FullName}{hint}", ex);
         }
     }
 

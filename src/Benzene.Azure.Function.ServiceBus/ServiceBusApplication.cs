@@ -8,6 +8,7 @@ using Benzene.Abstractions.Middleware;
 using Benzene.Core.MessageHandlers.Info;
 using Benzene.Core.Middleware;
 using Microsoft.Azure.Functions.Worker;
+using Benzene.Core;
 using Microsoft.Extensions.Logging;
 
 namespace Benzene.Azure.Function.ServiceBus;
@@ -127,7 +128,9 @@ public class ServiceBusBatchApplication : IMiddlewareApplication<ServiceBusRecei
                     using (var loggingScope = serviceResolverFactory.CreateScope())
                     {
                         loggingScope.GetService<ILogger<ServiceBusApplication>>()
-                            .LogError(ex, "Processing Service Bus message {messageId} failed", context.Message.MessageId);
+                            .LogError(ex, BenzeneFailure.IsInfrastructure(ex)
+                    ? BenzeneFailure.InfrastructureLogPrefix + " Processing Service Bus message {messageId} failed — this service is mis-wired; the message is not at fault"
+                    : "Processing Service Bus message {messageId} failed", context.Message.MessageId);
                     }
                 }
                 catch (Exception) when (explicitAck && !acked)

@@ -5,6 +5,7 @@ using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Abstractions.Middleware;
 using Benzene.Core.MessageHandlers.Info;
 using Benzene.Core.Middleware;
+using Benzene.Core;
 using Microsoft.Extensions.Logging;
 
 namespace Benzene.Aws.Lambda.EventBridge;
@@ -64,7 +65,9 @@ public class EventBridgeApplication : IMiddlewareApplication<EventBridgeEvent>
         {
             using var loggingScope = serviceResolverFactory.CreateScope();
             loggingScope.GetService<ILogger<EventBridgeApplication>>()
-                .LogError(ex, "Processing EventBridge event {id} failed", context.Event.Id);
+                .LogError(ex, BenzeneFailure.IsInfrastructure(ex)
+                    ? BenzeneFailure.InfrastructureLogPrefix + " Processing EventBridge event {id} failed — this service is mis-wired; the message is not at fault"
+                    : "Processing EventBridge event {id} failed", context.Event.Id);
         }
     }
 }

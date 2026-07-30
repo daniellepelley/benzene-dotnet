@@ -6,6 +6,7 @@ using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Abstractions.Middleware;
 using Benzene.Core.MessageHandlers.Info;
 using Benzene.Core.Middleware;
+using Benzene.Core;
 using Microsoft.Extensions.Logging;
 
 namespace Benzene.Azure.Function.EventGrid;
@@ -71,7 +72,9 @@ public class EventGridBatchApplication : IMiddlewareApplication<EventGridTrigger
                     using (var loggingScope = serviceResolverFactory.CreateScope())
                     {
                         loggingScope.GetService<ILogger<EventGridApplication>>()
-                            .LogError(ex, "Processing Event Grid event {id} failed", context.Event.Id);
+                            .LogError(ex, BenzeneFailure.IsInfrastructure(ex)
+                    ? BenzeneFailure.InfrastructureLogPrefix + " Processing Event Grid event {id} failed — this service is mis-wired; the message is not at fault"
+                    : "Processing Event Grid event {id} failed", context.Event.Id);
                     }
                 }
             }, _options.MaxDegreeOfParallelism);

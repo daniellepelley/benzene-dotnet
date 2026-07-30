@@ -16,6 +16,7 @@ using Benzene.Microsoft.Dependencies;
 using Benzene.Test.Examples;
 using Benzene.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using Moq;
 using Xunit;
 
 namespace Benzene.Test.Aws.HttpBridge;
@@ -31,6 +32,10 @@ public class HttpBridgeTest
     {
         var services = new ServiceCollection();
         services.AddLogging();
+        // ExampleMessageHandler takes IExampleService. Registering it makes the SQS path genuinely
+        // work, so these tests assert what they are about — which binding claims an event — rather
+        // than a handler failure that used to be quietly reported as a batch item failure.
+        services.AddScoped(_ => Mock.Of<IExampleService>());
         services.UsingBenzene(x => x
             .AddBenzene()
             .AddMessageHandlers(typeof(Defaults).Assembly)

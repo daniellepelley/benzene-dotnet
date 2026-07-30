@@ -6,6 +6,7 @@ using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Abstractions.Middleware;
 using Benzene.Core.MessageHandlers.Info;
 using Benzene.Results;
+using Benzene.Core;
 using Microsoft.Extensions.Logging;
 
 namespace Benzene.Aws.Lambda.DynamoDb;
@@ -59,7 +60,9 @@ public class DynamoDbApplication : IMiddlewareApplication<DynamoDbEvent, DynamoD
                 using (var loggingScope = serviceResolverFactory.CreateScope())
                 {
                     loggingScope.GetService<ILogger<DynamoDbApplication>>()
-                        .LogError(ex, "Processing DynamoDB stream record {sequenceNumber} failed", record.Dynamodb?.SequenceNumber);
+                        .LogError(ex, BenzeneFailure.IsInfrastructure(ex)
+                    ? BenzeneFailure.InfrastructureLogPrefix + " Processing DynamoDB stream record {sequenceNumber} failed — this service is mis-wired; the message is not at fault"
+                    : "Processing DynamoDB stream record {sequenceNumber} failed", record.Dynamodb?.SequenceNumber);
                 }
 
                 context.MessageResult = BenzeneResult.UnexpectedError();

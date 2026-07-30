@@ -26,6 +26,7 @@ meet on a deployed function.
 | `http-routes` | fails start-up | An `[HttpEndpoint]` handler with no `[Message]`, so discovery skips it and its route never exists. Also compiles the route table at start-up, so the first request no longer pays for it. |
 | `outbound-routing` | fails start-up | A topic a generated client will send to with no outbound route registered. |
 | `unmapped-response-handlers` | logs a warning | Handlers returning a payload on a topic no response-event mapping covers. Advisory only — a handler that legitimately publishes nothing looks identical. |
+| `pipeline-resolution` | fails start-up | Middleware anywhere in any pipeline that cannot be constructed. Middleware is resolved lazily, per link, per message, so without this a pipeline can be completely unable to run and look healthy until traffic arrives. Costs about 16ms on a service the size of `examples/Aws`, and the work is not wasted — it constructs what the first message would have constructed anyway. |
 
 If a check is wrong for your application, one switch covers all of them:
 
@@ -51,6 +52,35 @@ Two related checks are worth knowing about but are not part of this phase:
 - **Compile-time.** `BENZ001` (duplicate `[Message]` topic) and `BENZ002` (`[HttpEndpoint]` with no
   `[Message]`) are compiler errors, delivered with `Benzene.Core.MessageHandlers`. They catch the
   attribute-declared half of the same two mistakes before you run anything at all.
+
+## Infrastructure failures are not the message's fault
+
+There is a third kind of failure that is neither of the two below, and it needs the opposite
+handling: the service is **mis-wired**. A registration is missing, so every message fails the same
+way, and no amount of retrying or redelivery will change that.
+
+Reported per message, that is a slow disaster. Each record is dead-lettered on its own, the next one
+does exactly the same, and the function keeps returning success — so the queue drains into the DLQ
+while the service reports itself healthy.
+
+Benzene now tells the two apart. A resolution failure throws `BenzeneResolutionException`, and
+`BenzeneFailure.IsInfrastructure(exception)` recognises it anywhere in the exception chain:
+
+- **SQS fails the whole invocation.** The exception escapes per-record handling entirely, so SQS
+  retries the batch instead of dead-lettering it a message at a time, and the function fails loudly
+  and repeatedly until the wiring is fixed. This overrides `SqsBatchFailureMode` — but only for
+  infrastructure failures. A handler that throws on one payload keeps partial-batch reporting exactly
+  as before.
+- **Every transport logs it distinctly**, prefixed `[benzene:infrastructure]`, so a wiring fault is
+  greppable and separable from the per-message noise around it.
+
+The classification is deliberately narrow: only a proven resolution failure counts, because the cost
+of a false positive is failing a whole batch over one bad message. Anything unrecognised is treated
+as a business failure — the existing, safe behaviour.
+
+Most wiring faults never get this far, because the `pipeline-resolution` start-up check above
+constructs every middleware before any message arrives. What reaches here is the residual: a
+**handler's** own dependency, which is only constructed when a message is dispatched to its topic.
 
 ## Two kinds of failure
 

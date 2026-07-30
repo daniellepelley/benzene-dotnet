@@ -8,6 +8,7 @@ using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Abstractions.Middleware;
 using Benzene.Core.MessageHandlers.Info;
 using Benzene.Core.Middleware;
+using Benzene.Core;
 using Microsoft.Extensions.Logging;
 
 namespace Benzene.Aws.Lambda.Sqs;
@@ -81,8 +82,31 @@ public class SqsApplication : IMiddlewareApplication<SQSEvent, SQSBatchResponse>
                 {
                     using (var loggingScope = serviceResolverFactory.CreateScope())
                     {
-                        loggingScope.GetService<ILogger<SqsApplication>>()
-                            .LogError(ex, "Processing SQS message {messageId} failed", context.SqsMessage.MessageId);
+                        var logger = loggingScope.GetService<ILogger<SqsApplication>>();
+
+                        if (BenzeneFailure.IsInfrastructure(ex))
+                        {
+                            logger.LogError(ex,
+                                "{prefix} Processing SQS message {messageId} failed because this service is " +
+                                "mis-wired, not because of the message. Failing the whole invocation: every " +
+                                "message in this queue will fail the same way, and dead-lettering them one at a " +
+                                "time would drain the queue while the service reported itself healthy.",
+                                BenzeneFailure.InfrastructureLogPrefix, context.SqsMessage.MessageId);
+                        }
+                        else
+                        {
+                            logger.LogError(ex, "Processing SQS message {messageId} failed", context.SqsMessage.MessageId);
+                        }
+                    }
+
+                    // An infrastructure failure is not this message's fault and is not retryable per
+                    // message, so it escapes the per-record handling entirely and fails the invocation.
+                    // SQS then retries the batch rather than dead-lettering it record by record, and the
+                    // function keeps failing loudly until the wiring is fixed - which is the correct
+                    // blast radius for a fault that affects every message equally.
+                    if (BenzeneFailure.IsInfrastructure(ex))
+                    {
+                        throw;
                     }
 
                     return new SQSBatchResponse.BatchItemFailure { ItemIdentifier = context.SqsMessage.MessageId };

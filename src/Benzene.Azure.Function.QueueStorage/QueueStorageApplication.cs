@@ -6,6 +6,7 @@ using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Abstractions.Middleware;
 using Benzene.Core.MessageHandlers.Info;
 using Benzene.Core.Middleware;
+using Benzene.Core;
 using Microsoft.Extensions.Logging;
 
 namespace Benzene.Azure.Function.QueueStorage;
@@ -73,7 +74,9 @@ public class QueueStorageBatchApplication : IMiddlewareApplication<QueueStorageM
                     using (var loggingScope = serviceResolverFactory.CreateScope())
                     {
                         loggingScope.GetService<ILogger<QueueStorageApplication>>()
-                            .LogError(ex, "Processing Queue Storage message {messageId} failed", context.Message.MessageId);
+                            .LogError(ex, BenzeneFailure.IsInfrastructure(ex)
+                    ? BenzeneFailure.InfrastructureLogPrefix + " Processing Queue Storage message {messageId} failed — this service is mis-wired; the message is not at fault"
+                    : "Processing Queue Storage message {messageId} failed", context.Message.MessageId);
                     }
                 }
             }, _options.MaxDegreeOfParallelism);

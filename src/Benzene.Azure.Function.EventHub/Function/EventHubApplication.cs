@@ -8,6 +8,7 @@ using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Abstractions.Middleware;
 using Benzene.Core.MessageHandlers.Info;
 using Benzene.Core.Middleware;
+using Benzene.Core;
 using Microsoft.Extensions.Logging;
 
 namespace Benzene.Azure.Function.EventHub.Function;
@@ -93,7 +94,9 @@ public class EventHubBatchApplication : IMiddlewareApplication<EventData[]>
                     using (var loggingScope = serviceResolverFactory.CreateScope())
                     {
                         loggingScope.GetService<ILogger<EventHubApplication>>()
-                            .LogError(ex, "Processing Event Hub event {sequenceNumber} failed", context.EventData.SequenceNumber);
+                            .LogError(ex, BenzeneFailure.IsInfrastructure(ex)
+                    ? BenzeneFailure.InfrastructureLogPrefix + " Processing Event Hub event {sequenceNumber} failed — this service is mis-wired; the message is not at fault"
+                    : "Processing Event Hub event {sequenceNumber} failed", context.EventData.SequenceNumber);
                     }
                 }
             }, _options.MaxDegreeOfParallelism);

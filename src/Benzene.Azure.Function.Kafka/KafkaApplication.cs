@@ -7,6 +7,7 @@ using Benzene.Abstractions.Middleware;
 using Benzene.Core.MessageHandlers.Info;
 using Benzene.Core.Middleware;
 using Microsoft.Azure.Functions.Worker;
+using Benzene.Core;
 using Microsoft.Extensions.Logging;
 
 namespace Benzene.Azure.Function.Kafka;
@@ -75,7 +76,9 @@ public class KafkaBatchApplication : IMiddlewareApplication<KafkaRecord[]>
                     using (var loggingScope = serviceResolverFactory.CreateScope())
                     {
                         loggingScope.GetService<ILogger<KafkaApplication>>()
-                            .LogError(ex, "Processing Kafka record on topic {topic} failed", context.KafkaEvent.Topic);
+                            .LogError(ex, BenzeneFailure.IsInfrastructure(ex)
+                    ? BenzeneFailure.InfrastructureLogPrefix + " Processing Kafka record on topic {topic} failed — this service is mis-wired; the message is not at fault"
+                    : "Processing Kafka record on topic {topic} failed", context.KafkaEvent.Topic);
                     }
                 }
             }, _options.MaxDegreeOfParallelism);

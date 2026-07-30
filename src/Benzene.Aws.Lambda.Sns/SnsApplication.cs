@@ -7,6 +7,7 @@ using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Abstractions.Middleware;
 using Benzene.Core.MessageHandlers.Info;
 using Benzene.Core.Middleware;
+using Benzene.Core;
 using Microsoft.Extensions.Logging;
 
 namespace Benzene.Aws.Lambda.Sns;
@@ -72,7 +73,9 @@ public class SnsApplication : IMiddlewareApplication<SNSEvent>
                     using (var loggingScope = serviceResolverFactory.CreateScope())
                     {
                         loggingScope.GetService<ILogger<SnsApplication>>()
-                            .LogError(ex, "Processing SNS message {messageId} failed", context.SnsRecord.Sns.MessageId);
+                            .LogError(ex, BenzeneFailure.IsInfrastructure(ex)
+                    ? BenzeneFailure.InfrastructureLogPrefix + " Processing SNS message {messageId} failed — this service is mis-wired; the message is not at fault"
+                    : "Processing SNS message {messageId} failed", context.SnsRecord.Sns.MessageId);
                     }
                 }
             }, _options.MaxDegreeOfParallelism);

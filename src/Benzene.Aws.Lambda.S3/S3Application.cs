@@ -7,6 +7,7 @@ using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Abstractions.Middleware;
 using Benzene.Core.MessageHandlers.Info;
 using Benzene.Core.Middleware;
+using Benzene.Core;
 using Microsoft.Extensions.Logging;
 
 namespace Benzene.Aws.Lambda.S3;
@@ -68,7 +69,9 @@ public class S3Application : IMiddlewareApplication<S3Event>
                 {
                     using var loggingScope = serviceResolverFactory.CreateScope();
                     loggingScope.GetService<ILogger<S3Application>>()
-                        .LogError(ex, "Processing S3 object {objectKey} failed", objectKey);
+                        .LogError(ex, BenzeneFailure.IsInfrastructure(ex)
+                    ? BenzeneFailure.InfrastructureLogPrefix + " Processing S3 object {objectKey} failed — this service is mis-wired; the message is not at fault"
+                    : "Processing S3 object {objectKey} failed", objectKey);
                 }
             }, _options.MaxDegreeOfParallelism);
     }

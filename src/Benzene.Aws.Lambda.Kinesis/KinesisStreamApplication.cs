@@ -6,6 +6,7 @@ using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Abstractions.Middleware;
 using Benzene.Core.MessageHandlers.Info;
 using Benzene.Core.Middleware;
+using Benzene.Core;
 using Microsoft.Extensions.Logging;
 
 namespace Benzene.Aws.Lambda.Kinesis;
@@ -101,7 +102,9 @@ public class KinesisStreamApplication : StreamMiddlewareApplication<KinesisEvent
             catch (Exception ex)
             {
                 serviceResolver.GetService<ILogger<KinesisStreamApplication>>()
-                    .LogError(ex, "Kinesis stream processing failed; resuming from the last checkpoint");
+                    .LogError(ex, BenzeneFailure.IsInfrastructure(ex)
+                    ? BenzeneFailure.InfrastructureLogPrefix + " Kinesis stream processing failed; resuming from the last checkpoint — this service is mis-wired; the message is not at fault"
+                    : "Kinesis stream processing failed; resuming from the last checkpoint");
             }
         }
     }

@@ -3,6 +3,7 @@ using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Abstractions.Middleware;
 using Benzene.Core.MessageHandlers.Info;
 using Google.Events.Protobuf.Cloud.PubSub.V1;
+using Benzene.Core;
 using Microsoft.Extensions.Logging;
 
 namespace Benzene.GoogleCloud.Functions.PubSub;
@@ -61,7 +62,9 @@ public class PubSubMiddlewareApplication : IMiddlewareApplication<MessagePublish
             using (var loggingScope = serviceResolverFactory.CreateScope())
             {
                 loggingScope.GetService<ILogger<PubSubMiddlewareApplication>>()
-                    .LogError(ex, "Processing Pub/Sub message {messageId} failed", context.Message.MessageId);
+                    .LogError(ex, BenzeneFailure.IsInfrastructure(ex)
+                    ? BenzeneFailure.InfrastructureLogPrefix + " Processing Pub/Sub message {messageId} failed — this service is mis-wired; the message is not at fault"
+                    : "Processing Pub/Sub message {messageId} failed", context.Message.MessageId);
             }
         }
     }

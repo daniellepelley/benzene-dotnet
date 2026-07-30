@@ -8,6 +8,7 @@ using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Abstractions.Middleware;
 using Benzene.Core.MessageHandlers.Info;
 using Benzene.Core.Middleware;
+using Benzene.Core;
 using Microsoft.Extensions.Logging;
 
 namespace Benzene.Aws.Lambda.Kafka;
@@ -98,7 +99,9 @@ public class KafkaApplication : IMiddlewareApplication<KafkaEvent, KafkaBatchRes
             {
                 using var loggingScope = serviceResolverFactory.CreateScope();
                 loggingScope.GetService<ILogger<KafkaApplication>>()
-                    .LogError(ex, "Processing Kafka record {partition}@{offset} failed", partitionKey, record.Offset);
+                    .LogError(ex, BenzeneFailure.IsInfrastructure(ex)
+                    ? BenzeneFailure.InfrastructureLogPrefix + " Processing Kafka record {partition}@{offset} failed — this service is mis-wired; the message is not at fault"
+                    : "Processing Kafka record {partition}@{offset} failed", partitionKey, record.Offset);
 
                 return new KafkaBatchResponse.BatchItemFailure(partitionKey, record.Offset);
             }

@@ -2,6 +2,7 @@
 using System.Threading.Tasks;
 using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Middleware;
+using Benzene.Core;
 using Benzene.Core.Exceptions;
 using Benzene.Core.MessageHandlers.DI;
 using Benzene.Microsoft.Dependencies;
@@ -130,7 +131,11 @@ public class MicrosoftDependencyInjectionTest
         using var factory = new MicrosoftServiceResolverFactory(services);
         using var serviceResolver = factory.CreateScope();
 
-        var ex = Assert.Throws<BenzeneException>(() => serviceResolver.GetService<IMiddlewareFactory>());
+        // BenzeneResolutionException, not the base BenzeneException: the specific type is what lets a
+        // transport tell a wiring failure from a business one without matching on message text.
+        var ex = Assert.Throws<BenzeneResolutionException>(() => serviceResolver.GetService<IMiddlewareFactory>());
+
+        Assert.True(BenzeneFailure.IsInfrastructure(ex));
 
         // The container's real error is preserved (never masked by the diagnostic), and the message
         // carries the actionable registration hint derived from the requested type itself.
