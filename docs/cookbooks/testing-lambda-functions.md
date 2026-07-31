@@ -35,15 +35,15 @@ on top of it, plus a troubleshooting section for setup mistakes that don't show 
 
 ```bash
 dotnet add package Benzene.Testing --prerelease
-dotnet add package Benzene.Tools --prerelease
+dotnet add package Benzene.Aws.Lambda.Core.TestHelpers --prerelease
 dotnet add package Benzene.Aws.Lambda.ApiGateway.TestHelpers --prerelease
 dotnet add package Benzene.Aws.Lambda.Sqs.TestHelpers --prerelease
 dotnet add package xunit
 dotnet add package Moq
 ```
 
-`Benzene.Testing` provides `BenzeneTestHost`/`HttpBuilder`/`MessageBuilder`. `Benzene.Tools`
-provides `AwsLambdaBenzeneTestHost`, the wrapper that turns the built `IAwsLambdaEntryPoint` into
+`Benzene.Testing` provides `BenzeneTestHost`/`HttpBuilder`/`MessageBuilder`. `Benzene.Aws.Lambda.Core.TestHelpers`
+provides `AwsLambdaBenzeneTestHost` (and the `BuildAwsLambdaHost()` extension), the wrapper that turns the built `IAwsLambdaEntryPoint` into
 something you can send events into and get typed responses back from. The two `TestHelpers`
 packages add the `SendApiGatewayAsync`/`SendSqsAsync` extensions and the
 `AsApiGatewayRequest`/`AsSqs` builder conversions for their respective event sources.
@@ -190,7 +190,7 @@ using Benzene.Aws.Lambda.ApiGateway.TestHelpers;
 using Benzene.Aws.Lambda.Sqs.TestHelpers;
 using Benzene.Results;
 using Benzene.Testing;
-using Benzene.Tools.Aws;
+using Benzene.Aws.Lambda.Core.TestHelpers;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;

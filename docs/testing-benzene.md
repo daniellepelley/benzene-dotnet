@@ -46,7 +46,7 @@ registration the StartUp made — the standard way to swap in fakes and mocks.
 
 `BuildAwsLambdaHost()` builds an `IAwsLambdaEntryPoint` — the same construction
 [`AwsLambdaHost<TStartUp>`](getting-started-aws.md) performs for a real deployment. Wrap it in
-`AwsLambdaBenzeneTestHost` (from `Benzene.Tools`) to send events into it and get typed responses
+`AwsLambdaBenzeneTestHost` (from `Benzene.Aws.Lambda.Core.TestHelpers`) to send events into it and get typed responses
 back:
 
 ```csharp
