@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<AssemblyName>Benzene.Aws.Lambda.Hosting</AssemblyName>
+		<RootNamespace>Benzene.Aws.Lambda.Hosting</RootNamespace>
+		<Nullable>enable</Nullable>
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<!-- The custom-runtime bootstrap loop. This package deliberately references neither ASP.NET Core
+		     nor Amazon.Lambda.AspNetCoreServer: it runs a pure-Benzene entry point. The ASP.NET adapter
+		     lives in Benzene.Aws.Lambda.AspNet and references this. -->
+		<PackageReference Include="Amazon.Lambda.RuntimeSupport" Version="1.10.0" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\Benzene.Aws.Lambda.Core\Benzene.Aws.Lambda.Core.csproj" />
+	</ItemGroup>
+
+</Project>

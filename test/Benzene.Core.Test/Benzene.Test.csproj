@@ -75,6 +75,8 @@
     <ProjectReference Include="..\..\src\Benzene.Aws.Lambda.Kafka.TestHelpers\Benzene.Aws.Lambda.Kafka.TestHelpers.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Aws.Lambda.Sqs\Benzene.Aws.Lambda.Sqs.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Aws.Lambda.HttpBridge\Benzene.Aws.Lambda.HttpBridge.csproj" />
+    <ProjectReference Include="..\..\src\Benzene.Aws.Lambda.Hosting\Benzene.Aws.Lambda.Hosting.csproj" />
+    <ProjectReference Include="..\..\src\Benzene.Aws.Lambda.AspNet\Benzene.Aws.Lambda.AspNet.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Aws.Lambda.Sqs.TestHelpers\Benzene.Aws.Lambda.Sqs.TestHelpers.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Aws.Lambda.Sns\Benzene.Aws.Lambda.Sns.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Aws.Lambda.Sns.TestHelpers\Benzene.Aws.Lambda.Sns.TestHelpers.csproj" />

@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<AssemblyName>Benzene.Aws.Lambda.AspNet</AssemblyName>
+		<RootNamespace>Benzene.Aws.Lambda.AspNet</RootNamespace>
+		<Nullable>enable</Nullable>
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<!-- ASP.NET Core hosting types (IServer, IHttpApplication, WebApplication). -->
+		<FrameworkReference Include="Microsoft.AspNetCore.App" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<!-- The class-library hosting model — LambdaServer + APIGatewayHttpApiV2ProxyFunction. This is the
+		     one package that references ASP.NET; it is never a dependency of any other Benzene package. We
+		     deliberately do NOT use Amazon.Lambda.AspNetCoreServer.Hosting: its AddAWSLambdaHosting takes
+		     over the runtime loop with an HTTP-only handler. We re-create its ~30-line runtime-support
+		     server natively (BenzeneLambdaServer) so Benzene stays the top-level dispatcher. -->
+		<PackageReference Include="Amazon.Lambda.AspNetCoreServer" Version="9.1.0" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\Benzene.Aws.Lambda.Hosting\Benzene.Aws.Lambda.Hosting.csproj" />
+		<ProjectReference Include="..\Benzene.Aws.Lambda.HttpBridge\Benzene.Aws.Lambda.HttpBridge.csproj" />
+		<ProjectReference Include="..\Benzene.Microsoft.Dependencies\Benzene.Microsoft.Dependencies.csproj" />
+	</ItemGroup>
+
+</Project>

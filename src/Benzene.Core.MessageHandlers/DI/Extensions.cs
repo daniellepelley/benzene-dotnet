@@ -152,6 +152,14 @@ public static class Extensions
     /// <returns>The same container, for chaining.</returns>
     public static IBenzeneServiceContainer AddMessageHandlers(this IBenzeneServiceContainer services)
     {
+        // The message router and factory registered below have a hard dependency on the AddBenzene
+        // baseline (IDefaultStatuses, ISerializer, the service resolver, core middleware). Ensuring it
+        // here — idempotently, since AddBenzene is all TryAdd — means registering handlers is enough on
+        // its own: no transport and no hand-composed function can wire up dispatch and forget the
+        // baseline it needs. (The old footgun surfaced far from its cause, as IDefaultStatuses being
+        // unresolvable from inside MessageHandlerFactory on the first message.)
+        services.AddBenzene();
+
         RegisterHandlerFinderInfrastructure(services);
 
         services.TryAddScoped<IMessageHandlerDefinitionLookUp, MessageHandlerDefinitionLookUp>();
@@ -206,6 +214,10 @@ public static class Extensions
     public static IBenzeneServiceContainer AddMessageHandlers(this IBenzeneServiceContainer services,
         Type[] types)
     {
+        // See the no-arg overload: the router/factory registered below need the AddBenzene baseline, so
+        // ensure it here (idempotently) rather than leaving every caller to remember it.
+        services.AddBenzene();
+
         // Record the scanned candidates (cumulatively, one record per call) so cross-cutting
         // diagnostics can see the types discovery skipped - e.g. Benzene.Http's
         // UnroutedHttpEndpointCheck flagging an [HttpEndpoint] handler missing its [Message].

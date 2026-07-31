@@ -1,6 +1,15 @@
 # Running ASP.NET Core and Benzene in one Lambda — research
 
-**Status:** RESEARCH — **feasibility proven by a working spike** (2026-07-27). Ready to build.
+**Status:** DELIVERED (2026-07-30) — shipped as a layered pair rather than the single package §7
+proposed: `Benzene.Aws.Lambda.HttpBridge` (the ASP.NET-free port), `Benzene.Aws.Lambda.Hosting` (the
+ASP.NET-free custom-runtime bootstrap loop), and `Benzene.Aws.Lambda.AspNet` (the ASP.NET adapter:
+`BenzeneAspNetBridge`, the Benzene-driven `IServer`, and one-call `AddBenzeneAwsLambdaHosting`). The
+end-user recipe collapsed further than §5 — `app.Run()` instead of a hand-built entry point — because
+`AddBenzeneAwsLambdaHosting` re-creates `Amazon.Lambda.AspNetCoreServer.Hosting`'s runtime-support
+server natively with Benzene as the dispatcher. See `docs/cookbooks/aspnet-with-sqs-and-sns.md`.
+Original research below, kept for the rationale.
+
+**Was:** RESEARCH — **feasibility proven by a working spike** (2026-07-27). Ready to build.
 **Date:** 2026-07-27
 **Question:** Can a single Lambda serve HTTP through a real ASP.NET Core application while the same
 function handles SQS/SNS/EventBridge through Benzene's pipelines? If so, does that justify a
@@ -139,10 +148,14 @@ var benzene = new AwsLambdaEntryPoint(
 1. **`await app.StartAsync()` is mandatory.** `LambdaServer` captures the `IHttpApplication` in
    `StartAsync`; skip it and the ASP.NET path has nothing to dispatch into. It is a no-op otherwise —
    no socket is opened.
-2. **`AddBenzene()` must be called explicitly.** The Lambda hosts call it for you via their startup
-   path; composing by hand does not, and the failure is remote from the cause — an SQS record fails
-   with `Unable to resolve service for type 'IDefaultStatuses'` from inside `MessageHandlerFactory`.
-   A composition helper in the package should call it, which is most of the case for shipping one.
+2. **`AddBenzene()` must be called explicitly.** *(Fixed at the source, 2026-07-30: `AddMessageHandlers`
+   now pulls the `AddBenzene` baseline in, so this footgun is gone whether you hand-compose or use the
+   helper — see below.)* The Lambda hosts call it for you via their startup path; composing by hand did
+   not, and the failure was remote from the cause — an SQS record failing with `Unable to resolve service
+   for type 'IDefaultStatuses'` from inside `MessageHandlerFactory`. The original reasoning here — "a
+   composition helper in the package should call it" — is what motivated looking deeper: because the
+   router/factory that needs the baseline are registered by `AddMessageHandlers`, that is where the
+   baseline is now ensured, universally, rather than in each transport's helper.
 3. **Errors surface only through `ILogger`.** `SqsApplication` catches per-record exceptions, logs
    them, and reports a batch-item failure. With logging cleared, a broken pipeline looks exactly like
    a message that simply did not route. Worth stating in the package docs.
