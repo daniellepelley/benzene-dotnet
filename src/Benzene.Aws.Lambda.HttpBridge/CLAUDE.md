@@ -41,7 +41,7 @@ and this bridge claim the same payload shapes, so register **one or the other**,
 Hand-composed, a mixed function is:
 ```csharp
 builder.Services.AddSingleton<IServer, LambdaServer>();      // replaces Kestrel
-builder.Services.UsingBenzene(x => x.AddBenzene()…);         // AddBenzene() is required by hand
+builder.Services.UsingBenzene(x => x.AddMessageHandlers(…)…);
 builder.Services.AddSingleton<IAwsHttpBridge<…>>(sp => new AspNetBridge(sp));
 
 pipeline.UseHttpBridgeV2().UseSqs(sqs => sqs.UseMessageHandlers());
@@ -49,13 +49,14 @@ pipeline.UseHttpBridgeV2().UseSqs(sqs => sqs.UseMessageHandlers());
 var app = builder.Build();
 await app.StartAsync();     // LambdaServer captures the IHttpApplication here — required
 ```
-Three failure modes worth knowing, all remote from their cause and all recorded in
+Two failure modes worth knowing, both remote from their cause and recorded in
 `work/aws-lambda-aspnetcore-research.md`: skipping `StartAsync()` leaves the HTTP path with nothing
-to dispatch into; skipping `AddBenzene()` surfaces as `IDefaultStatuses` unresolvable from inside
-`MessageHandlerFactory`; and per-record SQS errors surface only through `ILogger`, so a cleared
-logging pipeline makes a broken handler look like a message that simply did not route. The first two
-are exactly what `AddBenzeneAwsLambdaHosting` removes — it captures the pipeline and calls
-`AddBenzene()` for you; the third is inherent to the SQS transport and stated in its docs.
+to dispatch into (exactly what `AddBenzeneAwsLambdaHosting` captures for you); and per-record SQS
+errors surface only through `ILogger`, so a cleared logging pipeline makes a broken handler look like
+a message that simply did not route (inherent to the SQS transport, stated in its docs). A third — the
+old `AddBenzene()`-forgotten footgun that surfaced as `IDefaultStatuses` unresolvable from inside
+`MessageHandlerFactory` — is gone at the source: registering handlers now pulls the `AddBenzene`
+baseline in, whether you hand-compose or use `AddBenzeneAwsLambdaHosting`.
 
 ## Dependencies on other Benzene packages
 - **Benzene.Aws.Lambda.Core** — the event-stream pipeline and router base.

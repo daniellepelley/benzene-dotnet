@@ -102,12 +102,14 @@ Both HTTP and the queues run off the **one** `IServiceProvider` `builder.Build()
 stores and clients are singletons that exist once, and a handler invoked over SQS sees the same
 registrations the HTTP path sees.
 
-Two things the package does for you that a hand-composed function is prone to getting wrong:
+One thing the package does for you that a hand-composed function is prone to getting wrong:
 
-- **`AddBenzene()` is called for you.** Composing by hand and forgetting it fails only on the queue
-  path — a clean `200` on HTTP while every SQS record is redriven — see [Troubleshooting](#troubleshooting).
 - **The ASP.NET pipeline is captured for you.** There is no `await app.StartAsync()` to remember; the
   Benzene-driven `IServer` captures it when `app.Run()` starts.
+
+(The other classic footgun — forgetting `AddBenzene()`, which failed only on the queue path with a
+clean `200` on HTTP — is gone at the source: registering handlers now pulls the baseline in, so there
+is nothing to remember whether you use this package or compose by hand.)
 
 **Register `UseHttpBridgeV2()` *or* `UseApiGatewayV2(...)`, never both.** They claim the same payload
 shapes, and a function serves a given shape from one place or the other. Everything non-HTTP is
@@ -160,8 +162,7 @@ pipeline the package builds, then drive it through the entry point:
 var services = new ServiceCollection();
 services.AddLogging();
 services.UsingBenzene(x => x
-    .AddBenzene()
-    .AddMessageHandlers(typeof(OrderCreatedHandler).Assembly)
+    .AddMessageHandlers(typeof(OrderCreatedHandler).Assembly)   // pulls in the AddBenzene baseline
     .AddSqs()
     .AddSns());
 services.AddSingleton<IAwsHttpBridge<APIGatewayHttpApiV2ProxyRequest, APIGatewayHttpApiV2ProxyResponse>>(
@@ -188,19 +189,6 @@ above is about proving the *routing* — HTTP claimed, queues routed — on one 
 [Testing Lambda Functions](testing-lambda-functions.md).
 
 ## Troubleshooting
-
-**HTTP works, queues do not — every SQS record is a batch item failure with**
-
-```
-Benzene.Core.Exceptions.BenzeneException: Unable to resolve type MessageRouter`1[[SqsMessageContext, …]]
- ---> System.InvalidOperationException: Unable to resolve service for type 'IDefaultStatuses'
-      while attempting to activate 'MessageHandlerFactory'.
-```
-
-You called `AddBenzene()` nowhere and something removed the one `AddBenzeneAwsLambdaHosting` adds — or
-you are composing the entry point entirely by hand (see [Under the hood](#under-the-hood-the-http-bridge-port)).
-The helper calls `AddBenzene()` for you; hand-composition does not. If a service is green on HTTP and
-silently redriving its queue to the DLQ, check this first.
 
 **A broken queue pipeline looks exactly like a message that did not route.** `SqsApplication` catches
 per-record exceptions, logs them, and reports a batch item failure — so with no logging provider

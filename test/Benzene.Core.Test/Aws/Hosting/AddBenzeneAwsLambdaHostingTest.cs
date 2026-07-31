@@ -29,8 +29,8 @@ public class AddBenzeneAwsLambdaHostingTest
         var services = new ServiceCollection();
         services.AddLogging();
 
-        // Deliberately WITHOUT .AddBenzene() — the helper must add it, or SQS records fail far from the
-        // cause with 'Unable to resolve IDefaultStatuses'.
+        // Deliberately WITHOUT .AddBenzene() — registering handlers must pull the baseline in on its own,
+        // or SQS records fail far from the cause with 'Unable to resolve IDefaultStatuses'.
         services.UsingBenzene(x => x
             .AddMessageHandlers(typeof(Defaults).Assembly)
             .AddSqs());
@@ -58,11 +58,12 @@ public class AddBenzeneAwsLambdaHostingTest
     }
 
     [Fact]
-    public void CallsAddBenzeneForYou()
+    public void HasTheBenzeneBaseline_WithoutAnyoneCallingAddBenzene()
     {
         using var provider = Compose().BuildServiceProvider();
 
-        // Resolvable only because the helper called AddBenzene() — the user's UsingBenzene above did not.
+        // Resolvable even though nothing above called AddBenzene() — registering handlers pulls the
+        // baseline in (AddMessageHandlers -> AddBenzene), so the old IDefaultStatuses footgun is gone.
         Assert.NotNull(provider.GetService<IDefaultStatuses>());
     }
 

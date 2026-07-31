@@ -26,8 +26,9 @@ from its cause.
 ## How it works
 - **`AddBenzeneAwsLambdaHosting(events => …)`** — configures the AWS event pipeline against the app's
   service collection (so `UseSqs`/`UseSns` register their services before the container is built),
-  registers the built-in bridges, calls `AddBenzene()` for you, and — only inside Lambda — registers the
-  Benzene-driven `IServer`.
+  registers the built-in bridges, and — only inside Lambda — registers the Benzene-driven `IServer`. It
+  no longer needs to call `AddBenzene()` itself: registering handlers (any `UseMessageHandlers`) now
+  pulls that baseline in from core, so the old footgun is gone whether you use this or hand-compose.
 - **Built-in bridges — one per front-door shape**, so a mixed function needs no adapter class whichever
   it is fronted by: `BenzeneAspNetBridge` (API Gateway HTTP API v2, resolved by `UseHttpBridgeV2()`),
   `BenzeneAspNetRestBridge` (API Gateway REST v1, `UseHttpBridge()`), and `BenzeneAspNetAlbBridge`

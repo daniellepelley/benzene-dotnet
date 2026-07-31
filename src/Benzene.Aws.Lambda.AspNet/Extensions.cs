@@ -5,7 +5,6 @@ using Benzene.Abstractions.Middleware;
 using Benzene.Aws.Lambda.Core;
 using Benzene.Aws.Lambda.Core.AwsEventStream;
 using Benzene.Aws.Lambda.HttpBridge;
-using Benzene.Core.MessageHandlers.DI;
 using Benzene.Core.Middleware;
 using Benzene.Microsoft.Dependencies;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -60,8 +59,8 @@ public static class Extensions
     /// <para>
     /// The Benzene-driven <c>IServer</c> is registered only when running inside Lambda (detected via
     /// <c>AWS_LAMBDA_RUNTIME_API</c>); locally, Kestrel keeps serving so <c>dotnet run</c> still hosts the
-    /// HTTP endpoints. <c>AddBenzene()</c> is called for you here — the composition footgun the manual
-    /// recipe is prone to.
+    /// HTTP endpoints. The <c>AddBenzene()</c> baseline no longer has to be remembered anywhere —
+    /// registering handlers (via any <c>UseMessageHandlers</c>) now guarantees it in core.
     /// </para>
     /// </remarks>
     public static IServiceCollection AddBenzeneAwsLambdaHosting(
@@ -70,8 +69,8 @@ public static class Extensions
     {
         // Configure the event pipeline against the app's service collection: UseSqs/UseSns register
         // their services now (before the container is built), while the pipeline itself is built later.
+        // Those UseMessageHandlers calls also pull in the AddBenzene baseline, so it isn't repeated here.
         var container = new MicrosoftBenzeneServiceContainer(services);
-        container.AddBenzene();
         var eventPipeline = new MiddlewarePipelineBuilder<AwsEventStreamContext>(container);
         configureEvents(eventPipeline);
 
