@@ -34,7 +34,7 @@ namespace Benzene.Http.BenzeneMessage;
 /// production.
 /// </para>
 /// </remarks>
-public class BenzeneMessageHttpMiddleware<TContext> : IMiddleware<TContext> where TContext : IHttpContext
+public class BenzeneMessageHttpMiddleware<TContext> : IMiddleware<TContext>, ITerminalMiddleware where TContext : IHttpContext
 {
     private static readonly JsonSerializer Serializer = new();
 

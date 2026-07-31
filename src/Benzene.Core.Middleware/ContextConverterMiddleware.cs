@@ -18,7 +18,7 @@ public class ContextConverterMiddleware<TContext, TContextOut>(
     IContextConverter<TContext, TContextOut> converter,
     IMiddlewarePipeline<TContextOut> middlewarePipeline,
     IServiceResolver serviceResolver)
-    : IMiddleware<TContext>
+    : IMiddleware<TContext>, ITerminalMiddleware
 {
     /// <summary>
     /// Gets the name of this middleware component.

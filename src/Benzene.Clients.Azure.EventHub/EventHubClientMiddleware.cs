@@ -9,7 +9,7 @@ namespace Benzene.Clients.Azure.EventHub;
 /// Middleware that sends the <see cref="EventHubSendMessageContext"/>'s event via an
 /// <see cref="EventHubProducerClient"/> and records that the send completed.
 /// </summary>
-public class EventHubClientMiddleware : IMiddleware<EventHubSendMessageContext>
+public class EventHubClientMiddleware : IMiddleware<EventHubSendMessageContext>, ITerminalMiddleware
 {
     private readonly EventHubProducerClient _producerClient;
 

@@ -9,7 +9,7 @@ namespace Benzene.Clients.Azure.ServiceBus;
 /// Middleware that sends the <see cref="ServiceBusSendMessageContext"/>'s message via a
 /// <see cref="ServiceBusSender"/> and records that the send completed.
 /// </summary>
-public class ServiceBusClientMiddleware : IMiddleware<ServiceBusSendMessageContext>
+public class ServiceBusClientMiddleware : IMiddleware<ServiceBusSendMessageContext>, ITerminalMiddleware
 {
     private readonly ServiceBusSender _sender;
 

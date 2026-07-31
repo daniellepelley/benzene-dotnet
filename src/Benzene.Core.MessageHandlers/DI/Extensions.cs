@@ -204,6 +204,9 @@ public static class Extensions
         // Constructs every middleware in every pipeline at start-up — see
         // PipelineResolutionStartUpCheck for why that is not something the container can do for us.
         services.TryAddSingletonImplementation<IStartUpCheck, PipelineResolutionStartUpCheck>();
+        // Reports a pipeline that composes cleanly and can never handle anything - UseSqs(sqs => { })
+        // and its relatives, which dead-letter every message without failing.
+        services.TryAddSingletonImplementation<IStartUpCheck, TerminalMiddlewareStartUpCheck>();
     }
 
     /// <summary>

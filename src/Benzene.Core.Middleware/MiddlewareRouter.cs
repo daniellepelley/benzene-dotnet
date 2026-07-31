@@ -13,7 +13,7 @@ namespace Benzene.Core.Middleware;
 /// within the same context can be dispatched to different handlers. Derived classes implement the
 /// extraction, routing logic, and handling behavior.
 /// </remarks>
-public abstract class MiddlewareRouter<TRequest, TContext>(IServiceResolver serviceResolver) : IMiddleware<TContext>
+public abstract class MiddlewareRouter<TRequest, TContext>(IServiceResolver serviceResolver) : IMiddleware<TContext>, ITerminalMiddleware
 {
     /// <summary>
     /// Gets the name of this middleware component. Defaults to the concrete router's own type name

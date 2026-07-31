@@ -8,7 +8,7 @@ namespace Benzene.RabbitMq.RabbitMqSendMessage;
 /// <see cref="RabbitMqSendMessageContext"/> to its exchange/routing key via the shared
 /// <see cref="IChannel"/>, forwarding the Benzene headers onto <c>BasicProperties</c>.
 /// </summary>
-public class RabbitMqClientMiddleware : IMiddleware<RabbitMqSendMessageContext>
+public class RabbitMqClientMiddleware : IMiddleware<RabbitMqSendMessageContext>, ITerminalMiddleware
 {
     private readonly IChannel _channel;
     private readonly bool _mandatory;

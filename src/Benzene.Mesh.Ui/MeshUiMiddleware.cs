@@ -23,7 +23,7 @@ namespace Benzene.Mesh.Ui;
 /// deliberately bypassing the message-result path, whose body handler forces
 /// <c>application/json</c> - matching <c>Benzene.Spec.Ui.SpecUiMiddleware</c>'s exact shape.
 /// </remarks>
-public class MeshUiMiddleware<TContext> : IMiddleware<TContext> where TContext : IHttpContext
+public class MeshUiMiddleware<TContext> : IMiddleware<TContext>, ITerminalMiddleware where TContext : IHttpContext
 {
     private readonly string _path;
     private readonly string _html;

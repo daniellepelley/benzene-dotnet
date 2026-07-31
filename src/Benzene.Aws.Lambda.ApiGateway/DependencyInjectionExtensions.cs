@@ -186,7 +186,8 @@ public static class DependencyInjectionExtensions
     /// </remarks>
     public static IMiddlewarePipelineBuilder<ApiGatewayContext> UseHealthCheck(this IMiddlewarePipelineBuilder<ApiGatewayContext> app, string topic, string method, string path, IHealthCheckBuilder builder)
     {
-        return app.Use(resolver => new FuncWrapperMiddleware<ApiGatewayContext>("HealthCheck", async (context, next) =>
+        // Terminal: this answers the request itself. UseLivenessCheck() alone is a complete pipeline.
+        return app.Use(resolver => new TerminalFuncWrapperMiddleware<ApiGatewayContext>("HealthCheck", async (context, next) =>
         {
             var resultSetter = resolver.GetService<IMessageHandlerResultSetter<ApiGatewayContext>>();
             if (context.ApiGatewayProxyRequest.HttpMethod.ToUpperInvariant() == method.ToUpperInvariant() &&

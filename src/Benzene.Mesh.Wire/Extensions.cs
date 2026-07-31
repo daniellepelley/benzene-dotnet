@@ -27,7 +27,8 @@ public static class Extensions
     {
         var topics = new HashSet<string>(aliases) { MeshTopics.Descriptor };
 
-        return app.Use(resolver => new FuncWrapperMiddleware<TContext>("MeshDescriptor", async (context, next) =>
+        // Terminal: it answers the descriptor topic itself.
+        return app.Use(resolver => new TerminalFuncWrapperMiddleware<TContext>("MeshDescriptor", async (context, next) =>
         {
             var messageGetter = resolver.GetService<IMessageGetter<TContext>>();
             var topic = messageGetter.GetTopic(context);

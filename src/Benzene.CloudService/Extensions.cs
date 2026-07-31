@@ -198,7 +198,8 @@ public static class Extensions
     private static void UseDescriptor(
         IMiddlewarePipelineBuilder<BenzeneMessageContext> app, CloudServiceDescriptorSource descriptorSource)
     {
-        app.Use(resolver => new FuncWrapperMiddleware<BenzeneMessageContext>("CloudServiceDescriptor", async (context, next) =>
+        // Terminal: it answers the descriptor topic itself.
+        app.Use(resolver => new TerminalFuncWrapperMiddleware<BenzeneMessageContext>("CloudServiceDescriptor", async (context, next) =>
         {
             var messageGetter = resolver.GetService<IMessageGetter<BenzeneMessageContext>>();
             var topic = messageGetter.GetTopic(context);

@@ -21,7 +21,7 @@ namespace Benzene.Mesh.Ui;
 /// GET/HEAD this writes the page as <c>text/html</c> and short-circuits; any other request is passed
 /// to <c>next</c>.
 /// </remarks>
-public class MeshSpecUiMiddleware<TContext> : IMiddleware<TContext> where TContext : IHttpContext
+public class MeshSpecUiMiddleware<TContext> : IMiddleware<TContext>, ITerminalMiddleware where TContext : IHttpContext
 {
     private readonly string _path;
     private readonly string _html;

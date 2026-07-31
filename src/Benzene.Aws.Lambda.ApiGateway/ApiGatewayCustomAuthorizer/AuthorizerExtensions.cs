@@ -25,7 +25,9 @@ public static class AuthorizerExtensions
         this IMiddlewarePipelineBuilder<ApiGatewayCustomAuthorizerContext> app,
         Func<APIGatewayCustomAuthorizerRequest, IServiceResolver, Task<APIGatewayCustomAuthorizerResponse>> authorize)
     {
-        return app.Use("CustomAuthorizer",
+        // Terminal: this produces the authorizer response, which is the whole of what a custom
+        // authorizer Lambda does - the pipeline is complete with nothing after it.
+        return app.UseTerminal("CustomAuthorizer",
             (IServiceResolver resolver, ApiGatewayCustomAuthorizerContext context, Func<Task> next)
                 => AuthorizeAsync(resolver, context, next, authorize));
     }

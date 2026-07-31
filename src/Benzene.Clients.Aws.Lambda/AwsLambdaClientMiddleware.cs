@@ -9,7 +9,7 @@ namespace Benzene.Clients.Aws.Lambda;
 /// Middleware that invokes the <see cref="LambdaSendMessageContext"/>'s request against AWS Lambda and
 /// records the response on the context.
 /// </summary>
-public class AwsLambdaClientMiddleware : IMiddleware<LambdaSendMessageContext>
+public class AwsLambdaClientMiddleware : IMiddleware<LambdaSendMessageContext>, ITerminalMiddleware
 {
     private readonly IAmazonLambda _amazonLambda;
 

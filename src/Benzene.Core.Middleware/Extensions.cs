@@ -111,6 +111,42 @@ public static class Extensions
     }
 
     /// <summary>
+    /// Adds named inline middleware that answers the message itself rather than decorating what comes
+    /// after it - the inline equivalent of implementing <see cref="ITerminalMiddleware"/>.
+    /// </summary>
+    /// <typeparam name="TContext">The context type that the middleware operates on.</typeparam>
+    /// <param name="app">The pipeline builder to add middleware to.</param>
+    /// <param name="name">The name for this middleware component.</param>
+    /// <param name="func">The function that defines the middleware behavior.</param>
+    /// <returns>The pipeline builder for method chaining.</returns>
+    /// <remarks>
+    /// Behaves exactly like the matching <c>Use</c> overload. The only difference is that the
+    /// terminal-middleware start-up check can see that a pipeline ending here <em>can</em> handle a
+    /// message - which it cannot read from a lambda.
+    /// </remarks>
+    public static IMiddlewarePipelineBuilder<TContext> UseTerminal<TContext>(this IMiddlewarePipelineBuilder<TContext> app,
+        string name, Func<TContext, Func<Task>, Task> func)
+    {
+        return app.Use(new TerminalFuncWrapperMiddleware<TContext>(name, func));
+    }
+
+    /// <summary>
+    /// Adds named inline terminal middleware with access to the service resolver. See
+    /// <see cref="UseTerminal{TContext}(IMiddlewarePipelineBuilder{TContext}, string, Func{TContext, Func{Task}, Task})"/>.
+    /// </summary>
+    /// <typeparam name="TContext">The context type that the middleware operates on.</typeparam>
+    /// <param name="app">The pipeline builder to add middleware to.</param>
+    /// <param name="name">The name for this middleware component.</param>
+    /// <param name="func">The function that defines the middleware behavior with access to the service resolver.</param>
+    /// <returns>The pipeline builder for method chaining.</returns>
+    public static IMiddlewarePipelineBuilder<TContext> UseTerminal<TContext>(this IMiddlewarePipelineBuilder<TContext> app,
+        string name, Func<IServiceResolver, TContext, Func<Task>, Task> func)
+    {
+        return app.Use(serviceResolver =>
+            new TerminalFuncWrapperMiddleware<TContext>(name, (context, next) => func(serviceResolver, context, next)));
+    }
+
+    /// <summary>
     /// Executes an action on the request before continuing to the next middleware.
     /// </summary>
     /// <typeparam name="TContext">The context type that the middleware operates on.</typeparam>
@@ -325,12 +361,16 @@ public static class Extensions
     {
         var newApp = app.Create<TContext>();
         builder(newApp);
+        // Built once here rather than inside the lambda: rebuilding the chain per message was pure
+        // waste, and a branch only built when a message arrives is invisible to the start-up checks -
+        // which is exactly the class of bug (an unhandleable pipeline) they exist to catch.
+        var branch = newApp.Build();
 
-        return app.Use(resolver => new FuncWrapperMiddleware<TContext>("Split", async (context, next) =>
+        return app.Use(resolver => new TerminalFuncWrapperMiddleware<TContext>("Split", async (context, next) =>
         {
             if (check(context))
             {
-                await newApp.Build().HandleAsync(context, resolver);
+                await branch.HandleAsync(context, resolver);
             }
             else
             {
@@ -357,12 +397,16 @@ public static class Extensions
     {
         var newApp = app.Create<TContext>();
         builder(newApp);
+        // Built once here rather than inside the lambda: rebuilding the chain per message was pure
+        // waste, and a branch only built when a message arrives is invisible to the start-up checks -
+        // which is exactly the class of bug (an unhandleable pipeline) they exist to catch.
+        var branch = newApp.Build();
 
-        return app.Use(resolver => new FuncWrapperMiddleware<TContext>("Split", async (context, next) =>
+        return app.Use(resolver => new TerminalFuncWrapperMiddleware<TContext>("Split", async (context, next) =>
         {
             if (predicate.Check(context, resolver))
             {
-                await newApp.Build().HandleAsync(context, resolver);
+                await branch.HandleAsync(context, resolver);
             }
             else
             {

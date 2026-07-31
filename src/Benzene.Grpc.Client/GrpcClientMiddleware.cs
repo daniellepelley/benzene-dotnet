@@ -4,7 +4,7 @@ using Grpc.Core;
 
 namespace Benzene.Grpc.Client;
 
-public class GrpcClientMiddleware : IMiddleware<GrpcSendMessageContext>
+public class GrpcClientMiddleware : IMiddleware<GrpcSendMessageContext>, ITerminalMiddleware
 {
     private readonly CallInvoker _callInvoker;
     private readonly IGrpcClientRouteRegistry _routeRegistry;

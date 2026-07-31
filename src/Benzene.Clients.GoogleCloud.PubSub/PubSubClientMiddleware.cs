@@ -12,7 +12,7 @@ namespace Benzene.Clients.GoogleCloud.PubSub;
 /// per-message HTTP status the way SQS does), which the outbound routing pipeline surfaces to the
 /// caller.
 /// </summary>
-public class PubSubClientMiddleware : IMiddleware<PubSubSendMessageContext>
+public class PubSubClientMiddleware : IMiddleware<PubSubSendMessageContext>, ITerminalMiddleware
 {
     private readonly PublisherServiceApiClient _publisher;
 

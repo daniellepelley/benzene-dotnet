@@ -8,7 +8,7 @@ namespace Benzene.Clients.Aws.Sns;
 /// <summary>
 /// Publishes the pipeline context's request to SNS and records the response.
 /// </summary>
-public class SnsClientMiddleware : IMiddleware<SnsSendMessageContext>
+public class SnsClientMiddleware : IMiddleware<SnsSendMessageContext>, ITerminalMiddleware
 {
     private readonly IAmazonSimpleNotificationService _amazonSns;
 

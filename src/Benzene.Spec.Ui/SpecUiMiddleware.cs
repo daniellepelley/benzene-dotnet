@@ -18,7 +18,7 @@ namespace Benzene.Spec.Ui;
 /// <c>SetStatusCode</c> / <c>SetBody</c> then <see cref="IBenzeneResponseAdapter{TContext}.FinalizeAsync"/> —
 /// deliberately bypassing the message-result path, whose body handler forces <c>application/json</c>.
 /// </remarks>
-public class SpecUiMiddleware<TContext> : IMiddleware<TContext> where TContext : IHttpContext
+public class SpecUiMiddleware<TContext> : IMiddleware<TContext>, ITerminalMiddleware where TContext : IHttpContext
 {
     private readonly string _path;
     private readonly string _html;

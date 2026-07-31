@@ -9,7 +9,7 @@ namespace Benzene.Clients.Azure.QueueStorage;
 /// Middleware that sends the <see cref="QueueStorageSendMessageContext"/>'s text via a
 /// <see cref="QueueClient"/> and records that the send completed.
 /// </summary>
-public class QueueStorageClientMiddleware : IMiddleware<QueueStorageSendMessageContext>
+public class QueueStorageClientMiddleware : IMiddleware<QueueStorageSendMessageContext>, ITerminalMiddleware
 {
     private readonly QueueClient _queueClient;
 

@@ -3,7 +3,7 @@ using Benzene.Abstractions.Middleware;
 
 namespace Benzene.Client.Http;
 
-public class HttpClientMiddleware : IMiddleware<HttpSendMessageContext>
+public class HttpClientMiddleware : IMiddleware<HttpSendMessageContext>, ITerminalMiddleware
 {
     private readonly HttpClient _httpClient;
     private readonly ICancellationTokenAccessor _cancellationTokenAccessor;

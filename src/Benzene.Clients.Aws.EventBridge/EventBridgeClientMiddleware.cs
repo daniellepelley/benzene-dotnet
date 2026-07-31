@@ -10,7 +10,7 @@ namespace Benzene.Clients.Aws.EventBridge;
 /// injected EventBridge client. Failures propagate — callers (e.g.
 /// <see cref="EventBridgeBenzeneMessageClient"/>) map them to a Benzene result.
 /// </summary>
-public class EventBridgeClientMiddleware : IMiddleware<EventBridgeSendMessageContext>
+public class EventBridgeClientMiddleware : IMiddleware<EventBridgeSendMessageContext>, ITerminalMiddleware
 {
     private readonly IAmazonEventBridge _amazonEventBridge;
 

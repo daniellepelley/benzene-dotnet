@@ -27,6 +27,29 @@ meet on a deployed function.
 | `outbound-routing` | fails start-up | A topic a generated client will send to with no outbound route registered. |
 | `unmapped-response-handlers` | logs a warning | Handlers returning a payload on a topic no response-event mapping covers. Advisory only — a handler that legitimately publishes nothing looks identical. |
 | `pipeline-resolution` | fails start-up | Middleware anywhere in any pipeline that cannot be constructed. Middleware is resolved lazily, per link, per message, so without this a pipeline can be completely unable to run and look healthy until traffic arrives. Costs about 16ms on a service the size of `examples/Aws`, and the work is not wasted — it constructs what the first message would have constructed anyway. |
+| `terminal-middleware` | fails start-up | A pipeline with nothing in it that can end — `UseSqs(sqs => { })`, or a pipeline with logging and validation but no `UseMessageHandlers()`. It composes, deploys, returns 200, and dead-letters every message it is given. Costs about 9ms on a service the size of `examples/Aws`. |
+
+### When `terminal-middleware` is wrong
+
+The rule is the `ITerminalMiddleware` marker: a pipeline needs at least one middleware that says it
+can end one. "Does this middleware call `next`?" is not answerable without running it, and most
+middleware answers "sometimes", so the marker is a statement of intent rather than an inference.
+
+Everything in Benzene that ends a pipeline carries it — `UseMessageHandlers()`, every transport
+router, every client's send middleware, the health-check endpoints, the spec and mesh UIs. Your own
+middleware does not, so a pipeline that ends in yours is the one false positive this check can
+produce. Say so and it stops:
+
+```csharp
+public class ServeFromCache : IMiddleware<SqsMessageContext>, ITerminalMiddleware { ... }
+```
+
+Nothing about execution changes — the marker is read once, at start-up. For inline middleware, where
+there is no type to mark, `UseTerminal(name, ...)` is the same statement:
+
+```csharp
+app.UseTerminal("static-response", async (context, next) => { ... });
+```
 
 If a check is wrong for your application, one switch covers all of them:
 

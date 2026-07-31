@@ -230,7 +230,9 @@ public static class Extensions
     private static IMiddlewarePipelineBuilder<TContext> UseHealthCheckMiddleware<TContext>(
         this IMiddlewarePipelineBuilder<TContext> app, string[] matchTopics, IHealthCheckBuilder builder, bool includeDependencyChecks)
     {
-        return app.Use(resolver => new FuncWrapperMiddleware<TContext>(Constants.HealthCheckMiddlewareName, async (context, next) =>
+        // Terminal: a health-check endpoint answers the message itself. UseLivenessCheck() on its own is
+        // a complete pipeline, so the terminal-middleware check has to be able to see that it ends here.
+        return app.Use(resolver => new TerminalFuncWrapperMiddleware<TContext>(Constants.HealthCheckMiddlewareName, async (context, next) =>
         {
             var mapper = resolver.GetService<IMessageGetter<TContext>>();
             var messageTopic = mapper.GetTopic(context);

@@ -9,7 +9,7 @@ namespace Benzene.Clients.Azure.EventGrid;
 /// Middleware that sends the <see cref="EventGridSendMessageContext"/>'s event via an
 /// <see cref="EventGridPublisherClient"/> and records that the send completed.
 /// </summary>
-public class EventGridClientMiddleware : IMiddleware<EventGridSendMessageContext>
+public class EventGridClientMiddleware : IMiddleware<EventGridSendMessageContext>, ITerminalMiddleware
 {
     private readonly EventGridPublisherClient _publisherClient;
 

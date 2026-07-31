@@ -9,7 +9,7 @@ namespace Benzene.Clients.Aws.Sqs;
 /// Middleware that sends the <see cref="SqsSendMessageContext"/>'s request to SQS and records the
 /// response on the context.
 /// </summary>
-public class SqsClientMiddleware : IMiddleware<SqsSendMessageContext>
+public class SqsClientMiddleware : IMiddleware<SqsSendMessageContext>, ITerminalMiddleware
 {
     private readonly IAmazonSQS _amazonSqs;
 

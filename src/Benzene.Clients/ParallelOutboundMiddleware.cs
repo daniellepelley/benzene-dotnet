@@ -19,7 +19,7 @@ namespace Benzene.Clients;
 /// failure whose errors name each failed transport. Egress converters always produce
 /// <see cref="IBenzeneResult{Void}"/>, so the aggregate is an <see cref="IBenzeneResult{Void}"/> too.
 /// </summary>
-internal class ParallelOutboundMiddleware : IMiddleware<OutboundContext>
+internal class ParallelOutboundMiddleware : IMiddleware<OutboundContext>, ITerminalMiddleware
 {
     private readonly IReadOnlyList<Branch> _branches;
     private readonly IServiceResolver _serviceResolver;

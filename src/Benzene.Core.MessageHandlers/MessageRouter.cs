@@ -22,7 +22,7 @@ namespace Benzene.Core.MessageHandlers;
 /// <see cref="HandleAsync"/> — in all of these cases <c>next</c> is never invoked, so this middleware
 /// is always the terminal step for message-handler dispatch.
 /// </remarks>
-public class MessageRouter<TContext> : IMiddleware<TContext>
+public class MessageRouter<TContext> : IMiddleware<TContext>, ITerminalMiddleware
 {
     private readonly ILogger<MessageRouter<TContext>> _logger;
     private readonly IMessageHandlerFactory _messageHandlerFactory;

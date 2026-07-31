@@ -466,9 +466,31 @@ are corrected here rather than quietly edited out.
 | 3. `RegistrationCheck` bugs + dead guard | **Done** | Chain-first precedence, untransposed type/package, and `AwsEventStreamContext.Handled` so the "event type has not been recognized" message can finally fire. |
 | 4. Ship the analyzer | **Done** | Referenced by `Benzene.Core.MessageHandlers`, plus `examples/Directory.Build.props` (analyzer assets do not flow along a ProjectReference chain). BENZ002 added. |
 | 5. Warm-up as a check phase | **Done** | `IStartUpCheck`, on by default, run from every host and every `Build*` test-host extension, with one kill switch. Four checks wired: duplicate-topic (throws), empty-handler-registry (logs), http-routes, outbound-routing, plus the advisory unmapped-response-handlers. |
-| 6. Pipeline-introspection seam | **Done (dry-resolve)** | `PipelineDescriptor` published at `Build()`; `pipeline-resolution` check constructs every middleware in every pipeline at start-up. ~16ms on `examples/Aws`, measured. **Correction:** this document says `BenzeneApplicationBuilder.Create<TContext>` "fragments this" by minting a fresh `RegisterDependency` — it does not. That type is a stateless adapter over the container, so a fresh one over the same container fragments nothing, and sub-pipelines already share the outer builder's registration path. No change to `BenzeneApplicationBuilder` was needed. The terminal-middleware check (B1) is still outstanding — it needs an `ITerminalMiddleware` marker and a rule that does not false-positive on the outer event-stream pipeline, whose terminals are transport routers rather than `MessageRouter<>`. |
+| 6. Pipeline-introspection seam | **Done (dry-resolve)** | `PipelineDescriptor` published at `Build()`; `pipeline-resolution` check constructs every middleware in every pipeline at start-up. ~16ms on `examples/Aws`, measured. **Correction:** this document says `BenzeneApplicationBuilder.Create<TContext>` "fragments this" by minting a fresh `RegisterDependency` — it does not. That type is a stateless adapter over the container, so a fresh one over the same container fragments nothing, and sub-pipelines already share the outer builder's registration path. No change to `BenzeneApplicationBuilder` was needed. The terminal-middleware check (B1) landed on the same seam: `ITerminalMiddleware` is a non-generic marker, carried by `MessageRouter<>`, `MiddlewareRouter<,>` (so every transport router inherits it, including on the outer event-stream pipeline), every client send middleware, `ContextConverterMiddleware`, `Split`, the health-check endpoints, and the spec/mesh UIs. ~9ms on `examples/Aws`, measured. |
 | 7. Classify infra vs business exceptions | **Done** | Decision taken: an infrastructure failure fails the whole SQS invocation rather than dead-lettering one record at a time. **Two things this document got out of date on:** the "fail the whole invocation" mechanism already existed (`SqsBatchFailureMode.FailWholeBatch` + `SqsBatchProcessingException`) as a static config choice, so the work was deciding *when* to trigger it, not building it; and a classification vocabulary already existed in `MeshIssueClassification` (`config-wiring`/`dependency`/`exception`/`validation`) for mesh issue feeds, though it never reached the transport's retry decision. |
 | 8. Test-suite hygiene | **Done** | `SpecTest` names its nine handlers instead of scanning the AppDomain; six TestHelpers builders now reference `BenzeneWireNames.DefaultTopic`, with per-transport round-trip assertions that hold whether they do or not. |
+
+### What the terminal-middleware check found on the way in
+
+The full suite was the measurement, the same as for `ValidateOnBuild`, and the blast radius was five
+tests rather than sixty-seven — all of them the same shape, and all of them right to fail:
+
+- **`UseLivenessCheck`/`UseReadinessCheck` alone is a complete pipeline.** The health-check endpoints
+  are built from `FuncWrapperMiddleware`, which is also what every pass-through decorator is built
+  from, so their intent lives inside a lambda and cannot be read from a type. That is what
+  `TerminalFuncWrapperMiddleware` and the public `UseTerminal(...)` overloads exist for.
+- **`UseApiGatewayCustomAuthorizer` produces the authorizer response** and nothing follows it — the
+  same fix.
+
+Two things changed that were not strictly the check's business but were found by it:
+
+- **`Split` built its branch pipeline inside the message lambda**, so the chain was rebuilt on every
+  message and the branch was invisible to both start-up checks. Built once at configuration time now.
+- The marker doubles as documentation: "which middleware can end a pipeline" was previously only
+  answerable by reading each one for whether it calls `next`.
+
+The residual false positive is a user's own terminal middleware, unmarked. It is reported with the
+remedy in the message, and the marker changes nothing about execution.
 
 ### A third correction, found while implementing 6 and 7
 

@@ -3,7 +3,7 @@ using Confluent.Kafka;
 
 namespace Benzene.Kafka.Core.Kafka;
 
-public class KafkaClientMiddleware : IMiddleware<KafkaSendMessageContext>
+public class KafkaClientMiddleware : IMiddleware<KafkaSendMessageContext>, ITerminalMiddleware
 {
     private readonly IProducer<string, string> _producer;
 
