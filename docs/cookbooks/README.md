@@ -43,6 +43,9 @@ Cookbooks are step-by-step guides that show you how to solve specific problems w
 ### Configuration & Secrets
 - [Secrets & Multi-Cloud Configuration](secrets-configuration.md) - A provider-agnostic `ISecretStore` seam (env vars, mounted files, composed, cached), startup fail-fast validation, and copy-paste Key Vault / AWS Secrets Manager / SSM adapters
 
+### Schema Evolution & Versioning
+- [Message Payload Versioning](message-versioning.md) - Evolve a topic's payload without breaking existing producers: route to a version-specific handler, or keep one handler and transparently up/down-cast older payloads (with multi-step version chains composed for you). Built around the runnable, CI-tested [`examples/Versioning`](../../examples/Versioning)
+
 ### Testing
 - [Integration Testing Lambda Functions](testing-lambda-functions.md) - Test Lambda handlers end-to-end
 - [Mocking External Dependencies](mocking-dependencies.md) - Test message handlers in isolation
