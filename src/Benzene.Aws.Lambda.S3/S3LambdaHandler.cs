@@ -62,5 +62,10 @@ public class S3LambdaHandler : AwsLambdaMiddlewareRouter<S3Event>
     protected override async Task HandleFunction(S3Event request, AwsEventStreamContext context, IServiceResolverFactory serviceResolver)
     {
         await _application.HandleAsync(request, serviceResolver);
+
+        // Fire-and-forget, so no response body is written. The claim has to be explicit or the entry
+        // point raises "the event type has not been recognized" after the event was handled. See
+        // AwsEventStreamContext.MarkHandled.
+        context.MarkHandled();
     }
 }

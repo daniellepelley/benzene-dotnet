@@ -62,5 +62,11 @@ public class SnsLambdaHandler : AwsLambdaMiddlewareRouter<SNSEvent>
     protected override async Task HandleFunction(SNSEvent request, AwsEventStreamContext context, IServiceResolverFactory serviceResolverFactory)
     {
         await _application.HandleAsync(request, serviceResolverFactory);
+
+        // SNS is fire-and-forget, so unlike SQS this writes no response body. The claim therefore has to
+        // be explicit: without it the entry point cannot tell a handled-but-responseless invocation from
+        // an unroutable one, and raises "the event type has not been recognized" after every SNS batch —
+        // even though the records were processed. See AwsEventStreamContext.MarkHandled.
+        context.MarkHandled();
     }
 }
