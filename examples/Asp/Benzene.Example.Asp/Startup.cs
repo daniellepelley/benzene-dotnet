@@ -19,6 +19,7 @@ using Serilog.Events;
 using Benzene.Abstractions.MessageHandlers;
 using Benzene.Abstractions.Middleware;
 using Benzene.Core.MessageHandlers;
+using Benzene.Core.MessageHandlers.DI;
 using Benzene.Core.Messages;
 using Benzene.Core.Middleware;
 using Benzene.Diagnostics.Correlation;
@@ -68,7 +69,10 @@ public class Startup
         // A real service points OAuth2BearerOptions at a real identity provider instead.
         services.AddSingleton<DemoJwtIssuer>();
 
-        services.UsingBenzene();
+        services.UsingBenzene(x => x.SetApplicationInfo(
+            "Benzene ASP.NET Example",
+            "1.0.0",
+            "Example ASP.NET Core host demonstrating Benzene message handlers, validation, and the derived OpenAPI spec."));
 
         services.AddValidatorsFromAssemblyContaining<GetOrderMessageValidator>();
     }
