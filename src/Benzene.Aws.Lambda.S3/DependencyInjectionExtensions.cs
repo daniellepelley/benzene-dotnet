@@ -37,7 +37,7 @@ public static class DependencyInjectionExtensions
         services.AddScoped<IMessageHandlerResultSetter<S3RecordContext>, S3MessageHandlerResultSetter>();
         services.AddMediaFormatNegotiation<S3RecordContext>();
         services
-            .AddScoped<IRequestMapper<S3RecordContext>,
+            .TryAddScoped<IRequestMapper<S3RecordContext>,
                 MultiSerializerOptionsRequestMapper<S3RecordContext>>();
 
         services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.S3));

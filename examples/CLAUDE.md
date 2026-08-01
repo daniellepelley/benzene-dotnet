@@ -41,9 +41,10 @@ handler/logic in `Benzene.Examples.App` and wiring it from the hosts, rather tha
   (`order:create` has a v1 and a v2 handler, routed by `benzene-version`) and transparent payload casting
   with **caster chaining** (`inventory:adjust` upcasts v1→v2→v3 through adjacent casters to a single v3
   handler, and downcasts the response back). Has its own `README.md`, its own
-  `Benzene.Examples.Versioning.sln`, and an end-to-end test project driven by `BenzeneTestHost`. Note the
-  `StartUp` enables the casting decorators in `Configure` (via `app.Register(...)`) *after* the transports,
-  since each AWS transport's `AddScoped<IRequestMapper<TContext>>` would otherwise overwrite them.
+  `Benzene.Examples.Versioning.sln`, and an end-to-end test project driven by `BenzeneTestHost`. Mechanism B
+  is wired with a single `AddPayloadVersioning(...)` in `ConfigureServices` (declares transports + versions +
+  upcasts; synthesises downcasts; validates the caster graph at startup) — order-independent because the AWS
+  transports register their default `IRequestMapper<TContext>` with `TryAdd`.
 - **`Grpc/`** — gRPC host (+ a client project).
 - **`Kafka/`** — Kafka consumer and producer.
 - **`Google/`** — Google Cloud host (built on `Benzene.AspNet.Core` + `Benzene.Http`).

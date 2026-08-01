@@ -9,7 +9,6 @@ using Benzene.Core.MessageHandlers;
 using Benzene.Core.MessageHandlers.DI;
 using Benzene.Core.Messages.BenzeneMessage;
 using Benzene.Core.Versioning;
-using Benzene.Core.Versioning.Schemas;
 using Benzene.Examples.Versioning.Services;
 using Benzene.Http;
 using Benzene.Microsoft.Dependencies;
@@ -28,12 +27,14 @@ namespace Benzene.Examples.Versioning;
 ///  * Mechanism A - handler-version dispatch: the topic <c>order:create</c> has two handlers
 ///    (<see cref="Handlers.CreateOrderV1MessageHandler"/> / <see cref="Handlers.CreateOrderV2MessageHandler"/>),
 ///    one per version; the incoming <c>benzene-version</c> selects which runs. No casters are registered
-///    for that topic, so the casting pipeline below passes it straight through.
+///    for that topic, so the casting pipeline passes it straight through.
 ///
 ///  * Mechanism B - transparent payload casting: the topic <c>inventory:adjust</c> has three payload
-///    versions and ONE handler (<see cref="Handlers.AdjustInventoryMessageHandler"/>, on V3). Only the
-///    adjacent casters V1&lt;-&gt;V2 and V2&lt;-&gt;V3 are registered, so a V1 producer is upcast by CHAINING
-///    V1-&gt;V2-&gt;V3 (and the V3 response downcast V3-&gt;V2-&gt;V1) - there is deliberately no direct V1&lt;-&gt;V3 caster.
+///    versions and ONE handler (<see cref="Handlers.AdjustInventoryMessageHandler"/>, on V3), wired with a
+///    single <see cref="PayloadVersioningExtensions.AddPayloadVersioning"/> call. Only the adjacent UPcasts
+///    V1-&gt;V2 and V2-&gt;V3 are declared; the framework composes the missing V1-&gt;V3 pair by CHAINING, and
+///    synthesises the V3-&gt;V2-&gt;V1 downcasts - so a V1 producer is upcast V1-&gt;V2-&gt;V3 to reach the handler and
+///    the response is downcast back, with no direct V1&lt;-&gt;V3 caster and no hand-written downcasters.
 /// </summary>
 public class StartUp : BenzeneStartUp
 {
@@ -64,48 +65,38 @@ public class StartUp : BenzeneStartUp
                 // /inventory/adjust over API Gateway.
                 .AddMessageHandlers(typeof(StartUp).Assembly)
                 .AddHttpMessageHandlers()
-                // Register the framework-default request/response mappers the casting decorators wrap.
                 .AddContextItems();
 
-            RegisterInventoryCasters(x);
+            AddInventoryVersioning(x);
         });
     }
 
     /// <summary>
-    /// Mechanism B caster definitions for <c>inventory:adjust</c>. Registering ONLY the adjacent hops
-    /// (V1&lt;-&gt;V2 and V2&lt;-&gt;V3) is the whole point: <see cref="SchemaCastDefinitionsExpander"/> composes the
-    /// missing V1&lt;-&gt;V3 pairs by chaining, so a V1 request travels V1-&gt;V2-&gt;V3 to reach the single V3 handler
-    /// and its response travels V3-&gt;V2-&gt;V1 back. Each newer version's added field is seeded by the
-    /// upcaster, which is how a plain V1 request can prove, from its downcast V1 response, that both hops
-    /// ran. Enabling the decorators that USE these casters happens in <see cref="Configure"/>, after the
-    /// transports are wired - see there for why.
+    /// Mechanism B, in one call. Declaring only the adjacent UPcasts (V1-&gt;V2, V2-&gt;V3) is the whole point:
+    /// the framework composes the missing V1-&gt;V3 pair by chaining, and synthesises the reverse
+    /// V3-&gt;V2-&gt;V1 downcasts (each a field-drop). Each newer version's added field is seeded by its upcaster,
+    /// which is how a plain V1 request proves, from its downcast V1 response, that both hops ran. The caster
+    /// graph is validated here, at startup - a missing path throws now, not on the first message.
+    ///
+    /// Enabling casting for the four transports via <c>ForContext</c> happens here in
+    /// <c>ConfigureServices</c>: it is order-independent because the transports register their default
+    /// request mapper with <c>TryAdd</c>, so these decorators win regardless of when the transport is wired.
     /// </summary>
-    private static void RegisterInventoryCasters(IBenzeneServiceContainer x)
+    private static void AddInventoryVersioning(IBenzeneServiceContainer x)
     {
-        x.RegisterSchemaCastDefinitions(builder => builder
-                // Upcasts (request path): seed the field each version introduced.
-                .Add<InvV1.InventoryAdjustment, InvV2.InventoryAdjustment>(
-                    Topics.InventoryAdjust, Versions.V1, Versions.V2,
+        x.AddPayloadVersioning(versioning => versioning
+            .ForContext<BenzeneMessageContext>()
+            .ForContext<ApiGatewayContext>()
+            .ForContext<SqsMessageContext>()
+            .ForContext<SnsRecordContext>()
+            .Topic(Topics.InventoryAdjust, topic => topic
+                .Version<InvV1.InventoryAdjustment>(Versions.V1)
+                .Version<InvV2.InventoryAdjustment>(Versions.V2)
+                .Version<InvV3.InventoryAdjustment>(Versions.V3)
+                .Upcast<InvV1.InventoryAdjustment, InvV2.InventoryAdjustment>(
                     f => f.RegisterInitValue(o => o.WarehouseId, "wh-main"))
-                .Add<InvV2.InventoryAdjustment, InvV3.InventoryAdjustment>(
-                    Topics.InventoryAdjust, Versions.V2, Versions.V3,
-                    f => f.RegisterInitValue(o => o.Reason, "unspecified"))
-                // Downcasts (response path): drop the field the older version never had. Auto property-map.
-                .Add<InvV3.InventoryAdjustment, InvV2.InventoryAdjustment>(
-                    Topics.InventoryAdjust, Versions.V3, Versions.V2)
-                .Add<InvV2.InventoryAdjustment, InvV1.InventoryAdjustment>(
-                    Topics.InventoryAdjust, Versions.V2, Versions.V1))
-            .RegisterPayloadSchemaVersions(new[]
-            {
-                new PayloadSchemaVersions
-                {
-                    Topic = Topics.InventoryAdjust,
-                    // Every live version may arrive, and a response may be requested in any of them - the
-                    // expander composes every needed (from,to) pair from the four adjacent casters above.
-                    FromSchemas = new[] { Versions.V1, Versions.V2, Versions.V3 },
-                    ToSchemas = new[] { Versions.V1, Versions.V2, Versions.V3 }
-                }
-            });
+                .Upcast<InvV2.InventoryAdjustment, InvV3.InventoryAdjustment>(
+                    f => f.RegisterInitValue(o => o.Reason, "unspecified"))));
     }
 
     public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration)
@@ -130,19 +121,6 @@ public class StartUp : BenzeneStartUp
             aws.UseSns(sns => sns
                 .UseMessageHandlers(_ => { }));
         });
-
-        // Enable transparent payload casting for every transport - AFTER UseAwsLambda has wired them.
-        // Ordering matters: each AWS transport's own registration (AddApiGateway/AddSqs/AddSns) registers
-        // its IRequestMapper<TContext> with a last-wins AddScoped, so if the casting decorators were
-        // registered earlier (in ConfigureServices) the transport would overwrite them and the request
-        // upcast would silently not run. Registering them here, after the transports, makes the decorators
-        // the final (winning) registration for each context. A topic with no casters (order:create) is
-        // unaffected - the decorators pass it straight through.
-        app.Register(container => container
-            .UsePayloadVersionCasting<BenzeneMessageContext>()
-            .UsePayloadVersionCasting<ApiGatewayContext>()
-            .UsePayloadVersionCasting<SqsMessageContext>()
-            .UsePayloadVersionCasting<SnsRecordContext>());
     }
 }
 

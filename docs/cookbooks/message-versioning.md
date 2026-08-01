@@ -60,74 +60,50 @@ config is involved.
 ## Mechanism B — one handler, transparent casting (with chaining)
 
 Keep a single handler on the newest schema and let Benzene cast older payloads up to it, and the response
-back down to the caller's version. Three pieces:
-
-**1. Define a "caster" per adjacent version step.** A caster maps one version's type to the next.
-`RegisterSchemaCastDefinitions` takes a fluent builder; the auto overload maps same-named properties, and
-`RegisterInitValue` seeds a field the newer version introduced:
+back down to the caller's version — all from one call, `AddPayloadVersioning`:
 
 ```csharp
 services.UsingBenzene(x => x
     .AddBenzene()
     .AddMessageHandlers(typeof(StartUp).Assembly)
-    .AddContextItems()                       // the framework-default mappers the casters wrap
-    .RegisterSchemaCastDefinitions(b => b
-        // upcasts (request path): seed the field each version added
-        .Add<V1.InventoryAdjustment, V2.InventoryAdjustment>("inventory:adjust", "v1", "v2",
-            f => f.RegisterInitValue(o => o.WarehouseId, "wh-main"))
-        .Add<V2.InventoryAdjustment, V3.InventoryAdjustment>("inventory:adjust", "v2", "v3",
-            f => f.RegisterInitValue(o => o.Reason, "unspecified"))
-        // downcasts (response path): drop the field the older version never had (auto property-map)
-        .Add<V3.InventoryAdjustment, V2.InventoryAdjustment>("inventory:adjust", "v3", "v2")
-        .Add<V2.InventoryAdjustment, V1.InventoryAdjustment>("inventory:adjust", "v2", "v1"))
-    .RegisterPayloadSchemaVersions(new[]
-    {
-        new PayloadSchemaVersions
-        {
-            Topic = "inventory:adjust",
-            FromSchemas = new[] { "v1", "v2", "v3" }, // versions that may arrive
-            ToSchemas   = new[] { "v1", "v2", "v3" }, // versions a response may be requested in
-        }
-    }));
+    .AddContextItems()
+    .AddPayloadVersioning(versioning => versioning
+        // the transports this service should cast for
+        .ForContext<BenzeneMessageContext>()
+        .ForContext<ApiGatewayContext>()
+        .ForContext<SqsMessageContext>()
+        .ForContext<SnsRecordContext>()
+        .Topic("inventory:adjust", topic => topic
+            .Version<V1.InventoryAdjustment>("v1")
+            .Version<V2.InventoryAdjustment>("v2")
+            .Version<V3.InventoryAdjustment>("v3")
+            // only the UPcasts; seed the field each version introduced
+            .Upcast<V1.InventoryAdjustment, V2.InventoryAdjustment>(f => f.RegisterInitValue(o => o.WarehouseId, "wh-main"))
+            .Upcast<V2.InventoryAdjustment, V3.InventoryAdjustment>(f => f.RegisterInitValue(o => o.Reason, "unspecified")))));
 ```
 
-**2. Only register the *adjacent* hops.** Notice there is **no** direct `v1 ⇄ v3` caster. When a v1
-payload arrives for the v3 handler, `SchemaCastDefinitionsExpander` finds and composes the path
-**v1 → v2 → v3** (breadth-first) at startup — that's **caster chaining**. Each hop seeds its field, so the
-v3 handler sees a payload with both `WarehouseId` (from the v1→v2 hop) and `Reason` (from the v2→v3 hop)
-populated, even though the v1 producer sent neither. The response is downcast the same way, `v3 → v2 → v1`.
-A missing path fails fast at startup, not per message.
+That one call:
 
-**3. Enable the decorators — and mind the ordering.** `UsePayloadVersionCasting<TContext>()` wraps the
-per-context request/response mappers with the casting decorators. It must be the **last** registration of
-those mappers, so it wins:
+- **Declares each version once** (name ↔ CLR type) and derives the from/to schema sets from them, so there is nothing to keep in sync.
+- **Needs only the adjacent upcasts.** There is deliberately no direct `v1 → v3` caster: when a v1 payload arrives for the v3 handler, the framework composes the path **v1 → v2 → v3** (breadth-first) — that's **caster chaining** — and each hop seeds its field, so the handler sees a payload with both `WarehouseId` (from the v1→v2 hop) and `Reason` (from the v2→v3 hop) populated, even though the v1 producer sent neither.
+- **Synthesises the downcasts.** A field-drop `v3 → v2 → v1` downcaster is derived from each upcast, so old clients get responses in their own shape without you writing the reverse casters. Supply an explicit `.Downcast<TNew, TOld>(...)` only when the older version needs a field *re-derived* rather than simply dropped.
+- **Validates eagerly, at startup.** The caster graph is expanded when `AddPayloadVersioning` runs, so a missing conversion path — or a version declared with no reachable caster — throws *then*, at deploy time, not on the first message in production.
+- **Is order-independent.** It enables the casting decorators for each `ForContext` here in `ConfigureServices`; the AWS transports register their default request mapper with `TryAdd`, so these decorators win no matter when the transport is wired in `Configure`. There is no post-transport call to remember, and no way to half-wire it.
 
-```csharp
-services.UsingBenzene(x => x.UsePayloadVersionCasting<BenzeneMessageContext>());
-```
+<details>
+<summary>Lower-level API (advanced / non-standard hosts)</summary>
 
-> **Ordering gotcha on AWS event transports.** `AddApiGateway`/`AddSqs`/`AddSns` register their own
-> `IRequestMapper<TContext>` with a **last-wins** `AddScoped` when the transport is wired in `Configure`.
-> If you call `UsePayloadVersionCasting<ApiGatewayContext>()` earlier (in `ConfigureServices`) the
-> transport overwrites it and the request upcast silently doesn't run. Register the casting decorators
-> **after** the transports — e.g. via `app.Register(...)` right after `app.UseAwsLambda(...)`:
->
-> ```csharp
-> public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration)
-> {
->     app.UseAwsLambda(aws => { /* UseBenzeneMessage / UseApiGateway / UseSqs / UseSns */ });
->
->     app.Register(container => container
->         .UsePayloadVersionCasting<BenzeneMessageContext>()
->         .UsePayloadVersionCasting<ApiGatewayContext>()
->         .UsePayloadVersionCasting<SqsMessageContext>()
->         .UsePayloadVersionCasting<SnsRecordContext>());
-> }
-> ```
->
-> The BenzeneMessage envelope registers its mapper with `TryAdd`, so it isn't affected either way — but
-> registering everything after the transports is the rule that always works. See
-> [`examples/Versioning/StartUp.cs`](../../examples/Versioning/Benzene.Examples.Versioning/StartUp.cs).
+`AddPayloadVersioning` wraps three primitives you can use directly if you need to:
+`RegisterSchemaCastDefinitions` (register each `ISchemaCaster`), `RegisterPayloadSchemaVersions` (build the
+`ISchemaCasters` aggregate), and `UsePayloadVersionCasting<TContext>()` (wrap the per-context mappers).
+Two caveats the one-call API handles for you: `RegisterPayloadSchemaVersions` expands the caster graph
+**lazily**, so a missing path throws on the first message rather than at startup; and
+`UsePayloadVersionCasting<TContext>()` must be the **last** registration of `IRequestMapper<TContext>`, so
+on a host whose transport registers that mapper with a last-wins `AddScoped` you must call it *after* the
+transport (e.g. via `app.Register(...)` in `Configure`). Prefer `AddPayloadVersioning` unless you have a
+reason not to.
+
+</details>
 
 ### The "default version" for a cast topic
 

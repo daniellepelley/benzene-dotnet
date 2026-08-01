@@ -46,7 +46,7 @@ public static class DependencyInjectionExtensions
         services.AddScoped<IMessageHandlerResultSetter<SnsRecordContext>, SnsMessageHandlerResultSetter>();
         services.AddMediaFormatNegotiation<SnsRecordContext>();
         services
-            .AddScoped<IRequestMapper<SnsRecordContext>,
+            .TryAddScoped<IRequestMapper<SnsRecordContext>,
                 MultiSerializerOptionsRequestMapper<SnsRecordContext>>();
 
         services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.Sns));
