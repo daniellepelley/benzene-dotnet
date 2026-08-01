@@ -101,6 +101,7 @@ jobs:
         dotnet test examples/OpenTelemetry/Benzene.Examples.OpenTelemetry.Test/Benzene.Examples.OpenTelemetry.Test.csproj --no-build --verbosity normal
         dotnet test examples/Saga/Benzene.Example.Saga.Tests/Benzene.Example.Saga.Tests.csproj --no-build --verbosity normal
         dotnet test examples/Google/Benzene.Examples.Google.Tests/Benzene.Examples.Google.Tests.csproj --no-build --verbosity normal
+        dotnet test examples/Versioning/Benzene.Examples.Versioning.Tests/Benzene.Examples.Versioning.Tests.csproj --no-build --verbosity normal
 
   # Real-dependency tier for the AWS example: runs its SQS egress demo end-to-end against a real
   # LocalStack SQS queue (Benzene.Examples.Aws.Dev.Test). Mirrors the library-level

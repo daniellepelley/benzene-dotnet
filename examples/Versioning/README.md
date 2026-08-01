@@ -62,11 +62,12 @@ So [`StartUp`](Benzene.Examples.Versioning/StartUp.cs) registers the **caster de
 
 ## Run it
 
-The examples are not part of the main CI gate; build and test this one directly:
-
 ```bash
 dotnet test examples/Versioning/Benzene.Examples.Versioning.sln
 ```
+
+The example is also wired into CI's `examples-build` job (built as part of `Benzene.Examples.sln` and
+its tests run in the "Test in-memory examples" step), so a `src/` change that breaks it fails the build.
 
 Everything is in-memory — no AWS account, no localstack. `BenzeneTestHost.Create<StartUp>()` boots the
 real `StartUp` the same way a deployed Lambda would, and each test pushes a native transport event
