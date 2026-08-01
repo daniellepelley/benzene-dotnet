@@ -43,5 +43,10 @@ public class EventBridgeLambdaHandler : AwsLambdaMiddlewareRouter<EventBridgeEve
     protected override async Task HandleFunction(EventBridgeEvent request, AwsEventStreamContext context, IServiceResolverFactory serviceResolverFactory)
     {
         await _application.HandleAsync(request, serviceResolverFactory);
+
+        // Fire-and-forget, so no response body is written. The claim has to be explicit or the entry
+        // point raises "the event type has not been recognized" after the event was handled. See
+        // AwsEventStreamContext.MarkHandled.
+        context.MarkHandled();
     }
 }
