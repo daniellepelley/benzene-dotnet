@@ -50,7 +50,7 @@ public static class DependencyInjectionExtensions
         services.AddScoped<IMessageHandlerResultSetter<SqsConsumerMessageContext>, SqsConsumerMessageHandlerResultSetter>();
         services.AddMediaFormatNegotiation<SqsConsumerMessageContext>();
         services
-            .AddScoped<IRequestMapper<SqsConsumerMessageContext>,
+            .TryAddScoped<IRequestMapper<SqsConsumerMessageContext>,
                 MultiSerializerOptionsRequestMapper<SqsConsumerMessageContext>>();
 
         services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.Sqs));

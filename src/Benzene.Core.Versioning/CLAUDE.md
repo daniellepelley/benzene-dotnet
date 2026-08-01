@@ -63,18 +63,28 @@ branching, no separate version-to-type registry).
   request declared) and hands the inner mapper a shim result (`CastMessageHandlerResult` +
   `ResponseTypeOverrideDefinition`) so serialization/raw-content handling is reused, not
   reimplemented. Passes through for failures, no version, null/raw-string payloads, or no caster
-- `PayloadVersionCastingExtensions.UsePayloadVersionCasting<TContext>()` - opt-in DI wiring: wraps
-  that context's default request/response mappers with the decorators. **Call after the transport's
-  own registration** so the closed decorator registrations win. **Register both cast directions** -
-  an upcast V1->V2 does not give the response downcast V2->V1; the simplest way is to list every live
-  version in *both* `FromSchemas` and `ToSchemas` of the `PayloadSchemaVersions` you pass to
-  `RegisterPayloadSchemaVersions`, so the expander composes every pair. Wraps the framework-default
-  mappers only - a bespoke request mapper (e.g. gRPC's) is not wrapped on the request side
+- `PayloadVersioningExtensions.AddPayloadVersioning(...)` - **the recommended entry point**; one fluent
+  call that wraps the three primitives below and closes their footguns: declares each version once
+  (name <-> type, so `From/ToSchemas` are derived), needs only the upcasts (field-drop downcasts are
+  synthesised), **validates the caster graph eagerly at registration** (a missing path throws at startup,
+  not on the first message), and enables the decorators per `.ForContext<TContext>()`. Order-independent:
+  the AWS event-source transports register their default `IRequestMapper<TContext>` with `TryAdd`, so
+  these decorators win regardless of when the transport is wired
+- `PayloadVersionCastingExtensions.UsePayloadVersionCasting<TContext>()` - the low-level decorator wiring
+  `AddPayloadVersioning` calls per context: wraps that context's default request/response mappers with the
+  decorators. If used directly, **call after any transport that registers `IRequestMapper<TContext>` with
+  a last-wins `AddScoped`** so the decorator wins (the AWS event transports now use `TryAdd`, so this is
+  no longer needed for them; a bespoke host still might). **Register both cast directions** - an upcast
+  V1->V2 does not give the response downcast V2->V1; `AddPayloadVersioning` synthesises them, or list every
+  live version in *both* `FromSchemas` and `ToSchemas`. Wraps the framework-default mappers only - a
+  bespoke request mapper (e.g. gRPC's) is not wrapped on the request side
 - `SchemaCastersBuilder` / `SchemaCasterBuilder<TFrom, TTo>` - fluent registration
 - `SchemaCastDefinitionsExpander` - given the required from/to version pairs
   (`PayloadSchemaVersions`), reuses direct casters and BFS-composes multi-step chains (preferring
   a shortcut caster over a longer one when both exist - see above); throws at expansion time when
-  no path exists (fail fast at startup)
+  no path exists. Expansion runs **eagerly** (at registration/startup) via `AddPayloadVersioning`, or
+  **lazily** (first time `ISchemaCasters` resolves, i.e. the first message for the topic) via the
+  low-level `RegisterPayloadSchemaVersions` singleton factory
 - `SchemaCasterExtensions` - DI registration: `RegisterSchemaCastDefinitions` (register individual
   casters) + `RegisterPayloadSchemaVersions` (register the expanded `ISchemaCasters` singleton).
   Collects registered casters via `IServiceResolver.GetServices<ISchemaCaster>()`

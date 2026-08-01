@@ -51,7 +51,7 @@ public static class DependencyInjectionExtensions
         services.TryAddScoped<IMessageBodyBytesGetter<ApiGatewayContext>, ApiGatewayMessageBodyBytesGetter>();
         services.TryAddScoped<IMessageHandlerResultSetter<ApiGatewayContext>, ApiGatewayMessageHandlerResultSetter>();
         services
-            .AddScoped<IRequestMapper<ApiGatewayContext>,
+            .TryAddScoped<IRequestMapper<ApiGatewayContext>,
                 MultiSerializerOptionsRequestMapper<ApiGatewayContext>>();
         services.AddScoped<IRequestEnricher<ApiGatewayContext>, ApiGatewayRequestEnricher>();
         services.AddScoped<IHttpRequestAdapter<ApiGatewayContext>, ApiGatewayHttpRequestAdapter>();
@@ -93,7 +93,7 @@ public static class DependencyInjectionExtensions
         services.TryAddScoped<IMessageBodyBytesGetter<ApiGatewayV2Context>, ApiGatewayV2MessageBodyBytesGetter>();
         services.TryAddScoped<IMessageHandlerResultSetter<ApiGatewayV2Context>, ApiGatewayV2MessageHandlerResultSetter>();
         services
-            .AddScoped<IRequestMapper<ApiGatewayV2Context>,
+            .TryAddScoped<IRequestMapper<ApiGatewayV2Context>,
                 MultiSerializerOptionsRequestMapper<ApiGatewayV2Context>>();
         services.AddScoped<IRequestEnricher<ApiGatewayV2Context>, ApiGatewayV2RequestEnricher>();
         services.AddScoped<IHttpRequestAdapter<ApiGatewayV2Context>, ApiGatewayV2HttpRequestAdapter>();

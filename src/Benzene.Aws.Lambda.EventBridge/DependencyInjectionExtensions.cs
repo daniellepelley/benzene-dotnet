@@ -32,7 +32,7 @@ public static class DependencyInjectionExtensions
         services.AddScoped<IMessageHandlerResultSetter<EventBridgeContext>, EventBridgeMessageHandlerResultSetter>();
         services.AddMediaFormatNegotiation<EventBridgeContext>();
         services
-            .AddScoped<IRequestMapper<EventBridgeContext>,
+            .TryAddScoped<IRequestMapper<EventBridgeContext>,
                 MultiSerializerOptionsRequestMapper<EventBridgeContext>>();
 
         services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.EventBridge));

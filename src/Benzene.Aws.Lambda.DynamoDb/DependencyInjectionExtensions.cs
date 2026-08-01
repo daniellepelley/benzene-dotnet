@@ -36,7 +36,7 @@ public static class DependencyInjectionExtensions
         services.AddScoped<IMessageHandlerResultSetter<DynamoDbRecordContext>, DynamoDbMessageHandlerResultSetter>();
         services.AddMediaFormatNegotiation<DynamoDbRecordContext>();
         services
-            .AddScoped<IRequestMapper<DynamoDbRecordContext>,
+            .TryAddScoped<IRequestMapper<DynamoDbRecordContext>,
                 MultiSerializerOptionsRequestMapper<DynamoDbRecordContext>>();
 
         services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.DynamoDb));

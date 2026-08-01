@@ -27,7 +27,8 @@ the topic's default handler. Proven end to end over the envelope, SQS and SNS in
 
 Three payload versions of one type, but only **one** handler — written against the newest, V3. Older
 producers are cast to V3 transparently, and the response cast back to the caller's version. The point of
-the example is **chaining**: only the *adjacent* casters are registered —
+the example is **chaining**: only the *adjacent upcasts* are declared (the framework synthesises the
+field-drop downcasts) —
 
 ```
 V1 ⇄ V2 ⇄ V3          (there is deliberately NO direct V1 ⇄ V3 caster)
@@ -49,16 +50,17 @@ downcast — which is how a plain **V1** request/response can prove *both* hops 
 chain + V3→V2→V1 downcast over the envelope, API Gateway and SQS, plus the single-hop, no-cast, and
 no-version-bypass cases).
 
-## Wiring note — casting decorators go in `Configure`, after the transports
+## Wiring — one call
 
-Casting is enabled per transport with `UsePayloadVersionCasting<TContext>()`. Each AWS transport
-(`AddApiGateway`/`AddSqs`/`AddSns`) registers its own `IRequestMapper<TContext>` with a **last-wins**
-`AddScoped` when it is wired in `Configure`. If the casting decorators were registered earlier (in
-`ConfigureServices`) the transport would overwrite them and the request upcast would silently not run.
-So [`StartUp`](Benzene.Examples.Versioning/StartUp.cs) registers the **caster definitions** in
-`ConfigureServices` but enables the **decorators** via `app.Register(...)` in `Configure`, *after*
-`app.UseAwsLambda(...)` — the final, winning registration. (The BenzeneMessage envelope's mapper is
-`TryAdd`, so it isn't affected either way; the AWS event transports are.)
+[`StartUp`](Benzene.Examples.Versioning/StartUp.cs) wires all of Mechanism B with a single
+`AddPayloadVersioning(...)` in `ConfigureServices`: it declares the four transports (`ForContext<…>()`),
+the three versions, and just the two upcasts. From that it derives the schema sets, synthesises the
+downcasts, **validates the caster graph at startup** (a missing path throws at deploy, not on the first
+message), and enables the casting decorators for each transport. It's order-independent — the AWS
+transports register their default request mapper with `TryAdd`, so the decorators win wherever the
+transport is wired — so `Configure` just calls `app.UseAwsLambda(...)` with no follow-up casting call to
+remember. See the [Message Payload Versioning cookbook](../../docs/cookbooks/message-versioning.md) for the
+API in full, including the lower-level primitives `AddPayloadVersioning` wraps.
 
 ## Run it
 
