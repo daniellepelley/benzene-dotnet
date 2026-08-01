@@ -35,6 +35,15 @@ handler/logic in `Benzene.Examples.App` and wiring it from the hosts, rather tha
   `PublishOrderCreatedMessageHandler` + `DependenciesBuilder`'s `AddOutboundRouting(...)` wiring —
   see [docs/clients.md](../docs/clients.md#runnable-example-the-ingressegress-symmetry).
 - **`Azure/`** — Azure Functions host. Same egress demonstration as `Aws/` above, via Service Bus.
+- **`Versioning/`** — payload schema versioning demo ([docs/specification/versioning.md](../docs/specification/versioning.md)),
+  self-contained (does **not** use the shared `App` domain). One AWS Lambda `StartUp` over four transports
+  (BenzeneMessage envelope + API Gateway + SQS + SNS) dogfoods **both** axes: handler-version dispatch
+  (`order:create` has a v1 and a v2 handler, routed by `benzene-version`) and transparent payload casting
+  with **caster chaining** (`inventory:adjust` upcasts v1→v2→v3 through adjacent casters to a single v3
+  handler, and downcasts the response back). Has its own `README.md`, its own
+  `Benzene.Examples.Versioning.sln`, and an end-to-end test project driven by `BenzeneTestHost`. Note the
+  `StartUp` enables the casting decorators in `Configure` (via `app.Register(...)`) *after* the transports,
+  since each AWS transport's `AddScoped<IRequestMapper<TContext>>` would otherwise overwrite them.
 - **`Grpc/`** — gRPC host (+ a client project).
 - **`Kafka/`** — Kafka consumer and producer.
 - **`Google/`** — Google Cloud host (built on `Benzene.AspNet.Core` + `Benzene.Http`).
