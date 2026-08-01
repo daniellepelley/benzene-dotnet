@@ -24,7 +24,9 @@ Benzene is a hexagonal framework designed for services running in serverless env
   - [Privacy & Data Handling](privacy-and-data-handling.md)
 
 - **Benzene Specification (Draft)** — the language-neutral core Benzene itself is defined by, independent of the .NET implementation, so a future port to another language is a translation of a design rather than a rewrite. The spec is the cross-language source of truth and lives in the [`benzene`](https://github.com/daniellepelley/Benzene/tree/main/docs/specification) repo, not in this .NET repo:
-  - [Overview, Design Principles, Core Concepts, Wire Contracts, Transport Bindings, Mesh Contracts, Cloud Service Profile, Versioning, Porting Guide, and Conformance Fixtures](https://github.com/daniellepelley/Benzene/tree/main/docs/specification)
+  - [Read the specification](https://benzene.app/docs/specification/index.html) — overview, design
+    principles, core concepts, wire contracts, transport bindings, mesh contracts, the Cloud Service
+    Profile, versioning, the porting guide, and the conformance fixtures
 
 - **Service Mesh**
   - [Mesh UI](mesh-ui.md) — the two dashboards `Benzene.Mesh.Ui` ships: the Mesh Explorer (a published-artifact catalog viewer, primarily static-hosted) and the Fleet view (a live dashboard polling a running `Benzene.Mesh.Collector`)
