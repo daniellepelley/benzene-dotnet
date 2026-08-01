@@ -35,15 +35,15 @@ on top of it, plus a troubleshooting section for setup mistakes that don't show 
 
 ```bash
 dotnet add package Benzene.Testing --prerelease
-dotnet add package Benzene.Tools --prerelease
+dotnet add package Benzene.Aws.Lambda.Core.TestHelpers --prerelease
 dotnet add package Benzene.Aws.Lambda.ApiGateway.TestHelpers --prerelease
 dotnet add package Benzene.Aws.Lambda.Sqs.TestHelpers --prerelease
 dotnet add package xunit
 dotnet add package Moq
 ```
 
-`Benzene.Testing` provides `BenzeneTestHost`/`HttpBuilder`/`MessageBuilder`. `Benzene.Tools`
-provides `AwsLambdaBenzeneTestHost`, the wrapper that turns the built `IAwsLambdaEntryPoint` into
+`Benzene.Testing` provides `BenzeneTestHost`/`HttpBuilder`/`MessageBuilder`. `Benzene.Aws.Lambda.Core.TestHelpers`
+provides `AwsLambdaBenzeneTestHost` (and the `BuildAwsLambdaHost()` extension), the wrapper that turns the built `IAwsLambdaEntryPoint` into
 something you can send events into and get typed responses back from. The two `TestHelpers`
 packages add the `SendApiGatewayAsync`/`SendSqsAsync` extensions and the
 `AsApiGatewayRequest`/`AsSqs` builder conversions for their respective event sources.
@@ -54,6 +54,7 @@ A small order-processing function: `POST /orders` charges a customer through a p
 port and returns the created order; an `orders:shipped` SQS message notifies the customer's
 shipping notifier port. Both handlers depend on interfaces (ports) that are easy to mock in tests.
 
+<!-- compile: order-function-suite -->
 ```csharp
 // Handlers.cs
 using Benzene.Abstractions.MessageHandlers;
@@ -61,6 +62,7 @@ using Benzene.Abstractions.Results;
 using Benzene.Core.MessageHandlers;
 using Benzene.Http;
 using Benzene.Results;
+using Void = Benzene.Abstractions.Results.Void;   // disambiguate from System.Void under implicit usings
 
 public interface IPaymentGateway
 {
@@ -136,13 +138,16 @@ public class OrderShippedMessageHandler : IMessageHandler<OrderShippedEvent, Voi
 }
 ```
 
+<!-- compile: order-function-suite -->
 ```csharp
 // StartUp.cs
 using Benzene.Abstractions.Hosting;
 using Benzene.Aws.Lambda.ApiGateway;
 using Benzene.Aws.Lambda.Core;
 using Benzene.Aws.Lambda.Sqs;
+using Benzene.Core.MessageHandlers;
 using Benzene.Core.MessageHandlers.DI;
+using Benzene.Http;
 using Benzene.Microsoft.Dependencies;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -180,8 +185,31 @@ public class StartUp : BenzeneStartUp
 function handling multiple event sources, exactly as described in
 [Getting Started: Supported Event Sources](../getting-started-aws.md#supported-event-sources).
 
+`StartUp` wires the two ports to their production adapters. Their bodies aren't the point of this
+cookbook — the tests below replace both with mocks — so they're stubbed here just enough to make the
+function a complete, buildable project:
+
+<!-- compile: order-function-suite -->
+```csharp
+// Adapters.cs
+using Benzene.Abstractions.Results;
+
+public class StripePaymentGateway : IPaymentGateway
+{
+    public Task<IBenzeneResult<string>> ChargeAsync(string customerId, int amountInCents) =>
+        throw new NotImplementedException("Calls the Stripe SDK in production.");
+}
+
+public class EmailShippingNotifier : IShippingNotifier
+{
+    public Task NotifyCustomerAsync(Guid orderId, string trackingNumber) =>
+        throw new NotImplementedException("Calls your email provider in production.");
+}
+```
+
 ## The Test Suite
 
+<!-- compile: order-function-suite -->
 ```csharp
 // OrderFunctionTests.cs
 using Amazon.Lambda.APIGatewayEvents;
@@ -190,7 +218,7 @@ using Benzene.Aws.Lambda.ApiGateway.TestHelpers;
 using Benzene.Aws.Lambda.Sqs.TestHelpers;
 using Benzene.Results;
 using Benzene.Testing;
-using Benzene.Tools.Aws;
+using Benzene.Aws.Lambda.Core.TestHelpers;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;

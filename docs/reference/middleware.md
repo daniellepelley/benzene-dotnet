@@ -181,8 +181,10 @@ exponential backoff.
 | `numberOfRetries` | `3` | Maximum retry attempts. |
 | `initialDelay` | `null` | Delay before the first retry. |
 | `backoffFactor` | `2.0` | Multiplier applied to the delay each attempt. |
+| `maxDelay` | `null` | Caps the computed backoff delay. |
 | `shouldRetry` | `null` | Predicate on the exception — retry only when it returns true. |
 | `shouldRetryContext` | `null` | Predicate on the context — retry based on the message/result. |
+| `jitter` | `null` | Optional per-delay jitter applied to the computed delay. |
 | `delay` | `null` | Custom delay implementation (override the default `Task.Delay`). |
 
 ### `UseHealthCheck(...)`
@@ -318,7 +320,7 @@ For sending messages *out* to other services, configured on a client pipeline
 | Step | Package | Sends via |
 |---|---|---|
 | `UseHttpClient()` / `UseHttp(...)` | `Benzene.Client.Http` | An outbound HTTP request. |
-| `UseSqsClient()` / `UseSqs(...)` | `Benzene.Aws.Sqs` | An SQS queue. |
+| `UseSqsClient()` / `UseSqs(...)` | `Benzene.Clients.Aws.Sqs` | An SQS queue. |
 | `UseSnsClient()` / `UseSns(...)` | `Benzene.Clients.Aws.Sns` | An SNS topic. |
 | `UseAwsLambdaClient()` / `UseAwsLambda(...)` | `Benzene.Clients.Aws.Lambda` | A direct AWS Lambda invoke. |
 | `UseKafkaClient()` / `UseKafka(...)` | `Benzene.Kafka.Core` | A Kafka topic (including Event Hubs' Kafka endpoint). |

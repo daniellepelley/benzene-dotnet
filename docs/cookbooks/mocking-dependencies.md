@@ -50,8 +50,9 @@ public class GetOrderHandler : IMessageHandler<GetOrderMessage, OrderDto>
 ### 2. Build a test host with the dependency mocked
 
 ```csharp
-using Benzene.Tools;      // AwsLambdaBenzeneTestHost
-using Benzene.Testing;    // BenzeneTestHost, MessageBuilder
+using Benzene.Aws.Lambda.Core.TestHelpers;         // AwsLambdaBenzeneTestHost, BuildAwsLambdaHost
+using Benzene.Core.MessageHandlers.TestHelpers;    // SendBenzeneMessageAsync
+using Benzene.Testing;                             // BenzeneTestHost, MessageBuilder
 using Moq;
 using Xunit;
 

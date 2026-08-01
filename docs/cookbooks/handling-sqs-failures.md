@@ -147,8 +147,10 @@ public static IMiddlewarePipelineBuilder<TContext> UseRetry<TContext>(
     int numberOfRetries = 3,
     TimeSpan? initialDelay = null,       // defaults to 200ms
     double backoffFactor = 2.0,
+    TimeSpan? maxDelay = null,           // caps the computed backoff delay
     Func<Exception, bool>? shouldRetry = null,          // defaults to "retry everything except OperationCanceledException"
     Func<TContext, bool>? shouldRetryContext = null,     // defaults to "never retry a non-throwing result"
+    Func<TimeSpan, TimeSpan>? jitter = null,             // optional per-delay jitter
     Func<TimeSpan, Task>? delay = null)                  // defaults to Task.Delay; override in tests
 ```
 
