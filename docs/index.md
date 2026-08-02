@@ -67,7 +67,7 @@ Benzene is a hexagonal framework designed for services running in serverless env
 - **Code Generation**
   - [Terraform](terraform.md)
   - [Client SDKs](client-sdks.md)
-  - [Spec Endpoint (OpenAPI / AsyncAPI / Benzene format)](spec.md) — a runtime feature of a Benzene service, not to be confused with the [Benzene Specification](specification/README.md) above: this is a `UseSpec` middleware that serves *your* service's own schema
+  - [Spec Endpoint (OpenAPI / AsyncAPI / Benzene format)](spec.md) — a runtime feature of a Benzene service, not to be confused with the [Benzene Specification](https://benzene.app/docs/specification/index.html) above: this is a `UseSpec` middleware that serves *your* service's own schema
   - [Spec UI](spec-ui.md) — a Swagger-UI-style browser for the spec endpoint above
 
 - **Reference**

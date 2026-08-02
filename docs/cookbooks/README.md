@@ -51,7 +51,7 @@ Cookbooks are step-by-step guides that show you how to solve specific problems w
 - [Mocking External Dependencies](mocking-dependencies.md) - Test message handlers in isolation
 - [Contract Testing (schema compatibility)](contract-testing.md) - Catch breaking contract changes before they reach consumers, at runtime (schema-hash drift check) and in CI (backward-compatibility gate)
 - [Schema Registry Integration](schema-registry.md) - Register event payload schemas centrally, frame messages with the Confluent wire format for cross-consumer interop, and gate deploys with a byte-identical compatibility check (structural evolution needs a real registry server or your own checker; with copy-paste Confluent / Azure adapters)
-- [Contract Testing (conformance)](../specification/porting-guide.md) - Verify message contracts between services via the conformance-testing approach
+- [Contract Testing (conformance)](https://benzene.app/docs/specification/porting-guide.html) - Verify message contracts between services via the conformance-testing approach
 
 ### Orchestration
 - [Sagas (distributed transactions that roll back cleanly)](sagas.md) - Run a multi-service operation as all-or-nothing: each step carries a compensation, and any failure rolls the whole thing back in reverse (LIFO) order, leaving no orphaned records
