@@ -43,9 +43,8 @@ duplicates remain observable:
 
 ```csharp
 app
-    .UseProcessResponse()
     .UseIdempotency<ServiceBusMessageContext>()   // <-- de-duplicate here
-    .UseMessageHandlers(x => x.AddHandlers());
+    .UseMessageHandlers();
 ```
 
 That's it. The first delivery of each message is processed; redeliveries of the same key

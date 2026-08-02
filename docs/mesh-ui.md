@@ -1,7 +1,7 @@
 # Mesh UI
 
 **`Benzene.Mesh.Ui`** ships a self-contained, dependency-free HTML viewer over Benzene's
-[service mesh](specification/mesh.md) — the same visual family as [Spec UI](spec-ui.md), styled
+[service mesh](https://github.com/daniellepelley/Benzene/blob/main/docs/specification/mesh.md) — the same visual family as [Spec UI](spec-ui.md), styled
 with the same design tokens, but one level up: catalog-of-services instead of catalog-of-topics.
 
 The **Mesh Explorer** (`mesh-ui.html`) is a published mesh **artifact snapshot** — service health,
@@ -140,9 +140,9 @@ var html = MeshUiPage.GetHtml("https://cdn.example.com/mesh/manifest.json");
 
 ## The live Fleet plane
 
-When you point the page at a live [`Benzene.Mesh.Collector`](specification/mesh.md), the catalog is
+When you point the page at a live [`Benzene.Mesh.Collector`](https://github.com/daniellepelley/Benzene/blob/main/docs/specification/mesh.md), the catalog is
 enriched with *derived* fleet data — from registered descriptors, heartbeats, and trace events the
-collector has actually ingested, never hand-declared, per [mesh.md §2–§4](specification/mesh.md):
+collector has actually ingested, never hand-declared, per [mesh.md §2–§4](https://github.com/daniellepelley/Benzene/blob/main/docs/specification/mesh.md):
 
 - a **Fleet landing view** (five summary tiles — services, topics, invocations, errors, unhealthy —
   a live Services table with health/reduced-feed markers, a topic catalog with observed consumers,
@@ -213,7 +213,7 @@ unfiltered behavior exactly.
 > Log Analytics (billed on data scanned) — a 7-day range raises the App-Insights query cost. The X-Ray
 > recent-flows scan is window-sensitive on both.
 
-This is the [Cloud Service Profile](specification/cloud-service-profile.md)'s intended visibility
+This is the [Cloud Service Profile](https://github.com/daniellepelley/Benzene/blob/main/docs/specification/cloud-service-profile.md)'s intended visibility
 surface (its R6 requirement provisions exactly the feeds the Fleet plane reads);
-[mesh.md §9](specification/mesh.md#9-relationship-to-the-existing-net-mesh-packages-informative)
+[mesh.md §9](https://github.com/daniellepelley/Benzene/blob/main/docs/specification/mesh.md#9-relationship-to-the-existing-net-mesh-packages-informative)
 covers how the artifact and collector pipelines converge.

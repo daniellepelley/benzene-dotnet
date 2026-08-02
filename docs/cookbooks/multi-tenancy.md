@@ -158,7 +158,7 @@ app
     .UseOAuth2Bearer(oauth2Options)
     .UseTenant<MyContext>((_, r) => r.GetService<AuthenticationHolder>().Principal?.FindFirst("tid")?.Value)
     .RequireTenant<MyContext>()
-    .UseMessageHandlers(x => x.AddHandlers());
+    .UseMessageHandlers();
 ```
 
 ## Step 4 — use the tenant to isolate
