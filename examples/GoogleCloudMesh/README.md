@@ -74,6 +74,21 @@ with `gcloud functions deploy` (Gen2, buildpack source deploy from the repo root
 project references resolve), which also creates each Pub/Sub function's trigger subscription. Run it
 manually with a project id and a Terraform-state bucket.
 
+## Teardown
+
+A standing deploy bills while it merely exists — eight Gen2 Cloud Functions (each a Cloud Run service),
+the Pub/Sub inbox topics, the mesh GCS bucket, a Cloud Scheduler job, and the runtime service account.
+Tear it down between sessions and a redeploy is one workflow run.
+
+Run the **Destroy Google Cloud Mesh Example** workflow
+(`.github/workflows/destroy-google-cloud-mesh-example.yml`) — the counterpart of the deploy. Type
+`DESTROY` to confirm and pass the same `project` / `region` / `state_bucket` you deployed with. Because
+the functions are created **outside** Terraform (`gcloud functions deploy`), the workflow first deletes
+all eight by name via `gcloud` (removing each function's Cloud Run service and Eventarc trigger), *then*
+runs `terraform destroy` against the same remote GCS state for the topics, bucket, service account, IAM
+and scheduler. Optionally tick **Also delete the Terraform state bucket** for a full cleanup; by default
+the state bucket is kept so a redeploy stays cheap.
+
 ## Prerequisites: bootstrap the API-enablement APIs (one-time)
 
 The workflow enables every API it needs — but it can't enable the two APIs that *enablement itself*
