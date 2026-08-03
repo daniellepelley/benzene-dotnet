@@ -365,8 +365,8 @@ cost to zero, and a redeploy is one workflow run.
 
 **Via GitHub Actions (recommended):** run the **Destroy AWS Mesh Example** workflow
 (`.github/workflows/destroy-aws-mesh-example.yml`) — the counterpart of the deploy workflow. It uses
-the same remote S3 state, so it destroys exactly what the deploy created. Type `DESTROY` to confirm,
-pick the region you deployed to, and optionally tick **Also delete the Terraform state bucket** for a
+the same remote S3 state, so it destroys exactly what the deploy created. Pick the region you deployed
+to, and optionally tick **Also delete the Terraform state bucket** for a
 full cleanup. Beyond `terraform destroy` it also empties the artifacts bucket first (S3 refuses to
 delete a non-empty bucket) and deletes the `/aws/lambda/benzene-mesh-*` log groups Lambda creates
 implicitly — neither is a Terraform resource, and both would otherwise linger and keep billing.

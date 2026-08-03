@@ -81,8 +81,8 @@ the Pub/Sub inbox topics, the mesh GCS bucket, a Cloud Scheduler job, and the ru
 Tear it down between sessions and a redeploy is one workflow run.
 
 Run the **Destroy Google Cloud Mesh Example** workflow
-(`.github/workflows/destroy-google-cloud-mesh-example.yml`) — the counterpart of the deploy. Type
-`DESTROY` to confirm and pass the same `project` / `region` / `state_bucket` you deployed with. Because
+(`.github/workflows/destroy-google-cloud-mesh-example.yml`) — the counterpart of the deploy. Pass the
+same `project` / `region` / `state_bucket` you deployed with. Because
 the functions are created **outside** Terraform (`gcloud functions deploy`), the workflow first deletes
 all eight by name via `gcloud` (removing each function's Cloud Run service and Eventarc trigger), *then*
 runs `terraform destroy` against the same remote GCS state for the topics, bucket, service account, IAM

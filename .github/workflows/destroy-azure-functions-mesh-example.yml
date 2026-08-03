@@ -26,10 +26,6 @@ on:
         description: "Storage account used at deploy (its <name>tfstate account holds the remote state)"
         required: true
         default: "benzenefnmesh"
-      confirm:
-        description: "Type DESTROY to confirm — this deletes the deployed AzureFunctionsMesh stack"
-        required: true
-        default: ""
       delete_resource_group:
         description: "Also delete the resource group benzene-fnmesh-rg (full cleanup; removes the Terraform state account too)"
         type: boolean
@@ -49,14 +45,6 @@ jobs:
     # environment for its secrets to be exposed (matching the deploy workflow).
     environment: test
     steps:
-      # Fail before touching Azure if the confirmation doesn't match — this job is destructive.
-      - name: Check confirmation
-        run: |
-          if [ "${{ inputs.confirm }}" != "DESTROY" ]; then
-            echo "::error::Confirmation mismatch: type DESTROY (exactly) to run this workflow."
-            exit 1
-          fi
-
       - uses: actions/checkout@v4
 
       - uses: azure/login@v2

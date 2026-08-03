@@ -58,8 +58,8 @@ sessions and a redeploy is one workflow run.
 
 Run the **Destroy Azure Mesh Example** workflow
 (`.github/workflows/destroy-azure-mesh-example.yml`) — the counterpart of the deploy. It uses the same
-remote azurerm state, so it destroys exactly what the deploy created. Type `DESTROY` to confirm, pass the
-same `location` / `acr_name` / `storage_account` you deployed with, and optionally tick **Also delete the
+remote azurerm state, so it destroys exactly what the deploy created. Pass the same `location` /
+`acr_name` / `storage_account` you deployed with, and optionally tick **Also delete the
 resource group** for a full cleanup (that removes `benzene-mesh-rg` and, with it, the tiny Terraform
 state account). By default the resource group and state account are kept, so a redeploy stays cheap.
 
