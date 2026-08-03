@@ -50,6 +50,21 @@ Storage**.
    - `service_spec_ui_urls` — each service's Spec UI (with its **Benzene utilities** panel).
    - `mesh_refresh_url` — `POST` to force a discovery+aggregation pass (returns `201 {"discovered":3}`).
 
+## Teardown
+
+A standing deploy bills while it merely exists — the App Service plan, the three service Web Apps + the
+mesh Web App, the Container Registry, and the storage account all cost money idle. Tear it down between
+sessions and a redeploy is one workflow run.
+
+Run the **Destroy Azure Mesh Example** workflow
+(`.github/workflows/destroy-azure-mesh-example.yml`) — the counterpart of the deploy. It uses the same
+remote azurerm state, so it destroys exactly what the deploy created. Type `DESTROY` to confirm, pass the
+same `location` / `acr_name` / `storage_account` you deployed with, and optionally tick **Also delete the
+resource group** for a full cleanup (that removes `benzene-mesh-rg` and, with it, the tiny Terraform
+state account). By default the resource group and state account are kept, so a redeploy stays cheap.
+
+Locally: `cd examples/AzureMesh/deploy && terraform destroy` (against the same remote state).
+
 ## OpenTelemetry
 
 The mesh Web App wires **full OpenTelemetry** (`AddOpenTelemetry` + Benzene traces/metrics over OTLP,

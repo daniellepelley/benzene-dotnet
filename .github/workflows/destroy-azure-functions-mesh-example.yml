@@ -1,0 +1,114 @@
+name: Destroy Azure Functions Mesh Example
+
+# Manual-only teardown for examples/AzureFunctionsMesh — the counterpart of "Deploy Azure Functions
+# Mesh Example".
+#
+# WHY THIS EXISTS: the deployed demo bills while it merely exists — seven Function Apps plus the
+# Service Bus namespace, Event Hub, Event Grid topic/subscriptions, storage account and identity that
+# back them. Tear the stack down when you are done demoing and redeploy in minutes.
+#
+# Uses the SAME remote azurerm state as the deploy workflow, so it destroys exactly what that created.
+# The resource group (benzene-fnmesh-rg) and the Terraform state storage account live OUTSIDE Terraform
+# (the config reads the RG as a data source), so a plain `terraform destroy` removes the app resources
+# but keeps the tiny state account. The Event Grid subscriptions are left at their default
+# wire_eventgrid_subscriptions=false: that empties their for_each (so their live function-key data
+# source is NOT read during the destroy plan, which would otherwise fail against a stopped app) while
+# `terraform destroy` still removes the instances already recorded in state. "Also delete the resource
+# group" opts into removing the RG (and the state account) for a full, from-scratch cleanup.
+on:
+  workflow_dispatch:
+    inputs:
+      location:
+        description: "Azure region (must match the region the stack was deployed to)"
+        required: true
+        default: "westeurope"
+      storage_account:
+        description: "Storage account used at deploy (its <name>tfstate account holds the remote state)"
+        required: true
+        default: "benzenefnmesh"
+      confirm:
+        description: "Type DESTROY to confirm — this deletes the deployed AzureFunctionsMesh stack"
+        required: true
+        default: ""
+      delete_resource_group:
+        description: "Also delete the resource group benzene-fnmesh-rg (full cleanup; removes the Terraform state account too)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  RG: benzene-fnmesh-rg
+  PROJECT: benzene-fnmesh
+
+jobs:
+  destroy:
+    runs-on: ubuntu-latest
+    # The AZURE_CREDENTIALS secret lives in the "test" GitHub Environment; a job must declare the
+    # environment for its secrets to be exposed (matching the deploy workflow).
+    environment: test
+    steps:
+      # Fail before touching Azure if the confirmation doesn't match — this job is destructive.
+      - name: Check confirmation
+        run: |
+          if [ "${{ inputs.confirm }}" != "DESTROY" ]; then
+            echo "::error::Confirmation mismatch: type DESTROY (exactly) to run this workflow."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - uses: hashicorp/setup-terraform@v3
+
+      # Point at the same remote state the deploy wrote. If the state storage account is missing there
+      # is nothing deployed (or it was deployed elsewhere) — say so plainly rather than creating one.
+      - name: Terraform init (remote azurerm state)
+        working-directory: examples/AzureFunctionsMesh/deploy
+        env:
+          STATE_SA: ${{ inputs.storage_account }}tfstate
+        run: |
+          if ! az storage account show -g "$RG" -n "$STATE_SA" >/dev/null 2>&1; then
+            echo "::error::No Terraform state account ($STATE_SA) in resource group $RG — nothing to destroy here."
+            echo "::error::Check the storage_account input matches the deploy, and that you're on the right subscription."
+            exit 1
+          fi
+          terraform init -input=false \
+            -backend-config="resource_group_name=$RG" \
+            -backend-config="storage_account_name=$STATE_SA" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=azure-functions-mesh.tfstate"
+
+      # Destroy exactly what deploy created. Leaving wire_eventgrid_subscriptions at its default (false)
+      # keeps the host-keys data source out of the destroy plan (see header) — the Event Grid
+      # subscriptions still get destroyed from state along with everything else.
+      - name: Terraform destroy
+        working-directory: examples/AzureFunctionsMesh/deploy
+        run: |
+          terraform destroy -input=false -auto-approve \
+            -var "location=${{ inputs.location }}" \
+            -var "project=$PROJECT" \
+            -var "resource_group=$RG" \
+            -var "storage_account=${{ inputs.storage_account }}"
+
+      # Full cleanup: delete the resource group itself (removes the state account and anything Terraform
+      # didn't track). --no-wait returns immediately; Azure completes the delete in the background.
+      - name: Delete the resource group
+        if: ${{ inputs.delete_resource_group }}
+        continue-on-error: true
+        run: |
+          echo "Deleting resource group $RG (this removes the Terraform state account too)"
+          az group delete -n "$RG" --yes --no-wait || true
+
+      - name: Confirm teardown
+        run: |
+          echo "AzureFunctionsMesh stack destroyed in ${{ inputs.location }}."
+          if [ "${{ inputs.delete_resource_group }}" = "true" ]; then
+            echo "Resource group $RG deletion was requested (completing in the background)."
+          else
+            echo "Kept resource group $RG and the Terraform state account for a cheap redeploy."
+          fi

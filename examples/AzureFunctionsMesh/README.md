@@ -140,6 +140,24 @@ uses; the mesh is scoped via `MESH_SUBSCRIPTION_ID` / `MESH_RESOURCE_GROUP`. To 
 `terraform apply`, publish each project (`func azure functionapp publish <name>`), then
 `terraform apply -var wire_eventgrid_subscriptions=true`.
 
+## Teardown
+
+A standing deploy bills while it merely exists — seven Function Apps plus the Service Bus namespace,
+Event Hub, Event Grid topic/subscriptions, storage account and identity. Tear it down between sessions
+and a redeploy is one workflow run.
+
+Run the **Destroy Azure Functions Mesh Example** workflow
+(`.github/workflows/destroy-azure-functions-mesh-example.yml`) — the counterpart of the deploy. It uses
+the same remote azurerm state, so it destroys exactly what the deploy created. Type `DESTROY` to confirm,
+pass the same `location` / `storage_account` you deployed with, and optionally tick **Also delete the
+resource group** for a full cleanup (that removes `benzene-fnmesh-rg` and, with it, the Terraform state
+account). It leaves `wire_eventgrid_subscriptions` at its default `false`, which keeps the live
+function-key data source out of the destroy plan (it would otherwise fail against a stopped app) while
+still destroying the Event Grid subscriptions already recorded in state.
+
+Locally: `cd examples/AzureFunctionsMesh/deploy && terraform destroy -var "storage_account=<name>"`
+(against the same remote state).
+
 ## Known first-deploy iteration points
 
 Live Azure behaviour is only verifiable on a real deploy (as with every mesh example); the likely
