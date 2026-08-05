@@ -43,7 +43,8 @@ public class CreateOrderMessageValidatorTest
             Name = null,
             Status = null
         });
-        result.ShouldNotHaveValidationErrorFor(x => x.Name);
+        // Both are required on create (NotEmpty) — a null Name errors just like a null Status.
+        result.ShouldHaveValidationErrorFor(x => x.Name);
         result.ShouldHaveValidationErrorFor(x => x.Status);
     }
 }
