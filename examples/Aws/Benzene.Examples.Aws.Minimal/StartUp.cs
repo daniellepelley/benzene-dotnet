@@ -35,15 +35,14 @@ public class StartUp : BenzeneStartUp
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
-        // The stand-in "data store" the handler records to, so a fire-and-forget SNS/SQS/EventBridge
-        // test can still observe that the handler ran.
+        // Only the app's own service - no Benzene registration needed here. The stand-in "data store"
+        // the handler records to, so a fire-and-forget SNS/SQS/EventBridge test can still observe that
+        // the handler ran.
+        //
+        // Everything Benzene is wired implicitly in Configure: each transport registers its own mappers
+        // (UseApiGateway, UseSns, ..., UseBenzeneMessage), and UseMessageHandlers() discovers the
+        // handlers and pulls in the core services. The host provides logging.
         services.AddSingleton<IProcessedLog, InMemoryProcessedLog>();
-
-        // The only Benzene registration this host needs up front: the BenzeneMessage envelope's mappers.
-        // Everything else is registered implicitly in Configure - UseMessageHandlers() discovers the
-        // handlers and pulls in the core services (AddBenzene) + context mappers, and UseApiGateway wires
-        // HTTP routing. (UsingBenzene also registers logging.)
-        services.UsingBenzene(x => x.AddBenzeneMessage());
     }
 
     public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration)

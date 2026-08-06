@@ -38,6 +38,10 @@ public static class Extensions
     /// </remarks>
     public static IMiddlewarePipelineBuilder<AwsEventStreamContext> UseBenzeneMessage(this IMiddlewarePipelineBuilder<AwsEventStreamContext> app, IMiddlewarePipelineBuilder<BenzeneMessageContext> builder)
     {
+        // Self-register the envelope's context mappers, exactly like the inline overload above, so a
+        // StartUp that mounts a pre-built BenzeneMessage pipeline doesn't also have to call
+        // AddBenzeneMessage() in ConfigureServices for the mappers to resolve.
+        app.Register(x => x.AddBenzeneMessage());
         var pipeline = builder.Build();
         return app.Use(resolver => new BenzeneMessageLambdaHandler(pipeline, resolver));
     }

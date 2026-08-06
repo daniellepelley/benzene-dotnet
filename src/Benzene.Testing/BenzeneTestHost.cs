@@ -88,6 +88,11 @@ public class BenzeneTestHostBuilder<TStartUp> where TStartUp : BenzeneStartUp, n
             .Build();
 
         var services = new ServiceCollection();
+        // Match the real hosts (AwsLambdaHost, the ASP.NET/generic-host bootstrap, and UsingBenzene all
+        // call AddLogging): register logging up front so a StartUp that relies purely on the transports +
+        // UseMessageHandlers to wire Benzene - i.e. one whose ConfigureServices adds no Benzene services
+        // itself - resolves MessageHandlerFactory's ILoggerFactory here exactly as it would in production.
+        services.AddLogging();
         startUp.ConfigureServices(services, configuration);
 
         foreach (var action in _serviceActions)
