@@ -159,10 +159,11 @@ public class StartUp : BenzeneStartUp
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
-        services.UsingBenzene(x => x
-            .AddBenzene()
-            .AddBenzeneMessage()
-            .AddMessageHandlers(typeof(HeartbeatMessageHandler).Assembly));
+        // The BenzeneMessage envelope mappers are the one thing no transport self-registers here,
+        // since Configure builds the BenzeneMessageContext pipeline by hand rather than via a
+        // Use...() transport. UseMessageHandlers() in Configure discovers your handlers and pulls in
+        // the rest of the core pipeline, so there's no AddBenzene()/AddMessageHandlers() to add.
+        services.UsingBenzene(x => x.AddBenzeneMessage());
     }
 
     public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration)
@@ -242,8 +243,7 @@ inline `ConfigureServices`/`Configure` actions, without `IHostBuilder`:
 
 ```csharp
 var worker = new InlineSelfHostedStartUp()
-    .ConfigureServices(services => services.UsingBenzene(x => x.AddBenzene().AddBenzeneMessage()
-        .AddMessageHandlers(typeof(HeartbeatMessageHandler).Assembly)))
+    .ConfigureServices(services => services.UsingBenzene(x => x.AddBenzeneMessage()))
     .Configure(app =>
     {
         var pipeline = app.Create<BenzeneMessageContext>().UseMessageHandlers().Build();

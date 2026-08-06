@@ -89,7 +89,6 @@ worker-specific builder that `UseWorker(...)` hands you — so you wire it up in
 ```csharp
 using Benzene.Abstractions.Hosting;
 using Benzene.Core.MessageHandlers;
-using Benzene.Core.MessageHandlers.DI;
 using Benzene.Microsoft.Dependencies;
 using Benzene.RabbitMq;
 using Benzene.SelfHost;
@@ -108,9 +107,8 @@ public class StartUp : BenzeneStartUp
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
-        services.UsingBenzene(x => x
-            .AddBenzene()
-            .AddMessageHandlers(typeof(OrderCreatedMessageHandler).Assembly));
+        // Nothing Benzene-specific to register - register your own services here. UseRabbitMq and
+        // UseMessageHandlers in Configure wire up the RabbitMQ mappers and discover your handlers.
     }
 
     public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration)
@@ -137,7 +135,9 @@ public class StartUp : BenzeneStartUp
 ```
 
 - `UseRabbitMq(...)` registers the topic/version/headers/body getters that adapt a RabbitMQ delivery
-  to the message-handler pipeline (`AddRabbitMq()` is called for you) and adds the worker.
+  to the message-handler pipeline (`AddRabbitMq()` is called for you) and adds the worker — so
+  `ConfigureServices` needs no Benzene registration; `UseMessageHandlers()` discovers your handlers
+  and pulls in the core pipeline.
 - `RabbitMqConnectionFactory` wraps a `ConnectionFactory` — you own how the connection is built (host,
   credentials, virtual host, TLS, automatic recovery, which is on by the SDK's default); the worker
   owns its channel and disposes both on stop. For a custom connection strategy, implement

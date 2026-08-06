@@ -123,8 +123,6 @@ Configure the HTTP pipeline via `UseHttp`:
 using Benzene.Abstractions.Hosting;
 using Benzene.Azure.Function.AspNet;
 using Benzene.Core.MessageHandlers;
-using Benzene.Core.MessageHandlers.DI;
-using Benzene.Http;
 using Benzene.Microsoft.Dependencies;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -141,10 +139,8 @@ public class StartUp : BenzeneStartUp
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
-        services.UsingBenzene(x => x
-            .AddBenzene()
-            .AddMessageHandlers(typeof(HelloWorldMessageHandler).Assembly)
-            .AddHttpMessageHandlers());
+        // Nothing Benzene-specific to register here - register your own services. UseHttp adds the
+        // HTTP mappers and UseMessageHandlers discovers your handlers, both in Configure below.
     }
 
     public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration)
@@ -154,7 +150,9 @@ public class StartUp : BenzeneStartUp
 }
 ```
 
-`UseHttp` on `IBenzeneApplicationBuilder` is a no-op on any host other than Azure Functions (it
+There is no Benzene registration in `ConfigureServices`: `UseHttp(...)` self-registers the HTTP
+request/response mappers and `UseMessageHandlers()` discovers your `[Message]`/`[HttpEndpoint]`
+handlers and pulls in the core pipeline. `UseHttp` on `IBenzeneApplicationBuilder` is a no-op on any host other than Azure Functions (it
 only does something when `app` is actually an `IAzureFunctionAppBuilder`), which is what lets the
 same `StartUp` shape be reused across platforms — see [ASP.NET Core Integration](asp-net-core.md) for
 the same `UseHttp` method used in a plain ASP.NET Core app.
