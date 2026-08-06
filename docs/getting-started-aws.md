@@ -1,8 +1,17 @@
 # Getting Started: Benzene on AWS Lambda
 
 Benzene runs efficiently in AWS Lambda, supporting multiple event sources (API Gateway, SQS,
-SNS, Kafka, S3) through a single middleware pipeline. This guide starts from an empty folder
+SNS, EventBridge, Kafka, S3) through a single middleware pipeline. This guide starts from an empty folder
 and ends with a deployed Lambda function handling API Gateway, SQS, and SNS events.
+
+This is Benzene's flagship host: **one function, every event source.** The same handler you write below is
+reached over API Gateway (HTTP), SNS, SQS and EventBridge — adding a transport is one line of wiring, never
+a change to your logic.
+
+> **Runnable version:** [`examples/Aws/Benzene.Examples.Aws.Minimal`](../examples/Aws/Benzene.Examples.Aws.Minimal)
+> is the smallest form of this guide — one handler over API Gateway + SNS + SQS + EventBridge, with a test
+> that boots the real `StartUp` in-memory (no AWS account needed) and pushes a native event through each
+> source. Read it alongside this page.
 
 ## Prerequisites
 

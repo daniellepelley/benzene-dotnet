@@ -1,220 +1,58 @@
 # Getting Started
 
-This guide takes you from an empty folder to a running Benzene service in about five
-minutes — no cloud account required. You'll build a small HTTP service locally with ASP.NET
-Core, then, if you want, take the exact same message handler to AWS Lambda or Azure Functions
-without changing a line of it.
+Benzene's promise is **write your message handler once, host it anywhere**. Your logic lives in a
+handler that knows nothing about HTTP, Lambda, or queues; a thin bit of host wiring connects it to
+whatever platform you deploy on. So the fastest way to get started is to **start on the platform you're
+actually deploying to** — pick it below.
 
-If you already know you're deploying to a specific platform, you can jump straight to
-[AWS Lambda Setup](getting-started-aws.md) or [Azure Functions Setup](azure-functions.md) — but
-starting here first is the quickest way to see how Benzene fits together.
+> **Just want to see the shape first?** Every guide builds the same tiny thing and differs only in the
+> host wiring. If you have no platform in mind yet, the [AWS Lambda](getting-started-aws.md) guide is the
+> best tour of what makes Benzene worth it — one function, many event sources.
 
-## What you'll build
+## Pick your platform
 
-A single endpoint, `GET /hello/{name}`, that returns a JSON greeting. It's deliberately tiny
-so the focus stays on the moving parts you'll reuse in every Benzene service: a **message
-handler**, a **topic**, and the **middleware pipeline** that connects a transport to your
-handler.
+| You're deploying to… | Guide | Runnable example |
+|---|---|---|
+| **AWS Lambda** — API Gateway, SQS, SNS, EventBridge (the flagship: one function, every event source) | [Getting Started: AWS Lambda](getting-started-aws.md) | [`examples/Aws/Benzene.Examples.Aws.Minimal`](../examples/Aws/Benzene.Examples.Aws.Minimal) |
+| **Azure Functions** — HTTP + Service Bus, Event Hubs, Event Grid, Cosmos DB, Timer | [Getting Started: Azure Functions](azure-functions.md) | [`examples/Azure`](../examples/Azure) |
+| **Google Cloud Functions** — HTTP + Pub/Sub | [Getting Started: Google Cloud Functions](getting-started-google.md) | [`examples/Google`](../examples/Google) |
+| **Kubernetes** — a containerised service on any cluster | [Getting Started: Kubernetes](getting-started-kubernetes.md) | [`examples/K8sMesh/Service`](../examples/K8sMesh/Service) |
+| **ASP.NET Core** — a plain web app or API | [Getting Started: ASP.NET Core](getting-started-aspnet.md) | [`examples/Asp/Benzene.Example.Asp.Minimal`](../examples/Asp/Benzene.Example.Asp.Minimal) |
 
-## Prerequisites
+Other hosts have their own guides too: [Worker Services](getting-started-worker.md) (Kafka, HTTP,
+Service Bus, Event Hubs, Cosmos DB Change Feed in a long-running process), [gRPC](getting-started-grpc.md),
+[Kafka](getting-started-kafka.md), [RabbitMQ](getting-started-rabbitmq.md), and
+[Cloudflare Containers](getting-started-cloudflare.md). Prefer scaffolding? The
+[project templates](getting-started-templates.md) give you `dotnet new` starters for every host.
 
-- [.NET 10 SDK](https://dotnet.microsoft.com/download)
-- Any editor (Visual Studio, Rider, or VS Code)
+## The one idea they all share
 
-That's it — the local walkthrough needs nothing else installed.
+Whichever guide you pick, you write the same three things — and only the third changes between platforms:
 
-## The core idea in 60 seconds
+1. **A message handler** — your logic. It receives a typed request and returns a typed response wrapped
+   in a [result](message-result.md). It knows nothing about the transport.
 
-Benzene separates *what your service does* from *how it's invoked*:
+   ```csharp
+   [Message("order:placed")]
+   public class PlaceOrderMessageHandler : IMessageHandler<OrderPlaced, OrderAccepted>
+   {
+       public Task<IBenzeneResult<OrderAccepted>> HandleAsync(OrderPlaced message) { /* ... */ }
+   }
+   ```
 
-- A **message handler** contains your logic. It receives a typed request and returns a typed
-  response wrapped in a [result](message-result.md). It knows nothing about HTTP, Lambda, or
-  queues.
-- Each handler is mapped to a **topic** — a stable string like `hello:world` that identifies
-  the operation. Handlers are discovered automatically by reflection, so there's no routing
-  table to maintain.
-- A **transport** (ASP.NET Core here; AWS Lambda or Azure Functions elsewhere) is wired up in
-  a **middleware pipeline** that turns an incoming request into a message, routes it to the
-  matching handler by topic, and turns the result back into a transport-native response.
+2. **A topic** — the stable string (`order:placed`) every transport routes by. Handlers are discovered by
+   reflection, so there's no routing table to maintain.
 
-Because only the transport pipeline changes between hosts, the handler you write below runs
-unchanged on every platform Benzene supports. See [Message Handlers](message-handlers.md) and
-[Middleware](middleware.md) for the full picture.
+3. **The host wiring** — the *only* platform-specific part. On AWS it's `app.UseAwsLambda(aws => aws.UseApiGateway(...).UseSqs(...))`; on ASP.NET it's `app.UseBenzene(b => b.UseHttp(...))`; on Google Cloud it's `GoogleCloudFunctionHost<Startup>`. The handler above is byte-for-byte identical in every one.
 
-## 1. Create the project
+That's the portability Benzene's hexagonal design buys you: **the handler is the asset; the host is a
+detail.** See [Message Handlers](message-handlers.md) and [Middleware](middleware.md) for the full model,
+and [Hosting](hosting.md) for how each platform is wired.
 
-```bash
-mkdir HelloBenzene && cd HelloBenzene
-dotnet new web -f net10.0
-```
+## Prerequisites (all platforms)
 
-`dotnet new web` gives you a minimal ASP.NET Core app — a `Program.cs` and a `.csproj`, with
-no controllers or extra scaffolding to clear away.
+- [.NET 10 SDK](https://dotnet.microsoft.com/download) and any editor (Visual Studio, Rider, or VS Code).
+- Benzene's packages are prerelease (`-alpha`) until 1.0, so `dotnet add package … --prerelease` is
+  required. Each guide lists the specific packages for its host.
 
-## 2. Install the Benzene package
-
-Benzene's packages are published as prerelease (`-alpha`) versions until 1.0, so
-`--prerelease` is required:
-
-```bash
-dotnet add package Benzene.AspNet.Core --prerelease
-```
-
-`Benzene.AspNet.Core` brings in the middleware pipeline, the message handler infrastructure,
-and the ASP.NET Core HTTP integration transitively — it's the only package you need for this
-guide.
-
-## 3. Write a message handler
-
-Create `HelloWorldMessageHandler.cs`. This is where your logic lives — and the only file
-you'd carry over verbatim if you later moved to Lambda or Azure Functions:
-
-<!-- compile: quickstart sdk=web -->
-```csharp
-using Benzene.Abstractions.MessageHandlers;
-using Benzene.Abstractions.Results;
-using Benzene.Core.MessageHandlers;
-using Benzene.Http;
-using Benzene.Results;
-
-namespace HelloBenzene;
-
-[Message("hello:world")]
-[HttpEndpoint("GET", "/hello/{name}")]
-public class HelloWorldMessageHandler : IMessageHandler<HelloWorldRequest, HelloWorldResponse>
-{
-    public Task<IBenzeneResult<HelloWorldResponse>> HandleAsync(HelloWorldRequest message)
-    {
-        var response = new HelloWorldResponse { Message = $"Hello {message.Name}!" };
-        return Task.FromResult(BenzeneResult.Ok(response));
-    }
-}
-
-public class HelloWorldRequest
-{
-    public string Name { get; set; }
-}
-
-public class HelloWorldResponse
-{
-    public string Message { get; set; }
-}
-```
-
-Two attributes do the wiring, and both are found by reflection:
-
-- `[Message("hello:world")]` maps the handler to its topic. Every Benzene transport routes by
-  topic, so this is the identifier that stays constant across HTTP, Lambda, SQS, and the rest.
-- `[HttpEndpoint("GET", "/hello/{name}")]` maps an HTTP method and path onto that same topic.
-  The `{name}` segment is bound onto the request's `Name` property.
-
-The return type — `Task<IBenzeneResult<HelloWorldResponse>>` — is the response wrapped in a
-[result](message-result.md), which carries success/failure status alongside the payload.
-`BenzeneResult.Ok(...)` is the success case.
-
-## 4. Register and wire up Benzene
-
-Replace the generated `Program.cs` with this:
-
-<!-- compile: quickstart sdk=web -->
-```csharp
-using Benzene.AspNet.Core;
-using Benzene.Core.MessageHandlers;
-using Benzene.Core.MessageHandlers.DI;
-using Benzene.Microsoft.Dependencies;
-using HelloBenzene;
-
-var builder = WebApplication.CreateBuilder(args);
-
-// Register Benzene and discover message handlers in this assembly.
-builder.Services.UsingBenzene(x => x
-    .AddBenzene()
-    .AddMessageHandlers(typeof(HelloWorldMessageHandler).Assembly));
-
-var app = builder.Build();
-
-// Add the Benzene HTTP pipeline: turn each request into a message and route it to a handler.
-app.UseBenzene(benzene => benzene
-    .UseHttp(http => http
-        .UseMessageHandlers()));
-
-app.Run();
-```
-
-There are only two Benzene calls:
-
-- `UsingBenzene(x => x.AddBenzene().AddMessageHandlers(...))` registers Benzene's services and
-  scans the given assembly for handlers. Pass any type from the assembly you want scanned —
-  `typeof(HelloWorldMessageHandler).Assembly` here. `AddBenzene()` comes first and supplies the
-  core pipeline services (routing, result statuses, serialization); leaving it out is the most
-  common setup mistake, and nothing complains until the first request arrives.
-- `app.UseBenzene(benzene => benzene.UseHttp(http => http.UseMessageHandlers()))` inserts
-  Benzene into the ASP.NET Core request pipeline. `UseHttp` registers the HTTP-specific
-  services for you; `UseMessageHandlers()` is the step that routes a matched request to its
-  handler.
-
-The Benzene middleware only responds to requests that match one of your `[HttpEndpoint]`
-routes — anything it doesn't recognise falls through to the rest of the ASP.NET Core pipeline,
-so it coexists cleanly with controllers, static files, or health-check endpoints if you add
-them later.
-
-## 5. Run it
-
-```bash
-dotnet run
-```
-
-The console prints the local URL (typically `http://localhost:5000`). In another terminal:
-
-```bash
-curl http://localhost:5000/hello/world
-```
-
-```json
-{"message":"Hello world!"}
-```
-
-That's a complete Benzene service. The request arrived over HTTP, Benzene mapped
-`GET /hello/{name}` to the `hello:world` topic, bound `world` onto `HelloWorldRequest.Name`,
-invoked your handler, and serialised the result back as JSON.
-
-## What just happened
-
-```
-GET /hello/world
-      │
-      ▼
-[HttpEndpoint] route match  ──►  topic "hello:world"
-      │
-      ▼
-HelloWorldMessageHandler.HandleAsync(request)
-      │
-      ▼
-BenzeneResult.Ok(response)  ──►  200  {"message":"Hello world!"}
-```
-
-The handler in the middle never touched `HttpContext`. Swap the transport pipeline in
-`Program.cs` for an AWS Lambda or Azure Functions one and the same handler runs there — that's
-the portability Benzene's hexagonal design buys you.
-
-## Next steps
-
-Now that you have a service running, layer on the cross-cutting concerns and platforms you
-need — each is a small, self-contained addition:
-
-- **Add validation** — reject bad requests before they reach your handler with
-  [FluentValidation](fluent-validation.md) or [Data Annotations](data-annotations.md).
-- **Add correlation & logging** — trace requests end-to-end with
-  [Correlation IDs](correlation-ids.md) and [Monitoring & Diagnostics](monitoring.md).
-- **Understand the pipeline** — see what else you can compose in with
-  [Middleware](middleware.md) and [Common Middleware](common-middleware.md).
-- **Test your handlers** — [Testing Benzene](testing-benzene.md) shows how to test handlers in
-  isolation and pipelines end-to-end.
-- **Deploy to the cloud** — take the same handler to
-  [AWS Lambda](getting-started-aws.md) (API Gateway, SQS, SNS, Kafka, S3) or
-  [Azure Functions](azure-functions.md).
-- **Go deeper with recipes** — the [Cookbooks](cookbooks/README.md) cover real-world scenarios
-  like retries, fan-out, caching, and distributed tracing.
-
-For complete, runnable projects covering every transport, see the
-[`examples/`](../examples) folder in the repository.
+Ready? **[Pick your platform](#pick-your-platform)** and go.

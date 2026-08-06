@@ -5,7 +5,12 @@ Benzene is a hexagonal framework designed for services running in serverless env
 ### Main Themes
 
 - **General**
-  - [Getting Started](getting-started.md) — build and run your first Benzene service in 5 minutes
+  - [Getting Started](getting-started.md) — pick the platform you deploy to, then build your first service in minutes
+    - [AWS Lambda](getting-started-aws.md) — the flagship: one function over API Gateway, SQS, SNS, EventBridge
+    - [Azure Functions](azure-functions.md) — HTTP plus every non-HTTP trigger
+    - [Google Cloud Functions](getting-started-google.md) — HTTP + Pub/Sub
+    - [Kubernetes](getting-started-kubernetes.md) — a containerised service on any cluster
+    - [ASP.NET Core](getting-started-aspnet.md) — a plain web app or API
   - [Project Templates](getting-started-templates.md) — `dotnet new` starter projects for every host, consumable from Visual Studio and Rider
   - [Unified Hosting Model](hosting.md)
   - [Capability Matrix](capability-matrix.md) — what Benzene does, deliberately doesn't (and why), and how to fill the gap
