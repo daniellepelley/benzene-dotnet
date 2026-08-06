@@ -126,7 +126,6 @@ public class StartUp : BenzeneStartUp
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
         services.UsingBenzene(x => x
-            .AddBenzene()
             .AddMessageHandlers(typeof(HelloWorldMessageHandler).Assembly));
     }
 
@@ -139,10 +138,11 @@ public class StartUp : BenzeneStartUp
 }
 ```
 
-`.AddBenzene()` registers the core pipeline services every host needs — routing, result statuses,
-serialization. It comes first, and leaving it out is the single most common setup mistake: nothing
-complains until the first message arrives, and the failure then names an internal type rather than
-the missing call.
+That's the only registration you need. `AddMessageHandlers(...)` scans the given assembly for your
+`[Message]`/`[HttpEndpoint]` handlers and — since it depends on them — pulls in the core pipeline
+services (routing, result statuses, serialization) for you, so there's no separate `AddBenzene()` call
+to remember. Pass the assembly (or a list of types) to scope discovery; the transports you wire in
+`Configure` add their own request/response mappers.
 
 > This is the platform-neutral pattern used by every Benzene host — the
 > [`examples/Aws`](../examples/Aws) project follows exactly this shape. Only the AWS-specific event

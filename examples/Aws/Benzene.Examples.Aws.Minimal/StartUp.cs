@@ -39,16 +39,11 @@ public class StartUp : BenzeneStartUp
         // test can still observe that the handler ran.
         services.AddSingleton<IProcessedLog, InMemoryProcessedLog>();
 
-        services.UsingBenzene(x => x
-            .AddBenzene()
-            .SetApplicationInfo("Benzene AWS Minimal", "1.0.0",
-                "One order:placed handler, reached over API Gateway, SNS, SQS and EventBridge.")
-            .AddBenzeneMessage()
-            // Scan this assembly for [Message]/[HttpEndpoint] handlers; AddHttpMessageHandlers registers
-            // the HTTP route so order:placed is reachable at POST /orders over API Gateway.
-            .AddMessageHandlers(typeof(StartUp).Assembly)
-            .AddHttpMessageHandlers()
-            .AddContextItems());
+        // The only Benzene registration this host needs up front: the BenzeneMessage envelope's mappers.
+        // Everything else is registered implicitly in Configure - UseMessageHandlers() discovers the
+        // handlers and pulls in the core services (AddBenzene) + context mappers, and UseApiGateway wires
+        // HTTP routing. (UsingBenzene also registers logging.)
+        services.UsingBenzene(x => x.AddBenzeneMessage());
     }
 
     public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration)
