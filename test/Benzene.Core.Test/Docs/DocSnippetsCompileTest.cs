@@ -48,7 +48,7 @@ public class DocSnippetsCompileTest
 
         foreach (var guide in new[]
                  {
-                     "docs/getting-started.md",
+                     "docs/getting-started-aspnet.md",
                      "docs/getting-started-aws.md",
                      "docs/getting-started-kafka.md",
                      "docs/getting-started-rabbitmq.md",

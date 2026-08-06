@@ -1,9 +1,10 @@
 # Benzene ASP.NET Core Example (Minimal)
 
 The smallest thing that works: the runnable version of the
-[Getting Started](../../../docs/getting-started.md) walkthrough. A single endpoint,
-`GET /hello/{name}`, that returns a JSON greeting - nothing else. Start here if you're meeting
-Benzene for the first time.
+[Getting Started: ASP.NET Core](../../../docs/getting-started-aspnet.md) walkthrough. A single endpoint,
+`GET /hello/{name}`, that returns a JSON greeting - nothing else. Start here if you're building on
+ASP.NET Core; if you're deploying to a cloud host, the [platform picker](../../../docs/getting-started.md)
+points at the guide for your platform.
 
 For a fuller ASP.NET Core host (Spec UI, validation, an OAuth2-protected route), see the sibling
 [`Benzene.Example.Asp`](../Benzene.Example.Asp) project.

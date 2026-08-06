@@ -22,18 +22,24 @@ handler/logic in `Benzene.Examples.App` and wiring it from the hosts, rather tha
 - **`App/`** — shared handlers/validators/services (above); the reused core.
 - **`Asp/`** — ASP.NET Core host. Two projects:
   - `Benzene.Example.Asp.Minimal` — the smallest thing that works: the runnable version of
-    [docs/getting-started.md](../docs/getting-started.md) (`GET /hello/{name}` only), using the
-    documented `BenzeneStartUp` + `WebApplicationBuilder.UseBenzene<StartUp>()` model. Start newcomers here.
+    [docs/getting-started-aspnet.md](../docs/getting-started-aspnet.md) (`GET /hello/{name}` only), using the
+    documented `BenzeneStartUp` + `WebApplicationBuilder.UseBenzene<StartUp>()` model. Start ASP.NET
+    newcomers here; the [platform picker](../docs/getting-started.md) routes other platforms to their guide.
   - `Benzene.Example.Asp` — the fuller host: Spec UI (`/spec-ui`) + `spec` endpoint, FluentValidation,
     Serilog, controllers, and an OAuth2-protected `/protected/ping` route. It wires Benzene by hand via
     `IApplicationBuilder.UseBenzene(builder => builder.UseHttp(...))` (the other documented ASP.NET path,
     see [docs/hosting.md](../docs/hosting.md)) because it needs native ASP.NET plumbing —
     `UseRouting`/`UseAuthorization`/`MapControllers` and an `app.Map("/protected", ...)` branch — that a
     single `BenzeneStartUp.Configure(IBenzeneApplicationBuilder, …)` can't reach.
-- **`Aws/`** — AWS Lambda host demonstrating multiple event sources (API Gateway + custom authorizer,
-  SNS, SQS, Kafka, EventBridge) in one function. Also demonstrates **egress** alongside ingress:
-  `PublishOrderCreatedMessageHandler` + `DependenciesBuilder`'s `AddOutboundRouting(...)` wiring —
-  see [docs/clients.md](../docs/clients.md#runnable-example-the-ingressegress-symmetry).
+- **`Aws/`** — AWS Lambda. Two host projects:
+  - `Benzene.Examples.Aws.Minimal` — the smallest thing that works and the runnable version of
+    [docs/getting-started-aws.md](../docs/getting-started-aws.md): ONE `order:placed` handler reached over
+    API Gateway + SNS + SQS + EventBridge, with `Benzene.Examples.Aws.Minimal.Tests` driving each source
+    through `BenzeneTestHost` in-memory. Start AWS newcomers here.
+  - `Benzene.Examples.Aws` — the fuller host demonstrating multiple event sources (API Gateway + custom
+    authorizer, SNS, SQS, Kafka, EventBridge) in one function. Also demonstrates **egress** alongside
+    ingress: `PublishOrderCreatedMessageHandler` + `DependenciesBuilder`'s `AddOutboundRouting(...)` wiring
+    — see [docs/clients.md](../docs/clients.md#runnable-example-the-ingressegress-symmetry).
 - **`Azure/`** — Azure Functions host. Same egress demonstration as `Aws/` above, via Service Bus.
 - **`Versioning/`** — payload schema versioning demo ([docs/specification/versioning.md](../docs/specification/versioning.md)),
   self-contained (does **not** use the shared `App` domain). One AWS Lambda `StartUp` over four transports
