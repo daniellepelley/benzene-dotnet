@@ -382,6 +382,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Idempotency.DynamoD
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.MapReduce", "src\Benzene.MapReduce\Benzene.MapReduce.csproj", "{1A62A8D0-C8AB-435C-80B8-DC4624A6BFF0}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.EventSourcing", "src\Benzene.EventSourcing\Benzene.EventSourcing.csproj", "{355EE7C8-45D9-4DC0-9AEA-74A5DCF4C221}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -2396,6 +2398,18 @@ Global
 		{1A62A8D0-C8AB-435C-80B8-DC4624A6BFF0}.Release|x64.Build.0 = Release|Any CPU
 		{1A62A8D0-C8AB-435C-80B8-DC4624A6BFF0}.Release|x86.ActiveCfg = Release|Any CPU
 		{1A62A8D0-C8AB-435C-80B8-DC4624A6BFF0}.Release|x86.Build.0 = Release|Any CPU
+		{355EE7C8-45D9-4DC0-9AEA-74A5DCF4C221}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{355EE7C8-45D9-4DC0-9AEA-74A5DCF4C221}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{355EE7C8-45D9-4DC0-9AEA-74A5DCF4C221}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{355EE7C8-45D9-4DC0-9AEA-74A5DCF4C221}.Debug|x64.Build.0 = Debug|Any CPU
+		{355EE7C8-45D9-4DC0-9AEA-74A5DCF4C221}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{355EE7C8-45D9-4DC0-9AEA-74A5DCF4C221}.Debug|x86.Build.0 = Debug|Any CPU
+		{355EE7C8-45D9-4DC0-9AEA-74A5DCF4C221}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{355EE7C8-45D9-4DC0-9AEA-74A5DCF4C221}.Release|Any CPU.Build.0 = Release|Any CPU
+		{355EE7C8-45D9-4DC0-9AEA-74A5DCF4C221}.Release|x64.ActiveCfg = Release|Any CPU
+		{355EE7C8-45D9-4DC0-9AEA-74A5DCF4C221}.Release|x64.Build.0 = Release|Any CPU
+		{355EE7C8-45D9-4DC0-9AEA-74A5DCF4C221}.Release|x86.ActiveCfg = Release|Any CPU
+		{355EE7C8-45D9-4DC0-9AEA-74A5DCF4C221}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -2567,6 +2581,7 @@ Global
 		{A15CCED1-4E7C-42D5-8D62-3A7AD75664E4} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{F978FABF-C4AA-49DB-BFA5-AD81226518C6} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{1A62A8D0-C8AB-435C-80B8-DC4624A6BFF0} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{355EE7C8-45D9-4DC0-9AEA-74A5DCF4C221} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {B4E68A9C-300A-490A-B3A5-1F1D5A0A3260}
