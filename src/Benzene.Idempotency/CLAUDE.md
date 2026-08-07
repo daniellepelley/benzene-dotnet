@@ -8,10 +8,13 @@ idempotency key: the first delivery is processed and its key recorded; redeliver
 short-circuit without re-invoking the handler.
 
 Persistence is pluggable via `IIdempotencyStore` so the dedupe record can live wherever suits the
-deployment — no database opinion is baked in. **The only store this package ships is
-`InMemoryIdempotencyStore`, which is single-process.** There is no built-in shared/distributed store.
+deployment — no database opinion is baked in. **This package ships `InMemoryIdempotencyStore`
+(single-process, for one host / tests).** For a fleet, use a distributed store: the sibling
+`Benzene.Idempotency.DynamoDb` package provides `DynamoDbIdempotencyStore` (atomic conditional-write
+claim + TTL) via `AddDynamoDbIdempotencyStore(...)`; any store backed by an atomic
+conditional write (Redis `SET NX`, a unique-key insert) works the same way.
 See the [Capability Matrix](../../docs/capability-matrix.md) for why cross-instance de-duplication
-can't be solved inside Benzene alone, and the external-store pattern that does solve it.
+can't be solved by the in-memory store alone.
 
 ## Capability boundary — cross-instance dedup is NOT solved in-box
 This package gives you the pipeline seam and a single-process in-memory store. It does **not**
