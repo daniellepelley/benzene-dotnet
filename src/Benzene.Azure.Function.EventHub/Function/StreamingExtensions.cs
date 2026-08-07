@@ -14,6 +14,18 @@ namespace Benzene.Azure.Function.EventHub.Function;
 /// enabling windowing/aggregation — the opt-in alternative to <c>UseEventHub(...)</c>, which fans the
 /// batch out into one message per event.
 /// </summary>
+/// <remarks>
+/// <para><b>Checkpointing.</b> Unlike the AWS Kinesis streaming binding — whose event source mapping
+/// reads back a resume sequence number (<c>ReportBatchItemFailures</c>), so it wires a real
+/// <see cref="IStreamCheckpointer{TItem}"/> — the Azure Functions Event Hubs trigger owns checkpointing
+/// itself: it advances the checkpoint past the whole batch when the function returns, and does not on a
+/// throw. There is no per-item return channel for Benzene to drive, so this binding correctly uses
+/// <c>NullStreamCheckpointer</c>. This is a deliberate platform difference, not a missing feature.</para>
+/// <para><b>Failure.</b> An exception from a stream step propagates out of the function, so the Event
+/// Hubs host retries the batch (or dead-letters per host config) rather than checkpointing past it — no
+/// silent progress on failure. Make stream processing idempotent, since a retried batch is reprocessed
+/// from the start.</para>
+/// </remarks>
 public static class StreamingExtensions
 {
     /// <summary>

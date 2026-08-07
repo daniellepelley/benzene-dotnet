@@ -103,16 +103,17 @@ a mid-batch failure has weaker progress semantics than Kinesis.
 
 **Placement.** Existing `Benzene.Azure.Function.EventHub`.
 
-**Design.** Recon needed on what the Azure isolated-worker Event Hubs binding actually permits
-(Functions checkpoints automatically per-invocation; the win here is exposing an `IStreamCheckpointer`
-so a stream step can checkpoint after a window, and surfacing a failure result rather than swallowing).
-Wire the three-arg `StreamMiddlewareApplication` with a real `EventHubStreamCheckpointer` mirroring
-`KinesisStreamCheckpointer`, if the binding surface allows a batch result. If it genuinely cannot
-(the platform owns checkpointing), downgrade this to a documentation note and drop the code change.
+**Design.** **RESOLVED — correct-by-design, no code change.** Investigated: the Azure Functions Event
+Hubs trigger owns checkpointing itself (it advances past the whole batch when the function returns,
+and not on a throw), so there is **no per-item return channel** for Benzene to drive — unlike AWS
+Kinesis, whose event source mapping reads back a resume sequence number. The 2-arg
+`StreamMiddlewareApplication` / `MiddlewareApplication` do **not** swallow exceptions (verified: no
+`catch`), so a stream-step failure propagates out of the function and the host retries the batch — no
+silent progress on failure. `NullStreamCheckpointer` is therefore the right choice, not a gap. Outcome:
+documented the checkpoint/failure model on `StreamingExtensions` so it isn't mistaken for a
+deficiency; dropped the code change.
 
-**Tests.** Checkpoint advances monotonically; failure reports the last checkpoint.
-
-**Risk.** Medium — depends on the Azure binding surface; may reduce to a doc clarification.
+**Risk.** None — doc-only.
 
 ## 4. Scatter-gather / map-reduce helper
 
