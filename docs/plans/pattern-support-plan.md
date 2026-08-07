@@ -33,8 +33,9 @@ existing transport packages), it extends that; it does not grow the core.
   **Event Hubs** streaming binding uses a `NullStreamCheckpointer` and reports nothing.
 - `BoundedFanOut.WhenAllAsync<TSource,TResult>(source, Func<TSource,Task<TResult>> body, int? maxDop)`
   is public, results in source order — the reusable bounded parallel-map.
-- Payload-schema casting decorates only the framework-default request mapper; **gRPC's** protobuf
-  request mapper is not wrapped (versioning.md §4.2.1) — response-side casting is universal.
+- Payload-schema casting decorated only the framework-default request mapper; **gRPC's** protobuf
+  request mapper was not wrapped (versioning.md §4.2.1) — response-side casting is universal.
+  *(Resolved — see §5: `UsePayloadVersionRequestCasting<TContext,TInner>` + `Benzene.Grpc.Versioning`.)*
 
 ---
 
@@ -142,25 +143,42 @@ failed shard; BestEffort surfaces failures without dropping them silently.
 **Risk.** Low-medium — API-shape choices; keep it minimal (one method + options + result), resist a
 framework.
 
-## 5. gRPC request-side payload casting
+## 5. gRPC request-side payload casting — DONE
 
 **Problem.** Payload-schema casting wraps the framework-default request mapper but not gRPC's
 protobuf-JSON request mapper (versioning.md §4.2.1), so request-side upcasting silently doesn't apply
 on gRPC — a real gap for versioned gRPC contracts.
 
-**Placement.** Existing `Benzene.Grpc` (+ `Benzene.Core.Versioning` seam).
+**What shipped.** A new small package `Benzene.Grpc.Versioning` (`AddGrpcPayloadVersioning(...)`), plus
+one seam added to `Benzene.Core.Versioning`.
 
-**Design.** Recon the request-casting decorator (`UsePayloadVersionCasting`/the request-mapper
-decorator in `Benzene.Core.Versioning`) and gRPC's `IRequestMapper<GrpcContext>` registration; apply
-the same decorator to the gRPC request mapper (or make the casting decorator wrap *whatever*
-`IRequestMapper<TContext>` is registered, generically, so every transport is covered uniformly and
-this class of gap can't recur). Prefer the generic fix if it's clean.
+- **Why not the fully-generic "wrap whatever is registered" fix.** The DI abstraction
+  (`IBenzeneServiceContainer`) is registration-only: it has no primitive to read or decorate the
+  *previously registered* `IRequestMapper<TContext>`. A generic decorator would have to capture the
+  prior descriptor, which means adding a decoration capability to all three container implementations
+  (Microsoft, Autofac, null-object) — a large, cross-cutting change out of proportion to the gap. The
+  `AddPayloadVersioning().ForContext<TContext>()` reflection path also can't know gRPC's concrete
+  mapper type. So the generic fix was rejected as not-clean, per "prefer the generic fix *if it's
+  clean*".
+- **What was done instead (low-risk, faithful).** `Benzene.Core.Versioning` gained
+  `UsePayloadVersionRequestCasting<TContext, TInnerRequestMapper>()`, which wraps `CastingRequestMapper`
+  over a *named concrete inner mapper* rather than the hardcoded framework default. The existing
+  `UsePayloadVersionCasting<TContext>` was refactored to call it with the default mapper — pure
+  refactor, no behaviour change (existing 53 versioning tests still green). `Benzene.Grpc.Versioning`'s
+  `AddGrpcPayloadVersioning(...)` reuses `AddPayloadVersioning` for the caster declaration + eager
+  validation, then re-points the request side at the real `GrpcRequestMapper` (last-registration-wins,
+  the established contract). Request side only — gRPC has no response payload mapper (it writes straight
+  to protobuf via its result setter), so there is nothing to downcast.
+- **Correctness verified.** `ProtobufJsonGrpcMessageAdapter.ConvertRequest<T>` formats the incoming
+  protobuf message to proto3 JSON then deserializes into *any* CLR type, so the decorator's "read as the
+  incoming version's CLR shape, then upcast" works through gRPC's own bridge.
 
-**Tests.** A v1 request over gRPC upcasts to a single v2 handler (mirror the `examples/K8sMesh`
-upcast, but over gRPC).
+**Tests (4, all green).** `test/Benzene.Grpc.Test/GrpcPayloadVersioningTest.cs`: the resolved request
+mapper is the casting decorator; a V1 gRPC request is read through the protobuf bridge and upcast to the
+V2 handler type; no-version and no-casters both pass straight through.
 
-**Risk.** Medium-high — touches versioning internals and the gRPC mapper; do it last, carefully, with
-the existing versioning tests as a guardrail.
+**Spec.** versioning.md §4.2.1's "Known limitation" bullet (informative, .NET) updated to describe the
+`UsePayloadVersionRequestCasting` / `Benzene.Grpc.Versioning` resolution.
 
 ## 6. Event-sourcing support *(largest)*
 

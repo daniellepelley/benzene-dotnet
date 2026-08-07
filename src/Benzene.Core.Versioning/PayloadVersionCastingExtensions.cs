@@ -30,7 +30,9 @@ public static class PayloadVersionCastingExtensions
     /// with <c>RegisterSchemaCastDefinitions</c>/<c>RegisterPayloadSchemaVersions</c> to supply the
     /// casters. It wraps the framework-default mappers (<see cref="MultiSerializerOptionsRequestMapper{TContext}"/>
     /// / <see cref="DefaultResponsePayloadMapper{TContext}"/>); a transport that registers a bespoke
-    /// request mapper (e.g. gRPC's protobuf-bridging one) is not wrapped on the request side.
+    /// request mapper (e.g. gRPC's protobuf-bridging one) wraps that instead via
+    /// <see cref="UsePayloadVersionRequestCasting{TContext,TInnerRequestMapper}"/> (see
+    /// <c>Benzene.Grpc.Versioning</c>).
     /// </remarks>
     /// <typeparam name="TContext">The transport-specific context type to enable casting for.</typeparam>
     /// <param name="services">The service container to register into.</param>
@@ -38,21 +40,56 @@ public static class PayloadVersionCastingExtensions
     public static IBenzeneServiceContainer UsePayloadVersionCasting<TContext>(this IBenzeneServiceContainer services)
         where TContext : class
     {
-        // Self-register the framework-default mappers as their own concrete types so the decorators
-        // below can resolve and wrap them (they're otherwise only registered under their interfaces).
-        services.TryAddScoped<MultiSerializerOptionsRequestMapper<TContext>>();
-        services.TryAddScoped<DefaultResponsePayloadMapper<TContext>>();
+        // Request side wraps the framework-default request mapper. A transport with a bespoke request
+        // mapper (gRPC) re-wires the request side over its own mapper via the overload below.
+        services.UsePayloadVersionRequestCasting<TContext, MultiSerializerOptionsRequestMapper<TContext>>();
 
-        services.AddScoped<IRequestMapper<TContext>>(resolver =>
-            new CastingRequestMapper<TContext>(
-                resolver.GetService<MultiSerializerOptionsRequestMapper<TContext>>(),
-                resolver.GetService<IMessageVersionGetter<TContext>>(),
-                resolver.GetService<IMessageTopicGetter<TContext>>(),
-                resolver.TryGetService<ISchemaCasters>()));
+        // Self-register the framework-default response mapper as its own concrete type so the decorator
+        // below can resolve and wrap it (it's otherwise only registered under its interface).
+        services.TryAddScoped<DefaultResponsePayloadMapper<TContext>>();
 
         services.AddScoped<IResponsePayloadMapper<TContext>>(resolver =>
             new CastingResponsePayloadMapper<TContext>(
                 resolver.GetService<DefaultResponsePayloadMapper<TContext>>(),
+                resolver.GetService<IMessageVersionGetter<TContext>>(),
+                resolver.GetService<IMessageTopicGetter<TContext>>(),
+                resolver.TryGetService<ISchemaCasters>()));
+
+        return services;
+    }
+
+    /// <summary>
+    /// Wraps the request payload mapper for <typeparamref name="TContext"/> with the version-casting
+    /// decorator over a <b>named concrete inner mapper</b>, rather than the framework default. Use this
+    /// for a transport whose real <see cref="IRequestMapper{TContext}"/> is bespoke - most notably gRPC,
+    /// whose <c>GrpcRequestMapper</c> bridges protobuf and so cannot be replaced by the default
+    /// serializer-based mapper (docs/specification/versioning.md §4.2.1). The decorator reads the wire
+    /// body as the incoming version's CLR shape through <typeparamref name="TInnerRequestMapper"/> - so
+    /// the transport's own deserialization still runs - then upcasts into the handler's request type.
+    /// A topic with no registered casters, or a message signalling no version, delegates straight through.
+    /// </summary>
+    /// <remarks>
+    /// Register this <b>after</b> the transport's own request-mapper registration so this closed
+    /// <see cref="IRequestMapper{TContext}"/> wins, and after any <see cref="UsePayloadVersionCasting{TContext}"/>
+    /// so it re-points the request side at <typeparamref name="TInnerRequestMapper"/>. The response side is
+    /// unaffected - gRPC writes its response straight to protobuf via its result setter and has no
+    /// response payload mapper to cast.
+    /// </remarks>
+    /// <typeparam name="TContext">The transport-specific context type to enable request casting for.</typeparam>
+    /// <typeparam name="TInnerRequestMapper">The transport's real request mapper, wrapped as the inner.</typeparam>
+    /// <param name="services">The service container to register into.</param>
+    /// <returns>The same container, for chaining.</returns>
+    public static IBenzeneServiceContainer UsePayloadVersionRequestCasting<TContext, TInnerRequestMapper>(this IBenzeneServiceContainer services)
+        where TContext : class
+        where TInnerRequestMapper : class, IRequestMapper<TContext>
+    {
+        // Self-register the inner mapper as its own concrete type so the decorator can resolve and wrap
+        // it (it's otherwise only registered under the IRequestMapper<TContext> interface).
+        services.TryAddScoped<TInnerRequestMapper>();
+
+        services.AddScoped<IRequestMapper<TContext>>(resolver =>
+            new CastingRequestMapper<TContext>(
+                resolver.GetService<TInnerRequestMapper>(),
                 resolver.GetService<IMessageVersionGetter<TContext>>(),
                 resolver.GetService<IMessageTopicGetter<TContext>>(),
                 resolver.TryGetService<ISchemaCasters>()));

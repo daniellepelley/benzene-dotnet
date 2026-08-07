@@ -39,6 +39,8 @@
     <ProjectReference Include="..\..\src\Benzene.Grpc.Client\Benzene.Grpc.Client.csproj" />
     <ProjectReference Include="..\..\src\Benzene.HealthChecks\Benzene.HealthChecks.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Grpc.TestHelpers\Benzene.Grpc.TestHelpers.csproj" />
+    <ProjectReference Include="..\..\src\Benzene.Grpc.Versioning\Benzene.Grpc.Versioning.csproj" />
+    <ProjectReference Include="..\..\src\Benzene.Core.Versioning\Benzene.Core.Versioning.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Core.MessageHandlers\Benzene.Core.MessageHandlers.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Microsoft.Dependencies\Benzene.Microsoft.Dependencies.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Testing\Benzene.Testing.csproj" />

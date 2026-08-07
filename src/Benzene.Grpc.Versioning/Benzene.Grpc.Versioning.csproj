@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Benzene.Grpc.Versioning</AssemblyName>
+    <RootNamespace>Benzene.Grpc.Versioning</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Benzene.Core.Versioning\Benzene.Core.Versioning.csproj" />
+    <ProjectReference Include="..\Benzene.Grpc\Benzene.Grpc.csproj" />
+  </ItemGroup>
+</Project>
