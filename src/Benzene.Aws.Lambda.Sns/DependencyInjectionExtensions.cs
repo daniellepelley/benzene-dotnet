@@ -38,8 +38,10 @@ public static class DependencyInjectionExtensions
     public static IBenzeneServiceContainer AddSns(this IBenzeneServiceContainer services, string topicAttributeKey)
     {
         services.TryAddScoped<JsonSerializer>();
+        services.TryAddScoped<PresetTopicHolder>();
 
-        services.AddScoped<IMessageTopicGetter<SnsRecordContext>>(_ => new SnsMessageTopicGetter(topicAttributeKey));
+        services.AddScoped<IMessageTopicGetter<SnsRecordContext>>(resolver =>
+            new PresetTopicMessageTopicGetter<SnsRecordContext>(new SnsMessageTopicGetter(topicAttributeKey), resolver.GetService<PresetTopicHolder>()));
         services.AddHeaderMessageVersionGetter<SnsRecordContext>();
         services.AddScoped<IMessageHeadersGetter<SnsRecordContext>, SnsMessageHeadersGetter>();
         services.AddScoped<IMessageBodyGetter<SnsRecordContext>, SnsMessageBodyGetter>();

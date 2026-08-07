@@ -200,9 +200,9 @@ public static class MiddlewarePipelineExtensions
     /// <remarks>
     /// Works on any transport whose adapter wraps its topic getter in
     /// <see cref="PresetTopicMessageTopicGetter{TContext}"/> (every non-HTTP transport that supports
-    /// preset topics - SQS/Service Bus/Event Hub/Queue Storage/Timer/Event Grid/RabbitMQ, and the
-    /// self-hosted SQS/Service Bus/Event Hub workers). It carries the derived topic in scoped DI state,
-    /// not on the context, exactly like <c>UsePresetTopic</c>.
+    /// preset topics - SQS/SNS/EventBridge/Service Bus/Event Hub/Queue Storage/Timer/Event Grid/RabbitMQ,
+    /// and the self-hosted SQS/Service Bus/Event Hub workers). It carries the derived topic in scoped DI
+    /// state, not on the context, exactly like <c>UsePresetTopic</c>.
     /// </remarks>
     public static IMiddlewarePipelineBuilder<TContext> UseTopicFrom<TContext>(this IMiddlewarePipelineBuilder<TContext> app,
         Func<TContext, ITopic?> topicSelector)

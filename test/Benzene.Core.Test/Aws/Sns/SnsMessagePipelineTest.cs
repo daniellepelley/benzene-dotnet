@@ -80,6 +80,35 @@ public class SnsMessagePipelineTest
     }
 
     [Fact]
+    public async Task Send_NoTopicAttribute_WithPresetTopic_RoutesToPresetTopic()
+    {
+        IBenzeneResult messageResult = null;
+
+        var host = new EntryPointMiddleApplicationBuilder<SNSEvent, SnsRecordContext>()
+            .ConfigureServices(services =>
+            {
+                services
+                    .ConfigureServiceCollection()
+                    .UsingBenzene(x => x.AddSns());
+            })
+            .Configure(app => app
+                .UsePresetTopic(Defaults.Topic)
+                .OnResponse("Check Response", context =>
+                {
+                    messageResult = context.MessageResult;
+                })
+                .UseMessageHandlers())
+            .Build(x => new SnsApplication(x));
+
+        // No topic attribute on the notification - the preset supplies the route.
+        var request = MessageBuilder.Create(null, Defaults.MessageAsObject).AsSns();
+
+        await host.SendAsync(request);
+
+        Assert.True(messageResult.IsSuccessful);
+    }
+
+    [Fact]
     public async Task Send_Xml()
     {
         IBenzeneResult messageResult = null;

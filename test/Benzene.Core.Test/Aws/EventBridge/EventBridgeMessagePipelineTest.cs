@@ -43,6 +43,35 @@ public class EventBridgeMessagePipelineTest
     }
 
     [Fact]
+    public async Task Send_ForeignDetailType_WithPresetTopic_RoutesToPresetTopic()
+    {
+        IBenzeneResult messageResult = null;
+
+        var host = new EntryPointMiddleApplicationBuilder<EventBridgeEvent, EventBridgeContext>()
+            .ConfigureServices(services =>
+            {
+                services
+                    .ConfigureServiceCollection()
+                    .UsingBenzene(x => x.AddEventBridge());
+            })
+            .Configure(app => app
+                .UsePresetTopic(Defaults.Topic)
+                .OnResponse("Check Response", context =>
+                {
+                    messageResult = context.MessageResult;
+                })
+                .UseMessageHandlers())
+            .Build(x => new EventBridgeApplication(x));
+
+        // A foreign detail-type (not a Benzene topic); the preset supplies the route.
+        var request = MessageBuilder.Create("aws.foreign.event", Defaults.MessageAsObject).AsEventBridge();
+
+        await host.SendAsync(request);
+
+        Assert.True(messageResult.IsSuccessful);
+    }
+
+    [Fact]
     public async Task Send_UnknownDetailType_ReturnsNotFoundResult()
     {
         IBenzeneResult messageResult = null;

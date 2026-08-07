@@ -30,7 +30,9 @@ idempotent.
   single-context: EventBridge delivers ONE event per invocation (no `Records` batch), so this is
   one pipeline invocation + one DI scope per event, not a `MiddlewareMultiApplication` fan-out.
 - `EventBridgeContext : IHasMessageResult` — carries the event and the handler result.
-- Getters: topic = `detail-type`; body = `detail` raw JSON; headers = `eventbridge-`-prefixed
+- Getters: topic = `detail-type` (wrapped in `PresetTopicMessageTopicGetter`, so `.UsePresetTopic(...)`
+  / `.UseTopicFrom(...)` can route a foreign bus event whose `detail-type` is not a Benzene topic);
+  body = `detail` raw JSON; headers = `eventbridge-`-prefixed
   envelope metadata plus Benzene wire headers lifted from the reserved `_benzeneHeaders` object
   inside `detail` (EventBridge has no native per-message attributes — the outbound client in
   `Benzene.Clients.Aws/EventBridge/` embeds them there).

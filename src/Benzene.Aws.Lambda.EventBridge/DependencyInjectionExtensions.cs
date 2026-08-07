@@ -24,8 +24,10 @@ public static class DependencyInjectionExtensions
     public static IBenzeneServiceContainer AddEventBridge(this IBenzeneServiceContainer services)
     {
         services.TryAddScoped<JsonSerializer>();
+        services.TryAddScoped<PresetTopicHolder>();
 
-        services.AddScoped<IMessageTopicGetter<EventBridgeContext>, EventBridgeMessageTopicGetter>();
+        services.AddScoped<IMessageTopicGetter<EventBridgeContext>>(resolver =>
+            new PresetTopicMessageTopicGetter<EventBridgeContext>(new EventBridgeMessageTopicGetter(), resolver.GetService<PresetTopicHolder>()));
         services.AddHeaderMessageVersionGetter<EventBridgeContext>();
         services.AddScoped<IMessageHeadersGetter<EventBridgeContext>, EventBridgeMessageHeadersGetter>();
         services.AddScoped<IMessageBodyGetter<EventBridgeContext>, EventBridgeMessageBodyGetter>();
