@@ -35,20 +35,14 @@ public class StartUp : BenzeneStartUp
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
-        // The stand-in "data store" the handler records to, so a fire-and-forget SNS/SQS/EventBridge
-        // test can still observe that the handler ran.
+        // Only the app's own service - no Benzene registration needed here. The stand-in "data store"
+        // the handler records to, so a fire-and-forget SNS/SQS/EventBridge test can still observe that
+        // the handler ran.
+        //
+        // Everything Benzene is wired implicitly in Configure: each transport registers its own mappers
+        // (UseApiGateway, UseSns, ..., UseBenzeneMessage), and UseMessageHandlers() discovers the
+        // handlers and pulls in the core services. The host provides logging.
         services.AddSingleton<IProcessedLog, InMemoryProcessedLog>();
-
-        services.UsingBenzene(x => x
-            .AddBenzene()
-            .SetApplicationInfo("Benzene AWS Minimal", "1.0.0",
-                "One order:placed handler, reached over API Gateway, SNS, SQS and EventBridge.")
-            .AddBenzeneMessage()
-            // Scan this assembly for [Message]/[HttpEndpoint] handlers; AddHttpMessageHandlers registers
-            // the HTTP route so order:placed is reachable at POST /orders over API Gateway.
-            .AddMessageHandlers(typeof(StartUp).Assembly)
-            .AddHttpMessageHandlers()
-            .AddContextItems());
     }
 
     public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration)

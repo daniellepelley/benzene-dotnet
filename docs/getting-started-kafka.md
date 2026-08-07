@@ -99,7 +99,6 @@ the worker-specific builder that `UseWorker(...)` hands you — so you wire Kafk
 ```csharp
 using Benzene.Abstractions.Hosting;
 using Benzene.Core.MessageHandlers;
-using Benzene.Core.MessageHandlers.DI;
 using Benzene.Kafka.Core;
 using Benzene.Microsoft.Dependencies;
 using Benzene.SelfHost;
@@ -118,10 +117,8 @@ public class StartUp : BenzeneStartUp
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
-        services.UsingBenzene(x => x
-            .AddBenzene()
-            .AddMessageHandlers(typeof(HelloWorldMessageHandler).Assembly)
-            .AddKafka<Ignore, string>());
+        // Nothing Benzene-specific to register - register your own services here. UseKafka and
+        // UseMessageHandlers in Configure wire up the Kafka mappers and discover your handlers.
     }
 
     public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration)
@@ -149,10 +146,11 @@ public class StartUp : BenzeneStartUp
   `examples/Kafka`) is the common case where you don't care about the message key and the value is
   a JSON string; use `Confluent.Kafka`'s other built-in deserializers (or your own) for other
   shapes.
-- `AddKafka<TKey, TValue>()` (called by `ConfigureServices`) registers the topic/body/headers
-  getters that adapt a `ConsumeResult<TKey, TValue>` to the message-handler pipeline. Kafka record
-  headers **are** mapped to Benzene message headers on this path (UTF-8 decoded) — unlike the Azure
-  Functions Kafka trigger below.
+- `UseKafka<TKey, TValue>(...)` registers the topic/body/headers getters that adapt a
+  `ConsumeResult<TKey, TValue>` to the message-handler pipeline (`AddKafka<TKey, TValue>()` is called
+  for you), so no Benzene registration is needed in `ConfigureServices` — `UseMessageHandlers()`
+  discovers your handlers and pulls in the core pipeline. Kafka record headers **are** mapped to
+  Benzene message headers on this path (UTF-8 decoded) — unlike the Azure Functions Kafka trigger below.
 - `BenzeneKafkaConfig.ConcurrentRequests` (default `5`) bounds how many records this worker
   processes concurrently via an internal `BoundedConcurrentDispatcher` (Channels-based).
 

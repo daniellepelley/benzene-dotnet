@@ -107,8 +107,6 @@ using Benzene.Abstractions.Hosting;
 using Benzene.Aws.Lambda.ApiGateway;
 using Benzene.Aws.Lambda.Core;
 using Benzene.Core.MessageHandlers;
-using Benzene.Core.MessageHandlers.DI;
-using Benzene.Http;
 using Benzene.Microsoft.Dependencies;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -125,9 +123,8 @@ public class StartUp : BenzeneStartUp
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
-        services.UsingBenzene(x => x
-            .AddBenzene()
-            .AddMessageHandlers(typeof(HelloWorldMessageHandler).Assembly));
+        // Nothing Benzene-specific to register here. Register your own application services -
+        // repositories, HTTP clients, options - and Benzene wires itself up in Configure below.
     }
 
     public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration)
@@ -139,10 +136,14 @@ public class StartUp : BenzeneStartUp
 }
 ```
 
-`.AddBenzene()` registers the core pipeline services every host needs — routing, result statuses,
-serialization. It comes first, and leaving it out is the single most common setup mistake: nothing
-complains until the first message arrives, and the failure then names an internal type rather than
-the missing call.
+Notice there is **no Benzene registration in `ConfigureServices`** — no `AddBenzene()`, no
+`AddMessageHandlers()`. `UseMessageHandlers()` in `Configure` discovers your `[Message]`/`[HttpEndpoint]`
+handlers by reflection and — since the router depends on them — pulls in the core pipeline services
+(routing, result statuses, serialization) for you; each transport you wire (`UseApiGateway`, and
+`UseSqs`/`UseSns`/... below) registers its own request/response mappers the same way. The no-argument
+`UseMessageHandlers()` scans every loaded assembly; pass an assembly or a list of types
+(`UseMessageHandlers(typeof(HelloWorldMessageHandler).Assembly)`) if you'd rather scope discovery
+explicitly. Either way, `ConfigureServices` is now just for *your* services.
 
 > This is the platform-neutral pattern used by every Benzene host — the
 > [`examples/Aws`](../examples/Aws) project follows exactly this shape. Only the AWS-specific event

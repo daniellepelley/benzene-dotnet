@@ -74,8 +74,6 @@ public class OrderAccepted { public string OrderId { get; set; } public string S
 using Benzene.Abstractions.Hosting;
 using Benzene.AspNet.Core;
 using Benzene.Core.MessageHandlers;
-using Benzene.Core.MessageHandlers.DI;
-using Benzene.Http;
 using Benzene.Microsoft.Dependencies;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -88,15 +86,20 @@ public class Startup : BenzeneStartUp
         => new ConfigurationBuilder().AddEnvironmentVariables().Build();
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
-        => services.UsingBenzene(x => x
-            .AddBenzene()
-            .AddMessageHandlers(typeof(PlaceOrderMessageHandler).Assembly)
-            .AddHttpMessageHandlers());
+    {
+        // Nothing Benzene-specific to register - register your own services here. UseHttp and
+        // UseMessageHandlers in Configure wire up the HTTP mappers and discover your handlers.
+    }
 
     public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration)
         => app.UseHttp(http => http.UseMessageHandlers());
 }
 ```
+
+`ConfigureServices` registers no Benzene services: `UseHttp(...)` adds the HTTP request/response
+mappers and `UseMessageHandlers()` discovers your `[Message]`/`[HttpEndpoint]` handlers by reflection
+and pulls in the core pipeline for you. Pass an assembly or type list to `UseMessageHandlers(...)` if
+you'd rather scope discovery explicitly.
 
 `Function.cs` is the only Google-specific line — it hosts that `Startup` on the Functions Framework:
 
