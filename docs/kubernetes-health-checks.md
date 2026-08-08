@@ -145,7 +145,6 @@ public class MyStartUp : BenzeneStartUp
 {
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
         => services.UsingBenzene(x => x
-            .AddBenzene()
             .AddMessageHandlers()
             .AddSingleton<IHttpEndpointDefinition>(_ =>
                 new HttpEndpointDefinition("GET", "/livez", Constants.DefaultLivenessTopic))

@@ -122,7 +122,7 @@ public class StartUp : BenzeneStartUp
     public override IConfiguration GetConfiguration() => new ConfigurationBuilder().Build();
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
-        => services.UsingBenzene(x => x.AddBenzene().AddBenzeneMessage()
+        => services.UsingBenzene(x => x.AddBenzeneMessage()
             .AddMessageHandlers(typeof(HelloWorldMessageHandler).Assembly));
 
     public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration) => app

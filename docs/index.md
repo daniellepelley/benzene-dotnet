@@ -89,8 +89,8 @@ Benzene is a hexagonal framework designed for services running in serverless env
   - [Authentication Patterns](cookbooks/auth-patterns.md) — OAuth2 bearer token (JWT) validation, Basic auth, and scope-based authorization for services with no security-terminating gateway in front of them
 
 - **Live Demos**
-  - [Mesh UI](../demos/mesh/index.html) — a running dashboard over sample service health, contract drift, and cross-service traffic
-  - [Spec UI](../demos/spec/index.html) — browse a sample Benzene message spec, Swagger-UI style
+  - [Mesh UI](https://benzene.app/demos/mesh/index.html) — a running dashboard over sample service health, contract drift, and cross-service traffic
+  - [Spec UI](https://benzene.app/demos/spec/index.html) — browse a sample Benzene message spec, Swagger-UI style
   - Fleet view has no static demo here — it only ever renders what it polls live from a running
     `Benzene.Mesh.Collector`, so there's nothing to show without one. See [Mesh UI](mesh-ui.md#fleet-view)
     for what it looks like, or run [`examples/Mesh`](../examples/Mesh)'s `./run.sh` for the real thing.

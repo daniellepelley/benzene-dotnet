@@ -160,9 +160,6 @@ public class StartUp : BenzeneStartUp
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
         services.UsingBenzene(x => x
-            // Required because the SQS handler below resolves ISetCurrentTransport directly
-            // (SqsApplication.HandleAsync) — see Troubleshooting if you forget this.
-            .AddBenzene()
             .AddMessageHandlers(typeof(CreateOrderMessageHandler).Assembly)
             .AddHttpMessageHandlers());
 
@@ -342,36 +339,6 @@ A few things worth calling out:
   into.
 
 ## Troubleshooting
-
-### `BenzeneException: Unable to resolve type ...ISetCurrentTransport, ...`
-
-This is the most common first-run failure for a function that wires up SQS, SNS, or Kafka (or the
-BenzeneMessage bridge via `UseBenzeneMessage(...)`). Those transports call
-`serviceResolver.GetService<ISetCurrentTransport>()` directly while dispatching each
-message/record — unlike `UseApiGateway(...)`, which doesn't need it — and `ISetCurrentTransport` is
-only registered by `.AddBenzene()`:
-
-```csharp
-services.UsingBenzene(x => x
-    .AddBenzene()               // <-- registers ISetCurrentTransport (and ICurrentTransport)
-    .AddMessageHandlers(typeof(CreateOrderMessageHandler).Assembly)
-    .AddHttpMessageHandlers());
-```
-
-If your `Configure` also bridges through `UseBenzeneMessage(...)` (rather than `UseSqs`/`UseSns`
-directly), you additionally need `.AddBenzeneMessage()`:
-
-```csharp
-services.UsingBenzene(x => x
-    .AddBenzene()
-    .AddBenzeneMessage()
-    .AddMessageHandlers(typeof(CreateOrderMessageHandler).Assembly));
-```
-
-Because `BuildAwsLambdaHost()` performs the exact same construction as a real deployment (see
-[Getting Started: Troubleshooting](../getting-started-aws.md#troubleshooting)), this mistake
-surfaces identically in a test and in production — the test failing here is exactly the point: it
-catches the misconfiguration before a real SQS message ever hits the deployed function.
 
 ### `WithServices` mock never gets called / real dependency runs instead
 

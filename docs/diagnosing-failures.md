@@ -55,7 +55,6 @@ If a check is wrong for your application, one switch covers all of them:
 
 ```csharp
 services.UsingBenzene(x => x
-    .AddBenzene()
     .AddBenzeneStartUpChecks(BenzeneStartUpCheckMode.Advisory)   // log and continue
     .AddMessageHandlers(typeof(Program).Assembly));
 ```

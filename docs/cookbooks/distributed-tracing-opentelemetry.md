@@ -205,7 +205,6 @@ public class WorkerStartUp : BenzeneStartUp
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
         services.UsingBenzene(x => x
-            .AddBenzene()
             .AddDiagnostics()
             .AddMessageHandlers(typeof(ProcessOrderMessageHandler).Assembly));
     }

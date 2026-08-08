@@ -128,7 +128,6 @@ using Microsoft.Extensions.DependencyInjection;
 public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
 {
     services.UsingBenzene(x => x
-        .AddBenzene()
         .AddDiagnostics() // registers ActivityProcessTimerFactory as IProcessTimerFactory
         .AddMessageHandlers(typeof(GetProductMessageHandler).Assembly)
         .AddHttpMessageHandlers());

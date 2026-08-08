@@ -64,7 +64,6 @@ back down to the caller's version — all from one call, `AddPayloadVersioning`:
 
 ```csharp
 services.UsingBenzene(x => x
-    .AddBenzene()
     .AddMessageHandlers(typeof(StartUp).Assembly)
     .AddContextItems()
     .AddPayloadVersioning(versioning => versioning

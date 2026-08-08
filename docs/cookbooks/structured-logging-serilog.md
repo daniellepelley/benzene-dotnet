@@ -65,7 +65,6 @@ public override void ConfigureServices(IServiceCollection services, IConfigurati
     services.AddLogging(x => x.AddSerilog());
 
     services.UsingBenzene(x => x
-        .AddBenzene()
         .AddMessageHandlers(typeof(CreateOrderMessage).Assembly));
 }
 ```

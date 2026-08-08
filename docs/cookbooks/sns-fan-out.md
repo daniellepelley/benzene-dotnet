@@ -94,7 +94,6 @@ public class NotificationStartUp : BenzeneStartUp
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
         services.UsingBenzene(x => x
-            .AddBenzene()
             .AddMessageHandlers(typeof(SendOrderConfirmationEmailHandler).Assembly));
     }
 

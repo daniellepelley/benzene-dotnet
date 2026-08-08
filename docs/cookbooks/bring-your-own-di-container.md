@@ -114,7 +114,6 @@ Benzene app — no host required:
 var services = new ServiceCollection();
 services.UsingBenzene(x =>
 {
-    x.AddBenzene();
     x.AddMessageHandlers(typeof(MyHandler).Assembly);
 });
 
