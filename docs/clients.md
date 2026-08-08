@@ -27,7 +27,7 @@ Add the core client abstractions, plus whichever transport package(s) you need:
 | `Benzene.Clients.Azure.ServiceBus` / `.EventHub` / `.EventGrid` / `.QueueStorage` | The Azure outbound clients, one package per transport, mirroring the AWS split. Each gives a `.Use<Transport>(...)` route extension and a standalone `IBenzeneMessageClient`. No egress exists for Blob Storage/Cosmos DB Change Feed/Timer — they aren't transports (see [Capability Matrix](capability-matrix.md)); "Kafka over Event Hubs" egress is `Benzene.Kafka.Core` unchanged (below), not a separate Azure package. |
 | `Benzene.Kafka.Core` | `KafkaBenzeneMessageClient` (Kafka transport — including Event Hubs' Kafka-protocol endpoint). |
 | `Benzene.Grpc.Client` | `GrpcBenzeneMessageClient` (gRPC transport). |
-| `Benzene.Client.Http` | `HttpContextConverter`/`HttpClientMiddleware` — the lower-level pipeline building blocks for sending over HTTP (see [HTTP](#http) below). |
+| `Benzene.Clients.Http` | `HttpContextConverter`/`HttpClientMiddleware` — the lower-level pipeline building blocks for sending over HTTP (see [HTTP](#http) below). |
 | `Benzene.Resilience` | `RetryMiddleware<TContext>`/`.UseRetry(...)` — works on `OutboundContext` unmodified. |
 
 ## Basic usage
@@ -241,7 +241,7 @@ These transports don't have an `OutboundContext` route extension yet — `.UseAw
 
 ### HTTP
 
-Package: `Benzene.Client.Http`. HTTP has never had an `IBenzeneMessageClient` implementation or an outbound-routing route extension — see [Using a transport client directly — HTTP](#http-1) below for the lower-level pipeline you compose yourself.
+Package: `Benzene.Clients.Http`. HTTP has never had an `IBenzeneMessageClient` implementation or an outbound-routing route extension — see [Using a transport client directly — HTTP](#http-1) below for the lower-level pipeline you compose yourself.
 
 ## Generated clients (`Benzene.CodeGen.Client`)
 
@@ -414,9 +414,9 @@ Unlike the other transports, a non-OK gRPC status doesn't collapse to a single g
 
 ### HTTP
 
-Package: `Benzene.Client.Http`.
+Package: `Benzene.Clients.Http`.
 
-HTTP is the odd one out: there is no `HttpBenzeneMessageClient : IBenzeneMessageClient` shipped today. Instead, `Benzene.Client.Http` gives you the lower-level pipeline building blocks to compose an outbound HTTP call yourself:
+HTTP is the odd one out: there is no `HttpBenzeneMessageClient : IBenzeneMessageClient` shipped today. Instead, `Benzene.Clients.Http` gives you the lower-level pipeline building blocks to compose an outbound HTTP call yourself:
 
 ```csharp
 var pipeline = new MiddlewarePipelineBuilder<IBenzeneClientContext<CreateOrderRequest, OrderCreatedResponse>>(services)

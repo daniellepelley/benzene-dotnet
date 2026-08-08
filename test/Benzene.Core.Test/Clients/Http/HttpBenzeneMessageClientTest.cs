@@ -7,7 +7,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Benzene.Abstractions.Results;
-using Benzene.Client.Http;
+using Benzene.Clients.Http;
 using Benzene.Clients;
 using Benzene.Results;
 using Xunit;

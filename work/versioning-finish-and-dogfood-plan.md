@@ -39,7 +39,7 @@ The wire token is the same everywhere: HTTP route `/v{version}` captures the tok
 
 ## Slices (each builds + tests + commits)
 1. Version header constant (`Benzene.Abstractions.Messages`) + outbound overloads (`Benzene.Clients`,
-   `Benzene.Client.Http`). Unit tests.
+   `Benzene.Clients.Http`). Unit tests.
 2. `Benzene.Http` `/v{version}` route policy: `HttpVersioningOptions` + `VersionedHttpEndpointFinder`
    decorator + `AddHttpVersioning()` opt-in. Unit tests (routes doubled; bare→latest still matches).
 3. Mesh cross-version compatibility: `MeshTopicEntry` field / `MeshTopicStatus` extension +

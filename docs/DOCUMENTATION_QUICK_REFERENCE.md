@@ -126,8 +126,7 @@ Write a cookbook for implementing distributed tracing with OpenTelemetry
 ### AWS Lambda
 ```csharp
 // Packages
-dotnet add package Benzene.Aws.Lambda.Core --prerelease
-dotnet add package Benzene.Aws.Lambda.ApiGateway --prerelease
+dotnet add package Benzene.Aws.Lambda --prerelease
 
 // Entry point
 public class Function : AwsLambdaHost<StartUp> { }

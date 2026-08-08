@@ -130,7 +130,7 @@ Topic ids are now declared once, mirroring `BenzeneResultStatus`:
 
 The plan's final bare-word audit (§4) caught **three live topic sends** the constants-first pass had
 missed — `AwsLambdaHealthCheck` sending `ping`, `SqsHealthCheck`'s topic attribute, and a second
-`healthCheckTopic` default in `Benzene.Client.Http/Extensions.cs`. All three compile fine either way
+`healthCheckTopic` default in `Benzene.Clients.Http/Extensions.cs`. All three compile fine either way
 and would have failed only at runtime, against a renamed service. It also confirmed the survivors
 that must **not** change: the `spec`/`healthcheck` CLI *command* names, and the gRPC
 `liveness`/`readiness` *service names and health tags*.

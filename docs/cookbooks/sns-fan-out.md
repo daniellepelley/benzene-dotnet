@@ -37,7 +37,7 @@ dotnet add package Benzene.Clients.Aws.Sns
 Each subscriber Lambda:
 
 ```bash
-dotnet add package Benzene.Aws.Lambda.Sns
+dotnet add package Benzene.Aws.Lambda
 ```
 
 ## Step-by-Step Implementation

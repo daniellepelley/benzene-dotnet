@@ -33,16 +33,16 @@ Benzene's packages are published as prerelease (`-alpha`) versions, so `--prerel
 required until 1.0:
 
 ```bash
-dotnet add package Benzene.Aws.Lambda.Core --prerelease
-dotnet add package Benzene.Aws.Lambda.ApiGateway --prerelease
+dotnet add package Benzene.Aws.Lambda --prerelease
 ```
 
-`Benzene.Aws.Lambda.Core` brings in the middleware pipeline, message handler infrastructure,
-and `BenzeneStartUp` base class transitively (via `Benzene.Microsoft.Dependencies`).
-`Benzene.Aws.Lambda.ApiGateway` adds the `UseApiGateway` middleware for handling HTTP requests
-via API Gateway. Add `Benzene.Aws.Lambda.Sqs`, `Benzene.Aws.Lambda.Sns`,
-`Benzene.Aws.Lambda.Kafka`, or `Benzene.Aws.Lambda.S3` the same way if your function also needs
-to handle those event sources (see [Supported Event Sources](#supported-event-sources) below).
+`Benzene.Aws.Lambda` is the umbrella for building a Lambda service: one package brings in the
+middleware pipeline and message-handler infrastructure (transitively via
+`Benzene.Microsoft.Dependencies`), the `BenzeneStartUp` base class, `UseApiGateway`, and **every**
+event-source middleware — `UseSqs`, `UseSns`, `UseKafka`, `UseS3`, and the rest — so you don't add a
+package per event source (see [Supported Event Sources](#supported-event-sources) below). Prefer a
+narrower dependency? Reference `Benzene.Aws.Lambda.Core` plus just the transport package(s) you need
+(`Benzene.Aws.Lambda.Sqs`, `.Sns`, `.Kafka`, `.S3`, …) instead of the umbrella.
 
 You'll also need the concrete `Microsoft.Extensions.Configuration` implementation for
 `GetConfiguration()` below (only its abstractions are referenced transitively):

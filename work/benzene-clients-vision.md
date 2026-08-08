@@ -9,7 +9,7 @@
 > §2/§4 design-decision test in this document. It's a design proposal only, not yet implemented or
 > approved for implementation.
 **Purpose:** Capture the aims for Benzene's outbound "pipes and adapters out" —
-everything in `Benzene.Clients`, `Benzene.Clients.Aws`, `Benzene.Client.Http`, and
+everything in `Benzene.Clients`, `Benzene.Clients.Aws`, `Benzene.Clients.Http`, and
 sibling packages — so a redesign of that layer is driven by a clear statement of intent
 rather than by patching individual symptoms. Companion to
 [`benzene-vision.md`](benzene-vision.md), which covers the framework as a whole; this

@@ -3,7 +3,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Benzene.Abstractions.Messages.BenzeneClient;
-using Benzene.Client.Http;
+using Benzene.Clients.Http;
 using Benzene.Clients;
 using Benzene.Clients.Aws.Sns;
 using Benzene.Clients.Aws.Sqs;

@@ -5,7 +5,7 @@ using Benzene.Abstractions.Serialization;
 using Benzene.Clients;
 using Benzene.Results;
 
-namespace Benzene.Client.Http;
+namespace Benzene.Clients.Http;
 
 public class HttpContextConverter<TRequest, TResponse> : IContextConverter<IBenzeneClientContext<TRequest, TResponse>, HttpSendMessageContext>
 {

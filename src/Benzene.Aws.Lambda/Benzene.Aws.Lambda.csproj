@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!--
+        Meta-package. Benzene.Aws.Lambda carries no code of its own: the AWS Lambda support is split
+        into one package per event source so a function only drags in the SDK for the triggers it uses.
+        This package references the Lambda core plus every event-source transport, so a consumer can add
+        one reference to build a Lambda service instead of naming each; consumers who want a narrower
+        dependency should reference just the transport package(s) they need (Benzene.Aws.Lambda.Core
+        plus Benzene.Aws.Lambda.ApiGateway / .Sqs / .Sns / .DynamoDb / .Kinesis / .S3 / .EventBridge /
+        .Kafka). Opt-in extras (Benzene.Aws.Lambda.XRay, .Hosting, .AspNet) are deliberately not pulled
+        in here.
+    -->
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <AssemblyName>Benzene.Aws.Lambda</AssemblyName>
+        <RootNamespace>Benzene.Aws.Lambda</RootNamespace>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Benzene.Aws.Lambda.Core\Benzene.Aws.Lambda.Core.csproj" />
+        <ProjectReference Include="..\Benzene.Aws.Lambda.ApiGateway\Benzene.Aws.Lambda.ApiGateway.csproj" />
+        <ProjectReference Include="..\Benzene.Aws.Lambda.Sqs\Benzene.Aws.Lambda.Sqs.csproj" />
+        <ProjectReference Include="..\Benzene.Aws.Lambda.Sns\Benzene.Aws.Lambda.Sns.csproj" />
+        <ProjectReference Include="..\Benzene.Aws.Lambda.DynamoDb\Benzene.Aws.Lambda.DynamoDb.csproj" />
+        <ProjectReference Include="..\Benzene.Aws.Lambda.Kinesis\Benzene.Aws.Lambda.Kinesis.csproj" />
+        <ProjectReference Include="..\Benzene.Aws.Lambda.S3\Benzene.Aws.Lambda.S3.csproj" />
+        <ProjectReference Include="..\Benzene.Aws.Lambda.EventBridge\Benzene.Aws.Lambda.EventBridge.csproj" />
+        <ProjectReference Include="..\Benzene.Aws.Lambda.Kafka\Benzene.Aws.Lambda.Kafka.csproj" />
+    </ItemGroup>
+</Project>

@@ -10,7 +10,7 @@ This is an **investigation**, not an implementation. It surveys what Benzene alr
 concrete options with trade-offs, and recommends a phased path.
 
 > **Update (2026-07-22): Phase 1 / Option A is implemented.** The envelope client landed in the existing
-> **`Benzene.Client.Http`** package (not a new `Benzene.Clients.Http` — that package was already the
+> **`Benzene.Clients.Http`** package (not a new `Benzene.Clients.Http` — that package was already the
 > outbound-HTTP home, and its pre-existing content was a *plain-REST* caller, not the envelope client, so
 > the gap below held exactly). New: `HttpBenzeneMessageClient : IBenzeneMessageClient` (POSTs
 > `{ topic, headers, body }`, maps the `{ statusCode, headers, body }` response), `HttpBenzeneMessageHealthCheck`

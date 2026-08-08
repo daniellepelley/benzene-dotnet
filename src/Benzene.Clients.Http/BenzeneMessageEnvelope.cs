@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Benzene.Client.Http;
+namespace Benzene.Clients.Http;
 
 /// <summary>
 /// The outbound BenzeneMessage envelope shape — <c>{ "topic": ..., "headers": { ... }, "body": "..." }</c> —

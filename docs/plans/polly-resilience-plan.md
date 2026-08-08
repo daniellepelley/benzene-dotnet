@@ -38,7 +38,7 @@ zero-dependency `UseRetry` for users who want no extra dependency.
   the context afterwards. So an outcome-aware Polly middleware must read the result off the context
   after `next()` and surface it to Polly. `RetryMiddleware` already models exactly this split with
   its `shouldRetryContext(TContext)` predicate — the Polly version generalizes it.
-- **HttpClient is a special, already-solved case.** `Benzene.Client.Http` builds on `HttpClient`;
+- **HttpClient is a special, already-solved case.** `Benzene.Clients.Http` builds on `HttpClient`;
   the Microsoft-blessed path there is `Microsoft.Extensions.Http.Resilience`
   (`AddStandardResilienceHandler()`), which is Polly v8 under the hood.
 
@@ -71,16 +71,16 @@ Keep `Benzene.Resilience` (homegrown, zero-dependency retry) exactly as-is. Add 
 
 ### HttpClient resilience (Phase 3)
 
-For `Benzene.Client.Http`, adopt `Microsoft.Extensions.Http.Resilience`'s
+For `Benzene.Clients.Http`, adopt `Microsoft.Extensions.Http.Resilience`'s
 `AddStandardResilienceHandler()` on the underlying `HttpClient` registration rather than routing
 HTTP retries through the Benzene middleware layer — it is the Microsoft-standard, handles the
 `HttpResponseMessage`-outcome semantics correctly, and keeps HTTP transport concerns at the HTTP
-layer. Expose it via a small `Benzene.Client.Http` opt-in extension.
+layer. Expose it via a small `Benzene.Clients.Http` opt-in extension.
 
 ## Scope
 
 **In:** the `Benzene.Resilience.Polly` package (middleware + extensions), outcome-aware failure
-handling, HttpClient resilience wiring for `Benzene.Client.Http`, unit tests, a resilience cookbook,
+handling, HttpClient resilience wiring for `Benzene.Clients.Http`, unit tests, a resilience cookbook,
 and a package `CLAUDE.md`.
 
 **Out (for now):** removing or rewriting the homegrown `Benzene.Resilience.UseRetry` (it stays as
@@ -96,7 +96,7 @@ own abstractions (we consume Polly directly, we don't re-abstract it).
 2. **Outcome-aware** — `isFailure(TContext)` so an unsuccessful `IBenzeneResult` is a handled
    outcome. Tests over a handler returning a failure *result* (not throwing).
 3. **HttpClient resilience** — `Microsoft.Extensions.Http.Resilience` wiring in
-   `Benzene.Client.Http`.
+   `Benzene.Clients.Http`.
 4. **Docs** — `docs/cookbooks/resilience-with-polly.md`, package `CLAUDE.md`, and a cross-link from
    `Benzene.Resilience`'s `CLAUDE.md` ("basic retry here; full toolkit in `Benzene.Resilience.Polly`").
 

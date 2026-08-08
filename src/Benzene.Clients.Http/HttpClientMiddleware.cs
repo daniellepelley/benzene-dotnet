@@ -1,7 +1,7 @@
 ﻿using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Middleware;
 
-namespace Benzene.Client.Http;
+namespace Benzene.Clients.Http;
 
 public class HttpClientMiddleware : IMiddleware<HttpSendMessageContext>, ITerminalMiddleware
 {

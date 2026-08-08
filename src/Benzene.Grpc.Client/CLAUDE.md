@@ -3,7 +3,7 @@
 ## What this package does
 Outbound gRPC client: `GrpcBenzeneMessageClient : IBenzeneMessageClient`, sending unary calls through
 a Benzene middleware pipeline over a `Grpc.Net.Client.GrpcChannel`. Mirrors the shape of
-`Benzene.Kafka.Core`'s and `Benzene.Client.Http`'s outbound clients.
+`Benzene.Kafka.Core`'s and `Benzene.Clients.Http`'s outbound clients.
 
 ## Key types/interfaces
 
