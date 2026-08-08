@@ -32,7 +32,6 @@ public static class DependenciesBuilder
         services.AddScoped<IOrderService, OrderService>();
 
         services.UsingBenzene(x => x
-            .AddBenzene()
             .AddMessageHandlers(typeof(CreateOrderMessage).Assembly));
 
         // Log how long each message takes to handle, so `dotnet run` shows the pipeline firing.

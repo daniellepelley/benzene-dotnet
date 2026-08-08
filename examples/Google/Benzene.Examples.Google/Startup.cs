@@ -36,7 +36,6 @@ public class Startup : BenzeneStartUp
         services.AddScoped<IOrderService, OrderService>();
 
         services.UsingBenzene(x => x
-            .AddBenzene()
             .AddMessageHandlers(typeof(CreateOrderMessage).Assembly)
             .AddHttpMessageHandlers());
 

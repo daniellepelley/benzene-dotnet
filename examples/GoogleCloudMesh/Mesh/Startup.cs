@@ -34,7 +34,6 @@ public class Startup : BenzeneStartUp
         var prefix = Environment.GetEnvironmentVariable("MESH_PREFIX") ?? "";
 
         services.UsingBenzene(x => x
-            .AddBenzene()
             .AddDiagnostics()
             .AddMessageHandlers(typeof(Startup).Assembly)
             .AddHttpMessageHandlers()

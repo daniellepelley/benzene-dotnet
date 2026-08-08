@@ -75,7 +75,6 @@ public static class DependenciesBuilder
 
         services.AddValidatorsFromAssemblyContaining<GetOrderMessageValidator>();
         services.UsingBenzene(x => x
-            .AddBenzene()
             // Span per middleware, so a failing stage is marked Error in a trace viewer. The focused
             // opt-in (not AddDiagnostics()) because this example registers its own IProcessTimerFactory
             // below - see docs/diagnosing-failures.md.

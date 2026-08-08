@@ -71,8 +71,7 @@ public static class MeshServiceWiring
 
         services.UsingBenzene(x =>
         {
-            x.AddBenzene()
-                .AddCorrelationId()
+            x.AddCorrelationId()
                 // AddDiagnostics() wires ActivityMiddlewareWrapper, so every middleware in every
                 // pipeline turns up as its own Activity span (tagged benzene.transport/topic/handler)
                 // and is exported over OTLP by AddBenzeneInstrumentation() above — full per-middleware

@@ -68,7 +68,7 @@ public class Startup : BenzeneStartUp
 
         services.UsingBenzene(x =>
         {
-            x.AddBenzene()
+            x
                 // Name the service in its own derived spec (the benzene spec's title = IApplicationInfo.Name).
                 // Without this it defaults to BlankApplicationInfo and the spec/Spec UI show no service name.
                 // Matches the name the mesh discovers this service under (its Kubernetes Service name).

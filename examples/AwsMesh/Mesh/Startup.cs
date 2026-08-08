@@ -48,10 +48,6 @@ public class Startup : BenzeneStartUp
 
         services.UsingBenzene(benzene =>
         {
-            // Baseline every Benzene app needs (IDefaultStatuses, serializer, version selection, core
-            // middleware). UseApiGateway/UseEventBridge/UseMessageHandlers don't register it — the app
-            // must, same as every other Benzene example.
-            benzene.AddBenzene();
             benzene.AddDiagnostics();
             // The mesh Lambda's own spans need benzene.service too (the domain services get it via
             // UseBenzeneCloudService, which this host doesn't use): without it the trace mappers fall

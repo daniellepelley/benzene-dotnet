@@ -37,8 +37,7 @@ public static class MeshServiceWiring
 
         services.UsingBenzene(x =>
         {
-            x.AddBenzene()
-                .SetApplicationInfo(serviceName, "1.0.0", $"{serviceName} service")
+            x.SetApplicationInfo(serviceName, "1.0.0", $"{serviceName} service")
                 .AddDiagnostics()
                 .AddMessageHandlers(handlers)
                 .AddHttpMessageHandlers();

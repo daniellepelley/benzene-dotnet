@@ -52,7 +52,6 @@ public class Startup : BenzeneStartUp
             });
 
         services.UsingBenzene(benzene => benzene
-            .AddBenzene()
             .AddDiagnostics()
             .AddMessageHandlers(typeof(Startup).Assembly)
             .AddHttpMessageHandlers()

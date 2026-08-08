@@ -57,7 +57,7 @@ public static class MeshServiceWiring
 
         services.UsingBenzene(x =>
         {
-            x.AddBenzene()
+            x
                 // Name the service in its own derived spec (the spec title = IApplicationInfo.Name) and
                 // under the same name the mesh discovers it by.
                 .SetApplicationInfo(serviceName, "1.0.0", $"{serviceName} service")

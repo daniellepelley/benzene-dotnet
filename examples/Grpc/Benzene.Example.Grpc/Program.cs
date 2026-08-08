@@ -18,8 +18,7 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.
 builder.Services.AddBenzeneGrpc();
 builder.Services.UsingBenzene(
-    x => x.AddBenzene()
-        .AddBenzeneMessage()
+    x => x.AddBenzeneMessage()
         .AddMessageHandlers(typeof(OrderDto).Assembly, typeof(SayHelloMessageHandler).Assembly)
         .AddGrpcMessageHandlers()
 );

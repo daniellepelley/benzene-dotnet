@@ -43,7 +43,6 @@ public static class DependenciesBuilder
         services.AddScoped<IOrderService, OrderService>();
 
         services.UsingBenzene(x => x
-            .AddBenzene()
             .AddXml()
             .AddMessageHandlers(typeof(CreateOrderMessage).Assembly)
             .AddKafka<Ignore, string>()

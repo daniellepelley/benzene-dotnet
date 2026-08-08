@@ -42,7 +42,6 @@ pipelineBuilder
 var benzeneApplication = new BenzeneMessageApplication(pipelineBuilder.Build());
 
 builder.Services.UsingBenzene(x => x
-    .AddBenzene()
     .AddBenzeneMessage()
     .AddMessageHandlers(typeof(Program).Assembly)
     .AddDiagnostics());

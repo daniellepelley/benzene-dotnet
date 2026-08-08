@@ -58,7 +58,6 @@ public static class DependenciesBuilder
         services.AddSingleton(serviceBusSender);
 
         services.UsingBenzene(x => x
-                .AddBenzene()
                 // Both the shared App domain's handlers AND this host's own (PublishOrderCreatedMessageHandler
                 // below) - AddMessageHandlers only registers handlers from the assemblies it's given, and
                 // the finder it registers is locked in via TryAddSingleton, so a later broader

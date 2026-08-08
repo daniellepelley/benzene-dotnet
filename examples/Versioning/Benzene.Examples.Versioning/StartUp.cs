@@ -56,8 +56,7 @@ public class StartUp : BenzeneStartUp
 
         services.UsingBenzene(x =>
         {
-            x.AddBenzene()
-                .SetApplicationInfo("Benzene Versioning Example", "1.0.0",
+            x.SetApplicationInfo("Benzene Versioning Example", "1.0.0",
                     "Dogfoods handler-version dispatch and transparent payload casting over AWS Lambda transports.")
                 .AddBenzeneMessage()
                 // Scan THIS assembly for the [Message]/[HttpEndpoint] handlers. AddHttpMessageHandlers
