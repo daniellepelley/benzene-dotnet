@@ -130,7 +130,7 @@ SagaResult result = await saga.RunAsync();           // all-or-nothing; rolls ba
 
 The primary integration is `IBenzeneMessageSender` (lander-to-lander), but a step's `Do`/`Compensate`
 are just `Func`s returning `IBenzeneResult<T>` (or a thin adapter for a plain `Task`), so an HTTP
-call (`Benzene.Client.Http`) or any custom async action works identically — matching the production
+call (`Benzene.Clients.Http`) or any custom async action works identically — matching the production
 system, which used mostly lander-to-lander but sometimes HTTP.
 
 ## 6. Proposed package shape

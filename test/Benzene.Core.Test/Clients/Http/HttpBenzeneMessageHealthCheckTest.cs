@@ -4,7 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Benzene.Client.Http;
+using Benzene.Clients.Http;
 using Benzene.HealthChecks.Core;
 using Xunit;
 

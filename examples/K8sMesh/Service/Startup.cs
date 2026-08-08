@@ -2,7 +2,7 @@ using Azure.Monitor.OpenTelemetry.Exporter;
 using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Hosting;
 using Benzene.AspNet.Core;
-using Benzene.Client.Http;
+using Benzene.Clients.Http;
 using Benzene.Clients;
 using Benzene.CloudService;
 using Benzene.Core.MessageHandlers;

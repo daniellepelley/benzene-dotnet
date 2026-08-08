@@ -65,6 +65,21 @@ comment here refers to `docs/specification/...`, that path is in the `benzene` r
 - Context types (`TContext`) stay pure — describe the transport message's shape only. For a
   middleware-to-later-step handoff scoped to one pipeline, use a small scoped DI-registered holder
   instead of adding a marker to the context — see `src/Benzene.Abstractions.Middleware/CLAUDE.md`.
+- **Package naming — family vs platform (two rules, by package kind).** The estate uses two orderings
+  deliberately; a new package follows the one for its kind:
+  1. **Hosting / transport adapters** are **platform-first**: `Benzene.<Platform>.<Runtime>.<Transport>`
+     (`Benzene.Aws.Lambda.Sns`, `Benzene.Azure.Function.ServiceBus`) — the platform *is* the product.
+  2. **Cross-cutting product families** with a shared, platform-agnostic abstraction are **feature-first**:
+     `Benzene.<Family>.<Platform>.<Transport>` (`Benzene.Clients.Aws.Sns`, `Benzene.Mesh.Aws.Lambda`,
+     `Benzene.HealthChecks.Azure.ServiceBus`) — the feature is the product, the platform just says which
+     backend fills it in, and the family's abstraction (`Benzene.Clients`, `Benzene.Mesh.Contracts`) has
+     no single platform to lead with.
+  3. **Platform-agnostic** packages take **no platform segment** (`Benzene.Core`, `Benzene.Results`,
+     `Benzene.Abstractions`).
+  This is why the outbound clients are `Benzene.Clients.Aws.*` (feature-first), **not**
+  `Benzene.Aws.Clients.*`. Keep singular/plural consistent within a family (hence `Benzene.Clients.Http`,
+  not `Benzene.Client.Http`). A references-only umbrella (e.g. `Benzene.Aws.Lambda`, `Benzene.Clients.Aws`)
+  may sit at the family/platform root to let a consumer take one dependency.
 
 ## Do NOT
 - Do not modify `Benzene.sln` / `Benzene.Examples.sln` structure without explicit approval

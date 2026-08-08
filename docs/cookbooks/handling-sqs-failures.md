@@ -20,7 +20,7 @@ This cookbook covers what Benzene actually does for you (partial-batch-failure r
 ## Installation
 
 ```bash
-dotnet add package Benzene.Aws.Lambda.Sqs
+dotnet add package Benzene.Aws.Lambda
 dotnet add package Benzene.Resilience --prerelease
 ```
 

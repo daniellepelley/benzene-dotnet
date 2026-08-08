@@ -25,7 +25,7 @@ for cross-cutting concerns and infrastructure integration packages.
 ### Clients & Communication
 - Benzene.Clients
 - Benzene.Clients.HealthChecks
-- Benzene.Client.Http
+- Benzene.Clients.Http
 - Benzene.Grpc
 
 ### Hosting

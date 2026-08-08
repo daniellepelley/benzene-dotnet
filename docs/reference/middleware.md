@@ -319,7 +319,7 @@ For sending messages *out* to other services, configured on a client pipeline
 
 | Step | Package | Sends via |
 |---|---|---|
-| `UseHttpClient()` / `UseHttp(...)` | `Benzene.Client.Http` | An outbound HTTP request. |
+| `UseHttpClient()` / `UseHttp(...)` | `Benzene.Clients.Http` | An outbound HTTP request. |
 | `UseSqsClient()` / `UseSqs(...)` | `Benzene.Clients.Aws.Sqs` | An SQS queue. |
 | `UseSnsClient()` / `UseSns(...)` | `Benzene.Clients.Aws.Sns` | An SNS topic. |
 | `UseAwsLambdaClient()` / `UseAwsLambda(...)` | `Benzene.Clients.Aws.Lambda` | A direct AWS Lambda invoke. |

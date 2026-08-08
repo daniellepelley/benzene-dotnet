@@ -8,7 +8,7 @@ using Benzene.Abstractions.DI;
 using Benzene.HealthChecks.Core;
 using JsonSerializer = Benzene.Clients.JsonSerializer;
 
-namespace Benzene.Client.Http;
+namespace Benzene.Clients.Http;
 
 /// <summary>
 /// Verifies reachability of a downstream Benzene service over its BenzeneMessage HTTP endpoint by POSTing a

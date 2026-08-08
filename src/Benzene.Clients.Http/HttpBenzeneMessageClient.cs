@@ -14,7 +14,7 @@ using Microsoft.Extensions.Logging;
 using JsonSerializer = Benzene.Clients.JsonSerializer;
 using Void = Benzene.Abstractions.Results.Void;
 
-namespace Benzene.Client.Http;
+namespace Benzene.Clients.Http;
 
 /// <summary>
 /// A Benzene message client that carries a lightweight BenzeneMessage envelope over HTTP: it POSTs

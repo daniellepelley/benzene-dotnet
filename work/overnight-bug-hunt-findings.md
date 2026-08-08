@@ -186,7 +186,7 @@ Fixed this pass (each behavior-preserving; full Core suite green: 1697):
 - ✅ **MeshSelfReportState torn read** (Low) — an `AddSingleton` shared across concurrent requests
   exposed a `DateTimeOffset?` (wider than a pointer) read/written without synchronization. Backed by
   an interlocked `long` (UTC ticks); public shape unchanged.
-- ✅ **Benzene.Client.Http per-call `HttpRequestMessage`/`HttpResponseMessage` not disposed** (Low) —
+- ✅ **Benzene.Clients.Http per-call `HttpRequestMessage`/`HttpResponseMessage` not disposed** (Low) —
   disposed in the converter's terminal `MapResponseAsync`. Not socket exhaustion today (buffered), but
   a real disposable gap.
 

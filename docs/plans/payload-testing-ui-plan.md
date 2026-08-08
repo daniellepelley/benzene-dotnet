@@ -248,6 +248,6 @@ Phases run in order; each compiles, passes the full suite, and merges independen
 - **Mesh integration**: the Mesh host (`deploy/Mesh`) already aggregates each service's benzene
   spec; once services advertise `messageEndpoint` (D6), the Mesh UI could offer cross-service
   payload testing from one dashboard. Requires the same security thinking as D5, multiplied.
-- **Client SDK reuse**: `Benzene.Client.Http` could gain a client that targets the
+- **Client SDK reuse**: `Benzene.Clients.Http` could gain a client that targets the
   `UseBenzeneMessage` endpoint, giving service-to-service calls a topic-addressed HTTP path
   without per-endpoint HTTP mappings.

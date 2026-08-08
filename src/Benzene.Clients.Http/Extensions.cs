@@ -6,7 +6,7 @@ using Benzene.Core.Middleware;
 using Benzene.HealthChecks.Core;
 using Microsoft.Extensions.Logging;
 
-namespace Benzene.Client.Http;
+namespace Benzene.Clients.Http;
 
 public static class Extensions
 {

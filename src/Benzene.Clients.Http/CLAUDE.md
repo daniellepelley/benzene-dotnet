@@ -1,4 +1,4 @@
-# Benzene.Client.Http
+# Benzene.Clients.Http
 
 ## What this package does
 Outbound HTTP for the Benzene client, in **two flavours**:

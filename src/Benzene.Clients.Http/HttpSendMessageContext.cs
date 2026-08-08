@@ -1,4 +1,4 @@
-﻿namespace Benzene.Client.Http;
+﻿namespace Benzene.Clients.Http;
 
 public class HttpSendMessageContext
 {

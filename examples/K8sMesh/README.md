@@ -38,7 +38,7 @@ Beyond discovery, each service **chains to the next** over its neighbour's Benze
   exposes, just over HTTP.
 - **Egress** — `orders`' `order:create` handler asks `payments` to `payment:take`, and `payments`'
   `payment:take` handler asks `shipping` to `shipment:book`, each via **`HttpBenzeneMessageClient`**
-  (`src/Benzene.Client.Http`). The downstream URL is the neighbour's in-cluster DNS name, injected as
+  (`src/Benzene.Clients.Http`). The downstream URL is the neighbour's in-cluster DNS name, injected as
   `DOWNSTREAM_MSG_URL` (e.g. `http://payments/benzene-message`); the terminal `shipping` service has none.
   Registration is one line — `x.AddHttpBenzeneMessageClient(downstreamUrl)` — which also auto-wires a
   non-destructive reachability check (a `healthcheck`-topic POST) onto the deep `healthcheck` layer.
