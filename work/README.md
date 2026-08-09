@@ -42,6 +42,21 @@ them apart. Anyone reading — human or agent — had to already know which was 
 6. **Archiving is not deletion.** Superseded reasoning is worth keeping — it is how you avoid
    relitigating a decision in six months. It just does not belong in the same drawer as the truth.
 
+## Documents that live in the specification repo
+
+Rule 5 (one home per document) cuts both ways. These were duplicated here by the repo split and have
+moved out to [`daniellepelley/Benzene`](https://github.com/daniellepelley/Benzene/tree/main/work),
+because their subject is the language-neutral contract or the shared UI, not the .NET implementation:
+
+- `benzene-vision.md` · `benzene-naming-principle.md` · `benzene-headers-design.md` ·
+  `benzene-headers-plan.md` · `error-payload-proposal.md` · `cloudevents-design.md` ·
+  `spec-review-2026-07-25.md` · `mesh-ui-product-vision.md`
+
+The copies here were not merely redundant. `benzene-naming-principle.md` in this repository still
+described the abandoned `benzene-topic` header spelling; the specification repo's copy records the
+2026-07-27 reversal back to `topic`, which is what actually shipped. A stale second copy of a contract
+document is worse than no copy.
+
 ## What is archived, and why it was
 
 See [`archive/README.md`](archive/README.md).
