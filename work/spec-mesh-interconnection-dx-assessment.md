@@ -1,6 +1,7 @@
 # Using the Spec + Mesh Data for Interconnection & Safe Change — DX Assessment
 
-**Status:** Assessment (proposals, not yet approved for implementation)
+**Status:** Assessment — approved 2026-08-09; the implementation plan is
+[`spec-mesh-tooling-implementation-plan.md`](spec-mesh-tooling-implementation-plan.md)
 **Date:** 2026-08-09
 **Owners:** dx-champion (build-toolchain half) + mesh-product-owner (mesh-data half); synthesized
 **Companion docs:** [`service-mesh-roadmap-1.0.md`](service-mesh-roadmap-1.0.md),
