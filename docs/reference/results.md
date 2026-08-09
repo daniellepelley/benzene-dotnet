@@ -81,10 +81,10 @@ BenzeneResult.BadRequest("Invalid request");
 
 | Member | Purpose |
 |---|---|
-| `BenzeneResult.Set(status, isSuccess)` / `Set<T>(...)` | Build a result with an explicit status string and success flag — the escape hatch for custom statuses. |
+| `BenzeneResult.Set<T>(status, isSuccess)` | Build a result with an explicit status string and success flag — the escape hatch for custom statuses. (The non-generic `Set(status)` / `Set(status, params errors)` take no success flag.) |
 | `BenzeneResult.Set(status, payload, isSuccess)` | Explicit status *and* payload *and* success flag — for results whose success class shouldn't be derived from the status (e.g. an unhealthy health check: `service-unavailable` for the HTTP 503, successful so the report payload renders as the body). |
-| `BenzeneResult.IsSuccess(result)` | True when the result's status is a success status. |
-| `BenzeneResult.IsAccepted(result)` | True when the result is `accepted`. |
+| `result.IsSuccess()` | Extension method — true when the result's status is a success status. |
+| `result.IsAccepted()` | Extension method — true when the result is `accepted`. |
 | `*Internal` factories (`OkInternal`, `NotFoundInternal`, …) | Variants used for internal/inter-service results — e.g. results returned across a Benzene [message client](packages.md#outbound-messaging-clients) rather than mapped straight to an HTTP response. |
 
 ## Classifying statuses

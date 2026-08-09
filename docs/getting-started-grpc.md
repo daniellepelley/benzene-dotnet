@@ -233,7 +233,6 @@ public class StartUp : BenzeneStartUp
     {
         services.AddBenzeneGrpc();
         services.UsingBenzene(x => x
-            .AddBenzeneMessage()
             .AddMessageHandlers(typeof(SayHelloMessageHandler).Assembly)
             .AddGrpcMessageHandlers());
     }

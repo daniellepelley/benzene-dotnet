@@ -44,7 +44,7 @@ Benzene is a hexagonal framework designed for services running in serverless env
     - [ASP.NET Core + SQS + SNS in one Lambda](cookbooks/aspnet-with-sqs-and-sns.md) — serve HTTP through an existing ASP.NET Core app while the same function consumes queues and topics through Benzene
   - **Azure**
     - [Azure Functions Setup](azure-functions.md) — HTTP plus every non-HTTP trigger (Event Hubs, Kafka, Service Bus, Cosmos DB Change Feed, Queue/Blob Storage, Event Grid, Timer)
-    - [Self-hosted Azure workers](getting-started-worker.md#part-b-built-in-workers-kafka-http-service-bus-event-hub-cosmos-db) — Service Bus, Event Hubs, and Cosmos DB Change Feed consumers without Azure Functions
+    - [Self-hosted Azure workers](getting-started-worker.md#part-b-built-in-workers-kafka-rabbitmq-service-bus-event-hub-cosmos-db) — Service Bus, Event Hubs, and Cosmos DB Change Feed consumers without Azure Functions
     - [Managed Identity & RBAC](cookbooks/managed-identity.md) — no connection strings: credential wiring and the roles each integration needs
     - [Service Bus](cookbooks/service-bus-handling.md) / [Event Hubs](cookbooks/event-hub-processing.md) / [Cosmos DB Change Feed](cookbooks/cosmos-change-feed-processing.md) cookbooks
   - **Cloudflare** *(experimental / community — out of scope for 1.0)*
@@ -92,5 +92,5 @@ Benzene is a hexagonal framework designed for services running in serverless env
   - [Mesh UI](https://benzene.app/demos/mesh/index.html) — a running dashboard over sample service health, contract drift, and cross-service traffic
   - [Spec UI](https://benzene.app/demos/spec/index.html) — browse a sample Benzene message spec, Swagger-UI style
   - Fleet view has no static demo here — it only ever renders what it polls live from a running
-    `Benzene.Mesh.Collector`, so there's nothing to show without one. See [Mesh UI](mesh-ui.md#fleet-view)
+    `Benzene.Mesh.Collector`, so there's nothing to show without one. See [Mesh UI](mesh-ui.md#the-live-fleet-plane)
     for what it looks like, or run [`examples/Mesh`](../examples/Mesh)'s `./run.sh` for the real thing.
