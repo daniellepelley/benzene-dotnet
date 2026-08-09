@@ -88,6 +88,10 @@ matching where your service runs; your message handlers stay identical across al
 | `Benzene.Aws.Lambda.Sns` | Handle SNS notification events — `UseSns(...)`. |
 | `Benzene.Aws.Lambda.S3` | Handle S3 bucket notification events — `UseS3(...)`. |
 | `Benzene.Aws.Lambda.Kafka` | Handle MSK / self-managed Kafka events — `UseKafka(...)`. |
+| `Benzene.Aws.Lambda.DynamoDb` | Handle DynamoDB Streams events — `UseDynamoDb(...)`. |
+| `Benzene.Aws.Lambda.Kinesis` | Handle Kinesis Data Streams events — `UseKinesisStream(...)`. |
+| `Benzene.Aws.Lambda.EventBridge` | Handle EventBridge events — `UseEventBridge(...)`. |
+| `Benzene.Aws.Lambda` | Umbrella meta-package: references the Lambda core plus every event-source transport above, so a service can add one package instead of naming each. Reference the individual packages for a narrower dependency. |
 
 See [AWS Lambda Setup](../getting-started-aws.md) for a full walkthrough and
 [AWS IAM Permissions](../aws-iam-permissions.md) for the per-source policies.
@@ -121,7 +125,7 @@ are the Azure counterparts of `Benzene.Kafka.Core`'s and `Benzene.Aws.Sqs`'s sta
 | `Benzene.Azure.EventHub` | A self-hosted Event Hubs consumer (`BenzeneEventHubWorker`, `worker.UseEventHub(...)`) that runs an `EventProcessorClient` (consumer groups, partition load balancing, blob checkpointing) and dispatches each event through the middleware pipeline — distinct from `Benzene.Azure.Function.EventHub`, which handles Event Hubs *as a Functions trigger*. |
 | `Benzene.Azure.CosmosDb` | A self-hosted Cosmos DB Change Feed consumer (`BenzeneCosmosChangeFeedWorker<TDocument>`, `worker.UseCosmosDbChangeFeed<TDocument>(...)`) that runs the SDK's Change Feed Processor (lease-container ownership, instance load balancing) and runs each batch through a fan-in streaming pipeline with manual batch-level checkpoint control — distinct from `Benzene.Azure.Function.CosmosDb`, which handles the change feed *as a Functions trigger*. |
 
-See [Worker Service Setup](../getting-started-worker.md#part-b-built-in-workers-kafka-http-service-bus-event-hub-cosmos-db).
+See [Worker Service Setup](../getting-started-worker.md#part-b-built-in-workers-kafka-rabbitmq-service-bus-event-hub-cosmos-db).
 
 ### Other hosts
 
