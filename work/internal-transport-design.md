@@ -141,6 +141,18 @@ This trade-off is a deliberate simplification, not an oversight — see
 `test/Benzene.Core.Test/Clients/InProcess/InProcessTransportTest.cs`'s
 `..._UnhandledTopic_ReturnsNotFoundInsteadOfThrowing` test for the behavior this relies on.
 
+**Update, following named pipelines (`work/inprocess-modular-monolith-scope.md`, Gap 1):** a
+narrower, non-reflective version of this check *did* become buildable once pipelines gained names.
+The blocker above was specifically "which **topics** use `.UseInProcess()`" — that remains
+unknowable without threading the topic through `OutboundRoutingBuilder.Route`'s `configure`
+parameter, out of scope here as before. But "which **pipeline names** are referenced by
+`.UseInProcess(name)`" needs no reflection: each call now explicitly records an
+`InProcessRouteReference(name)` (the same multi-registration idiom `MessageHandlerCandidateTypes`
+already uses for discovery diagnostics), and `InProcessRouteStartUpCheck` cross-references those
+names against `InProcessDispatcherRegistry`. This catches a typo'd or forgotten pipeline name at
+start-up; it does not (and does not claim to) catch a topic with no handler *within* a correctly
+named pipeline — that remains the honest `NotFound` at first send, exactly as described above.
+
 ### `InProcessSendMessageContext` — mirrors `SqsSendMessageContext`'s shape exactly
 
 Wraps `IBenzeneMessageRequest Request` in, exposes a settable `IBenzeneMessageResponse Response` —
@@ -177,11 +189,21 @@ error shapes, no risk of caller and handler sharing a mutable object by referenc
 the last few microseconds a zero-copy passthrough would save. No passthrough fast path shipped; still
 a plausible, explicitly out-of-scope future variant if a concrete measured need shows up.
 
-### No `ITransportInfo` for reachability, no health check — unchanged from the original proposal
+### `ITransportInfo` is registered after all — the original proposal's caveat didn't survive contact with the interface's actual meaning; no health check
 
-Both held as originally proposed: no `ITransportInfo` (nothing outside the process can reach this
-transport, so declaring inbound reachability would be false), no auto-wired health check (there is no
-external dependency to probe).
+The original proposal held that no `ITransportInfo` should be registered, reasoning that nothing
+outside the process can reach this transport, so declaring inbound reachability would be false.
+That reasoning doesn't hold up against what `ITransportInfo` actually documents itself as: "a
+transport the application can receive messages over" — not a claim of external reachability. The
+in-process transport genuinely is one such transport (the service really does receive and dispatch
+messages over it, just never across a process boundary), so `AddInProcessMessaging` registers
+`ITransportInfo(TransportNames.InProcess)` — its own, distinct from `AddBenzeneMessage()`'s
+`ITransportInfo(TransportNames.Benzene)`, so a service that only calls `AddInProcessMessaging()`
+never misrepresents itself as exposing that wire endpoint (see "A small, deliberate upstream split"
+above). This is accurate, not a gap: the descriptor/mesh should see "in-process" in a service's
+transport surface, the same as it sees "sqs" or "http".
+
+No auto-wired health check remains as originally proposed: there is no external dependency to probe.
 
 ## What this does not solve
 
@@ -193,13 +215,21 @@ external dependency to probe).
   legitimately fans out to multiple consumers, some local and some still remote.
 - **No cross-language story.** Single-runtime, in-process only; says nothing about a mixed
   .NET/TypeScript/Go mesh.
-- **No dedicated startup validation** — see "Startup-time fail-fast validation... dropped" above.
+- **No per-topic handler-existence startup validation** — see "Startup-time fail-fast
+  validation... dropped" above and its follow-up note. Pipeline-*name* validation (a `.UseInProcess`
+  route naming a pipeline nothing registered) is now checked at start-up; a route naming a real
+  pipeline that lacks a handler for the specific topic is still an honest `NotFound` at first send.
+- **No in-process event fan-out.** One event, many in-process reactions (the choreography a real
+  SNS topic gives you) has no equivalent here — `.UseInProcess(name)` dispatches to exactly one
+  named pipeline. See `work/inprocess-modular-monolith-scope.md` Gap 3.
 
 ## Migration shape
 
-1. Move the handler's registration into the caller's own `AddInProcessMessaging(...)` call.
+1. Move the handler's registration into the caller's own `AddInProcessMessaging(...)` call — named
+   (`registry => registry.Add("billing", ...)`) if the caller already hosts other in-process
+   modules, unnamed otherwise.
 2. Change that one topic's outbound route from `.UseSqs(queueUrl)` (or whatever it was) to
-   `.UseInProcess()`.
+   `.UseInProcess()` (or `.UseInProcess("billing")` for the named case).
 
 No change to the handler's code, no change to the calling code's `SendAsync` call site.
 
@@ -211,3 +241,12 @@ caller and dispatched handler, and that `AddInProcessMessaging` registers its ow
 rather than `AddBenzeneMessage`'s `"benzene"` one. `test/Benzene.Core.Test/Clients/DefaultBenzeneMessageSenderTest.cs`
 gained a test for the new `BenzeneMessageClientResponse` fallback-deserialization branch, independent
 of InProcess (it's a generic fix any transport can rely on).
+
+`test/Benzene.Core.Test/Clients/InProcess/InProcessNamedPipelinesTest.cs` (added alongside named
+pipelines) covers: two named pipelines in one call dispatching independently, a second top-level
+`AddInProcessMessaging` call throwing rather than silently shadowing the first (both when the first
+call used the named and the unnamed overload), the same name added twice within one call throwing
+and naming the duplicate, `InProcessDispatcherRegistry.Resolve` throwing on an unregistered name,
+and `InProcessRouteStartUpCheck`'s three cases (a route naming an unregistered pipeline throws at
+start-up; every route naming a registered pipeline passes; no in-process routes at all passes) plus
+that the check registers itself alongside the others.

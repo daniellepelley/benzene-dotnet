@@ -43,17 +43,8 @@ public class InProcessContextConverter : IContextConverter<OutboundContext, InPr
     /// </summary>
     /// <param name="contextIn">The outbound context to convert.</param>
     /// <returns>A task that resolves to the built <see cref="InProcessSendMessageContext"/>.</returns>
-    public Task<InProcessSendMessageContext> CreateRequestAsync(OutboundContext contextIn)
-    {
-        var request = new BenzeneMessageRequest
-        {
-            Topic = contextIn.Topic,
-            Headers = contextIn.Headers,
-            Body = _serializer.Serialize(contextIn.Request)
-        };
-
-        return Task.FromResult(new InProcessSendMessageContext(request));
-    }
+    public Task<InProcessSendMessageContext> CreateRequestAsync(OutboundContext contextIn) =>
+        Task.FromResult(new InProcessSendMessageContext(InProcessRequestBuilder.Build(contextIn, _serializer)));
 
     /// <summary>
     /// Maps the dispatched handler's response back onto the outbound context as a raw
