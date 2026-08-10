@@ -1,6 +1,8 @@
 using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Middleware;
 using Benzene.Abstractions.Results;
+using Benzene.Abstractions.Serialization;
+using Benzene.Clients.Common;
 
 namespace Benzene.Clients;
 
@@ -35,11 +37,20 @@ internal class DefaultBenzeneMessageSender : IBenzeneMessageSender
         var context = new OutboundContext(topic, request!, headers);
         await pipeline.HandleAsync(context, _serviceResolver);
 
-        if (context.Response is not IBenzeneResult<TResponse> typedResponse)
+        if (context.Response is IBenzeneResult<TResponse> typedResponse)
         {
-            throw new OutboundResponseTypeMismatchException(topic, OutboundResponseTypeMismatchException.GetActualResponseType(context.Response), typeof(TResponse));
+            return typedResponse;
         }
 
-        return typedResponse;
+        // A transport whose MapResponseAsync couldn't produce an already-typed IBenzeneResult<TResponse>
+        // (it doesn't know TResponse - only the caller does) may instead leave the raw envelope on the
+        // context. Deserialize it here, now that TResponse is known, rather than requiring every such
+        // transport to solve typed-response deserialization itself.
+        if (context.Response is BenzeneMessageClientResponse rawResponse)
+        {
+            return rawResponse.AsBenzeneResult<TResponse>(_serviceResolver.GetService<ISerializer>());
+        }
+
+        throw new OutboundResponseTypeMismatchException(topic, OutboundResponseTypeMismatchException.GetActualResponseType(context.Response), typeof(TResponse));
     }
 }

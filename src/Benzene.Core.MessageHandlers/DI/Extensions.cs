@@ -38,6 +38,23 @@ public static class Extensions
     /// <returns>The same container, for chaining.</returns>
     public static IBenzeneServiceContainer AddBenzeneMessage(this IBenzeneServiceContainer services)
     {
+        services.AddBenzeneMessageHandling();
+        services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.Benzene));
+        return services;
+    }
+
+    /// <summary>
+    /// Registers the request/response plumbing for the <c>BenzeneMessage</c> context (message
+    /// extraction, result setting, response adaptation) without announcing a "benzene" wire endpoint
+    /// via <see cref="ITransportInfo"/>. <see cref="AddBenzeneMessage"/> calls this and then adds that
+    /// announcement; a caller that dispatches <see cref="BenzeneMessageContext"/> some other way (e.g.
+    /// <c>Benzene.Clients.InProcess</c>'s in-process dispatch, which never exposes a wire endpoint)
+    /// calls this directly instead, and registers its own <see cref="ITransportInfo"/> under its own name.
+    /// </summary>
+    /// <param name="services">The service container to register into.</param>
+    /// <returns>The same container, for chaining.</returns>
+    public static IBenzeneServiceContainer AddBenzeneMessageHandling(this IBenzeneServiceContainer services)
+    {
         services.TryAddScoped<IMessageGetter<BenzeneMessageContext>, BenzeneMessageGetter>();
         services.TryAddScoped<IMessageBodyGetter<BenzeneMessageContext>, BenzeneMessageGetter>();
         services.TryAddScoped<IMessageTopicGetter<BenzeneMessageContext>, BenzeneMessageGetter>();
@@ -53,8 +70,6 @@ public static class Extensions
         services.TryAddScoped<IResponseHandler<BenzeneMessageContext>, RendererResponseHandler<BenzeneMessageContext>>();
         services.AddScoped<IResponseHandler<BenzeneMessageContext>, DefaultResponseStatusHandler<BenzeneMessageContext>>();
         services.TryAddScoped<IResponsePayloadMapper<BenzeneMessageContext>, DefaultResponsePayloadMapper<BenzeneMessageContext>>();
-
-        services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.Benzene));
 
         return services;
     }

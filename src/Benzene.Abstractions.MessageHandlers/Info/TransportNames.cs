@@ -40,5 +40,11 @@ namespace Benzene.Abstractions.MessageHandlers.Info
         public const string BlobStorage = "blob-storage";
         public const string CosmosDb = "cosmos-db";
         public const string Timer = "timer";
+
+        /// <summary>
+        /// The in-process transport (<c>Benzene.Clients.InProcess</c>): a topic dispatched directly to
+        /// a handler registered in the same runtime, without leaving the process.
+        /// </summary>
+        public const string InProcess = "in-process";
     }
 }

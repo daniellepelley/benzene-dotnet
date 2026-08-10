@@ -1,4 +1,5 @@
 using System.Threading.Tasks;
+using Benzene.Abstractions.Serialization;
 using Benzene.Clients;
 using Benzene.Core.Middleware;
 using Benzene.Microsoft.Dependencies;
@@ -107,5 +108,28 @@ public class DefaultBenzeneMessageSenderTest
         var result = await sender.SendAsync<string, Void>("order:create", "payload");
 
         Assert.Equal(BenzeneResultStatus.Accepted, result.Status);
+    }
+
+    [Fact]
+    public async Task SendAsync_RouteLeavesARawBenzeneMessageClientResponse_DeserializesItIntoTheRequestedTResponse()
+    {
+        // Simulates a transport whose MapResponseAsync can't produce an already-typed
+        // IBenzeneResult<TResponse> because it doesn't know TResponse at that point (e.g.
+        // Benzene.Clients.InProcess) - it leaves the raw envelope on the context instead, and
+        // DefaultBenzeneMessageSender must deserialize it once it knows TResponse.
+        var services = new ServiceCollection();
+        services.AddTransient<ISerializer, JsonSerializer>();
+        var container = new MicrosoftBenzeneServiceContainer(services);
+        container.AddOutboundRouting(routing => routing
+            .Route("order:create", pipeline => pipeline.OnRequest(context =>
+                context.Response = new BenzeneMessageClientResponse("ok", "\"created\""))));
+
+        var resolver = new MicrosoftServiceResolverAdapter(services.BuildServiceProvider());
+        var sender = resolver.GetService<IBenzeneMessageSender>();
+
+        var result = await sender.SendAsync<string, string>("order:create", "payload");
+
+        Assert.Equal(BenzeneResultStatus.Ok, result.Status);
+        Assert.Equal("created", result.Payload);
     }
 }
