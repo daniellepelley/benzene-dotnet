@@ -54,8 +54,8 @@ public static class DependencyInjectionExtensions
             .TryAddScoped<IRequestMapper<ApiGatewayContext>,
                 MultiSerializerOptionsRequestMapper<ApiGatewayContext>>();
         services.AddScoped<IRequestEnricher<ApiGatewayContext>, ApiGatewayRequestEnricher>();
-        services.AddScoped<IHttpRequestAdapter<ApiGatewayContext>, ApiGatewayHttpRequestAdapter>();
-        services.AddScoped<IBenzeneResponseAdapter<ApiGatewayContext>, ApiGatewayResponseAdapter>();
+        services.TryAddScoped<IHttpRequestAdapter<ApiGatewayContext>, ApiGatewayHttpRequestAdapter>();
+        services.TryAddScoped<IBenzeneResponseAdapter<ApiGatewayContext>, ApiGatewayResponseAdapter>();
         services.TryAddScoped<IHttpHeaderMappings, DefaultHttpHeaderMappings>();
         services.AddScoped<IResponseHandler<ApiGatewayContext>, HttpStatusCodeResponseHandler<ApiGatewayContext>>();
         services.AddScoped<IResponseRenderer<ApiGatewayContext>, SerializerResponseRenderer<ApiGatewayContext>>();
@@ -96,8 +96,8 @@ public static class DependencyInjectionExtensions
             .TryAddScoped<IRequestMapper<ApiGatewayV2Context>,
                 MultiSerializerOptionsRequestMapper<ApiGatewayV2Context>>();
         services.AddScoped<IRequestEnricher<ApiGatewayV2Context>, ApiGatewayV2RequestEnricher>();
-        services.AddScoped<IHttpRequestAdapter<ApiGatewayV2Context>, ApiGatewayV2HttpRequestAdapter>();
-        services.AddScoped<IBenzeneResponseAdapter<ApiGatewayV2Context>, ApiGatewayV2ResponseAdapter>();
+        services.TryAddScoped<IHttpRequestAdapter<ApiGatewayV2Context>, ApiGatewayV2HttpRequestAdapter>();
+        services.TryAddScoped<IBenzeneResponseAdapter<ApiGatewayV2Context>, ApiGatewayV2ResponseAdapter>();
         services.TryAddScoped<IHttpHeaderMappings, DefaultHttpHeaderMappings>();
         services.AddScoped<IResponseHandler<ApiGatewayV2Context>, HttpStatusCodeResponseHandler<ApiGatewayV2Context>>();
         services.AddScoped<IResponseRenderer<ApiGatewayV2Context>, SerializerResponseRenderer<ApiGatewayV2Context>>();

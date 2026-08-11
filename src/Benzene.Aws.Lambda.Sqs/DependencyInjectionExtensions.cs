@@ -40,12 +40,14 @@ public static class DependencyInjectionExtensions
         services.TryAddScoped<JsonSerializer>();
         services.TryAddScoped<PresetTopicHolder>();
 
-        services.AddScoped<IMessageTopicGetter<SqsMessageContext>>(resolver =>
+        // TryAdd: a user registration made earlier (ConfigureServices runs before Configure, where
+        // UseSqs calls this) wins over these per-context defaults.
+        services.TryAddScoped<IMessageTopicGetter<SqsMessageContext>>(resolver =>
             new PresetTopicMessageTopicGetter<SqsMessageContext>(new SqsMessageTopicGetter(topicAttributeKey), resolver.GetService<PresetTopicHolder>()));
-        services.AddHeaderMessageVersionGetter<SqsMessageContext>();
-        services.AddScoped<IMessageHeadersGetter<SqsMessageContext>, SqsMessageHeadersGetter>();
-        services.AddScoped<IMessageBodyGetter<SqsMessageContext>, SqsMessageBodyGetter>();
-        services.AddScoped<IMessageHandlerResultSetter<SqsMessageContext>, SqsMessageHandlerResultSetter>();
+        services.TryAddHeaderMessageVersionGetter<SqsMessageContext>();
+        services.TryAddScoped<IMessageHeadersGetter<SqsMessageContext>, SqsMessageHeadersGetter>();
+        services.TryAddScoped<IMessageBodyGetter<SqsMessageContext>, SqsMessageBodyGetter>();
+        services.TryAddScoped<IMessageHandlerResultSetter<SqsMessageContext>, SqsMessageHandlerResultSetter>();
         services.AddMediaFormatNegotiation<SqsMessageContext>();
         services
             .TryAddScoped<IRequestMapper<SqsMessageContext>,

@@ -84,9 +84,12 @@ public class MapperOverrideStartUp : CustomStatusStartUp
     }
 }
 
-// Control probe for the plain-Add seams: the user registers a custom ISerializer in
-// ConfigureServices. If the framework's later plain AddScoped<ISerializer, JsonSerializer> in
-// AddAspNetMessageHandlers wins (MS DI last-registration-wins), the marker never appears.
+// Regression probe for the per-context transport seams: the user registers a custom ISerializer in
+// ConfigureServices. AddAspNetMessageHandlers registers its JsonSerializer default with TryAdd, so
+// the user's earlier registration now wins the ISerializer resolve. NOTE the HTTP response body still
+// does NOT carry the marker: the render/request-mapping path serializes via the media-format
+// negotiator, whose default JsonMediaFormat wraps the concrete JsonSerializer and never resolves the
+// ISerializer seam - a separate (pre-existing) fact from the Add-vs-TryAdd ordering this fixes.
 public class SerializerOverrideStartUp : CustomStatusStartUp
 {
     public class MarkerSerializer : ISerializer
@@ -170,8 +173,18 @@ public class CustomStatusProbeTest
     {
         CustomStatusStartUp.Port = GetFreePort();
         var (status, body) = await PostAsync<SerializerOverrideStartUp>(CustomStatusStartUp.Port);
-        // PROBE: does the user's ISerializer take effect? From code reading the framework's later
-        // plain AddScoped in AddAspNetMessageHandlers wins and the marker never appears.
-        Assert.True(!body.Contains("MARKER:"), $"UNEXPECTED - override took effect: status={status} body={body}");
+        // The body stays plain JSON: the response is rendered through the media-format negotiator's
+        // default JsonMediaFormat (which wraps the concrete JsonSerializer), not the ISerializer seam,
+        // so the marker cannot appear here regardless of registration order.
+        Assert.Contains("acme", body);
+        Assert.True(!body.Contains("MARKER:"), $"body unexpectedly flowed through ISerializer: status={status} body={body}");
+
+        // The seam itself IS now honored: the transport TryAdds its JsonSerializer default, so the
+        // user's earlier ConfigureServices registration wins the single resolve (before the TryAdd
+        // conversion the framework's later plain AddScoped silently shadowed it).
+        using var host = new HostBuilder().UseBenzene<SerializerOverrideStartUp>().Build();
+        using var scope = host.Services.CreateScope();
+        Assert.IsType<SerializerOverrideStartUp.MarkerSerializer>(
+            scope.ServiceProvider.GetRequiredService<ISerializer>());
     }
 }

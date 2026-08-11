@@ -25,13 +25,15 @@ public static class DependencyInjectionExtensions
     {
         services.TryAddSingleton<IGrpcMethodFinder, ReflectionGrpcMethodFinder>();
         services.TryAddSingleton<IGrpcRouteFinder, GrpcRouteFinder>();
-        services.AddScoped<IMessageTopicGetter<GrpcContext>, GrpcMessageTopicGetter>();
-        services.AddHeaderMessageVersionGetter<GrpcContext>();
-        services.AddScoped<IMessageBodyGetter<GrpcContext>, GrpcMessageBodyGetter>();
-        services.AddScoped<IMessageHeadersGetter<GrpcContext>, GrpcMessageHeadersGetter>();
-        services.AddScoped<IMessageHandlerResultSetter<GrpcContext>, GrpcMessageHandlerResultSetter>();
+        // TryAdd: a user registration made earlier (ConfigureServices runs before Configure, where
+        // UseGrpc calls this) wins over these per-context defaults.
+        services.TryAddScoped<IMessageTopicGetter<GrpcContext>, GrpcMessageTopicGetter>();
+        services.TryAddHeaderMessageVersionGetter<GrpcContext>();
+        services.TryAddScoped<IMessageBodyGetter<GrpcContext>, GrpcMessageBodyGetter>();
+        services.TryAddScoped<IMessageHeadersGetter<GrpcContext>, GrpcMessageHeadersGetter>();
+        services.TryAddScoped<IMessageHandlerResultSetter<GrpcContext>, GrpcMessageHandlerResultSetter>();
         services.TryAddScoped<IGrpcMessageAdapter, ProtobufJsonGrpcMessageAdapter>();
-        services.AddScoped<IRequestMapper<GrpcContext>, GrpcRequestMapper>();
+        services.TryAddScoped<IRequestMapper<GrpcContext>, GrpcRequestMapper>();
         services.AddScoped<MessageRouter<GrpcContext>>();
 
         services.TryAddSingleton<IGrpcStatusCodeMapper, DefaultGrpcStatusCodeMapper>();

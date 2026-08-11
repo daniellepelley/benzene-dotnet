@@ -24,6 +24,12 @@ Works from ConfigureServices (TryAdd): `IHttpStatusCodeMapper` ✅(probed), `IGr
 Silently shadowed from ConfigureServices (plain Add during Configure): topic/body/header/version
 getters + result setters on **AspNet, SQS (both flavors), SNS, Kafka, ServiceBus, EventHub**;
 `IRequestMapper<AspNetContext>`; `ISerializer` ✅(probed — user serializer ignored on AspNet).
+[All converted to TryAdd — see fix 1. Note discovered while flipping the probe: even with the
+override honored at the seam, the AspNet request/response BODY never flows through `ISerializer` —
+the media-format path's default `JsonMediaFormat` wraps the concrete `JsonSerializer` directly, so a
+custom `ISerializer` affects only consumers that resolve the seam (clients, envelope handlers), not
+HTTP body rendering. Separate honesty question: is `ISerializer` over-advertised as "the" serializer
+seam?]
 
 Consequences beyond the getters themselves:
 - `AddPayloadVersioning(...).ForContext<AspNetContext>()` in ConfigureServices is **silently
@@ -34,7 +40,7 @@ Consequences beyond the getters themselves:
 - `Benzene.Testing`'s `WithServices` runs before Configure too, so even TEST fakes of transport
   getters are silently shadowed.
 
-**Fix (in progress): convert the per-context transport seams to TryAdd** so ConfigureServices
+**Fix (DONE): converted the per-context transport seams to TryAdd** so ConfigureServices
 overrides work uniformly, matching the BenzeneMessage envelope's existing registration style and
 making the versioning cookbook's order-independence claim true. Per-context generic seams have
 exactly one registrar each, so first-wins cannot change framework-vs-framework outcomes; `ISerializer`
@@ -132,9 +138,12 @@ application-defined statuses (unknown → each mapping's generic-error row, conf
   intercepts resolutions of the concrete type. → report/design question.
 
 ## Fix plan (obvious, in order)
-1. TryAdd conversion for per-context transport seams (AspNet, Aws.Sqs, Lambda.Sqs, Lambda.Sns,
+1. ~~TryAdd conversion for per-context transport seams (AspNet, Aws.Sqs, Lambda.Sqs, Lambda.Sns,
    Kafka.Core, Azure.ServiceBus, Azure.EventHub DI extensions) + regression tests (serializer +
-   header-getter override now honored; payload-versioning-on-AspNet from ConfigureServices works).
+   header-getter override now honored; payload-versioning-on-AspNet from ConfigureServices works).~~
+   **DONE** (also Grpc and the ApiGateway/V2 http/response adapters; collection-resolved services -
+   `IResponseHandler`, `IResponseRenderer`, `IRequestEnricher` - deliberately left plain Add, and
+   Azure.Function.* / GoogleCloud / Lambda.Kafka adapters were out of scope this pass).
 2. MessageRouter: treat `<missing>` sentinel as missing-topic → the remediation message fires.
 3. RabbitMQ null header value coalesce + test.
 4. CorrelationIdMiddleware: don't clobber existing per-call key + test (flag semantics in report).

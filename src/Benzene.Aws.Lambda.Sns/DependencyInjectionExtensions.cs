@@ -40,12 +40,14 @@ public static class DependencyInjectionExtensions
         services.TryAddScoped<JsonSerializer>();
         services.TryAddScoped<PresetTopicHolder>();
 
-        services.AddScoped<IMessageTopicGetter<SnsRecordContext>>(resolver =>
+        // TryAdd: a user registration made earlier (ConfigureServices runs before Configure, where
+        // UseSns calls this) wins over these per-context defaults.
+        services.TryAddScoped<IMessageTopicGetter<SnsRecordContext>>(resolver =>
             new PresetTopicMessageTopicGetter<SnsRecordContext>(new SnsMessageTopicGetter(topicAttributeKey), resolver.GetService<PresetTopicHolder>()));
-        services.AddHeaderMessageVersionGetter<SnsRecordContext>();
-        services.AddScoped<IMessageHeadersGetter<SnsRecordContext>, SnsMessageHeadersGetter>();
-        services.AddScoped<IMessageBodyGetter<SnsRecordContext>, SnsMessageBodyGetter>();
-        services.AddScoped<IMessageHandlerResultSetter<SnsRecordContext>, SnsMessageHandlerResultSetter>();
+        services.TryAddHeaderMessageVersionGetter<SnsRecordContext>();
+        services.TryAddScoped<IMessageHeadersGetter<SnsRecordContext>, SnsMessageHeadersGetter>();
+        services.TryAddScoped<IMessageBodyGetter<SnsRecordContext>, SnsMessageBodyGetter>();
+        services.TryAddScoped<IMessageHandlerResultSetter<SnsRecordContext>, SnsMessageHandlerResultSetter>();
         services.AddMediaFormatNegotiation<SnsRecordContext>();
         services
             .TryAddScoped<IRequestMapper<SnsRecordContext>,

@@ -87,7 +87,7 @@ That one call:
 - **Needs only the adjacent upcasts.** There is deliberately no direct `v1 → v3` caster: when a v1 payload arrives for the v3 handler, the framework composes the path **v1 → v2 → v3** (breadth-first) — that's **caster chaining** — and each hop seeds its field, so the handler sees a payload with both `WarehouseId` (from the v1→v2 hop) and `Reason` (from the v2→v3 hop) populated, even though the v1 producer sent neither.
 - **Synthesises the downcasts.** A field-drop `v3 → v2 → v1` downcaster is derived from each upcast, so old clients get responses in their own shape without you writing the reverse casters. Supply an explicit `.Downcast<TNew, TOld>(...)` only when the older version needs a field *re-derived* rather than simply dropped.
 - **Validates eagerly, at startup.** The caster graph is expanded when `AddPayloadVersioning` runs, so a missing conversion path — or a version declared with no reachable caster — throws *then*, at deploy time, not on the first message in production.
-- **Is order-independent.** It enables the casting decorators for each `ForContext` here in `ConfigureServices`; the AWS transports register their default request mapper with `TryAdd`, so these decorators win no matter when the transport is wired in `Configure`. There is no post-transport call to remember, and no way to half-wire it.
+- **Is order-independent.** It enables the casting decorators for each `ForContext` here in `ConfigureServices`; every built-in transport registers its default request mapper with `TryAdd`, so these decorators win no matter when the transport is wired in `Configure`. There is no post-transport call to remember, and no way to half-wire it.
 
 <details>
 <summary>Lower-level API (advanced / non-standard hosts)</summary>
@@ -97,10 +97,11 @@ That one call:
 `ISchemaCasters` aggregate), and `UsePayloadVersionCasting<TContext>()` (wrap the per-context mappers).
 Two caveats the one-call API handles for you: `RegisterPayloadSchemaVersions` expands the caster graph
 **lazily**, so a missing path throws on the first message rather than at startup; and
-`UsePayloadVersionCasting<TContext>()` must be the **last** registration of `IRequestMapper<TContext>`, so
-on a host whose transport registers that mapper with a last-wins `AddScoped` you must call it *after* the
-transport (e.g. via `app.Register(...)` in `Configure`). Prefer `AddPayloadVersioning` unless you have a
-reason not to.
+`UsePayloadVersionCasting<TContext>()` must be the **winning** registration of `IRequestMapper<TContext>`.
+Every built-in transport registers that mapper with `TryAdd`, so calling it in `ConfigureServices` wins;
+only a custom host that registers its mapper with a last-wins `AddScoped` needs the call placed *after*
+the transport (e.g. via `app.Register(...)` in `Configure`). Prefer `AddPayloadVersioning` unless you have
+a reason not to.
 
 </details>
 

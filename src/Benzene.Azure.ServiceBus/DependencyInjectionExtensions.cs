@@ -45,14 +45,16 @@ public static class DependencyInjectionExtensions
         // the worker reads it after the pipeline. Default (no override) unless the handler sets it.
         services.TryAddScoped<ServiceBusSettlementHolder>();
 
-        services.AddScoped<IMessageTopicGetter<ServiceBusConsumerContext>>(resolver =>
+        // TryAdd: a user registration made earlier (ConfigureServices runs before Configure, where
+        // UseServiceBus calls this) wins over these per-context defaults.
+        services.TryAddScoped<IMessageTopicGetter<ServiceBusConsumerContext>>(resolver =>
             new PresetTopicMessageTopicGetter<ServiceBusConsumerContext>(new ServiceBusConsumerMessageTopicGetter(topicPropertyKey), resolver.GetService<PresetTopicHolder>()));
-        services.AddHeaderMessageVersionGetter<ServiceBusConsumerContext>();
-        services.AddScoped<IMessageHeadersGetter<ServiceBusConsumerContext>, ServiceBusConsumerMessageHeadersGetter>();
-        services.AddScoped<IMessageBodyGetter<ServiceBusConsumerContext>, ServiceBusConsumerMessageBodyGetter>();
-        services.AddScoped<IMessageHandlerResultSetter<ServiceBusConsumerContext>, ServiceBusConsumerMessageHandlerResultSetter>();
+        services.TryAddHeaderMessageVersionGetter<ServiceBusConsumerContext>();
+        services.TryAddScoped<IMessageHeadersGetter<ServiceBusConsumerContext>, ServiceBusConsumerMessageHeadersGetter>();
+        services.TryAddScoped<IMessageBodyGetter<ServiceBusConsumerContext>, ServiceBusConsumerMessageBodyGetter>();
+        services.TryAddScoped<IMessageHandlerResultSetter<ServiceBusConsumerContext>, ServiceBusConsumerMessageHandlerResultSetter>();
         services.AddMediaFormatNegotiation<ServiceBusConsumerContext>();
-        services.AddScoped<IRequestMapper<ServiceBusConsumerContext>, MultiSerializerOptionsRequestMapper<ServiceBusConsumerContext>>();
+        services.TryAddScoped<IRequestMapper<ServiceBusConsumerContext>, MultiSerializerOptionsRequestMapper<ServiceBusConsumerContext>>();
 
         services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.ServiceBus));
 

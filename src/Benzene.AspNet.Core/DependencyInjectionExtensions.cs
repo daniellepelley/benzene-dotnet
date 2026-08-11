@@ -36,29 +36,35 @@ public static class DependencyInjectionExtensions
     /// </remarks>
     public static IBenzeneServiceContainer AddAspNetMessageHandlers(this IBenzeneServiceContainer services)
     {
-        services.AddScoped<ISerializer, JsonSerializer>();
+        // Single-resolve seams use TryAdd so a user registration made earlier (ConfigureServices runs
+        // before Configure, where UseHttp calls this) wins over these defaults. Collection-resolved
+        // services (IResponseHandler, IResponseRenderer, IRequestEnricher) stay plain Add: every
+        // registration is part of the pipeline, not a default to be overridden.
+        // Note: with no user override, AddBenzene's earlier TryAddSingleton<ISerializer, JsonSerializer>
+        // now wins over this one - same stateless type, singleton instead of scoped, intentionally.
+        services.TryAddScoped<ISerializer, JsonSerializer>();
         services.AddScoped<IMiddlewarePipelineBuilder<AspNetContext>, MiddlewarePipelineBuilder<AspNetContext>>();
-        services.AddScoped<IMessageTopicGetter<AspNetContext>, AspNetMessageTopicGetter>();
-        services.AddScoped<IMessageVersionGetter<AspNetContext>>(resolver =>
+        services.TryAddScoped<IMessageTopicGetter<AspNetContext>, AspNetMessageTopicGetter>();
+        services.TryAddScoped<IMessageVersionGetter<AspNetContext>>(resolver =>
             new AspNetMessageVersionGetter(resolver.GetService<IRouteFinder>(),
                 resolver.GetService<IMessageHeadersGetter<AspNetContext>>(),
                 resolver.TryGetService<MessageVersionHeaderNames>()?.HeaderNames));
-        services.AddScoped<IMessageHeadersGetter<AspNetContext>, AspNetMessageHeadersGetter>();
-        services.AddScoped<IMessageBodyGetter<AspNetContext>, AspNetMessageBodyGetter>();
-        services.AddScoped<IHttpRequestBodyReader<AspNetContext>, AspNetMessageBodyGetter>();
+        services.TryAddScoped<IMessageHeadersGetter<AspNetContext>, AspNetMessageHeadersGetter>();
+        services.TryAddScoped<IMessageBodyGetter<AspNetContext>, AspNetMessageBodyGetter>();
+        services.TryAddScoped<IHttpRequestBodyReader<AspNetContext>, AspNetMessageBodyGetter>();
         services.AddScoped<HttpRequestBodyBuffer>();
-        services.AddScoped<IMessageHandlerResultSetter<AspNetContext>, AspMessageHandlerResultSetter>();
+        services.TryAddScoped<IMessageHandlerResultSetter<AspNetContext>, AspMessageHandlerResultSetter>();
         services.AddScoped<IResponseHandler<AspNetContext>, HttpStatusCodeResponseHandler<AspNetContext>>();
         services.AddScoped<IResponseRenderer<AspNetContext>, SerializerResponseRenderer<AspNetContext>>();
         services.AddScoped<IResponseHandler<AspNetContext>, RendererResponseHandler<AspNetContext>>();
         services.AddScoped<MessageRouter<AspNetContext>>();
         services.AddMediaFormatNegotiation<AspNetContext>();
         services
-            .AddScoped<IRequestMapper<AspNetContext>,
+            .TryAddScoped<IRequestMapper<AspNetContext>,
                 MultiSerializerOptionsRequestMapper<AspNetContext>>();
         services.AddScoped<IRequestEnricher<AspNetContext>, AspNetRequestEnricher>();
-        services.AddScoped<IHttpRequestAdapter<AspNetContext>, AspNetHttpRequestAdapter>();
-        services.AddScoped<IBenzeneResponseAdapter<AspNetContext>, AspNetResponseAdapter>();
+        services.TryAddScoped<IHttpRequestAdapter<AspNetContext>, AspNetHttpRequestAdapter>();
+        services.TryAddScoped<IBenzeneResponseAdapter<AspNetContext>, AspNetResponseAdapter>();
         services.TryAddScoped<IHttpHeaderMappings, DefaultHttpHeaderMappings>();
 
         services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.Asp));

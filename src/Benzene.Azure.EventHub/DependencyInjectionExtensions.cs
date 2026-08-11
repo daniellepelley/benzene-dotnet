@@ -42,14 +42,16 @@ public static class DependencyInjectionExtensions
         services.TryAddScoped<JsonSerializer>();
         services.TryAddScoped<PresetTopicHolder>();
 
-        services.AddScoped<IMessageTopicGetter<EventHubConsumerContext>>(resolver =>
+        // TryAdd: a user registration made earlier (ConfigureServices runs before Configure, where
+        // UseEventHub calls this) wins over these per-context defaults.
+        services.TryAddScoped<IMessageTopicGetter<EventHubConsumerContext>>(resolver =>
             new PresetTopicMessageTopicGetter<EventHubConsumerContext>(new EventHubConsumerMessageTopicGetter(topicPropertyKey), resolver.GetService<PresetTopicHolder>()));
-        services.AddHeaderMessageVersionGetter<EventHubConsumerContext>();
-        services.AddScoped<IMessageHeadersGetter<EventHubConsumerContext>, EventHubConsumerMessageHeadersGetter>();
-        services.AddScoped<IMessageBodyGetter<EventHubConsumerContext>, EventHubConsumerMessageBodyGetter>();
-        services.AddScoped<IMessageHandlerResultSetter<EventHubConsumerContext>, EventHubConsumerMessageHandlerResultSetter>();
+        services.TryAddHeaderMessageVersionGetter<EventHubConsumerContext>();
+        services.TryAddScoped<IMessageHeadersGetter<EventHubConsumerContext>, EventHubConsumerMessageHeadersGetter>();
+        services.TryAddScoped<IMessageBodyGetter<EventHubConsumerContext>, EventHubConsumerMessageBodyGetter>();
+        services.TryAddScoped<IMessageHandlerResultSetter<EventHubConsumerContext>, EventHubConsumerMessageHandlerResultSetter>();
         services.AddMediaFormatNegotiation<EventHubConsumerContext>();
-        services.AddScoped<IRequestMapper<EventHubConsumerContext>, MultiSerializerOptionsRequestMapper<EventHubConsumerContext>>();
+        services.TryAddScoped<IRequestMapper<EventHubConsumerContext>, MultiSerializerOptionsRequestMapper<EventHubConsumerContext>>();
 
         services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.EventHub));
 
