@@ -22,19 +22,42 @@ public class MeshHostConfig
     public MeshHostServiceConfig[] Services { get; set; } = Array.Empty<MeshHostServiceConfig>();
 
     /// <summary>
-    /// Opt in to the live dispatch feature (the <c>mesh:dispatch</c> handler that invokes a registered
-    /// service's REAL handler with a chosen payload). Off by default: it fires real side-effects, so it
-    /// is a deliberate, non-default choice. Even when enabled it is still refused in a Production
-    /// environment unless <see cref="DispatchAllowInProduction"/> is also set.
+    /// Where the aggregator's generated catalog artifacts live. Defaults to the local filesystem
+    /// (<see cref="ArtifactRootDirectory"/>) - see <see cref="MeshSourceRegistrar"/> for the other
+    /// backends this can select and what each one reads from <see cref="MeshArtifactStoreConfig.Options"/>.
     /// </summary>
-    public bool EnableDispatch { get; set; }
+    public MeshArtifactStoreConfig ArtifactStore { get; set; } = new();
 
     /// <summary>
-    /// Whether the dispatch feature (when <see cref="EnableDispatch"/> is set) is also permitted in a
-    /// Production environment. Off by default - dispatch runs real handlers, so Production requires this
-    /// explicit second opt-in.
+    /// Additional usage (per-topic traffic) sources the aggregator reads back into <c>usage.json</c>
+    /// each run - zero or more, since <c>IMeshUsageSource</c> is resolved as <c>IEnumerable&lt;&gt;</c>.
+    /// Empty by default (no usage feed) - see <see cref="MeshSourceRegistrar"/> for the valid values.
     /// </summary>
-    public bool DispatchAllowInProduction { get; set; }
+    public MeshUsageSourceConfig[] Usage { get; set; } = Array.Empty<MeshUsageSourceConfig>();
+
+    /// <summary>
+    /// The fleet (live traffic) view's data source. An object, not an array - see
+    /// <see cref="MeshFleetConfig"/> for why only one may be configured. Defaults to <c>"none"</c>: no
+    /// live Fleet plane, the dashboard shows only the declared catalog.
+    /// </summary>
+    public MeshFleetConfig Fleet { get; set; } = new();
+
+    /// <summary>The service-graph topology view's data source. Defaults to <c>"none"</c> (no <c>topology.json</c> beyond the structural edges the aggregator itself derives).</summary>
+    public MeshTopologyConfig Topology { get; set; } = new();
+
+    /// <summary>
+    /// Opt in to the live dispatch feature (the <c>mesh:dispatch</c> handler that invokes a registered
+    /// service's REAL handler with a chosen payload). Off by default: it fires real side-effects, so it
+    /// is a deliberate, non-default choice.
+    /// </summary>
+    public MeshDispatchConfig Dispatch { get; set; } = new();
+
+    /// <summary>
+    /// Reserved for slice 2 (auth in the host) - this slice only carries the key through config
+    /// binding, it acts on nothing here. Defaults to <c>"none"</c>, today's only behaviour: the host
+    /// requires no authentication.
+    /// </summary>
+    public MeshAuthConfig Auth { get; set; } = new();
 }
 
 /// <summary>One <c>mesh.json</c> service entry, converted to a <see cref="MeshServiceRegistryEntry"/> via <see cref="ToEntry"/>.</summary>

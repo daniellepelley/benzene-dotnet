@@ -14,9 +14,20 @@
     <ProjectReference Include="..\..\..\src\Benzene.AspNet.Core\Benzene.AspNet.Core.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Microsoft.Dependencies\Benzene.Microsoft.Dependencies.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Mesh.Aggregator\Benzene.Mesh.Aggregator.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Mesh.Artifacts\Benzene.Mesh.Artifacts.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Mesh.Aws.Lambda\Benzene.Mesh.Aws.Lambda.csproj" />
-    <ProjectReference Include="..\..\..\src\Benzene.Mesh.Ui\Benzene.Mesh.Ui.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Mesh.Aws.S3\Benzene.Mesh.Aws.S3.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Mesh.Azure.Blob\Benzene.Mesh.Azure.Blob.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Mesh.Collector\Benzene.Mesh.Collector.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Mesh.Dispatch\Benzene.Mesh.Dispatch.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Mesh.Fleet.Aws.XRay\Benzene.Mesh.Fleet.Aws.XRay.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Mesh.Fleet.Jaeger\Benzene.Mesh.Fleet.Jaeger.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Mesh.Fleet.Tempo\Benzene.Mesh.Fleet.Tempo.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Mesh.GoogleCloud.Storage\Benzene.Mesh.GoogleCloud.Storage.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Mesh.Tracing.Tempo\Benzene.Mesh.Tracing.Tempo.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Mesh.Ui\Benzene.Mesh.Ui.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Mesh.Usage.ApplicationInsights\Benzene.Mesh.Usage.ApplicationInsights.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Mesh.Usage.CloudWatch\Benzene.Mesh.Usage.CloudWatch.csproj" />
   </ItemGroup>
 
 </Project>

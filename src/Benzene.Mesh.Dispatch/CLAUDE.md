@@ -47,8 +47,8 @@ own publishes). So it is off by two independent gates:
 
 ## When to use
 Only when you deliberately want the mesh to *send* live test messages to services (a dev/staging
-convenience). Wire it (gated) into a mesh host — see `deploy/Mesh/Benzene.Mesh.Host` (`EnableDispatch`
-/ `DispatchAllowInProduction` config, off by default). For copy-only payloads, or queue/stream
+convenience). Wire it (gated) into a mesh host — see `deploy/Mesh/Benzene.Mesh.Host` (`dispatch.enabled`
+/ `dispatch.allowInProduction` config, off by default). For copy-only payloads, or queue/stream
 transports (which stay compose+copy only), you don't need this package at all — that's `UseTestPayloads()`
 + the mesh UI's F3a composer.
 
