@@ -1,8 +1,8 @@
 # Kafka Setup
 
-Benzene ships three separate Kafka integrations — a platform-neutral self-hosted consumer/producer
-built on `Confluent.Kafka`, an AWS Lambda MSK/self-managed Kafka event source trigger, and an
-Azure Functions Kafka trigger. They share the same `[Message]`/message-handler programming model,
+Benzene ships four separate Kafka integrations — a platform-neutral self-hosted consumer/producer
+built on `Confluent.Kafka`, a windowed/checkpointed **stream** binding over that same consumer, an
+AWS Lambda MSK/self-managed Kafka event source trigger, and an Azure Functions Kafka trigger. They share the same `[Message]`/message-handler programming model,
 but are three independent implementations, not one library reused three times — the AWS and Azure
 packages do **not** depend on `Benzene.Kafka.Core`, and each maps a Kafka record onto the pipeline
 in its own way. Pick the section below that matches how you're hosting the service.
@@ -22,7 +22,8 @@ in its own way. Pick the section below that matches how you're hosting the servi
 
 | Scenario | Package | Underlying client |
 |---|---|---|
-| Long-running worker/console app consuming Kafka directly | `Benzene.Kafka.Core` | `Confluent.Kafka` |
+| Long-running worker/console app consuming Kafka directly, one message handler per record | `Benzene.Kafka.Core` | `Confluent.Kafka` |
+| The same, but windowed/aggregated stream processing over batches of records | `Benzene.Kafka.Streaming` | `Confluent.Kafka` (via `Benzene.Kafka.Core`) |
 | AWS Lambda triggered by MSK or self-managed Kafka | `Benzene.Aws.Lambda.Kafka` | `Amazon.Lambda.KafkaEvents` |
 | Azure Function triggered by Kafka (incl. Event Hubs' Kafka-compatible endpoint) | `Benzene.Azure.Function.Kafka` | `Microsoft.Azure.Functions.Worker.Extensions.Kafka` |
 
@@ -228,6 +229,103 @@ and polls for the effect:
 
 This is a real integration test against Docker Kafka, not an in-memory fake — budget for the
 broker's startup time in CI.
+
+---
+
+## 1b. Windowed stream processing (`Benzene.Kafka.Streaming`)
+
+Section 1 fans **out**: one context, one DI scope and one message-handler route per record. That's
+the right shape for command/event handling and the wrong one for stream processing — once a batch
+has been fanned out into isolated per-record contexts you can no longer window it, aggregate it, or
+re-order it by key.
+
+`Benzene.Kafka.Streaming` fans **in**. `worker.UseKafkaStream<TKey, TValue>(...)` accumulates
+consumed records into a batch — flushed when either `MaxBatchSize` records have arrived or
+`MaxBatchWait` has elapsed since the batch's *first* record, whichever comes first — and hands the
+whole batch to the pipeline as one `StreamContext<ConsumeResult<TKey, TValue>>`, consumed with
+`UseStream(...)` plus the stream operators (`Window(n)`, `PartitionBy(...)`). This is the Kafka
+counterpart of [`UseKinesisStream`](getting-started-aws.md) and
+[`UseCosmosDbChangeFeed`](getting-started-worker.md#azure-cosmos-db-change-feed-benzeneazurecosmosdb);
+handlers port between the three unchanged.
+
+It builds on section 1's package rather than replacing it — same `BenzeneKafkaConfig`, same
+`IKafkaConsumerFactory` seam, same health check — and `BenzeneKafkaWorker` is unaffected.
+
+```bash
+dotnet add package Benzene.Kafka.Streaming --prerelease
+```
+
+```csharp
+using Benzene.Core.Middleware;
+using Benzene.Kafka.Core;
+using Benzene.Kafka.Streaming;
+using Confluent.Kafka;
+
+public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration)
+{
+    app.UseWorker(worker => worker.UseKafkaStream<Ignore, string>(
+        new BenzeneKafkaConfig
+        {
+            ConsumerConfig = new ConsumerConfig
+            {
+                BootstrapServers = configuration["Kafka:BootstrapServers"],
+                GroupId = "market-data-aggregator",
+                AutoOffsetReset = AutoOffsetReset.Earliest,
+            },
+            Topics = new[] { "market-data" },
+        },
+        stream => stream.UseStream<ConsumeResult<Ignore, string>>(async context =>
+        {
+            // Records within a partition are in offset order; partitions are independent.
+            await foreach (var partition in context.Items.PartitionBy(r => r.TopicPartition, context.CancellationToken))
+            {
+                foreach (var window in partition.Value.Chunk(50))
+                {
+                    await AggregateAsync(window);
+
+                    // "Everything up to here, on THIS partition, is safe."
+                    await context.Checkpointer.CheckpointAsync(window[^1]);
+                }
+            }
+        }),
+        new KafkaStreamOptions
+        {
+            // Defaults shown except the window sizes.
+            MaxBatchSize = 1000,
+            MaxBatchWait = TimeSpan.FromMilliseconds(250),
+            AutoCheckpointOnSuccess = true,
+            CatchHandlerExceptions = false,
+        }));
+}
+```
+
+There is no `UseMessageHandlers()` routing here — a stream is handed to the handler intact, exactly
+as with Kinesis and the Cosmos change feed.
+
+**Checkpointing is per topic-partition.** Kafka's commit unit is `(topic, partition) → offset`, and a
+batch can span partitions, so `CheckpointAsync(record)` advances only *that record's own* partition
+and says nothing about any other. Each partition's watermark only ever moves forward — a checkpoint
+that would rewind it is ignored. Like every Kafka commit it has no gap tracking, so checkpoint a
+partition's *frontier* (the highest offset with every earlier offset on that partition complete),
+which processing each partition in offset order gives you for free. With `AutoCheckpointOnSuccess`
+(the default) a handler that never checkpoints still advances every partition to its last record when
+the pipeline completes cleanly.
+
+**On failure**, `CatchHandlerExceptions` picks between retry and skip:
+
+| Value | Behavior |
+|---|---|
+| `false` (default) | Commit whatever the handler checkpointed, then rewind each partition to *its own* first unprocessed record and retry the batch after `FailedBatchRetryDelay`. Nothing is lost; a reliably-failing batch retries forever. |
+| `true` | Log, checkpoint the batch anyway, and move on — the poison window is permanently skipped. |
+
+The per-partition rewind is something Kinesis structurally can't do (its resume point is a single
+sequence number for the whole batch). The batch's distinct partitions are available on
+`StreamContext.Metadata` under `KafkaStreamApplication<TKey, TValue>.TopicPartitionsMetadataKey`.
+
+For the full set of design tradeoffs — why the batch deadline is anchored to the first record rather
+than being a rolling idle timer, why offsets are always managed manually, and what happens during a
+rebalance — see `src/Benzene.Kafka.Streaming/CLAUDE.md` and
+`work/kafka-stream-binding-design.md`.
 
 ---
 

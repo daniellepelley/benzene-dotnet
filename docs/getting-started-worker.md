@@ -8,13 +8,13 @@ your worker has to do:
 | You want... | Use |
 |---|---|
 | A custom background loop (polling a database, a timer, a queue you talk to yourself), with the same `BenzeneStartUp` shape used by AWS/Azure/ASP.NET Core | **Part A** — `BenzeneStartUp` + `worker.Add(...)` |
-| A built-in consumer — Kafka (`Benzene.Kafka.Core`), RabbitMQ (`Benzene.RabbitMq`), Azure Service Bus (`Benzene.Azure.ServiceBus`), Azure Event Hubs (`Benzene.Azure.EventHub`), or a Cosmos DB Change Feed (`Benzene.Azure.CosmosDb`) — as part of the same process | **Part B** — `BenzeneStartUp` + `worker.UseKafka(...)`/`worker.UseRabbitMq(...)`/`worker.UseServiceBus(...)`/`worker.UseEventHub(...)`/`worker.UseCosmosDbChangeFeed(...)` |
+| A built-in consumer — Kafka (`Benzene.Kafka.Core`, or `Benzene.Kafka.Streaming` for windowed stream processing), RabbitMQ (`Benzene.RabbitMq`), Azure Service Bus (`Benzene.Azure.ServiceBus`), Azure Event Hubs (`Benzene.Azure.EventHub`), or a Cosmos DB Change Feed (`Benzene.Azure.CosmosDb`) — as part of the same process | **Part B** — `BenzeneStartUp` + `worker.UseKafka(...)`/`worker.UseKafkaStream(...)`/`worker.UseRabbitMq(...)`/`worker.UseServiceBus(...)`/`worker.UseEventHub(...)`/`worker.UseCosmosDbChangeFeed(...)` |
 
 Both use the same `BenzeneStartUp` shape — the one exercised by
 `test/Benzene.Core.Test/Hosting/UnifiedStartUpTest.cs` and documented in
 [Unified Hosting Model](hosting.md). They differ only in what you register inside `UseWorker(...)`:
 Part A adds a worker class you wrote yourself, while Part B calls a built-in
-`UseKafka`/`UseRabbitMq`/`UseServiceBus`/`UseEventHub`/`UseCosmosDbChangeFeed` extension. Those built-in extensions
+`UseKafka`/`UseKafkaStream`/`UseRabbitMq`/`UseServiceBus`/`UseEventHub`/`UseCosmosDbChangeFeed` extension. Those built-in extensions
 hang off the `IBenzeneWorkerStartup` builder that `UseWorker(...)` hands you — see
 [How `UseWorker` composes the built-in workers](#how-useworker-composes-the-built-in-workers) below
 for exactly how the two builders relate.
@@ -261,10 +261,11 @@ a lighter-weight way to register a worker without going through the generic host
 
 ## Part B: built-in workers (Kafka, RabbitMQ, Service Bus, Event Hub, Cosmos DB)
 
-`Benzene.Kafka.Core` (see [Kafka Setup](getting-started-kafka.md)), `Benzene.RabbitMq` (see
+`Benzene.Kafka.Core` and `Benzene.Kafka.Streaming` (see [Kafka Setup](getting-started-kafka.md)),
+`Benzene.RabbitMq` (see
 [RabbitMQ Setup](getting-started-rabbitmq.md)), `Benzene.Azure.ServiceBus`, `Benzene.Azure.EventHub`,
 and `Benzene.Azure.CosmosDb` ship built-in workers rather than asking you to write your own. Their
-`UseKafka`/`UseRabbitMq`/`UseServiceBus`/`UseEventHub`/`UseCosmosDbChangeFeed` extensions
+`UseKafka`/`UseKafkaStream`/`UseRabbitMq`/`UseServiceBus`/`UseEventHub`/`UseCosmosDbChangeFeed` extensions
 target `IBenzeneWorkerStartup` — the worker-specific builder that `UseWorker(...)` hands you — so you
 wire them up from the same `BenzeneStartUp` shape as Part A, just calling the built-in extensions
 inside `UseWorker(...)` instead of `worker.Add(...)`. (There is no self-hosted *HTTP* worker: for an
@@ -291,6 +292,21 @@ Add Kafka consumption the same way, inside the same `UseWorker(...)`, via
 see [Kafka Setup](getting-started-kafka.md#1-self-hosted-kafka-worker-benzenekafkacore) for the full
 walkthrough; `examples/Kafka/Benzene.Examples.Kafka` is a runnable version of exactly this Kafka
 worker.
+
+### Kafka stream processing (`Benzene.Kafka.Streaming`)
+
+`UseKafka` above fans **out** — one context, one DI scope and one message-handler route per record.
+For windowed/aggregated stream processing, `Benzene.Kafka.Streaming`'s
+`worker.UseKafkaStream<TKey, TValue>(...)` fans **in** instead: consumed records are accumulated into
+a batch (flushed on `MaxBatchSize` records or `MaxBatchWait` since the batch's first record, whichever
+comes first) and handed to the pipeline as one `StreamContext<ConsumeResult<TKey, TValue>>`, consumed
+with `UseStream(...)` and the stream operators. It is the Kafka counterpart of `UseKinesisStream` and
+`UseCosmosDbChangeFeed` below, and — like them — has no `UseMessageHandlers()` routing.
+
+Checkpointing is **per topic-partition** (Kafka's commit unit), so `CheckpointAsync(record)` advances
+only that record's own partition, never rewinds, and on failure each partition rewinds independently
+to its own first unprocessed record. Full walkthrough and the failure-policy table:
+[Kafka Setup §1b](getting-started-kafka.md#1b-windowed-stream-processing-benzenekafkastreaming).
 
 ### RabbitMQ (`Benzene.RabbitMq`)
 
@@ -534,7 +550,7 @@ public static IBenzeneApplicationBuilder UseWorker(this IBenzeneApplicationBuild
 `Benzene.Azure.ServiceBus.Extensions.UseServiceBus`, `Benzene.Azure.EventHub.Extensions.UseEventHub`,
 and `Benzene.Azure.CosmosDb.Extensions.UseCosmosDbChangeFeed`
 are all written directly against `IBenzeneWorkerStartup` (calling `.Add(...)` to register the built-in
-`BenzeneKafkaWorker`/`RabbitMqWorker`/`BenzeneServiceBusWorker`/`BenzeneEventHubWorker`/`BenzeneCosmosChangeFeedWorker`), so you
+`BenzeneKafkaWorker`/`BenzeneKafkaStreamWorker`/`RabbitMqWorker`/`BenzeneServiceBusWorker`/`BenzeneEventHubWorker`/`BenzeneCosmosChangeFeedWorker`), so you
 call them on the `worker` builder that `UseWorker(...)` hands you — not on `IBenzeneApplicationBuilder`
 directly. If you write your own `IBenzeneWorker` from scratch (Part A), you don't need any of those
 packages; you register it with the same `worker.Add(...)` those extensions call under the hood.

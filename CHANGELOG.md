@@ -58,6 +58,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   around them was removed.
 
 ### Added
+- **New `Benzene.Kafka.Streaming` package — windowed, partitioned and checkpointed Kafka stream
+  processing.** `worker.UseKafkaStream<TKey,TValue>(config, stream => stream.UseStream(...), options?)`
+  adds a self-hosted `BenzeneKafkaStreamWorker<TKey,TValue>` that accumulates consumed records into a
+  window — flushed when either `KafkaStreamOptions.MaxBatchSize` records have arrived or `MaxBatchWait`
+  has elapsed **since the window's first record** (a latency bound, deliberately not a rolling idle
+  timer) — and runs each window through a fan-in `StreamContext<ConsumeResult<TKey,TValue>>` pipeline,
+  the same shape as `UseKinesisStream` and `UseCosmosDbChangeFeed`. This closes the gap the spec's
+  `docs/patterns/streaming-processing.md` named: Kinesis, Event Hubs and the Cosmos change feed all had
+  windowed/checkpointed stream bindings, and Kafka had only a per-record consumer.
+  Checkpointing is **per topic-partition** (Kafka's commit unit): `CheckpointAsync(record)` advances
+  only that record's own partition and never rewinds, written through as `StoreOffset(offset + 1)` and
+  made durable with an explicit `Commit` at each window boundary — Kinesis's single shard-order frontier
+  collapsed into one independent frontier per partition, because a Kafka batch can span partitions and
+  there is no cross-partition order to preserve. `AutoCheckpointOnSuccess` (default `true`) matches
+  Kinesis/Cosmos. On failure, `CatchHandlerExceptions` (default `false`) commits the handler's partial
+  progress then `Seek`s each partition back to *its own* first unprocessed record and retries — a
+  mid-partition resume Kinesis structurally can't express; `true` checkpoints and permanently skips the
+  poison window instead. `EnableAutoOffsetStore` is forced off, so nothing but the checkpointer ever
+  advances an offset.
+  **Additive:** `Benzene.Kafka.Core`'s `BenzeneKafkaWorker`/`UseKafka` are unchanged, and the new
+  package project-references it, reusing `BenzeneKafkaConfig`, `IKafkaConsumerFactory`/
+  `KafkaConsumerFactory`, `AddKafka<TKey,TValue>()` and the Kafka dependency health check rather than
+  duplicating any of them. See `src/Benzene.Kafka.Streaming/CLAUDE.md`,
+  `work/kafka-stream-binding-design.md`, and
+  [Kafka Setup §1b](docs/getting-started-kafka.md#1b-windowed-stream-processing-benzenekafkastreaming).
 - **New `Benzene.Mesh.Usage.CloudWatch` package — the first metrics-backend usage adapter.** A
   `CloudWatchUsageSource : IMeshUsageSource` (pins only `AWSSDK.CloudWatch`) reads the
   `benzene.messages.processed` counter (tags `topic`/`transport`/`result`, emitted by every

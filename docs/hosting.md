@@ -329,6 +329,16 @@ are where mode 3 above ("Benzene decides how many events at once") actually matt
   from under in-flight handlers the way an earlier, simpler implementation did. (`RabbitMqWorker`
   additionally cancels its consumer first, so the drain only waits on already-in-flight deliveries.)
 
+`Benzene.Kafka.Streaming.BenzeneKafkaStreamWorker<TKey,TValue>` is mode 3 as well, but does not use
+`BoundedConcurrentDispatcher<T>` at all: it is a *streaming* binding, so instead of dispatching
+records concurrently it accumulates them into a window (bounded by `KafkaStreamOptions.MaxBatchSize`
+and `MaxBatchWait`) and runs one pipeline over the whole window at a time, in one DI scope - one
+batch in flight, never more. Concurrency inside the window is the handler's own business, expressed
+with the stream operators. Its offsets are always managed manually (auto-offset-store is forced off)
+and advance only through the batch's per-topic-partition checkpointer; `StopAsync` bounds its wait
+for the in-flight batch by the same `BenzeneKafkaConfig.DrainTimeout`, and abandons an
+*unflushed* partial batch rather than acknowledging work that was never done.
+
 The Azure self-hosted workers - `Benzene.Azure.ServiceBus.BenzeneServiceBusWorker` (a
 `ServiceBusProcessor` consuming a queue/subscription),
 `Benzene.Azure.EventHub.BenzeneEventHubWorker` (an `EventProcessorClient` consuming a hub with
