@@ -171,10 +171,11 @@ Same dogfooding, different substrate: discovery is still `Benzene.Mesh.Discovery
 it can pull and a route in.
 
 **Costs & teardown:** an EKS control plane bills ~$0.10/hour plus two `t3.small` nodes and four
-classic ELBs (mesh + the three services, one per LoadBalancer Service). Re-run the workflow with
-**destroy = true** to tear it all down (it deletes the namespace first so Kubernetes releases the
-ELBs, then `terraform destroy`). Note the services are exposed **unauthenticated** — fine for this
-throwaway demo, not a pattern to copy for real workloads.
+classic ELBs (mesh + the three services, one per LoadBalancer Service). Run **"Destroy EKS Mesh
+Example"** to tear it all down (it deletes the namespace first so Kubernetes releases the ELBs, then
+`terraform destroy`) — a dedicated one-click workflow, no confirmation toggle needed. Note the
+services are exposed **unauthenticated** — fine for this throwaway demo, not a pattern to copy for
+real workloads.
 
 To deploy from a laptop instead of CI, run the same four steps by hand: `terraform apply` in
 `deploy/`, push the images to the ECR repositories it outputs, `aws eks update-kubeconfig`, then
