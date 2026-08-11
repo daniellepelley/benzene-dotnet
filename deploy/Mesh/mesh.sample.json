@@ -1,0 +1,16 @@
+{
+  "artifactRootDirectory": "mesh-artifacts",
+  "pollIntervalSeconds": 60,
+  "services": [
+    {
+      "name": "orders-api",
+      "specUrl": "http://orders-api:8080/spec?type=benzene",
+      "healthUrl": "http://orders-api:8080/healthcheck"
+    },
+    {
+      "name": "payments-fn",
+      "source": "AwsLambdaInvoke",
+      "sourceOptions": { "functionName": "payments-fn", "region": "us-east-1" }
+    }
+  ]
+}
