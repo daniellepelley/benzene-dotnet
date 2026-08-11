@@ -51,7 +51,10 @@ public class RabbitMqContextConverter<T> : IContextConverter<IBenzeneClientConte
         var headers = new Dictionary<string, object?>();
         foreach (var header in contextIn.Request.Headers)
         {
-            headers[header.Key] = Encoding.UTF8.GetBytes(header.Value);
+            // Null-coalesce like the Kafka converter does: a null header value is publishable as
+            // empty rather than throwing ArgumentNullException - which the client's catch-all would
+            // otherwise mask as a bare service-unavailable with no hint of the real cause.
+            headers[header.Key] = Encoding.UTF8.GetBytes(header.Value ?? string.Empty);
         }
 
         // Carry the topic as a header too, so a Benzene RabbitMQ consumer's header-first topic getter

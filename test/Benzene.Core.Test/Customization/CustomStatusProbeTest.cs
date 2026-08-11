@@ -119,7 +119,7 @@ public class CustomStatusProbeTest
         return port;
     }
 
-    private static async Task<(int StatusCode, string Body)> PostAsync<TStartUp>(int port)
+    private static async Task<(int StatusCode, string Body)> PostAsync<TStartUp>(int port, string path = "/quarantine")
         where TStartUp : BenzeneStartUp, new()
     {
         var host = new HostBuilder().UseBenzene<TStartUp>().Build();
@@ -133,7 +133,7 @@ public class CustomStatusProbeTest
         {
             using var client = new HttpClient();
             var response = await client.PostAsync(
-                $"http://127.0.0.1:{port}/quarantine",
+                $"http://127.0.0.1:{port}{path}",
                 new StringContent("{}", Encoding.UTF8, "application/json"));
             var body = await response.Content.ReadAsStringAsync();
             return ((int)response.StatusCode, body);

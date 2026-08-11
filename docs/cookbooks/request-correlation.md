@@ -17,9 +17,9 @@ groups logs by request.
 
 This is covered in full, worked-example depth in
 [Distributed Tracing with OpenTelemetry](distributed-tracing-opentelemetry.md) — including exporting
-to Jaeger/an OTel Collector, propagating across an ASP.NET Core API and an SQS-backed worker, and
-the current limitation that inbound extraction only works for HTTP-based transports today. The
-short version:
+to Jaeger/an OTel Collector and propagating across an ASP.NET Core API and an SQS-backed worker.
+Inbound extraction works on any transport with a registered `IMessageHeadersGetter<TContext>` —
+HTTP, SQS, SNS, Kafka, and Event Hub included — not just HTTP. The short version:
 
 ```csharp
 // First middleware in the pipeline — establishes the Activity parent from an inbound traceparent header
@@ -103,7 +103,7 @@ the receiving service's logs if forwarded.
 ## Further Reading
 
 - [Distributed Tracing with OpenTelemetry](distributed-tracing-opentelemetry.md) — the full worked
-  example for W3C trace context, including the current SQS/SNS/Kafka/Event Hub inbound limitation
+  example for W3C trace context, propagated end to end across HTTP and an SQS worker
 - [Correlation Ids](../correlation-ids.md) — reference for `ICorrelationId`/`WithCorrelationId()`
 - [Clients — Outbound middleware](../clients.md#outbound-middleware) — `.UseCorrelationId()` reference
 - [Monitoring & Diagnostics](../monitoring.md) — the full picture of tracing, timers, logging, and OpenTelemetry

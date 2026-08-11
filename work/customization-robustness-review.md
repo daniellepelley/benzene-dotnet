@@ -1,6 +1,7 @@
 # Customization robustness review
 
-Status: in progress. Probes live in `test/Benzene.Core.Test/Customization/`. Findings verified by
+Status: all six obvious fixes DONE (see fix plan); the "Questions for the user" section below is
+awaiting decisions. Probes live in `test/Benzene.Core.Test/Customization/`. Findings verified by
 code-reading plus runtime probes (marked ✅ where probed over a real socket / real pipeline).
 
 ## The systemic finding: Add vs TryAdd decides whether "override X" works at all
@@ -144,14 +145,28 @@ application-defined statuses (unknown → each mapping's generic-error row, conf
    **DONE** (also Grpc and the ApiGateway/V2 http/response adapters; collection-resolved services -
    `IResponseHandler`, `IResponseRenderer`, `IRequestEnricher` - deliberately left plain Add, and
    Azure.Function.* / GoogleCloud / Lambda.Kafka adapters were out of scope this pass).
-2. MessageRouter: treat `<missing>` sentinel as missing-topic → the remediation message fires.
-3. RabbitMQ null header value coalesce + test.
-4. CorrelationIdMiddleware: don't clobber existing per-call key + test (flag semantics in report).
-5. DataAnnotations ValidationMiddleware: use IDefaultStatuses + test.
-6. Docs: correlation-ids.md key claim; multi-tenancy outbound section; request-correlation stale
-   claims; message-versioning AspNet ordering claim (until fix 1 makes it true); IBenzeneWireNames
-   XML doc honesty; SqsConsumerMessageHandlerResultSetter stale default; custom-status recipe
-   (mapper + validation + client wall) in message-result.md or a cookbook.
+2. ~~MessageRouter: treat `<missing>` sentinel as missing-topic → the remediation message fires.~~
+   **DONE** — the not-found branch emits the actionable detail for the sentinel (status stays
+   `not-found` so HTTP keeps its 404); logged as Warning. Note: unrouted AspNet requests
+   intentionally write no body (strangler fall-through for embedded mode), so on HTTP the message
+   surfaces in logs only; queue/stream transports carry it in the result.
+3. ~~RabbitMQ null header value coalesce + test.~~ **DONE** (matches Kafka's coalesce).
+4. ~~CorrelationIdMiddleware: don't clobber existing per-call key + test.~~ **DONE** — explicit
+   per-call header wins; ambient/self-generated value stamps only when the key is absent.
+5. ~~DataAnnotations ValidationMiddleware: use IDefaultStatuses + test.~~ **DONE** — builder passes
+   `TryGetService<IDefaultStatuses>()`; parameterless ctor keeps the old hard-coded default.
+6. ~~Docs batch.~~ **DONE** — correlation-ids.md key claim (+ clients.md row); multi-tenancy
+   outbound section rewritten as an `IMiddleware<OutboundContext>` example + case-insensitive
+   `GetHeader` in strategy B; request-correlation stale HTTP-only claim; IBenzeneWireNames XML doc
+   now says it is NOT a DI seam and names the real per-transport knobs;
+   SqsConsumerMessageHandlerResultSetter stale default; message-handlers.md/diagnosing-failures.md
+   (+ service-bus-handling.md) now describe the `<missing>` sentinel and the new not-found detail;
+   custom-status recipe added to message-result.md + reference/results.md (Set derives
+   IsSuccessful, HTTP 500/gRPC Internal mapping + TryAdd mapper replacement, validation-status
+   wiring, client NormalizeStatus wall, `Set(status, string)` overload trap).
+
+All six fixes verified: Benzene.Core.Test 2346/2346, Benzene.Conformance.Test 134/134. New tests in
+`test/Benzene.Core.Test/Customization/RobustnessFixesTest.cs`.
 
 ## Questions for the user (non-obvious)
 1. Client-side `NormalizeStatus` destroys custom statuses (→ `unexpected-error`). Pass unknown
@@ -164,3 +179,6 @@ application-defined statuses (unknown → each mapping's generic-error row, conf
 5. gRPC throwing on custom success statuses: acceptable (mapper replacement documented) or should
    unknown+IsSuccessful=true map to OK?
 6. `Set("custom", <string>)` overload trap — accept, or add an analyzer/obsolete overload?
+7. `ISerializer` never reaches HTTP body rendering (`JsonMediaFormat` wraps the concrete
+   `JsonSerializer`) — should the media-format path resolve `ISerializer` from DI, or should the
+   docs stop implying a replaced `ISerializer` changes HTTP bodies?

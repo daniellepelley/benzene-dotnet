@@ -185,10 +185,17 @@ app.UseMessageHandlers(typeof(CreateOrderMessageHandler).Assembly, router => rou
 Every overload ultimately registers a **`MessageRouter<TContext>`** as an `IMiddleware<TContext>` in
 the pipeline. `MessageRouter<TContext>.HandleAsync`:
 
-1. Extracts the topic via `IMessageGetter<TContext>`. If it's missing, sets a `validation-error`
-   result ("Topic is missing") and returns — no handler lookup happens.
+1. Extracts the topic via `IMessageGetter<TContext>`. The built-in topic getters never return a
+   null topic — an unresolvable topic becomes the `"<missing>"` sentinel — so the router's
+   `validation-error` ("Topic is missing") short-circuit fires only for a custom topic getter that
+   returns null/empty.
 2. Looks up the handler definition for that topic via `IMessageHandlerDefinitionLookUp`. If none is
-   found, sets a `not-found` result and returns.
+   found, sets a `not-found` result and returns. This is where an unresolvable topic actually
+   surfaces: for the `"<missing>"` sentinel the result's detail is the actionable "No topic could
+   be resolved from the message. On HTTP this means no route matched; on a queue/stream transport,
+   set the transport's topic attribute/header on the producer (check the configured topic key
+   matches the one the producer sends), or configure UsePresetTopic(...)…"; for a real topic it's
+   "No handler found for topic '{topic}'".
 3. Creates the handler instance via `IMessageHandlerFactory` (resolving it from DI, wrapping it per
    `IMessageHandlerWrapper`, and building its own per-handler middleware pipeline — see
    [Response handling](#response-handling) below).

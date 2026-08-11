@@ -125,7 +125,8 @@ failures aren't completely silent:
 
 | Situation | Signal | Source |
 |---|---|---|
-| Topic missing from the message | `Warning` "Topic is missing" | `MessageRouter` |
+| No topic resolvable from the message (built-in getters yield the `"<missing>"` sentinel) | `Warning` "No handler found for topic \<missing\>" plus an actionable detail (set the producer's topic attribute/header, or `UsePresetTopic(...)`); the result is `not-found` | `MessageRouter` |
+| Custom topic getter returned null/empty | `Warning` "Topic is missing"; the result is `validation-error` | `MessageRouter` |
 | No handler registered for the topic | `Warning` "No handler found for topic {topic}" | `MessageRouter` |
 | Handler returns an unsuccessful result | `Warning` "Handler {handler} for topic {topic} returned unsuccessful status {status}{errors}" | `MessageRouter` |
 | Handler/middleware throws | Transport-dependent — see the [catch matrix](#what-reaches-your-logs-per-transport) | the transport application |

@@ -87,11 +87,15 @@ tenant) — see [Security notes](#security-notes).
 
 ```csharp
 using Benzene.Abstractions.Messages.Mappers;
+using Benzene.Diagnostics.Correlation;   // the GetHeader extension
 
 app.UseTenant<MyContext>((context, resolver) =>
 {
-    var headers = resolver.GetService<IMessageHeadersGetter<MyContext>>().GetHeaders(context);
-    return headers != null && headers.TryGetValue("x-tenant-id", out var id) ? id : null;
+    // GetHeader matches the key case-insensitively. Headers dictionaries are ordinal
+    // case-sensitive, so a raw headers.TryGetValue("x-tenant-id", ...) would silently resolve
+    // no tenant for a sender that spells it X-Tenant-Id.
+    var id = resolver.GetService<IMessageHeadersGetter<MyContext>>().GetHeader(context, "x-tenant-id");
+    return string.IsNullOrEmpty(id) ? null : id;
 });
 ```
 
@@ -192,12 +196,38 @@ var connectionString = _tenantConnectionMap.ForTenant(_tenant.TenantId!);
 ```
 
 **Outbound propagation** — when this service calls another Benzene service, forward the tenant so the
-downstream `UseTenant` (Strategy B) picks it up. Stamp it onto the outbound message's headers in your
-client decorator, exactly as correlation/trace headers are forwarded (see
-[Request Correlation](request-correlation.md)):
+downstream `UseTenant` (Strategy B) picks it up. Header stamping is middleware on the **outbound
+route pipeline** — a custom `IMiddleware<OutboundContext>`, exactly as correlation/trace headers are
+forwarded (see [Clients — Writing a custom middleware](../clients.md#writing-a-custom-middleware),
+whose `TenantHeaderMiddleware` example is this same pattern; here it reads the scoped `TenantHolder`):
 
 ```csharp
-outboundHeaders["x-tenant-id"] = _tenant.TenantId!;
+using Benzene.Abstractions.Middleware;
+using Benzene.Clients;
+
+public class TenantHeaderMiddleware : IMiddleware<OutboundContext>
+{
+    private readonly TenantHolder _tenant;
+
+    public TenantHeaderMiddleware(TenantHolder tenant) => _tenant = tenant;
+
+    public string Name => nameof(TenantHeaderMiddleware);
+
+    public Task HandleAsync(OutboundContext context, Func<Task> next)
+    {
+        context.Headers["x-tenant-id"] = _tenant.TenantId!;
+        return next();
+    }
+}
+```
+
+Add it to each outbound route that should carry the tenant:
+
+```csharp
+services.UsingBenzene(x => x.AddOutboundRouting(routing => routing
+    .Route("order:process", pipeline => pipeline
+        .Use(resolver => new TenantHeaderMiddleware(resolver.GetService<TenantHolder>()))
+        .UseSqs(queueUrl))));
 ```
 
 ## Testing

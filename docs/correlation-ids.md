@@ -28,7 +28,20 @@ app.Use("PartnerCorrelation", resolver => async (context, next) =>
 
 Outbound clients can still forward the value: `.UseCorrelationId()` on an outbound route pipeline
 (see [Clients — Outbound middleware](clients.md#outbound-middleware)) stamps the current
-`ICorrelationId` onto the outgoing request's `x-correlation-id` header.
+`ICorrelationId` onto the outgoing request's headers under the **`correlationId`** key by default.
+The key is configurable — `.UseCorrelationId(correlationKey)` and `CorrelationIdMiddleware`'s
+constructor both take a `correlationKey` parameter (default `"correlationId"`). Note that the
+inbound diagnostics span tag (`benzene.correlation-id`, set by `AddDiagnostics()`'s middleware
+decorator) reads the **`x-correlation-id`** header, so a service that wants the receiving side's
+span tag to join up with the forwarded value should pass the key explicitly:
+
+```csharp
+pipeline.UseCorrelationId("x-correlation-id")
+```
+
+An explicit per-call header wins: if the outgoing message already carries a header under the same
+key (e.g. via `IBenzeneMessageSender.SendAsync`'s per-call `headers` parameter), the middleware
+leaves it untouched instead of overwriting it with the ambient — possibly self-generated — value.
 
 ## See Also
 

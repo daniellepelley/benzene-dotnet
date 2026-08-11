@@ -30,12 +30,19 @@ public class CorrelationIdMiddleware : IMiddleware<OutboundContext>
 
     /// <summary>
     /// Stamps the current correlation ID onto the outbound headers, then continues the pipeline.
+    /// An explicit per-call header under the same key wins: <see cref="ICorrelationId"/> always has
+    /// a value (it self-generates a GUID when nothing seeded it), so unconditionally overwriting
+    /// would silently replace a correlation id the caller deliberately forwarded with a random one.
     /// </summary>
     /// <param name="context">The outbound context to stamp headers onto.</param>
     /// <param name="next">The next middleware in the pipeline.</param>
     public Task HandleAsync(OutboundContext context, Func<Task> next)
     {
-        context.Headers[_correlationKey] = _correlationId.Get();
+        if (!context.Headers.ContainsKey(_correlationKey))
+        {
+            context.Headers[_correlationKey] = _correlationId.Get();
+        }
+
         return next();
     }
 }

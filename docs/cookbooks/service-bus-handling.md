@@ -117,7 +117,8 @@ await sender.SendMessageAsync(message);
 
 If the property is missing, `GetTopic` returns a topic whose `Id` is `Constants.Missing`
 (`"<missing>"`) — `MessageRouter` (`src/Benzene.Core.MessageHandlers/MessageRouter.cs`) then
-returns a validation-error result rather than routing anywhere; see
+returns a `not-found` result (its detail explains that no topic could be resolved and names the
+producer-side remedy) rather than routing anywhere; see
 [Troubleshooting](#message-never-reaches-a-handler) below for what that looks like from the
 outside.
 
@@ -325,12 +326,14 @@ See `test/Benzene.Core.Test/Azure/ServiceBusFailureHandlingTest.cs` for the full
 ### Message never reaches a handler
 
 If the `"topic"` application property is missing or isn't a string, `ServiceBusMessageTopicGetter`
-returns a topic with `Id == "<missing>"`. `MessageRouter` then returns a validation-error result
-instead of dispatching to any handler — unlike Event Hub's silent-drop behavior for a malformed
-envelope, this is at least a visible result. With the default `AckMode = AutoComplete` this result
+returns a topic with `Id == "<missing>"`. `MessageRouter` then returns a `not-found` result whose
+detail says no topic could be resolved and names the remedy (set the producer's topic
+property/attribute, or `UsePresetTopic(...)`) instead of dispatching to any handler — unlike Event
+Hub's silent-drop behavior for a malformed envelope, this is at least a visible result. With the
+default `AckMode = AutoComplete` this result
 has no effect on the underlying Service Bus message: the trigger still completes it on its own
 default settings. With `AckMode = Explicit` (see [step 5](#5-message-completion-the-default-and-real-per-message-control)),
-a validation-error result is a non-exception failure result, so the message is abandoned instead —
+a `not-found` result is a non-exception failure result, so the message is abandoned instead —
 either way, confirm your sender is actually setting the `"topic"` property (step 2), since a
 missing property is easy to miss when nothing about the send call itself fails.
 

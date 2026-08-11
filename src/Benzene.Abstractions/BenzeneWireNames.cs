@@ -5,16 +5,21 @@ namespace Benzene.Abstractions;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The spec is explicit that these are <em>defaults, not literals</em>: an implementation must
-/// expose them as a single injectable value so a service can align with a convention it does not
-/// control, replacing a name in one place rather than at every binding. This is that value —
-/// register a replacement and every binding and outbound client follows.
+/// This type exists as the single definition of the DEFAULT names — each binding's own
+/// <c>DefaultTopicAttribute</c>/<c>DefaultTopicProperty</c> constant aliases it rather than
+/// repeating the literal. It is <strong>not a DI seam</strong>: no binding or outbound client
+/// resolves <see cref="IBenzeneWireNames"/> from the container, so registering a replacement
+/// currently has no effect.
 /// </para>
 /// <para>
-/// <strong>An override applies to both directions.</strong> The same names must be used by the
-/// service's inbound bindings and its outbound clients. Overriding only one side would send
-/// messages the service cannot itself receive, and the symptom — a message that arrives and never
-/// routes — is indistinguishable from a missing handler.
+/// To change a name on the wire, configure each binding directly:
+/// <c>SqsConsumerConfig.TopicAttributeKey</c>, <c>BenzeneServiceBusConfig.TopicPropertyKey</c>,
+/// <c>BenzeneEventHubConfig.TopicPropertyKey</c>, <c>RabbitMqConfig.TopicHeaderKey</c>, or the
+/// topic-attribute/-property parameter on the transport's Add/Use extension — and align the
+/// outbound clients to match. <strong>An override applies to both directions:</strong> the same
+/// names must be used by the service's inbound bindings and its outbound clients. Overriding only
+/// one side would send messages the service cannot itself receive, and the symptom — a message
+/// that arrives and never routes — is indistinguishable from a missing handler.
 /// </para>
 /// <para>
 /// The defaults are what let two untouched Benzene services interoperate; a service that changes

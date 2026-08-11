@@ -109,6 +109,27 @@ application-defined statuses default to successful (use `Set<T>(status, bool)` t
 operation may have been applied, so blind retries are only safe for idempotent calls; opt in via
 its `shouldRetry` constructor parameter (e.g. `r => BenzeneResultStatus.IsTransient(r.Status)`).
 
+## Using an application-defined status
+
+Applications may use their own status strings (`BenzeneResult.Set("quarantined", payload)`), with
+caveats:
+
+- An application-defined status derives `IsSuccessful == true` (see above) — pass the explicit
+  `bool` overload to control the success class.
+- Transports map an unknown status to their generic-error row — HTTP `500`, gRPC `Internal` (a
+  thrown `RpcException`) — unless you replace `IHttpStatusCodeMapper` (`Benzene.Http`) /
+  `IGrpcStatusCodeMapper` (`Benzene.Grpc`). Both are registered with `TryAdd`, so a registration in
+  `ConfigureServices` wins.
+- Custom **validation** statuses: FluentValidation's per-rule `.WithStatus(...)`, the handler-level
+  `[ValidationStatus]` attribute, and the replaceable `IValidationStatusMapper` set the status on
+  validation failures; `IDefaultStatuses` replaces the framework's own defaults. The mapper caveat
+  above still applies.
+- **Benzene clients do not round-trip custom statuses**: a client receiving an unknown envelope
+  status rewrites the result to `unexpected-error` ("Status code ... not mapped").
+- **Overload trap**: `Set("my-status", "some string")` binds to `Set(status, params string[]
+  errors)` — the string becomes an error message and the result a *failure*. For a string payload
+  use `Set<string>("my-status", "some string", isSuccessful: true)`.
+
 ## Mapping in both directions
 
 - **Outbound (handler → transport):** `DefaultHttpStatusCodeMapper` (`Benzene.Http`) converts a

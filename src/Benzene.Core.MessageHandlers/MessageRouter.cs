@@ -103,11 +103,22 @@ public class MessageRouter<TContext> : IMiddleware<TContext>, ITerminalMiddlewar
         var messageHandlerDefinition = _messageHandlerDefinitionLookUp.FindHandler(topic);
         if (messageHandlerDefinition == null)
         {
-            _logger.LogWarning("No handler found for topic {topic}", topic.Id);
-            // Single-quote the topic id on the wire (this detail is serialized into the HTTP body):
-            // quotes delimit the value legibly and, unlike the internal "<missing>" sentinel's angle
-            // brackets, don't rely on the sentinel spelling being wire-friendly.
-            await _messageHandlerResultSetter.SetResultAsync(context, new MessageHandlerResult(topic, MessageHandlerDefinition.Empty(), BenzeneResult.Set(_defaultStatuses.NotFound, $"No handler found for topic '{topic.Id}'")));
+            // Every built-in topic getter converts an unresolvable topic into the "<missing>"
+            // sentinel (Topic's constructor does it), so the null-topic branch above never fires for
+            // them and THIS branch is where a wrong-attribute producer actually lands. Name the
+            // remedy here too - "No handler found for topic '<missing>'" on its own gives a
+            // newcomer nothing actionable to go on.
+            var detail = topic.Id == Benzene.Core.Messages.Constants.Missing.Id
+                ? "No topic could be resolved from the message. On HTTP this means no route matched; " +
+                  "on a queue/stream transport, set the transport's topic attribute/header on the " +
+                  "producer (check the configured topic key matches the one the producer sends), or " +
+                  "configure UsePresetTopic(...) to route every message on this pipeline to a fixed topic."
+                // Single-quote the topic id on the wire (this detail is serialized into the HTTP
+                // body): quotes delimit the value legibly and, unlike the internal "<missing>"
+                // sentinel's angle brackets, don't rely on the sentinel spelling being wire-friendly.
+                : $"No handler found for topic '{topic.Id}'";
+            _logger.LogWarning("No handler found for topic {topic}. {detail}", topic.Id, detail);
+            await _messageHandlerResultSetter.SetResultAsync(context, new MessageHandlerResult(topic, MessageHandlerDefinition.Empty(), BenzeneResult.Set(_defaultStatuses.NotFound, detail)));
             return;
         }
 
