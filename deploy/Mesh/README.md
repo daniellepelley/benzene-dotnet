@@ -34,9 +34,10 @@ roadmap doc).
 - **What this host will never do, by design:** enumerate a cloud account and auto-discover
   services. That capability exists (`Benzene.Mesh.Discovery.*`, used by the `examples/` Lambda
   hosts), but this host has **no reference to any `Benzene.Mesh.Discovery.*` package** - not a config
-  flag that happens to default off, a capability this binary is physically incapable of. `services`
-  is always a config-supplied, human-reviewed list. (A discovery-capable *separate* deployable is
-  slice 3's job, not this host's.)
+  flag that happens to default off, a capability this binary is physically incapable of, enforced by
+  `Benzene.Mesh.Host.Test/NoDiscoveryInVanillaHostTest.cs`. `services` is always a config-supplied,
+  human-reviewed list - the only way discovered services reach this host is by config naming a
+  document [`../Discovery`](../Discovery) already wrote, via `registryDocuments` below.
 
 ## Configuration
 
@@ -76,6 +77,25 @@ now generalized to every new section.
   but they're worth setting anyway purely so the Mesh UI's "spec"/"health" links have somewhere to
   point.
 - `owningTeam` (optional) - the "who do I talk to" field the Mesh UI renders on each service card.
+
+### `registryDocuments` - discovery-generated service lists
+
+```jsonc
+"registryDocuments": [ "registry.json" ]                                                      // default: [] (none)
+```
+
+Zero or more locations of discovery-generated registry documents (see
+[`../Discovery`](../Discovery) - a separate deployable, not part of this host), each a relative path
+resolved through this host's own `artifactStore` above and read back with
+`IMeshArtifactStore.TryReadAsync` - so a document `../Discovery` wrote to (say) the same S3 bucket is
+read from that bucket with no new credential path. Read once at startup and unioned with `services`;
+**`services` always wins a name clash** - an operator can always override a discovered entry by
+naming it explicitly ("discovery proposes, config disposes"). A document that is missing or fails to
+parse is logged and the host keeps running on whatever else could be read; if `registryDocuments` is
+non-empty and **nothing** could be read, the host fails to start rather than silently serving an empty
+dashboard - see [`../Discovery/README.md`](../Discovery/README.md) for the full write-up of why
+discovery is a separate deployable and the recommended review/PR-gating pattern for promoting a
+discovered list into what this host actually reads.
 
 ### `artifactStore` - where generated catalog artifacts live
 
@@ -254,7 +274,10 @@ term answer is a proper service-to-service API-key package, deliberately deferre
 
 Every credential comes from the container's ambient credential chain (AWS IAM role, Azure managed
 identity, Google Cloud service account) - never from `mesh.json`. Grant only what the sections you
-actually enable need.
+actually enable need. See [`../Discovery/README.md`](../Discovery/README.md#least-privilege-permission-matrix)
+for the separate, narrower permission matrix `../Discovery` needs - deliberately non-overlapping with
+this one on the interrogation axis (`lambda:InvokeFunction` and friends belong only to this host's
+role, never to discovery's).
 
 | Config section / value | Cloud API | Minimum permission | Scope it to |
 |---|---|---|---|
@@ -329,6 +352,22 @@ resolves from config):
 
 The one AwsMesh capability this cannot reach: `AddMeshAwsLambdaDiscovery()` (auto-discovering the
 Lambda functions to poll). That is deliberate - see "What this host will never do" above.
+
+**S3 + a discovered service list** (`../Discovery` writes `registry.json` to the same bucket; this
+host reads it back and unions it with a hand-pinned entry):
+
+```jsonc
+{
+  "services": [
+    { "name": "legacy-billing", "specUrl": "http://legacy-billing.internal/spec?type=benzene", "healthUrl": "http://legacy-billing.internal/healthcheck" }
+  ],
+  "registryDocuments": [ "registry.json" ],
+  "artifactStore": { "type": "s3", "options": { "bucket": "mesh-artifacts-bucket", "prefix": "mesh/" } }
+}
+```
+
+`legacy-billing` (not discoverable - it predates the `benzene` tag convention) stays pinned by
+`services`; every other entry in `registry.json` is discovered automatically.
 
 ## Running it via Docker Compose
 
