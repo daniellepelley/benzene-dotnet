@@ -155,16 +155,88 @@ Off by default: it invokes a registered service's REAL handler with a chosen pay
 side-effects execute). Two gates, both must pass: `enabled` (wires the feature at all) and, in a
 Production environment, `allowInProduction` too (an unset environment counts as Production).
 
-### `auth` - reserved
+### `auth` - who may reach the dashboard (work/enterprise/slice-2-auth.md)
 
 ```jsonc
-"auth": { "mode": "none" }                                                                     // the only value this slice implements
+"auth": { "mode": "none" }                                                                     // default - unchanged from before this slice
+
+"auth": {
+  "mode": "proxy",
+  "proxy": { "userHeader": "X-Forwarded-User", "trustedProxies": ["10.0.0.5"] }
+}
+
+"auth": {
+  "mode": "basic"
+  // credentials come from MESH_BASIC_USER / MESH_BASIC_PASSWORD - never mesh.json
+}
+
+"auth": {
+  "mode": "oidc",
+  "oidc": { "authority": "https://accounts.google.com", "clientId": "..." }
+  // the client secret comes from the env var named by oidc.clientSecretEnvVar (default
+  // MESH_OIDC_CLIENT_SECRET) - never mesh.json
+}
 ```
 
-The key is carried through config binding by this slice but not acted on - `mode` must be `"none"`
-today (the host requires no authentication, same as before this slice). A follow-up slice adds real
-modes here; **the mesh dashboard has no login today - do not expose this host on a network you don't
-trust until that lands.**
+One gate (`MeshAuthGate`) protects the whole host in every mode below - both `/artifacts/*` (served
+by `UseStaticFiles`, entirely outside the Benzene pipeline, when `artifactStore.type` is `file`) and
+everything inside the Benzene pipeline (`/mesh-ui`, `/mesh-spec-ui.html`, the non-file artifact
+store's root-relative paths, the `/benzene/invoke` envelope). `mode: "none"` (the default) leaves the
+host exactly as it was before this slice: no login, everything world-readable. **Do not expose this
+host on a network you don't trust with `mode: "none"`.**
+
+- **`proxy`** - trust an upstream front door (oauth2-proxy, an ALB+Cognito authenticator, Azure App
+  Proxy) that has already authenticated the caller and forwards identity in a header. Only the peer
+  addresses in `proxy.trustedProxies` are trusted to set that header - **this list must be non-empty**
+  or the host refuses to start, since an unrestricted forwarded-identity header is a total
+  authentication bypass (anyone who can reach the host could set it themselves).
+- **`basic`** - RFC 7617 HTTP Basic auth, one service-account-style credential pair from
+  `MESH_BASIC_USER`/`MESH_BASIC_PASSWORD`. The host refuses to start if either is unset.
+- **`oidc`** - interactive browser login (cookie + authorization-code redirect) against any
+  OIDC-compliant authority - the customer's own SSO and social login (Google, Okta, Entra ID, Auth0,
+  Keycloak, ...) are the same feature once the authority is configuration. `oidc.authority` and
+  `oidc.clientId` are required, and the client secret env var (named by `oidc.clientSecretEnvVar`,
+  default `MESH_OIDC_CLIENT_SECRET`) must be set, or the host refuses to start. **SAML is out of
+  scope** - every enterprise IdP that matters bridges SAML to OIDC, and `mode: "proxy"` covers the
+  rest.
+
+**Authorization**, once authenticated (any mode above): `auth.allowedEmailDomains` and
+`auth.requiredGroups` (both empty/unset by default - any authenticated caller is permitted) restrict
+who counts as permitted; a caller who authenticates but doesn't qualify gets `403 Forbidden`, not
+`401 Unauthorized`, matching `wire-contracts.md`'s distinction. There is no per-service RBAC in v1 -
+authenticated (and permitted) means full read access to the whole catalog.
+
+**`auth.dispatchRole`** is bound and validated (a config typo still fails fast), but is **not yet
+enforced**: `mesh:dispatch`, as this host currently wires it (`Startup.Configure`, gated behind
+`dispatch.enabled`), registers a handler with no HTTP route or envelope endpoint of its own - a
+pre-existing gap predating this slice (see `Benzene.Mesh.Dispatch/CLAUDE.md`'s "Follow-ups": the mesh
+UI's send leg is still unbuilt) - so there is no reachable request to attach a role check to yet.
+Giving dispatch its own reachable endpoint is dispatch-reachability work, not auth work; see the
+comment above `UseMeshDispatch` in `Startup.cs` for the full account.
+
+### `auth.ingestion` - the push-ingestion endpoint is a separate surface
+
+```jsonc
+"auth": { "ingestion": { "mode": "open" } }                                                    // default - unchanged from before this slice
+"auth": { "ingestion": { "mode": "sharedSecret" } }                                             // requires MESH_INGEST_SECRET
+```
+
+`/mesh/report` (`Benzene.Mesh.Aggregator`'s `MeshReportMessageHandler`) is how a service with no
+synchronous entry point self-reports into the mesh - the caller is a service, not a browser, so none
+of the `auth.mode` login flows above can cover it (a redirect-to-login response means nothing to a
+service POSTing a report). It is controlled independently by `auth.ingestion`:
+
+- **`open`** (default): no check, today's behaviour, unaffected by `auth.mode`.
+- **`sharedSecret`**: the request must carry an `X-Mesh-Ingest-Secret` header matching the
+  `MESH_INGEST_SECRET` environment variable (compared in constant time). Still independent of
+  `auth.mode` - a `basic`/`oidc`/`proxy`-protected dashboard does not itself protect `/mesh/report`.
+
+**The residual gap, stated plainly:** with `ingestion.mode: "open"` (the default) and `auth.mode` set
+to anything else, the **read** surface (the dashboard, the catalog) is protected and the **write**
+surface (`/mesh/report`) is not - any caller who can reach the host can inject a report for any
+service name. Set `ingestion.mode: "sharedSecret"` if that surface needs to be closed too; the longer-
+term answer is a proper service-to-service API-key package, deliberately deferred (see
+`work/enterprise/slice-2-auth.md`'s "what does not exist and must be built").
 
 ### Known limitations (documented, not fixed by this slice)
 
@@ -221,7 +293,7 @@ mesh.json is valid.
   fleet: none
   topology: none
   dispatch: disabled
-  auth: none
+  auth: none (ingestion=open)
 ```
 
 ## Worked examples
