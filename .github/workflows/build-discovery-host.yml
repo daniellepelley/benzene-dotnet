@@ -1,0 +1,54 @@
+# Compiles deploy/Discovery/Benzene.Mesh.Discovery.Host.sln - mirrors build-mesh-host.yml. This
+# deployable is a production-ready primitive (a real job an enterprise estate schedules), not an
+# example/demo, so unlike examples/ it gets real CI coverage rather than being left to build only
+# when someone remembers to.
+
+name: Build Discovery Host
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'deploy/Discovery/**'
+      - 'src/Benzene.Mesh.Aggregator/**'
+      - 'src/Benzene.Mesh.Aws.S3/**'
+      - 'src/Benzene.Mesh.Azure.Blob/**'
+      - 'src/Benzene.Mesh.Contracts/**'
+      - 'src/Benzene.Mesh.Discovery.Aws/**'
+      - 'src/Benzene.Mesh.Discovery.Azure/**'
+      - 'src/Benzene.Mesh.Discovery.Kubernetes/**'
+      - 'src/Benzene.Mesh.GoogleCloud.Storage/**'
+      - '.github/workflows/build-discovery-host.yml'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'deploy/Discovery/**'
+      - 'src/Benzene.Mesh.Aggregator/**'
+      - 'src/Benzene.Mesh.Aws.S3/**'
+      - 'src/Benzene.Mesh.Azure.Blob/**'
+      - 'src/Benzene.Mesh.Contracts/**'
+      - 'src/Benzene.Mesh.Discovery.Aws/**'
+      - 'src/Benzene.Mesh.Discovery.Azure/**'
+      - 'src/Benzene.Mesh.Discovery.Kubernetes/**'
+      - 'src/Benzene.Mesh.GoogleCloud.Storage/**'
+      - '.github/workflows/build-discovery-host.yml'
+  workflow_dispatch:
+
+jobs:
+  build-discovery-host:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: 10.0.x
+
+    - name: Restore dependencies
+      run: dotnet restore deploy/Discovery/Benzene.Mesh.Discovery.Host.sln
+    - name: Build
+      run: dotnet build deploy/Discovery/Benzene.Mesh.Discovery.Host.sln --no-restore
+    - name: Test
+      run: dotnet test deploy/Discovery/Benzene.Mesh.Discovery.Host.sln --no-build

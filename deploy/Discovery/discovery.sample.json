@@ -1,0 +1,8 @@
+{
+  "providers": [],
+  "filter": {
+    "tagKey": "benzene"
+  },
+  "artifactRootDirectory": "discovery-artifacts",
+  "outputPath": "registry.json"
+}

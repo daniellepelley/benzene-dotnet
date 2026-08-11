@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- Independent version line, matching deploy/Mesh/Benzene.Mesh.Host.csproj's precedent - this
+         deployable's own "correctness" changes on a different cadence than the library's version.txt. -->
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <VersionSuffix>alpha</VersionSuffix>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- A plain console app, not Microsoft.NET.Sdk.Web - this job has no HTTP surface (see
+         ../README.md) and so gets none of the shared web framework's implicit config wiring; every
+         Microsoft.Extensions.Configuration piece it needs is referenced explicitly. -->
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.FileExtensions" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.9" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Benzene.Mesh.Aggregator\Benzene.Mesh.Aggregator.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Mesh.Aws.S3\Benzene.Mesh.Aws.S3.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Mesh.Azure.Blob\Benzene.Mesh.Azure.Blob.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Mesh.Contracts\Benzene.Mesh.Contracts.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Mesh.Discovery.Aws\Benzene.Mesh.Discovery.Aws.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Mesh.Discovery.Azure\Benzene.Mesh.Discovery.Azure.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Mesh.Discovery.Kubernetes\Benzene.Mesh.Discovery.Kubernetes.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Mesh.GoogleCloud.Storage\Benzene.Mesh.GoogleCloud.Storage.csproj" />
+  </ItemGroup>
+
+</Project>
