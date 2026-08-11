@@ -35,7 +35,7 @@ public static class Extensions
         this IBenzeneServiceContainer services, XRayTraceSourceOptions? options = null)
     {
         services.AddSingleton(options ?? new XRayTraceSourceOptions());
-        services.AddSingleton<IAmazonXRay>(_ => new AmazonXRayClient());
+        services.TryAddSingleton<IAmazonXRay>(_ => new AmazonXRayClient());
         services.AddSingleton<IMeshTraceSource, XRayTraceSource>();
         services.AddSingleton<IMeshFleetReadModel, CompositeMeshFleetReadModel>();
         return services;

@@ -26,8 +26,8 @@ public static class Extensions
     /// <returns>The service container for method chaining.</returns>
     public static IBenzeneServiceContainer AddMeshLambdaSource(this IBenzeneServiceContainer services)
     {
-        services.AddSingleton<IAmazonLambda>(_ => new AmazonLambdaClient());
-        services.AddSingleton<IAwsLambdaClient>(resolver => new AwsLambdaClient(resolver.GetService<IAmazonLambda>()));
+        services.TryAddSingleton<IAmazonLambda>(_ => new AmazonLambdaClient());
+        services.TryAddSingleton<IAwsLambdaClient>(resolver => new AwsLambdaClient(resolver.GetService<IAmazonLambda>()));
         // Register the source with a *lazy* client handle: MeshAggregator resolves every
         // IMeshServiceSource eagerly at startup, so constructing the client here would force an
         // AmazonLambdaClient (which needs a region) even for a pure-HTTP mesh. Deferring it means the

@@ -30,7 +30,7 @@ public static class Extensions
         this IBenzeneServiceContainer services, ApplicationInsightsUsageOptions options)
     {
         services.AddSingleton(options);
-        services.AddSingleton(_ => new LogsQueryClient(new DefaultAzureCredential()));
+        services.TryAddSingleton(_ => new LogsQueryClient(new DefaultAzureCredential()));
         services.AddSingleton<IApplicationInsightsUsageQuery, LogsQueryUsageQuery>();
         services.AddSingleton<IMeshUsageSource, ApplicationInsightsUsageSource>();
         return services;

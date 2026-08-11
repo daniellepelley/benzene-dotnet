@@ -30,7 +30,7 @@ public static class Extensions
         this IBenzeneServiceContainer services, JaegerTraceSourceOptions options)
     {
         services.AddSingleton(options);
-        services.AddSingleton<HttpClient>();
+        services.TryAddSingleton<HttpClient>();
         services.AddSingleton<IMeshTraceSource, JaegerTraceSource>();
         services.AddSingleton<IMeshFleetReadModel, CompositeMeshFleetReadModel>();
         return services;

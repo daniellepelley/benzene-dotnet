@@ -20,7 +20,7 @@ public static class Extensions
     public static IBenzeneServiceContainer AddMeshAggregatorWithS3(
         this IBenzeneServiceContainer services, MeshServiceRegistry registry, string bucket, string prefix = "")
     {
-        services.AddSingleton<IAmazonS3>(_ => new AmazonS3Client());
+        services.TryAddSingleton<IAmazonS3>(_ => new AmazonS3Client());
         return services.AddMeshAggregator(registry,
             resolver => new S3MeshArtifactStore(resolver.GetService<IAmazonS3>(), bucket, prefix));
     }
