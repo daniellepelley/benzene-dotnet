@@ -1,0 +1,115 @@
+name: Destroy EKS Mesh Example
+
+# Manual-only teardown for examples/K8sMesh's AWS (EKS) leg — the counterpart of "Deploy EKS Mesh
+# Example". Run it; it destroys. No confirmation toggle - an EKS control plane bills ~$0.10/hour on
+# its own, before the EC2 nodes and the up-to-four internet-facing ELBs (Mesh UI + orders + payments +
+# shipping, each its own LoadBalancer Service) are counted, so there is no case where you'd run this
+# workflow and NOT want the stack gone.
+#
+# Uses the SAME remote S3 state as the deploy workflow, so it destroys exactly what that created.
+# The state bucket itself is deliberately NOT deleted (it is tiny, versioned, and shared with the
+# AwsMesh example's state under a different key); "Also delete the Terraform state bucket" opts into
+# removing it too, for a full cleanup.
+on:
+  workflow_dispatch:
+    inputs:
+      region:
+        description: "AWS region (must match the region the stack was deployed to)"
+        required: true
+        default: "eu-west-1"
+      delete_state_bucket:
+        description: "Also delete the Terraform state bucket (full cleanup; a redeploy then starts from scratch)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  PROJECT: benzene-k8smesh
+  NAMESPACE: benzene-mesh
+
+jobs:
+  destroy:
+    runs-on: ubuntu-latest
+    # The AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY secrets live in the "test" GitHub Environment;
+    # a job must declare the environment for its secrets to be exposed.
+    environment: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify AWS credentials are available
+        env:
+          KEY_ID: ${{ vars.AWS_ACCESS_KEY_ID || secrets.AWS_ACCESS_KEY_ID }}
+          SECRET: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          missing=0
+          [ -z "$KEY_ID" ] && { echo "::error::AWS_ACCESS_KEY_ID is empty (checked both vars and secrets)."; missing=1; }
+          [ -z "$SECRET" ] && { echo "::error::AWS_SECRET_ACCESS_KEY is empty in this job."; missing=1; }
+          if [ "$missing" = "1" ]; then
+            echo "::error::In the 'test' GitHub Environment (Settings -> Environments -> test): set AWS_ACCESS_KEY_ID as a Variable (or Secret) and AWS_SECRET_ACCESS_KEY as a Secret, ensure the deployment-branch policy allows this branch, and that the names match exactly."
+            exit 1
+          fi
+          echo "Both AWS credentials are present."
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID || secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ inputs.region }}
+
+      - uses: hashicorp/setup-terraform@v3
+
+      # Point at the same remote state the deploy wrote. If the bucket is missing there is nothing
+      # deployed (or it was deployed to another region) — say so plainly rather than creating one.
+      - name: Terraform init (remote S3 state)
+        working-directory: examples/K8sMesh/deploy
+        env:
+          REGION: ${{ inputs.region }}
+        run: |
+          ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
+          STATE_BUCKET="benzene-mesh-tfstate-${ACCOUNT}"
+          echo "STATE_BUCKET=$STATE_BUCKET" >> "$GITHUB_ENV"
+          if ! aws s3api head-bucket --bucket "$STATE_BUCKET" 2>/dev/null; then
+            echo "::error::No Terraform state bucket ($STATE_BUCKET) in $REGION — nothing to destroy here. Check the region matches the deploy."
+            exit 1
+          fi
+          terraform init -input=false \
+            -backend-config="bucket=$STATE_BUCKET" \
+            -backend-config="key=k8s-mesh/terraform.tfstate" \
+            -backend-config="region=$REGION"
+
+      # The internet-facing ELBs are owned by the Kubernetes mesh/orders/payments/shipping Services,
+      # not by Terraform, so delete the namespace first (the cloud controller reaps each ELB) and only
+      # then destroy the cluster — otherwise the ELBs (and their cost) would outlive the stack.
+      - name: Delete the Kubernetes namespace (releases the load balancers)
+        continue-on-error: true
+        working-directory: examples/K8sMesh/deploy
+        run: |
+          if aws eks describe-cluster --name "$PROJECT" --region "${{ inputs.region }}" >/dev/null 2>&1; then
+            aws eks update-kubeconfig --name "$PROJECT" --region "${{ inputs.region }}"
+            kubectl delete namespace "$NAMESPACE" --ignore-not-found --timeout=5m
+          else
+            echo "No cluster named $PROJECT in ${{ inputs.region }} — nothing to delete."
+          fi
+
+      - name: Terraform destroy
+        working-directory: examples/K8sMesh/deploy
+        run: terraform destroy -input=false -auto-approve -var "region=${{ inputs.region }}"
+
+      - name: Delete the Terraform state bucket
+        if: ${{ inputs.delete_state_bucket }}
+        continue-on-error: true
+        run: |
+          echo "Deleting state bucket $STATE_BUCKET (all versions)"
+          aws s3api delete-objects --bucket "$STATE_BUCKET" --delete "$(aws s3api list-object-versions \
+            --bucket "$STATE_BUCKET" --output json \
+            --query '{Objects: [].{Key:Key,VersionId:VersionId}}' )" 2>/dev/null || true
+          aws s3api delete-objects --bucket "$STATE_BUCKET" --delete "$(aws s3api list-object-versions \
+            --bucket "$STATE_BUCKET" --output json \
+            --query '{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' )" 2>/dev/null || true
+          aws s3 rb "s3://$STATE_BUCKET" --force || true
+
+      - name: Confirm teardown
+        run: echo "K8sMesh EKS stack destroyed in ${{ inputs.region }}."
