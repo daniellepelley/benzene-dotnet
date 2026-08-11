@@ -75,6 +75,7 @@ surprising case because nothing crashed.
 | Azure Queue Storage (`Benzene.Azure.Function.QueueStorage`) | **Safe by default** — `QueueStorageOptions.RaiseOnFailureStatus` defaults `true`, escalating a failure result (on both the preset-topic and envelope routing paths) into a throw so the host's `maxDequeueCount` retry/poison handling applies | `QueueStorageOptions.RaiseOnFailureStatus = false` for at-most-once |
 | Google Cloud Pub/Sub (`Benzene.GoogleCloud.Functions.PubSub`) | **Safe by default** — `PubSubOptions.RaiseOnFailureStatus` defaults `true`, escalating a failure result into a throw so Pub/Sub redelivers per the subscription's ack-deadline/retry policy | `PubSubOptions.RaiseOnFailureStatus = false` for at-most-once |
 | Kafka self-hosted worker (`Benzene.Kafka.Core`) | **At-most-once by default** — a stream worker (see the callout below) can't redeliver one record without halting, so `BenzeneKafkaConfig.CommitOnlyOnSuccess` defaults `false`: offsets auto-commit regardless of outcome, so a failed record is skipped on restart | `BenzeneKafkaConfig.CommitOnlyOnSuccess = true` (requires `CatchHandlerExceptions = false`) for at-least-once — offsets are then stored only after a successful handle, so a restart redelivers the failed record; or wire a `DeadLetterTopic` |
+| Kafka self-hosted *stream* worker (`Benzene.Kafka.Streaming`) | **At-least-once by default** — the exception among self-hosted stream workers: it processes a whole window at a time and can `Seek` each topic-partition back, so `KafkaStreamOptions.CatchHandlerExceptions` defaults `false` — a failed batch commits only what the handler checkpointed, rewinds each partition to its own first unprocessed record, and retries | `KafkaStreamOptions.CatchHandlerExceptions = true` for skip-and-continue — the poison window is checkpointed anyway and permanently passed over |
 | Azure Event Hubs self-hosted worker (`Benzene.Azure.EventHub`) | **At-most-once by default** — same stream constraint: `BenzeneEventHubConfig.CatchHandlerExceptions` defaults `true`, so a failed event (or an escalated failure result — `RaiseOnFailureStatus` also defaults `true`) is logged and skipped once a later event checkpoints past it | `BenzeneEventHubConfig.CatchHandlerExceptions = false` for at-least-once — the worker then stops at the failure without checkpointing, so a restart redelivers (and `RaiseOnFailureStatus = false` additionally accepts a failure result as settled) |
 | Azure Cosmos DB Change Feed (`Benzene.Azure.Function.CosmosDb`) | N/A as a "failure result" concern — like Kinesis, this is a fan-in `StreamContext<TDocument>` with no `IBenzeneResult`/message-handler routing; the trigger's lease checkpoints the whole batch on any non-throwing return, and unlike Kinesis there's no per-document checkpoint API to opt out of that with (see the package's own `CLAUDE.md`) | Have the handler throw for anything that must redeliver the whole batch |
 | HTTP / API Gateway | N/A — a failure result maps straight to an HTTP status code the caller sees synchronously; there's no async "retry" concept to opt into | N/A |
@@ -96,6 +97,16 @@ a genuine property of streams, not an oversight — the **Lambda/Functions** str
 DynamoDB Streams, the Kafka/Event Hub Function triggers) can be safe-by-default because the platform
 re-invokes them from the un-advanced checkpoint without any single process having to halt; a
 long-running self-hosted worker has no such external re-invoker.
+
+**`Benzene.Kafka.Streaming` is the one self-hosted stream worker that escapes this**, and it's worth
+being precise about why. It doesn't beat the constraint above — it changes the unit. Because it
+processes a whole *window* at a time rather than a record at a time, a failure has a natural
+boundary to retry at, and because Kafka offsets are seekable it can rewind each topic-partition to
+its own first unprocessed record without stopping the worker. So it defaults to at-least-once
+(`CatchHandlerExceptions = false`) rather than skip-and-continue. The cost is the usual one: a
+reliably-failing batch retries forever, which is exactly the trade `Benzene.Azure.CosmosDb` makes for
+the same reason. A per-record Kafka consumer (`Benzene.Kafka.Core`) still cannot do this — it has no
+window boundary and no watermark to seek back to.
 
 The rows marked N/A above (Cosmos DB Change Feed, HTTP) have no per-item async-retry knob to opt into
 — there, a handler that `throw`s is the escape hatch for anything that must redeliver.

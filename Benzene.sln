@@ -392,6 +392,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Aws.Lambda", "src\B
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Clients.InProcess", "src\Benzene.Clients.InProcess\Benzene.Clients.InProcess.csproj", "{2506FE3C-17A6-47FF-857C-D44EE8A5FCEA}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Kafka.Streaming", "src\Benzene.Kafka.Streaming\Benzene.Kafka.Streaming.csproj", "{08D96302-55EE-4606-8D71-A2C56F7280B2}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -2466,6 +2468,18 @@ Global
 		{2506FE3C-17A6-47FF-857C-D44EE8A5FCEA}.Release|x64.Build.0 = Release|Any CPU
 		{2506FE3C-17A6-47FF-857C-D44EE8A5FCEA}.Release|x86.ActiveCfg = Release|Any CPU
 		{2506FE3C-17A6-47FF-857C-D44EE8A5FCEA}.Release|x86.Build.0 = Release|Any CPU
+		{08D96302-55EE-4606-8D71-A2C56F7280B2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{08D96302-55EE-4606-8D71-A2C56F7280B2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{08D96302-55EE-4606-8D71-A2C56F7280B2}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{08D96302-55EE-4606-8D71-A2C56F7280B2}.Debug|x64.Build.0 = Debug|Any CPU
+		{08D96302-55EE-4606-8D71-A2C56F7280B2}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{08D96302-55EE-4606-8D71-A2C56F7280B2}.Debug|x86.Build.0 = Debug|Any CPU
+		{08D96302-55EE-4606-8D71-A2C56F7280B2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{08D96302-55EE-4606-8D71-A2C56F7280B2}.Release|Any CPU.Build.0 = Release|Any CPU
+		{08D96302-55EE-4606-8D71-A2C56F7280B2}.Release|x64.ActiveCfg = Release|Any CPU
+		{08D96302-55EE-4606-8D71-A2C56F7280B2}.Release|x64.Build.0 = Release|Any CPU
+		{08D96302-55EE-4606-8D71-A2C56F7280B2}.Release|x86.ActiveCfg = Release|Any CPU
+		{08D96302-55EE-4606-8D71-A2C56F7280B2}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -2641,6 +2655,7 @@ Global
 		{B7773E2D-C94F-459A-8756-DB339864ACE6} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{2DE44AEF-1E2D-48C8-9144-6FF26045835E} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{2506FE3C-17A6-47FF-857C-D44EE8A5FCEA} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{08D96302-55EE-4606-8D71-A2C56F7280B2} = {CAD82064-4662-44C3-80EB-BF546EC1900C}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {B4E68A9C-300A-490A-B3A5-1F1D5A0A3260}
