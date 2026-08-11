@@ -5,6 +5,7 @@ using Benzene.Core.MessageHandlers.DI;
 using Benzene.Diagnostics;
 using Benzene.Http;
 using Benzene.Http.Cors;
+using Benzene.Mesh.Artifacts;
 using Benzene.Mesh.Contracts;
 using Benzene.Mesh.GoogleCloud.Storage;
 using Benzene.Mesh.Ui;
