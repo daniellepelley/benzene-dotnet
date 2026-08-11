@@ -10,6 +10,7 @@ on:
     paths:
       - 'deploy/Mesh/**'
       - 'src/Benzene.Mesh.Aggregator/**'
+      - 'src/Benzene.Mesh.Artifacts/**'
       - 'src/Benzene.Mesh.Aws.Lambda/**'
       - 'src/Benzene.Mesh.Contracts/**'
       - 'src/Benzene.Mesh.Dispatch/**'
@@ -20,6 +21,7 @@ on:
     paths:
       - 'deploy/Mesh/**'
       - 'src/Benzene.Mesh.Aggregator/**'
+      - 'src/Benzene.Mesh.Artifacts/**'
       - 'src/Benzene.Mesh.Aws.Lambda/**'
       - 'src/Benzene.Mesh.Contracts/**'
       - 'src/Benzene.Mesh.Dispatch/**'
