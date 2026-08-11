@@ -341,9 +341,9 @@ public override void Configure(IBenzeneApplicationBuilder app, IConfiguration co
 
 The topic comes from a `topic` message attribute by default (`SqsConsumerConfig.TopicAttributeKey`) —
 set a different key to consume messages a non-Benzene producer routes on another attribute. See
-[Getting Started: Kubernetes](getting-started-kubernetes.md) for this worker deployed alongside an
-HTTP and a Kafka host, all three dispatching into one shared handler
-(`examples/K8sTransports/SqsWorker`).
+[Getting Started: Kubernetes](getting-started-kubernetes.md) for this worker hosted alongside HTTP and
+a Kafka consumer, in one process, all three dispatching into one shared handler
+(`examples/K8sTransports/App/WorkerStartup.cs`).
 
 ### RabbitMQ (`Benzene.RabbitMq`)
 

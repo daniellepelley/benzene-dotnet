@@ -1,0 +1,45 @@
+# One Deployment + Service for all three legs - HTTP, SQS, and Kafka all run in this one container
+# (see App/Program.cs). No bundled SQS/Kafka here: QUEUE_URL and KAFKA_BOOTSTRAP_SERVERS point at a
+# real queue and cluster, and SQS_SERVICE_URL is left UNSET so AmazonSQSClient() falls through to the
+# SDK's default credential chain - on EKS that's an IRSA role bound to `serviceAccountName` below (see
+# AWS's "IAM roles for service accounts" docs), the same pattern every other Benzene AWS client on
+# Kubernetes uses. For a credential-free local run against LocalStack + a throwaway Kafka broker
+# instead, see ../compose/docker-compose.yml, which sets SQS_SERVICE_URL.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-app
+  namespace: k8s-transports
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: orders-app }
+  template:
+    metadata:
+      labels: { app: orders-app }
+    spec:
+      # serviceAccountName: orders-app   # bind this to an IRSA role with sqs:ReceiveMessage/
+                                          # DeleteMessage/GetQueueAttributes on the queue below
+      containers:
+        - name: orders-app
+          image: benzene-k8stransports-app:local
+          imagePullPolicy: IfNotPresent
+          ports: [{ containerPort: 8080 }]
+          env:
+            - { name: PORT, value: "8080" }
+            - name: QUEUE_URL
+              value: "https://sqs.eu-west-1.amazonaws.com/<account-id>/orders"   # <- replace
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka-bootstrap.kafka.svc.cluster.local:9092"   # <- replace
+          readinessProbe:
+            tcpSocket: { port: 8080 }
+            initialDelaySeconds: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders-app
+  namespace: k8s-transports
+spec:
+  selector: { app: orders-app }
+  ports: [{ port: 80, targetPort: 8080 }]

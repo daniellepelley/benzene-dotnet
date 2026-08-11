@@ -12,15 +12,17 @@ public record PlaceOrderRequest(string CustomerId, string Sku, int Quantity);
 public record OrderPlaced(string OrderId, string Status);
 
 /// <summary>
-/// The one piece of business logic this example is about. It is reached three different ways by
-/// three different Kubernetes Deployments - <c>Api/</c> maps <c>POST /orders</c> straight onto it
-/// (the <see cref="HttpEndpointAttribute"/> below), <c>SqsWorker/</c> polls an SQS queue and
-/// dispatches every message to it, and <c>KafkaWorker/</c> consumes a Kafka topic and dispatches
-/// every record to it - all three registering it by the same <c>[Message("order-place")]</c>.
-/// Nothing in this class knows which of the three called it: no transport type, no queue/topic
-/// name, no HTTP context. That's deliberate - it's what "write the handler once, run it behind
-/// whichever transport reaches a pod fastest for the traffic you actually have" means in practice,
-/// not just as a slogan. See <c>docs/getting-started-kubernetes.md</c> for the full walkthrough.
+/// The one piece of business logic this example is about. It is reached three different ways, all
+/// from the same running container - <c>App/</c> hosts an ASP.NET Core server that maps
+/// <c>POST /orders</c> straight onto it (the <see cref="HttpEndpointAttribute"/> below), AND polls an
+/// SQS queue, AND consumes a Kafka topic, dispatching every message/record from either straight onto
+/// it too - all three registering it by the same <c>[Message("order-place")]</c>. Nothing in this
+/// class knows which of the three called it: no transport type, no queue/topic name, no HTTP context.
+/// That's deliberate - it's what "write the handler once, reach it from whichever transport carries
+/// the traffic you actually have, without standing up a separate service per transport" means in
+/// practice, not just as a slogan. See <c>docs/getting-started-kubernetes.md</c> for the full
+/// walkthrough, and <c>App/HttpStartup.cs</c> / <c>App/WorkerStartup.cs</c> for how one process hosts
+/// all three.
 /// </summary>
 [Message("order-place")]
 [HttpEndpoint("POST", "/orders")]

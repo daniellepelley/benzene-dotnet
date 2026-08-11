@@ -203,8 +203,8 @@ message. `MapGet` has no answer for that; you'd write a second, separate handler
 hand. With Benzene the handler above doesn't change at all: [`Benzene.Aws.Sqs`](getting-started-worker.md)
 or [`Benzene.Kafka.Core`](getting-started-kafka.md) point a worker at the *same*
 `HelloWorldMessageHandler`, because it was never written against `HttpContext` in the first place — see
-[`examples/K8sTransports`](../examples/K8sTransports) for that running as three independent Kubernetes
-Deployments from one handler. If HTTP genuinely is and always will be the only way in, reach for
+[`examples/K8sTransports`](../examples/K8sTransports) for that running, all three transports hosted
+together in one container. If HTTP genuinely is and always will be the only way in, reach for
 `MapGet`/`MapPost`/controllers instead — you'll write less code, not more.
 
 ## Next steps

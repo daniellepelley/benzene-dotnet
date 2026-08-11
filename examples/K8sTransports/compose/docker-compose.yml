@@ -1,9 +1,9 @@
-# Local, no-Kubernetes-needed way to see all three legs of this example running against real (if
-# emulated) SQS and Kafka. Each service's build.context is relative to this file, so run it from
-# anywhere with `docker compose -f examples/K8sTransports/compose/docker-compose.yml up --build`
-# (see the README for the full walkthrough). localstack/kafka here stand in for a real AWS SQS queue
-# and a real Kafka cluster - swap them for QUEUE_URL/KAFKA_BOOTSTRAP_SERVERS pointed at the real thing
-# to run the exact same three images anywhere else, including the k8s/ manifests in the parent
+# Local, no-Kubernetes-needed way to see all three legs of this example running - in one container -
+# against real (if emulated) SQS and Kafka. Each service's build.context is relative to this file, so
+# run it from anywhere with `docker compose -f examples/K8sTransports/compose/docker-compose.yml up
+# --build` (see the README for the full walkthrough). localstack/kafka here stand in for a real AWS
+# SQS queue and a real Kafka cluster - swap them for QUEUE_URL/KAFKA_BOOTSTRAP_SERVERS pointed at the
+# real thing to run the exact same image anywhere else, including the k8s/ manifest in the parent
 # directory.
 services:
   localstack:
@@ -48,28 +48,16 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
 
-  orders-api:
+  orders-app:
     build:
       context: ../../..
-      dockerfile: examples/K8sTransports/Api/Dockerfile
-    ports:
-      - "8080:8080"
-
-  orders-sqs-worker:
-    build:
-      context: ../../..
-      dockerfile: examples/K8sTransports/SqsWorker/Dockerfile
+      dockerfile: examples/K8sTransports/App/Dockerfile
     depends_on:
       - sqs-init
+      - kafka
+    ports:
+      - "8080:8080"
     environment:
       - QUEUE_URL=http://localstack:4566/000000000000/orders
       - SQS_SERVICE_URL=http://localstack:4566
-
-  orders-kafka-worker:
-    build:
-      context: ../../..
-      dockerfile: examples/K8sTransports/KafkaWorker/Dockerfile
-    depends_on:
-      - kafka
-    environment:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092

@@ -75,15 +75,20 @@ handler/logic in `Benzene.Examples.App` and wiring it from the hosts, rather tha
   the Mesh UI on a public ELB URL). Has its own `README.md`. Does **not** use the shared `App` domain.
 - **`K8sTransports/`** — the runnable version of
   [docs/getting-started-kubernetes.md](../docs/getting-started-kubernetes.md): one handler
-  (`Domain/PlaceOrderMessageHandler`) reached three ways, each its own Kubernetes Deployment —
-  `Api/` over HTTP, `SqsWorker/` polling SQS (`Benzene.Aws.Sqs`'s self-hosted consumer), `KafkaWorker/`
-  consuming Kafka (`Benzene.Kafka.Core`). Unlike `K8sMesh/` (service discovery across three *different*
-  services calling each other) this is one piece of logic behind three *inbound transports* — the two
-  demonstrate different things and are not interchangeable. `compose/docker-compose.yml` runs all
-  three legs locally against LocalStack + a throwaway Kafka broker with no cloud account; `k8s/` has no
-  bundled SQS/Kafka (see each manifest's own comment) since a real deployment points at a real queue
-  and cluster. Has its own `README.md`. Does **not** use the shared `App` domain (a dedicated `Domain/`
-  project instead, since it's the one thing the guide's three hosts must share unmodified).
+  (`Domain/PlaceOrderMessageHandler`) reached three ways from **one** Kubernetes Deployment — its own
+  `App/` project (not the top-level shared `App/Benzene.Examples.App` domain - see below) wires
+  Kestrel (`Benzene.AspNet.Core`), an SQS poller (`Benzene.Aws.Sqs`'s self-hosted consumer), and a
+  Kafka consumer (`Benzene.Kafka.Core`) together via **two** `BenzeneStartUp`s
+  (`HttpStartup`/`WorkerStartup`) sharing one `WebApplicationBuilder` — `Benzene.HostedService` adapts
+  the workers to `IHostedService` so they start/stop alongside Kestrel in the same process. Unlike
+  `K8sMesh/` (service discovery across three *different* services calling each other) this is one
+  piece of logic behind three *inbound transports* — the two demonstrate different things and are not
+  interchangeable. `compose/docker-compose.yml` runs the one image locally against LocalStack + a
+  throwaway Kafka broker with no cloud account; `k8s/` has no bundled SQS/Kafka (see the manifest's own
+  comment) since a real deployment points at a real queue and cluster. Has its own `README.md`,
+  including a closing note on the alternative (one Deployment per transport) shape and its tradeoffs.
+  Does **not** use the shared `App` domain (a dedicated `Domain/` project instead, since it's the one
+  thing this example's three transports must share unmodified).
 - **`AzureMesh/`** — the Azure counterpart: three Cloud Services as **Azure Web Apps for Containers**
   (reusing the `K8sMesh/Service` image) discovered by resource **tag** via
   `Benzene.Mesh.Discovery.Azure`, plus a mesh Web App that serves the Mesh UI and persists the catalog

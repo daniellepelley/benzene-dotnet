@@ -1,31 +1,26 @@
 # Getting Started: Benzene on Kubernetes
 
-This guide takes you from an empty folder to **one Benzene handler running as three independent
-Kubernetes Deployments** — an HTTP API, an SQS worker, and a Kafka worker — all dispatching into the
-exact same handler class. That's deliberately more than "deploy ASP.NET Core to a pod": see
+This guide takes you from an empty folder to **one Benzene handler, reached over HTTP, SQS, and
+Kafka, hosted in a single container** — one `Program.cs`, one Docker image, one Kubernetes
+Deployment, dispatching every message from all three transports into the exact same handler class.
+That's deliberately more than "deploy ASP.NET Core to a pod": see
 [Why not just ASP.NET Core?](#why-not-just-aspnet-core) below for why a single-transport example
 wouldn't actually show what Benzene is for here.
 
 > **Runnable version:** this guide follows [`examples/K8sTransports`](../examples/K8sTransports) —
-> Dockerfiles, Kubernetes manifests, and a `docker-compose.yml` that runs all three legs locally
+> a Dockerfile, a Kubernetes manifest, and a `docker-compose.yml` that runs all three legs locally
 > against LocalStack + a throwaway Kafka broker, no cloud account needed.
 
 ## What you'll build
 
 ```
-                              ┌──────────────────────────────────────┐
-        HTTP  ──────────────▶│  orders-api           (Deployment)    │──┐
-                              └──────────────────────────────────────┘  │
-                              ┌──────────────────────────────────────┐  │   all three dispatch
-        SQS queue  ─────────▶│  orders-sqs-worker    (Deployment)    │──┼──▶ PlaceOrderMessageHandler
-                              └──────────────────────────────────────┘  │
-                              ┌──────────────────────────────────────┐  │
-        Kafka topic  ───────▶│  orders-kafka-worker  (Deployment)    │──┘
-                              └──────────────────────────────────────┘
+        HTTP        ─────────┐
+        SQS queue   ─────────┼──▶  orders-app (Deployment)  ──▶  PlaceOrderMessageHandler
+        Kafka topic ─────────┘
 ```
 
-One handler project (`Domain`), referenced by three host projects, each its own container image,
-each its own Kubernetes Deployment, each independently replicated and scaled.
+One handler project (`Domain`), referenced by one host project that wires Kestrel, an SQS poller, and
+a Kafka consumer together — one container image, one Kubernetes Deployment.
 
 ## Prerequisites
 
@@ -89,34 +84,46 @@ public class PlaceOrderMessageHandler : IMessageHandler<PlaceOrderRequest, Order
 
 Two attributes, two transports covered for free: `[Message("order-place")]` is the topic every
 transport routes on; `[HttpEndpoint("POST", "/orders")]` additionally maps it onto a REST-shaped route
-for the HTTP host below. Nothing here mentions Kubernetes, SQS, Kafka, or HTTP status codes — that's
+for the HTTP leg below. Nothing here mentions Kubernetes, SQS, Kafka, or HTTP status codes — that's
 the whole point of a message handler in Benzene's hexagonal architecture: the domain logic sits behind
 a port, and a transport is just an adapter in front of it.
 
 The topic is `order-place`, not `order:place` — Benzene's usual colon convention (`order:create`,
 `payment:take`) doesn't survive contact with Kafka, whose topic names may only contain letters,
-digits, `.`, `_`, and `-`. Since the Kafka worker below routes on the record's *literal* topic name
+digits, `.`, `_`, and `-`. Since the Kafka leg below routes on the record's *literal* topic name
 against this same `[Message(...)]` value, the topic has to be spelled in a way all three transports
 can use unmodified.
 
-## 2. Host it over HTTP
+## 2. Host all three in one project
 
 ```bash
-mkdir ../Api && cd ../Api
+mkdir ../App && cd ../App
 dotnet new web -f net10.0
 dotnet add package Benzene.AspNet.Core --prerelease
+dotnet add package Benzene.HostedService --prerelease
+dotnet add package Benzene.Aws.Sqs --prerelease
+dotnet add package Benzene.Kafka.Core --prerelease
 dotnet add reference ../Domain
 ```
 
+One project, but **two** `BenzeneStartUp`s — this is the one non-obvious piece of the whole guide, so
+it's worth being explicit about why. `Configure(IBenzeneApplicationBuilder app, ...)` only gets to act
+on the platform its `app` was built for: `app.UseHttp(...)` is a no-op unless `app` is an
+`AspApplicationBuilder`, and `app.UseWorker(...)` is a no-op unless it's a `WorkerApplicationBuilder` —
+by design, so a `Configure` written for one platform can't silently half-apply on another. A single
+`Startup` can therefore wire HTTP *or* the workers, never both. Two `BenzeneStartUp`s sharing the same
+`WebApplicationBuilder.Services`, on the other hand, works fine — each gets the `app` its own platform
+builds, and both land in the same dependency-injection container:
+
 ```csharp
-// Startup.cs
+// HttpStartup.cs
 using Benzene.Abstractions.Hosting;
 using Benzene.AspNet.Core;
 using Benzene.Core.MessageHandlers;
 using Benzene.Core.MessageHandlers.DI;
 using Benzene.Microsoft.Dependencies;
 
-public class Startup : BenzeneStartUp
+public class HttpStartup : BenzeneStartUp
 {
     public override IConfiguration GetConfiguration()
         => new ConfigurationBuilder().AddEnvironmentVariables().Build();
@@ -136,58 +143,32 @@ public class Startup : BenzeneStartUp
 ```
 
 ```csharp
-// Program.cs
-using Benzene.AspNet.Core;
-
-var builder = WebApplication.CreateBuilder(args);
-builder.WebHost.UseUrls($"http://0.0.0.0:{Environment.GetEnvironmentVariable("PORT") ?? "8080"}");
-builder.UseBenzene<Startup>();
-
-var app = builder.Build();
-app.UseBenzene();
-app.Run();
-```
-
-This is exactly [Getting Started: ASP.NET Core](getting-started-aspnet.md) — nothing here is
-Kubernetes-specific yet.
-
-## 3. Host it on SQS
-
-A second, completely independent project, sharing nothing with `Api` except a reference to `Domain`:
-
-```bash
-mkdir ../SqsWorker && cd ../SqsWorker
-dotnet new worker -f net10.0
-dotnet add package Benzene.Aws.Sqs --prerelease
-dotnet add package Benzene.HostedService --prerelease
-dotnet add reference ../Domain
-```
-
-```csharp
-// Startup.cs
+// WorkerStartup.cs
 using Amazon.Runtime;
 using Amazon.SQS;
 using Benzene.Abstractions.Hosting;
 using Benzene.Aws.Sqs;
 using Benzene.Aws.Sqs.Consumer;
 using Benzene.Core.MessageHandlers;
+using Benzene.Kafka.Core;
 using Benzene.Microsoft.Dependencies;
 using Benzene.SelfHost;
+using Confluent.Kafka;
 
-public class Startup : BenzeneStartUp
+public class WorkerStartup : BenzeneStartUp
 {
     public override IConfiguration GetConfiguration()
         => new ConfigurationBuilder().AddEnvironmentVariables().Build();
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
-        // UseSqs (below) wires the SQS mappers; UseMessageHandlers() discovers PlaceOrderMessageHandler
-        // by reflection because this project references Domain - nothing to register here.
+        // UseSqs/UseKafka (below) wire their own mappers; UseMessageHandlers() discovers
+        // PlaceOrderMessageHandler by reflection because this project references Domain.
     }
 
     public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration)
     {
-        var config = new SqsConsumerConfig
+        var sqsConfig = new SqsConsumerConfig
         {
             QueueUrl = configuration["QUEUE_URL"]
                 ?? throw new InvalidOperationException("QUEUE_URL is not set"),
@@ -196,75 +177,13 @@ public class Startup : BenzeneStartUp
 
         // SQS_SERVICE_URL is only set for a LocalStack/emulator run (see the runnable example's
         // docker-compose.yml). Unset - the real-AWS/EKS case - AmazonSQSClient() falls through to the
-        // SDK's default credential chain, e.g. an IRSA-mapped pod service account: this worker never
-        // prescribes how you authenticate, same as every other Benzene AWS client.
+        // SDK's default credential chain, e.g. an IRSA-mapped pod service account.
         var localEndpoint = configuration["SQS_SERVICE_URL"];
         var sqsClient = string.IsNullOrEmpty(localEndpoint)
             ? new AmazonSQSClient()
             : new AmazonSQSClient(new BasicAWSCredentials("local", "local"),
                 new AmazonSQSConfig { ServiceURL = localEndpoint });
 
-        app.UseWorker(worker => worker.UseSqs(
-            config,
-            new SqsClientFactory(sqsClient),
-            sqs => sqs.UseMessageHandlers()));
-    }
-}
-```
-
-```csharp
-// Program.cs
-using Benzene.HostedService;
-
-IHost host = Host.CreateDefaultBuilder(args)
-    .UseBenzene<Startup>()
-    .Build();
-
-await host.RunAsync();
-```
-
-`SqsConsumer` (`Benzene.Aws.Sqs`) is a long-running poller, not a Lambda trigger — the right shape for
-a pod that stays up. It long-polls the queue, runs each message through the same middleware pipeline
-`Api` uses, and deletes only the messages whose handler actually succeeded (`SqsConsumerAckMode.PerMessage`,
-the default) — a failed or unrouted message is left on the queue for redelivery/DLQ redrive rather than
-silently dropped. See [Worker Service Setup](getting-started-worker.md) for the general shape this
-follows and every other built-in worker (Kafka, RabbitMQ, Service Bus, Event Hub, Cosmos DB) available
-the same way.
-
-## 4. Host it on Kafka
-
-A third project, independent of the other two:
-
-```bash
-mkdir ../KafkaWorker && cd ../KafkaWorker
-dotnet new worker -f net10.0
-dotnet add package Benzene.Kafka.Core --prerelease
-dotnet add package Benzene.HostedService --prerelease
-dotnet add reference ../Domain
-```
-
-```csharp
-// Startup.cs
-using Benzene.Abstractions.Hosting;
-using Benzene.Core.MessageHandlers;
-using Benzene.Kafka.Core;
-using Benzene.Microsoft.Dependencies;
-using Benzene.SelfHost;
-using Confluent.Kafka;
-
-public class Startup : BenzeneStartUp
-{
-    public override IConfiguration GetConfiguration()
-        => new ConfigurationBuilder().AddEnvironmentVariables().Build();
-
-    public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
-    {
-        // UseKafka (below) wires the Kafka mappers; UseMessageHandlers() discovers
-        // PlaceOrderMessageHandler the same way the SQS worker's does.
-    }
-
-    public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration)
-    {
         var kafkaConfig = new BenzeneKafkaConfig
         {
             ConsumerConfig = new ConsumerConfig
@@ -278,90 +197,94 @@ public class Startup : BenzeneStartUp
             Topics = new[] { "order-place" },
         };
 
-        app.UseWorker(worker =>
-            worker.UseKafka<Ignore, string>(kafkaConfig, kafka => kafka.UseMessageHandlers()));
+        // UseSqs(...).UseKafka(...) chains - each registers its own worker with the same
+        // IBenzeneWorkerStartup, and Benzene.HostedService composes them into ONE IHostedService
+        // that starts/stops together with Kestrel, in this one process.
+        app.UseWorker(worker => worker
+            .UseSqs(sqsConfig, new SqsClientFactory(sqsClient), sqs => sqs.UseMessageHandlers())
+            .UseKafka<Ignore, string>(kafkaConfig, kafka => kafka.UseMessageHandlers()));
     }
 }
 ```
 
 ```csharp
 // Program.cs
+using Benzene.AspNet.Core;
 using Benzene.HostedService;
 
-IHost host = Host.CreateDefaultBuilder(args)
-    .UseBenzene<Startup>()
-    .Build();
+var builder = WebApplication.CreateBuilder(args);
+builder.WebHost.UseUrls($"http://0.0.0.0:{Environment.GetEnvironmentVariable("PORT") ?? "8080"}");
 
-await host.RunAsync();
+// WebApplicationBuilder.UseBenzene<T> (Benzene.AspNet.Core) builds an AspApplicationBuilder;
+// IHostBuilder.UseBenzene<T> (Benzene.HostedService, reached via builder.Host - the same IHostBuilder
+// a Generic Host would use) builds a WorkerApplicationBuilder. Both register against this one
+// builder.Services.
+builder.UseBenzene<HttpStartup>();
+builder.Host.UseBenzene<WorkerStartup>();
+
+var app = builder.Build();
+app.UseBenzene();
+app.Run();
 ```
 
-See [Kafka Setup](getting-started-kafka.md) for `BenzeneKafkaConfig`'s other options
-(`ConcurrentRequests` bounds how many records this worker processes at once) and why the consumer
-routes on the record's literal Kafka topic name rather than a colon-style topic id.
+`SqsConsumer` (`Benzene.Aws.Sqs`) and the Kafka consumer (`Benzene.Kafka.Core`) are long-running
+pollers, not Lambda/event-source triggers — the right shape for a pod that stays up. Each runs its
+messages through the same middleware pipeline the HTTP leg uses; the SQS leg deletes only the
+messages whose handler actually succeeded (`SqsConsumerAckMode.PerMessage`, the default), leaving a
+failed or unrouted message on the queue for redelivery/DLQ redrive rather than silently dropping it.
+See [Worker Service Setup](getting-started-worker.md) for the general shape self-hosted workers
+follow and every other built-in one (RabbitMQ, Service Bus, Event Hub, Cosmos DB) available the same
+way, and [Kafka Setup](getting-started-kafka.md) for `BenzeneKafkaConfig`'s other options.
 
-## 5. Containerise all three
+## 3. Containerise it
 
-Each project gets its own `Dockerfile`; the two workers use the plain runtime image (no ASP.NET, no
-inbound listener) rather than `aspnet`:
+One project, one `Dockerfile`, one image:
 
 ```dockerfile
-# Api/Dockerfile
+# App/Dockerfile
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 COPY . .
-RUN dotnet publish Api/Api.csproj -c Release -o /app
+RUN dotnet publish App/App.csproj -c Release -o /app
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app
 COPY --from=build /app .
 ENV PORT=8080
 EXPOSE 8080
-ENTRYPOINT ["dotnet", "Api.dll"]
-```
-
-```dockerfile
-# SqsWorker/Dockerfile and KafkaWorker/Dockerfile follow the same shape, swapping the publish path,
-# and use the runtime (not aspnet) base image - a worker has nothing listening on a port:
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
-WORKDIR /src
-COPY . .
-RUN dotnet publish SqsWorker/SqsWorker.csproj -c Release -o /app
-
-FROM mcr.microsoft.com/dotnet/runtime:10.0
-WORKDIR /app
-COPY --from=build /app .
-ENTRYPOINT ["dotnet", "SqsWorker.dll"]
+ENTRYPOINT ["dotnet", "App.dll"]
 ```
 
 ```bash
-docker build -f Api/Dockerfile         -t orders-api:local         .
-docker build -f SqsWorker/Dockerfile   -t orders-sqs-worker:local  .
-docker build -f KafkaWorker/Dockerfile -t orders-kafka-worker:local .
-kind load docker-image orders-api:local orders-sqs-worker:local orders-kafka-worker:local
+docker build -f App/Dockerfile -t orders-app:local .
+kind load docker-image orders-app:local
 ```
 
-## 6. Deploy all three
+## 4. Deploy it
 
-`orders-api` gets a `Deployment` + `Service`, same as any HTTP workload. The two workers get a
-`Deployment` each and **no** `Service` — nothing calls a worker pod, it calls out:
+One `Deployment` + `Service` — the SQS and Kafka legs don't get their own, because nothing calls this
+pod over either of them; it calls out:
 
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: orders-api
+  name: orders-app
 spec:
   replicas: 2
-  selector: { matchLabels: { app: orders-api } }
+  selector: { matchLabels: { app: orders-app } }
   template:
-    metadata: { labels: { app: orders-api } }
+    metadata: { labels: { app: orders-app } }
     spec:
       containers:
-        - name: orders-api
-          image: orders-api:local
+        - name: orders-app
+          image: orders-app:local
           imagePullPolicy: IfNotPresent
           ports: [{ containerPort: 8080 }]
-          env: [{ name: PORT, value: "8080" }]
+          env:
+            - { name: PORT, value: "8080" }
+            - { name: QUEUE_URL, value: "https://sqs.eu-west-1.amazonaws.com/<account-id>/orders" }
+            - { name: KAFKA_BOOTSTRAP_SERVERS, value: "kafka-bootstrap.kafka.svc.cluster.local:9092" }
           readinessProbe:
             tcpSocket: { port: 8080 }
             initialDelaySeconds: 3
@@ -369,55 +292,21 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: orders-api
+  name: orders-app
 spec:
-  selector: { app: orders-api }
+  selector: { app: orders-app }
   ports: [{ port: 80, targetPort: 8080 }]
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: orders-sqs-worker
-spec:
-  replicas: 1
-  selector: { matchLabels: { app: orders-sqs-worker } }
-  template:
-    metadata: { labels: { app: orders-sqs-worker } }
-    spec:
-      containers:
-        - name: orders-sqs-worker
-          image: orders-sqs-worker:local
-          imagePullPolicy: IfNotPresent
-          env:
-            - { name: QUEUE_URL, value: "https://sqs.eu-west-1.amazonaws.com/<account-id>/orders" }
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: orders-kafka-worker
-spec:
-  replicas: 1
-  selector: { matchLabels: { app: orders-kafka-worker } }
-  template:
-    metadata: { labels: { app: orders-kafka-worker } }
-    spec:
-      containers:
-        - name: orders-kafka-worker
-          image: orders-kafka-worker:local
-          imagePullPolicy: IfNotPresent
-          env:
-            - { name: KAFKA_BOOTSTRAP_SERVERS, value: "kafka-bootstrap.kafka.svc.cluster.local:9092" }
 ```
 
 ```bash
 kubectl apply -f k8s.yaml
-kubectl get pods   # 4 pods: 2x orders-api, 1x orders-sqs-worker, 1x orders-kafka-worker
+kubectl get pods   # 2 pods: 2x orders-app
 ```
 
-## 7. Watch the same handler run three ways
+## 5. Watch the same handler run three ways
 
 ```bash
-kubectl port-forward service/orders-api 8080:80 &
+kubectl port-forward service/orders-app 8080:80 &
 curl -X POST http://localhost:8080/orders \
   -H "Content-Type: application/json" -d '{"customerId":"cust-1","sku":"espresso","quantity":2}'
 ```
@@ -427,18 +316,18 @@ curl -X POST http://localhost:8080/orders \
 ```
 
 ```bash
-kubectl logs deploy/orders-api | tail -1
+kubectl logs deploy/orders-app | tail -1
 # order placed: order-xxxxxxxxxxx - 2x espresso for cust-1
 ```
 
 Send a message to the SQS queue or the Kafka topic directly (from your own producer, `aws sqs
 send-message`, `kafka-console-producer` — see [the runnable example](../examples/K8sTransports) for
-exact commands against a local LocalStack/Kafka pair) and the **same log line** appears in
-`orders-sqs-worker`'s or `orders-kafka-worker`'s pod, for a request that never touched HTTP. That's
-the proof: one handler, three independently deployed, independently scaled entry points.
+exact commands against a local LocalStack/Kafka pair) and the **same log line** appears in the exact
+same pod's logs, for a request that never touched HTTP. That's the proof: one handler, one container,
+three transports.
 
 ```bash
-kubectl scale deploy/orders-kafka-worker --replicas=3   # only the Kafka leg scales
+kubectl scale deploy/orders-app --replicas=4   # scales all three transports' consuming capacity together
 ```
 
 ## Why not just ASP.NET Core?
@@ -451,21 +340,31 @@ just wants to drop a message and move on. Without a message-handler abstraction,
 its own bespoke controller/consumer with its own copy (or its own subtly-diverged reimplementation) of
 the same validation and business logic.
 
-With Benzene, that second entry point is a new host project and a `UseSqs`/`UseKafka` call — the
-handler doesn't change, because it was never written against HTTP in the first place. That's what
-sections 2–4 above actually demonstrate: the identical `PlaceOrderMessageHandler`, unmodified between
-them, wired onto three transports in about twenty lines of host-specific code each. On Kubernetes
-specifically, that means each transport is also its own Deployment: the HTTP leg scales on request
-volume, the Kafka leg scales on consumer lag, and a bad deploy to one doesn't touch the others —
-`kubectl rollout undo deploy/orders-kafka-worker` while `orders-api` keeps serving traffic
-uninterrupted, because they're not the same pod, the same image tag being rolled out, or even the
-same restart schedule.
+With Benzene, that second (and third) entry point is a few more lines in `WorkerStartup.Configure` —
+the handler doesn't change, because it was never written against HTTP in the first place. That's what
+section 2 above actually demonstrates: the identical `PlaceOrderMessageHandler`, unmodified, wired
+onto three transports from one project.
 
 > The `readinessProbe` above is a bare TCP check — wire a real health endpoint with
 > [Kubernetes Health Checks](kubernetes-health-checks.md) (`Benzene.HealthChecks`) so the probe
-> reflects your dependencies, not just process liveness. Same for the workers: they have no probe at
-> all above (nothing polls them over HTTP), but `Benzene.HealthChecks`' `/benzene/health` works
-> identically if you host it on a spare port.
+> reflects your dependencies (queue reachability, broker reachability), not just process liveness.
+
+## One container, or one per transport?
+
+This guide combines all three transports into a single Deployment because that's the shape that
+actually needs explaining — two `BenzeneStartUp`s sharing one `WebApplicationBuilder` isn't something
+you'd discover by reading the framework's method signatures alone. It is not the *only* shape, though,
+and it is not always the right one. Splitting the transports into **separate** Deployments (one for
+HTTP, one for the SQS poller, one for the Kafka consumer, each its own `BenzeneStartUp`/`Program.cs`/
+image) is a legitimate alternative: each transport then scales, rolls back, and fails independently —
+a bad Kafka-worker deploy, or the Kafka leg falling behind under load, no longer risks the HTTP leg's
+availability the way it does when a crash or a resource-starved process is shared between all three.
+The tradeoff is real too: more images to build, more Deployments to manage, and a little duplicated
+`Program.cs`/`Startup.cs` boilerplate per transport. `Domain/PlaceOrderMessageHandler.cs` doesn't
+change either way — only how many `BenzeneStartUp`s and Dockerfiles end up wrapping it. Reach for
+separate Deployments when the transports' traffic, failure modes, or scaling needs genuinely diverge;
+reach for one container when they don't and the operational simplicity of a single image/Deployment
+is worth more than that independence.
 
 ## Next steps
 

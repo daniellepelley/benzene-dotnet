@@ -8,15 +8,18 @@ using Benzene.Microsoft.Dependencies;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Benzene.Examples.K8sTransports.Api;
+namespace Benzene.Examples.K8sTransports.App;
 
 /// <summary>
-/// The HTTP leg: an ordinary ASP.NET Core container exposing <c>POST /orders</c>. There is nothing
-/// Kubernetes-specific here - it's hosted exactly like
-/// <a href="../../../docs/getting-started-aspnet.md">Getting Started: ASP.NET Core</a>, just pointed
-/// at the shared <see cref="PlaceOrderMessageHandler"/> instead of one it defines itself.
+/// The HTTP leg: maps <c>POST /orders</c> straight onto <see cref="PlaceOrderMessageHandler"/> on
+/// Kestrel. Wired via <c>WebApplicationBuilder.UseBenzene&lt;HttpStartup&gt;()</c> in
+/// <c>Program.cs</c> - a plain <see cref="IBenzeneApplicationBuilder"/> is handed to
+/// <see cref="Configure"/>, and calling <c>app.UseWorker(...)</c> here would silently no-op (it only
+/// runs when the app is a <c>WorkerApplicationBuilder</c>), which is exactly why the SQS/Kafka legs
+/// live in <see cref="WorkerStartup"/> instead - two <c>BenzeneStartUp</c>s, sharing the same
+/// <c>builder.Services</c>, is what lets one process own all three transports.
 /// </summary>
-public class Startup : BenzeneStartUp
+public class HttpStartup : BenzeneStartUp
 {
     public override IConfiguration GetConfiguration()
         => new ConfigurationBuilder().AddEnvironmentVariables().Build();

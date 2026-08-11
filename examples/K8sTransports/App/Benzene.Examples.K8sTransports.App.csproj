@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Benzene.Examples.K8sTransports.App</AssemblyName>
+    <RootNamespace>Benzene.Examples.K8sTransports.App</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Confluent.Kafka" Version="2.4.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Benzene.AspNet.Core hosts Kestrel/POST /orders; Benzene.HostedService adapts the SQS + Kafka
+         self-hosted workers (Benzene.SelfHost) into ASP.NET Core IHostedServices on the SAME
+         WebApplicationBuilder.Services - see Program.cs. Both host packages plus the two transport
+         packages sit on this one project so one process/container/image serves all three legs. -->
+    <ProjectReference Include="..\..\..\src\Benzene.AspNet.Core\Benzene.AspNet.Core.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.HostedService\Benzene.HostedService.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Aws.Sqs\Benzene.Aws.Sqs.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Kafka.Core\Benzene.Kafka.Core.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Microsoft.Dependencies\Benzene.Microsoft.Dependencies.csproj" />
+    <ProjectReference Include="..\Domain\Benzene.Examples.K8sTransports.Domain.csproj" />
+  </ItemGroup>
+
+</Project>
