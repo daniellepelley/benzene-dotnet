@@ -47,3 +47,27 @@ services:
     volumes:
       - ./mesh.json:/config/mesh.json:ro
     depends_on: [orders, payments, shipping]
+
+  # A second instance of the SAME image, auth.mode "proxy" - backs smoke-mesh-compose.yml's
+  # auth check (work/enterprise/slice-2-auth.md task 2.7). Reuses the image the `mesh` service
+  # above already builds, just with a different mounted config and port - no separate build.
+  mesh-proxy-test:
+    image: benzene-mesh-host:compose
+    ports:
+      - "8091:8080"
+    environment:
+      - MESH_CONFIG_PATH=/config/mesh.json
+    volumes:
+      - ./mesh.proxy-test.json:/config/mesh.json:ro
+    depends_on: [orders, payments, shipping, mesh]
+
+networks:
+  # A fixed subnet so the gateway address docker NATs published-port traffic through (what the
+  # container sees as the peer's RemoteIpAddress for a request curled from the CI runner via
+  # localhost:8091) is a known, stable value - matched against mesh.proxy-test.json's
+  # auth.proxy.trustedProxies below, rather than left to whatever docker0/compose would otherwise
+  # assign.
+  default:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16

@@ -78,6 +78,25 @@ jobs:
           done
           echo "all expected topics present"
 
+      # work/enterprise/slice-2-auth.md task 2.7: the `mesh-proxy-test` service (same image, port 8091,
+      # examples/K8sMesh/compose/mesh.proxy-test.json) runs auth.mode "proxy" - assert the forwarded-
+      # identity header actually gates /artifacts/manifest.json (the file-store branch, outside the
+      # Benzene pipeline). Covers this branch only; the non-file branch is unit-test-only, per the brief.
+      - name: Assert proxy-mode auth gates /artifacts/manifest.json
+        run: |
+          ok=0
+          for i in $(seq 1 30); do
+            without_header=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8091/artifacts/manifest.json)
+            with_header=$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-User: ci@example.com' http://localhost:8091/artifacts/manifest.json)
+            echo "attempt $i: without header=$without_header, with header=$with_header"
+            if [ "$without_header" = "401" ] && [ "$with_header" = "200" ]; then ok=1; break; fi
+            sleep 5
+          done
+          if [ "$ok" != "1" ]; then
+            echo "::error::proxy-mode auth did not gate /artifacts/manifest.json as expected"
+            exit 1
+          fi
+
       - name: Dump logs on failure
         if: failure()
         run: |

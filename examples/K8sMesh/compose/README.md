@@ -19,6 +19,7 @@ each. The mesh re-polls every 15s.
 |---|---|---|
 | `orders` / `payments` / `shipping` | `examples/K8sMesh/Service` | one Benzene Cloud Service image, run three times — `MESH_SERVICE` selects the domain. Each serves the Cloud Service Profile over HTTP: `/benzene/spec`, `/benzene/health`, `/benzene/invoke`, `/benzene/spec-ui`. |
 | `mesh` | `deploy/Mesh/Benzene.Mesh.Host` | the config-driven mesh aggregator + UI. Polls each service listed in [`mesh.json`](./mesh.json) on a timer, writes `manifest.json` / `services/*.json` / `topics.json` / `topology.json`, and serves the Mesh UI. |
+| `mesh-proxy-test` | same image as `mesh` | a second instance, port 8091, [`mesh.proxy-test.json`](./mesh.proxy-test.json) - `auth.mode: "proxy"`, exists to back `smoke-mesh-compose.yml`'s auth check (work/enterprise/slice-2-auth.md). Not something you need for the demo itself. |
 
 This is the same `Benzene.Mesh.Host` you'd run in your own `docker-compose.yml` alongside your real
 services — here it's just pointed at the three demo services via a static `mesh.json` instead of a
