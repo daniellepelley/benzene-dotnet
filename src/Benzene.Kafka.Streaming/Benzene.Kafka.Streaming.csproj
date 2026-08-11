@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Benzene.Kafka.Streaming</AssemblyName>
+    <RootNamespace>Benzene.Kafka.Streaming</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Description>Windowed, partitioned and checkpointed Kafka stream processing for Benzene: a self-hosted worker that accumulates consumed records into batches (by size or by age) and runs each batch through a fan-in streaming pipeline with real per-partition offset checkpointing.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Benzene.Kafka.Core\Benzene.Kafka.Core.csproj" />
+  </ItemGroup>
+
+</Project>
