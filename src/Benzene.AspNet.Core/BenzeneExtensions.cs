@@ -51,7 +51,15 @@ public static class BenzeneExtensions
         // AspNetMessageBodyGetter serves it from memory instead of blocking a thread-pool thread.
         pipeline.UseBufferedRequestBody();
         action(pipeline);
-        app.Add(serviceResolverFactory => new AspNetApplication(pipeline.Build(), serviceResolverFactory));
+
+        // Built eagerly, here, rather than inside the Add() callback below: Build() registers this
+        // pipeline's PipelineDescriptor into the service container as a side effect (see
+        // MiddlewarePipelineBuilder.Build()), and Add()'s callback only runs once the ASP.NET Core
+        // host is built - by which point the underlying IServiceCollection is sealed and any further
+        // registration throws. Matches the same eager-Build() pattern Benzene.Grpc.AspNet's UseGrpc
+        // already uses.
+        var builtPipeline = pipeline.Build();
+        app.Add(serviceResolverFactory => new AspNetApplication(builtPipeline, serviceResolverFactory));
         return app;
     }
 
@@ -89,36 +97,51 @@ public static class BenzeneExtensions
 
     /// <summary>
     /// Registers a platform-neutral <see cref="BenzeneStartUp"/>'s services with the ASP.NET Core host,
-    /// running <see cref="IStartUp{TContainer,TConfiguration,TAppBuilder}.GetConfiguration"/> and
-    /// <see cref="IStartUp{TContainer,TConfiguration,TAppBuilder}.ConfigureServices"/>. Pair with
-    /// <see cref="UseBenzene(IApplicationBuilder)"/> after <c>Build()</c> to run <c>Configure</c>.
+    /// running <see cref="IStartUp{TContainer,TConfiguration,TAppBuilder}.GetConfiguration"/>,
+    /// <see cref="IStartUp{TContainer,TConfiguration,TAppBuilder}.ConfigureServices"/>, and
+    /// <see cref="IStartUp{TContainer,TConfiguration,TAppBuilder}.Configure"/>. Pair with
+    /// <see cref="UseBenzene(IApplicationBuilder)"/> after <c>Build()</c> to finish wiring the
+    /// middleware pipeline into the ASP.NET Core request pipeline.
     /// </summary>
     /// <typeparam name="TStartUp">The <see cref="BenzeneStartUp"/> to run.</typeparam>
     /// <param name="builder">The web application builder.</param>
     /// <returns><paramref name="builder"/>, for method chaining.</returns>
+    /// <remarks>
+    /// <c>Configure</c> runs here, before <c>Build()</c>, not in the paired post-Build call - so every
+    /// registration it makes (the message pipeline, <c>AddBenzene()</c>, ...) lands in this same
+    /// <see cref="WebApplicationBuilder.Services"/> the host's eventual root provider is built from,
+    /// instead of a second, separate provider built later from a clone. Without that, a singleton
+    /// registered here that a Benzene message handler also depends on would silently be a different
+    /// instance from the one anything else resolved outside Benzene's own routing (a plain
+    /// <c>IHostedService</c>, a controller, ...) sees - see <see cref="AspApplicationBuilder"/>'s
+    /// <see cref="Microsoft.Extensions.DependencyInjection.IServiceCollection"/> constructor and
+    /// <see cref="AspApplicationBuilder.Finish"/> for the mechanics.
+    /// </remarks>
     public static WebApplicationBuilder UseBenzene<TStartUp>(this WebApplicationBuilder builder)
         where TStartUp : BenzeneStartUp, new()
     {
         var startUp = new TStartUp();
         var configuration = startUp.GetConfiguration();
         startUp.ConfigureServices(builder.Services, configuration);
-        builder.Services.AddSingleton(new BenzeneStartUpHolder(startUp, configuration));
+
+        var aspApplicationBuilder = new AspApplicationBuilder(builder.Services);
+        aspApplicationBuilder.Register(x => x.AddBenzene());
+        startUp.Configure(aspApplicationBuilder, configuration);
+
+        builder.Services.AddSingleton(new BenzeneStartUpHolder(aspApplicationBuilder));
         return builder;
     }
 
     /// <summary>
-    /// Runs the <c>Configure</c> method of the <see cref="BenzeneStartUp"/> registered by
-    /// <see cref="UseBenzene{TStartUp}(WebApplicationBuilder)"/> against the built application, wiring its
-    /// middleware pipeline into the ASP.NET Core request pipeline.
+    /// Completes the middleware wiring <see cref="UseBenzene{TStartUp}(WebApplicationBuilder)"/> deferred,
+    /// against the now-built application.
     /// </summary>
     /// <param name="app">The built ASP.NET Core application.</param>
     /// <returns><paramref name="app"/>, for method chaining.</returns>
     public static IApplicationBuilder UseBenzene(this IApplicationBuilder app)
     {
         var holder = app.ApplicationServices.GetRequiredService<BenzeneStartUpHolder>();
-        var aspApplicationBuilder = new AspApplicationBuilder(app);
-        aspApplicationBuilder.Register(x => x.AddBenzene());
-        holder.StartUp.Configure(aspApplicationBuilder, holder.Configuration);
+        holder.AspApplicationBuilder.Finish(app);
 
         // Check the wiring while the app is still being built, so a registration mistake fails
         // start-up instead of turning into a 404 or a 500 on the first request that reaches it.
@@ -129,14 +152,12 @@ public static class BenzeneExtensions
 
     private sealed class BenzeneStartUpHolder
     {
-        public BenzeneStartUpHolder(BenzeneStartUp startUp, IConfiguration configuration)
+        public BenzeneStartUpHolder(AspApplicationBuilder aspApplicationBuilder)
         {
-            StartUp = startUp;
-            Configuration = configuration;
+            AspApplicationBuilder = aspApplicationBuilder;
         }
 
-        public BenzeneStartUp StartUp { get; }
-        public IConfiguration Configuration { get; }
+        public AspApplicationBuilder AspApplicationBuilder { get; }
     }
 }
 
