@@ -73,6 +73,17 @@ handler/logic in `Benzene.Examples.App` and wiring it from the hosts, rather tha
   credential-free on kind (`deploy-k8s-mesh-example.yml`) and on real AWS EKS via `deploy/`
   (Terraform: EKS + ECR) + the `deploy/eks` overlay (`deploy-eks-mesh-example.yml`, which ends with
   the Mesh UI on a public ELB URL). Has its own `README.md`. Does **not** use the shared `App` domain.
+- **`K8sTransports/`** — the runnable version of
+  [docs/getting-started-kubernetes.md](../docs/getting-started-kubernetes.md): one handler
+  (`Domain/PlaceOrderMessageHandler`) reached three ways, each its own Kubernetes Deployment —
+  `Api/` over HTTP, `SqsWorker/` polling SQS (`Benzene.Aws.Sqs`'s self-hosted consumer), `KafkaWorker/`
+  consuming Kafka (`Benzene.Kafka.Core`). Unlike `K8sMesh/` (service discovery across three *different*
+  services calling each other) this is one piece of logic behind three *inbound transports* — the two
+  demonstrate different things and are not interchangeable. `compose/docker-compose.yml` runs all
+  three legs locally against LocalStack + a throwaway Kafka broker with no cloud account; `k8s/` has no
+  bundled SQS/Kafka (see each manifest's own comment) since a real deployment points at a real queue
+  and cluster. Has its own `README.md`. Does **not** use the shared `App` domain (a dedicated `Domain/`
+  project instead, since it's the one thing the guide's three hosts must share unmodified).
 - **`AzureMesh/`** — the Azure counterpart: three Cloud Services as **Azure Web Apps for Containers**
   (reusing the `K8sMesh/Service` image) discovered by resource **tag** via
   `Benzene.Mesh.Discovery.Azure`, plus a mesh Web App that serves the Mesh UI and persists the catalog

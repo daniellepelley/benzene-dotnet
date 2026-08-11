@@ -16,7 +16,7 @@ actually deploying to** — pick it below.
 | **AWS Lambda** — API Gateway, SQS, SNS, EventBridge (the flagship: one function, every event source) | [Getting Started: AWS Lambda](getting-started-aws.md) | [`examples/Aws/Benzene.Examples.Aws.Minimal`](../examples/Aws/Benzene.Examples.Aws.Minimal) |
 | **Azure Functions** — HTTP + Service Bus, Event Hubs, Event Grid, Cosmos DB, Timer | [Getting Started: Azure Functions](azure-functions.md) | [`examples/Azure`](../examples/Azure) |
 | **Google Cloud Functions** — HTTP + Pub/Sub | [Getting Started: Google Cloud Functions](getting-started-google.md) | [`examples/Google`](../examples/Google) |
-| **Kubernetes** — a containerised service on any cluster | [Getting Started: Kubernetes](getting-started-kubernetes.md) | [`examples/K8sMesh/Service`](../examples/K8sMesh/Service) |
+| **Kubernetes** — HTTP, SQS, Kafka (one handler, three independent Deployments) | [Getting Started: Kubernetes](getting-started-kubernetes.md) | [`examples/K8sTransports`](../examples/K8sTransports) |
 | **ASP.NET Core** — a plain web app or API | [Getting Started: ASP.NET Core](getting-started-aspnet.md) | [`examples/Asp/Benzene.Example.Asp.Minimal`](../examples/Asp/Benzene.Example.Asp.Minimal) |
 
 Other hosts have their own guides too: [Worker Services](getting-started-worker.md) (Kafka, HTTP,

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Benzene.Examples.K8sTransports.Api</AssemblyName>
+    <RootNamespace>Benzene.Examples.K8sTransports.Api</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Benzene.AspNet.Core\Benzene.AspNet.Core.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Microsoft.Dependencies\Benzene.Microsoft.Dependencies.csproj" />
+    <ProjectReference Include="..\Domain\Benzene.Examples.K8sTransports.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

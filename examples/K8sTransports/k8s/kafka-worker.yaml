@@ -1,0 +1,25 @@
+# The Kafka leg - a worker Deployment with no Service (nothing calls it; it calls out to Kafka). No
+# bundled broker here: point KAFKA_BOOTSTRAP_SERVERS at a real cluster - a self-managed Kafka
+# StatefulSet in this cluster, MSK, or Confluent Cloud all work identically, since this is plain
+# Confluent.Kafka. For a credential-free local run against a throwaway broker instead, see
+# ../compose/docker-compose.yml.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-kafka-worker
+  namespace: k8s-transports
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: orders-kafka-worker }
+  template:
+    metadata:
+      labels: { app: orders-kafka-worker }
+    spec:
+      containers:
+        - name: orders-kafka-worker
+          image: benzene-k8stransports-kafka-worker:local
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka-bootstrap.kafka.svc.cluster.local:9092"   # <- replace

@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Benzene.Examples.K8sTransports.Domain</AssemblyName>
+    <RootNamespace>Benzene.Examples.K8sTransports.Domain</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Benzene.Http alone is enough - it transitively brings in Benzene.Abstractions (IBenzeneResult),
+         Benzene.Core.MessageHandlers (the [Message] attribute, via Benzene.Abstractions.MessageHandlers
+         for IMessageHandler), and Benzene.Results (BenzeneResult.Created). Referenced here (not just by
+         the Api host) so the domain project can carry [HttpEndpoint] alongside [Message] - the same
+         handler class is what all three hosts below share. -->
+    <ProjectReference Include="..\..\..\src\Benzene.Http\Benzene.Http.csproj" />
+  </ItemGroup>
+
+</Project>

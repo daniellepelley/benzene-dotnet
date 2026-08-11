@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Benzene.Examples.K8sTransports.KafkaWorker</AssemblyName>
+    <RootNamespace>Benzene.Examples.K8sTransports.KafkaWorker</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Confluent.Kafka" Version="2.4.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="7.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Benzene.Kafka.Core\Benzene.Kafka.Core.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.HostedService\Benzene.HostedService.csproj" />
+    <ProjectReference Include="..\Domain\Benzene.Examples.K8sTransports.Domain.csproj" />
+  </ItemGroup>
+
+</Project>
