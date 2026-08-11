@@ -18,37 +18,67 @@ product a customer deploys, and it is the single hardest blocker on enterprise a
 
 ### The trap that will bite you
 
-The host serves the actual data **outside** the Benzene pipeline. From
-`deploy/Mesh/Benzene.Mesh.Host/Startup.cs`, in this order:
+**This section describes the code as slice 1 left it — read the real `Startup.cs` before you start,
+it may have moved again.** Slice 1 (config schema v1) split artifact serving into two paths, keyed
+on `IsFileArtifactStore`:
 
 ```csharp
-app.UseRouting();
-
-// ASP.NET Core static files — NOT the Benzene pipeline.
-app.UseStaticFiles(new StaticFileOptions
+public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
 {
-    FileProvider = new PhysicalFileProvider(Path.GetFullPath(_config.ArtifactRootDirectory)),
-    RequestPath = "/artifacts",
-});
+    app.UseRouting();
 
-app.UseBenzene(benzene => benzene
-    .UseHttp(asp =>
+    string manifestUrl;
+    if (IsFileArtifactStore)
     {
-        asp.UseMeshUi(path: "/mesh-ui", manifestUrl: "/artifacts/manifest.json");
-        asp.UseMeshSpecUi(path: "/mesh-spec-ui.html", manifestUrl: "/artifacts/manifest.json");
-        if (_config.EnableDispatch) { asp.UseMeshDispatch(...); }
-        asp.UseMessageHandlers();
-    })
-);
+        // ASP.NET Core static files — NOT the Benzene pipeline. The slice 1 author left a comment
+        // here flagging exactly this: "ONLY safe while there is no auth in front of it (slice 2
+        // must protect this surface too, not just the Benzene pipeline below)." That's you.
+        app.UseStaticFiles(new StaticFileOptions
+        {
+            FileProvider = new PhysicalFileProvider(Path.GetFullPath(_config.ArtifactRootDirectory)),
+            RequestPath = "/artifacts",
+        });
+        manifestUrl = "/artifacts/manifest.json";
+    }
+    else
+    {
+        // Root-relative — Benzene.Mesh.Artifacts.UseMeshArtifacts() (below) serves these INSIDE the
+        // Benzene pipeline for s3/azureBlob/gcs, unlike the file case above.
+        manifestUrl = "manifest.json";
+    }
+
+    app.UseBenzene(benzene => benzene
+        .UseHttp(asp =>
+        {
+            if (!IsFileArtifactStore) { asp.UseMeshArtifacts(); }
+            asp.UseMeshUi(path: "/mesh-ui", manifestUrl: manifestUrl, envelopeUrl: _fleetEnabled ? "/benzene/invoke" : null);
+            asp.UseMeshSpecUi(path: "/mesh-spec-ui.html", manifestUrl: manifestUrl);
+            if (_fleetEnabled) { asp.UseBenzeneMessage(..., fleet => fleet.UseMessageHandlers(MeshCollectorHandlers.Queries)); }
+            if (_config.Dispatch.Enabled) { asp.UseMeshDispatch(new MeshDispatchOptions { AllowInProduction = _config.Dispatch.AllowInProduction }); }
+            asp.UseMessageHandlers();
+        })
+    );
+}
 ```
 
-`/artifacts/manifest.json` — the entire estate in one file — is served by ASP.NET's
-`UseStaticFiles`, which knows nothing about Benzene middleware. **If you protect only the Benzene
-pipeline, you will ship a login page in front of a UI whose data is still world-readable at
-`/artifacts/manifest.json`.** It will look like it works. It will demo fine. It is not secure.
+**So there are two cases, not one:**
 
-Every auth task below must protect **both** surfaces, and the acceptance test in 2.7 exists
-specifically to prove it.
+- **`artifactStore.type: "file"` (the default):** `/artifacts/*` is served by ASP.NET's
+  `UseStaticFiles`, entirely outside the Benzene pipeline. `/artifacts/manifest.json` — the whole
+  estate in one file — is world-readable the moment `app.UseStaticFiles` runs, regardless of what
+  you put in the Benzene pipeline below it.
+- **`artifactStore.type` of `s3`/`azureBlob`/`gcs`:** artifacts are served by
+  `Benzene.Mesh.Artifacts.UseMeshArtifacts()` **inside** `UseHttp`, so they already sit behind
+  whatever you put earliest in that pipeline.
+
+**If you protect only the inner Benzene pipeline and the deployment uses the file store — the
+default — you will ship a login page in front of a UI whose data is still world-readable at
+`/artifacts/manifest.json`.** It will look like it works. It will demo fine on the non-default config
+you tested with. It is not secure on the default one.
+
+Every auth task below must protect **both** cases with one gate, placed early enough to cover the
+`file`-store branch too (task 2.2 says exactly where). The acceptance test in 2.7 exists specifically
+to prove both cases, not just the one that's already inside the pipeline.
 
 ### What already exists — do not rebuild it
 
@@ -211,10 +241,16 @@ Authenticated-but-not-permitted is **403, not 401** — the distinction is alrea
 into a redirect loop.
 
 Then the one read/write distinction worth having in v1: when `auth.mode != "none"` **and**
-`EnableDispatch` is true **and** `dispatchRole` is set, `mesh:dispatch` additionally requires that
+`Dispatch.Enabled` is true **and** `dispatchRole` is set, `mesh:dispatch` additionally requires that
 role. Use the existing `AuthorizationExtensions.RequireRole<TContext>(...)` — it is transport-neutral
 and already tested. "Who may fire the button that invokes real handlers" is the first question a
 security reviewer asks.
+
+**Note on the config shape:** slice 1 nested the dispatch flags — `_config.EnableDispatch` /
+`_config.DispatchAllowInProduction` from the original sketch shipped as `_config.Dispatch.Enabled` /
+`_config.Dispatch.AllowInProduction` (a `MeshDispatchConfig` section, see
+`deploy/Mesh/Benzene.Mesh.Host/MeshHostConfigSections.cs`). Every reference to the flat names
+elsewhere in this brief means the nested ones.
 
 **Scope limit: no per-service RBAC.** Authenticated → full read access. If you find yourself
 building a permission model, you have exceeded this slice.
@@ -264,9 +300,17 @@ these paths** is refused:
 And that `auth.mode: "none"` leaves every one of them open, so the default local-dev experience is
 provably unchanged.
 
+Run that same set of assertions against **both** artifact-store branches — `artifactStore.type:
+"file"` (paths under `/artifacts/`) and a non-file type (paths root-relative, e.g. `manifest.json`
+served through `Benzene.Mesh.Artifacts.UseMeshArtifacts()`). The file case is the one with the real
+trap (outside the pipeline); the non-file case is already inside it, but "already inside the
+pipeline" is exactly the kind of assumption this test exists to stop taking on faith.
+
 Extend the compose smoke test to run one pass with `mode: "proxy"` and assert
 `/artifacts/manifest.json` returns 401 without the header and 200 with it. The existing smoke test
-already curls that exact path, so this is a small addition to a proven harness.
+already curls that exact path, so this is a small addition to a proven harness. The compose sample
+uses the file store, so this covers that branch only — the non-file branch is unit-test-only, per
+the point above.
 
 **Done when:** removing the static-files gate makes a test fail. If it does not, the test is not
 testing the trap.
