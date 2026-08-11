@@ -32,7 +32,7 @@ public static class Extensions
         this IBenzeneServiceContainer services, TempoTraceSourceOptions options)
     {
         services.AddSingleton(options);
-        services.AddSingleton<HttpClient>();
+        services.TryAddSingleton<HttpClient>();
         services.AddSingleton<IMeshTraceSource, TempoTraceSource>();
         services.AddSingleton<IMeshFleetReadModel, CompositeMeshFleetReadModel>();
         return services;

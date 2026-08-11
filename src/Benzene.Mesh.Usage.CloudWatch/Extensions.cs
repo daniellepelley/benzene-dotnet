@@ -28,7 +28,7 @@ public static class Extensions
         this IBenzeneServiceContainer services, CloudWatchUsageOptions options)
     {
         services.AddSingleton(options);
-        services.AddSingleton<IAmazonCloudWatch>(_ => new AmazonCloudWatchClient());
+        services.TryAddSingleton<IAmazonCloudWatch>(_ => new AmazonCloudWatchClient());
         services.AddSingleton<IMeshUsageSource, CloudWatchUsageSource>();
         return services;
     }

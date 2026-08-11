@@ -37,7 +37,7 @@ public static class Extensions
     {
         services.AddSingleton(registry);
         services.AddSingleton(artifactStoreFactory);
-        services.AddSingleton<HttpClient>();
+        services.TryAddSingleton<HttpClient>();
         // The default IMeshServiceSource - other adapter packages (e.g. an AWS Lambda Invoke
         // source) add their own IMeshServiceSource registration alongside this one; MeshAggregator
         // resolves all of them via IEnumerable<IMeshServiceSource>, keyed by each source's Key.

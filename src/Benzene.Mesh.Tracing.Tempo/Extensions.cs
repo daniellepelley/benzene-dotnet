@@ -26,7 +26,7 @@ public static class Extensions
         this IBenzeneServiceContainer services, TempoTopologyOptions options)
     {
         services.AddSingleton(options);
-        services.AddSingleton<HttpClient>();
+        services.TryAddSingleton<HttpClient>();
         services.AddSingleton<PrometheusQueryClient>();
         services.AddSingleton<TempoServiceGraphTopologyBuilder>();
         return services;
