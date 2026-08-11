@@ -17,15 +17,21 @@ alongside their other infra), rather than only against `examples/Mesh/`'s demo/f
 - `MeshHostConfig`/`MeshHostServiceConfig` - the `mesh.json` binding shape (mutable properties, for
   `IConfiguration.Get<T>()` - this repo's first use of that pattern to bind a *list* of objects, see
   `work/service-mesh-roadmap-1.0.md`'s Phase D note). `MeshHostServiceConfig.ToEntry()` converts to
-  the immutable `Benzene.Mesh.Contracts.MeshServiceRegistryEntry` the rest of the mesh feature uses.
+  the immutable `Benzene.Mesh.Contracts.MeshServiceRegistryEntry` the rest of the mesh feature uses,
+  including the optional `OwningTeam` (the "who do I talk to" field the UI renders).
 - `MeshPollBackgroundService : BackgroundService` - runs `MeshAggregator.RunOnceAsync` on a timer
   (`MeshHostConfig.PollIntervalSeconds`) - new capability local to this Host app only, since a bare
   Compose deployment has no external scheduler the way a real deployment's `mesh:aggregate`
   invocation-trigger assumes. A failed pass is logged and does not stop future passes or crash the
   host.
 - `Program.cs` - `Host.CreateDefaultBuilder(args)` with an extra `ConfigureAppConfiguration` step
-  that loads `MESH_CONFIG_PATH` (if set) as an additional JSON config source, layered on top of
+  that delegates to `MeshConfigLoader.ConfigureMeshConfig`, layered on top of
   `Host.CreateDefaultBuilder`'s own default sources (env vars, etc.).
+- `MeshConfigLoader` - loads `MESH_CONFIG_PATH` (if set) as an additional JSON config source.
+  Pulled out of `Program.cs`'s top-level statements so it's directly unit-testable
+  (`Benzene.Mesh.Host.Test`). A **set but missing** path throws `FileNotFoundException` naming the
+  path at startup, rather than silently starting an empty mesh (`optional: true`'s old failure mode)
+  - unset stays a no-op, the legitimate env-var-only local-dev path this package's README documents.
 
 ## Deviations from the original design sketch
 - **No `selfReportIngestion.enabled` config toggle.** The original design considered gating whether
@@ -60,3 +66,9 @@ until `EnableDispatch` is set.
 
 ## Why this isn't part of `Benzene.sln`/`Benzene.Examples.sln`
 See `../README.md`'s own section on this - same reasoning as `templates/Benzene.Templates.sln`.
+
+## Tests
+`../Benzene.Mesh.Host.Test/` (xUnit), added to `Benzene.Mesh.Host.sln` (not `test/Benzene.Mesh.Test/`
+or `Benzene.sln` - a `ProjectReference` to this host from there would pull the host into
+`Benzene.sln`'s build graph, contradicting the independent-lifecycle reasoning above). It references
+this project directly and exercises `MeshConfigLoader` and `MeshHostServiceConfig.ToEntry()`.
