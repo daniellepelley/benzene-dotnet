@@ -10,7 +10,7 @@ public class MeshSpecUiPageTest
     {
         var html = MeshSpecUiPage.GetHtml();
 
-        Assert.Contains("<title>Benzene Mesh — Service Spec</title>", html);
+        Assert.Contains("<title>Benzene Service Spec</title>", html);
         Assert.Contains("<html lang=\"en\">", html);
         // Loads from the same-origin snapshot the aggregator captured, not a service-hosted UI.
         Assert.Contains("services/", html);
