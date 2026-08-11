@@ -34,6 +34,23 @@ public static class BenzeneExtensions
         app.Register(x => x
             .AddSingleton<IMiddlewarePipelineBuilder<AspNetContext>, MiddlewarePipelineBuilder<AspNetContext>>()
             .AddAspNetMessageHandlers());
+        var builtPipeline = BuildHttpPipeline(pipeline, action);
+        app.Add(serviceResolverFactory => new AspNetApplication(builtPipeline, serviceResolverFactory));
+        return app;
+    }
+
+    /// <summary>
+    /// Builds the HTTP middleware pipeline the ASP.NET binding runs requests through, wrapping the
+    /// caller's <paramref name="action"/> in the standard preamble. Shared by
+    /// <see cref="UseHttp(IAspApplicationBuilder, Action{IMiddlewarePipelineBuilder{AspNetContext}})"/>
+    /// (Benzene embedded in an ASP.NET Core app) and
+    /// <see cref="AspNetSelfHostExtensions.UseAspNet"/> (Kestrel hosted as a Benzene worker), so the
+    /// same <c>asp =&gt; asp.UseMessageHandlers()</c> action behaves identically on both.
+    /// </summary>
+    internal static IMiddlewarePipeline<AspNetContext> BuildHttpPipeline(
+        IMiddlewarePipelineBuilder<AspNetContext> pipeline,
+        Action<IMiddlewarePipelineBuilder<AspNetContext>> action)
+    {
         // Seed the scope's ambient cancellation token from the request's aborted token, so any
         // component resolving ICancellationTokenAccessor (e.g. a health check) observes a client
         // disconnect / request abort. Runs first, in the same per-request scope as the rest.
@@ -52,15 +69,13 @@ public static class BenzeneExtensions
         pipeline.UseBufferedRequestBody();
         action(pipeline);
 
-        // Built eagerly, here, rather than inside the Add() callback below: Build() registers this
+        // Built eagerly, here, rather than deferred into an Add() callback: Build() registers this
         // pipeline's PipelineDescriptor into the service container as a side effect (see
-        // MiddlewarePipelineBuilder.Build()), and Add()'s callback only runs once the ASP.NET Core
-        // host is built - by which point the underlying IServiceCollection is sealed and any further
+        // MiddlewarePipelineBuilder.Build()), and callers' Add() callbacks only run once the host is
+        // built - by which point the underlying IServiceCollection is sealed and any further
         // registration throws. Matches the same eager-Build() pattern Benzene.Grpc.AspNet's UseGrpc
         // already uses.
-        var builtPipeline = pipeline.Build();
-        app.Add(serviceResolverFactory => new AspNetApplication(builtPipeline, serviceResolverFactory));
-        return app;
+        return pipeline.Build();
     }
 
     /// <summary>

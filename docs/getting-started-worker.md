@@ -267,10 +267,12 @@ a lighter-weight way to register a worker without going through the generic host
 to write your own. Their `UseSqs`/`UseKafka`/`UseRabbitMq`/`UseServiceBus`/`UseEventHub`/
 `UseCosmosDbChangeFeed` extensions target `IBenzeneWorkerStartup` — the worker-specific builder that
 `UseWorker(...)` hands you — so you wire them up from the same `BenzeneStartUp` shape as Part A, just
-calling the built-in extensions inside `UseWorker(...)` instead of `worker.Add(...)`. (There is no
-self-hosted *HTTP* worker: for an HTTP endpoint alongside a worker, host on `Benzene.AspNet.Core` /
-Kestrel — see [Deprecations](deprecations.md) on why the former `HttpListener`-based
-`Benzene.SelfHost.Http` was removed.)
+calling the built-in extensions inside `UseWorker(...)` instead of `worker.Add(...)`. (For an HTTP
+endpoint alongside these workers, `Benzene.AspNet.Core`'s `UseAspNet` hosts Kestrel as a worker in
+this same `UseWorker(...)` chain — see
+[Getting Started: Kubernetes](getting-started-kubernetes.md) for it wired next to `UseSqs` and
+`UseKafka`. The former `HttpListener`-based `Benzene.SelfHost.Http` remains removed — see
+[Deprecations](deprecations.md).)
 
 **Worth reaching for even when a queue/stream is the only transport this service will ever have.**
 None of the six give you anything HTTP doesn't already get for free from ASP.NET Core — routing to a
@@ -341,9 +343,9 @@ public override void Configure(IBenzeneApplicationBuilder app, IConfiguration co
 
 The topic comes from a `topic` message attribute by default (`SqsConsumerConfig.TopicAttributeKey`) —
 set a different key to consume messages a non-Benzene producer routes on another attribute. See
-[Getting Started: Kubernetes](getting-started-kubernetes.md) for this worker hosted alongside HTTP and
-a Kafka consumer, in one process, all three dispatching into one shared handler
-(`examples/K8sTransports/App/WorkerStartup.cs`).
+[Getting Started: Kubernetes](getting-started-kubernetes.md) for this worker hosted alongside HTTP
+(`UseAspNet`) and a Kafka consumer, in one process and one startup, all three dispatching into one
+shared handler (`examples/K8sTransports/App/Startup.cs`).
 
 ### RabbitMQ (`Benzene.RabbitMq`)
 

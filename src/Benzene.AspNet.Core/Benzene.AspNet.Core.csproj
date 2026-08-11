@@ -14,6 +14,10 @@
     <ProjectReference Include="..\Benzene.Core.MessageHandlers\Benzene.Core.MessageHandlers.csproj" />
     <ProjectReference Include="..\Benzene.Http\Benzene.Http.csproj" />
     <ProjectReference Include="..\Benzene.Microsoft.Dependencies\Benzene.Microsoft.Dependencies.csproj" />
+    <!-- For UseAspNet (Kestrel hosted as an IBenzeneWorker) - the same dependency direction every
+         other worker transport already has (Benzene.Aws.Sqs and Benzene.Kafka.Core reference
+         SelfHost the same way). -->
+    <ProjectReference Include="..\Benzene.SelfHost\Benzene.SelfHost.csproj" />
   </ItemGroup>
 
 </Project>

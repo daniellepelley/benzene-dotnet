@@ -14,10 +14,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Benzene.AspNet.Core hosts Kestrel/POST /orders; Benzene.HostedService adapts the SQS + Kafka
-         self-hosted workers (Benzene.SelfHost) into ASP.NET Core IHostedServices on the SAME
-         WebApplicationBuilder.Services - see Program.cs. Both host packages plus the two transport
-         packages sit on this one project so one process/container/image serves all three legs. -->
+    <!-- Benzene.HostedService runs the composite worker on the generic host; Benzene.AspNet.Core's
+         UseAspNet hosts Kestrel AS one of those workers, peer to UseSqs/UseKafka - one project, one
+         Startup, one process/container/image serving all three legs. See Startup.cs. -->
     <ProjectReference Include="..\..\..\src\Benzene.AspNet.Core\Benzene.AspNet.Core.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.HostedService\Benzene.HostedService.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Aws.Sqs\Benzene.Aws.Sqs.csproj" />

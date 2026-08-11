@@ -204,8 +204,11 @@ hand. With Benzene the handler above doesn't change at all: [`Benzene.Aws.Sqs`](
 or [`Benzene.Kafka.Core`](getting-started-kafka.md) point a worker at the *same*
 `HelloWorldMessageHandler`, because it was never written against `HttpContext` in the first place — see
 [`examples/K8sTransports`](../examples/K8sTransports) for that running, all three transports hosted
-together in one container. If HTTP genuinely is and always will be the only way in, reach for
-`MapGet`/`MapPost`/controllers instead — you'll write less code, not more.
+together in one container. (And once ASP.NET Core is *only* the HTTP host — no controllers, no other
+ASP.NET middleware — `UseAspNet` hosts Kestrel as a worker inside a single Worker-platform startup,
+lighter than this guide's embedded shape: see
+[Getting Started: Kubernetes](getting-started-kubernetes.md).) If HTTP genuinely is and always will be
+the only way in, reach for `MapGet`/`MapPost`/controllers instead — you'll write less code, not more.
 
 ## Next steps
 

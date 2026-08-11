@@ -76,11 +76,11 @@ handler/logic in `Benzene.Examples.App` and wiring it from the hosts, rather tha
 - **`K8sTransports/`** — the runnable version of
   [docs/getting-started-kubernetes.md](../docs/getting-started-kubernetes.md): one handler
   (`Domain/PlaceOrderMessageHandler`) reached three ways from **one** Kubernetes Deployment — its own
-  `App/` project (not the top-level shared `App/Benzene.Examples.App` domain - see below) wires
-  Kestrel (`Benzene.AspNet.Core`), an SQS poller (`Benzene.Aws.Sqs`'s self-hosted consumer), and a
-  Kafka consumer (`Benzene.Kafka.Core`) together via **two** `BenzeneStartUp`s
-  (`HttpStartup`/`WorkerStartup`) sharing one `WebApplicationBuilder` — `Benzene.HostedService` adapts
-  the workers to `IHostedService` so they start/stop alongside Kestrel in the same process. Unlike
+  `App/` project (not the top-level shared `App/Benzene.Examples.App` domain - see below) is a single
+  `Startup` on the plain generic host whose `UseWorker` chains `UseAspNet` (Kestrel hosted **as a
+  worker**, `Benzene.AspNet.Core`), `UseSqs` (`Benzene.Aws.Sqs`'s self-hosted consumer), and
+  `UseKafka` (`Benzene.Kafka.Core`) — `Benzene.HostedService` composes the three into one
+  `IHostedService`. Unlike
   `K8sMesh/` (service discovery across three *different* services calling each other) this is one
   piece of logic behind three *inbound transports* — the two demonstrate different things and are not
   interchangeable. `compose/docker-compose.yml` runs the one image locally against LocalStack + a

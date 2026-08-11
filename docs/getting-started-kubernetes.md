@@ -106,64 +106,39 @@ dotnet add package Benzene.Kafka.Core --prerelease
 dotnet add reference ../Domain
 ```
 
-One project, but **two** `BenzeneStartUp`s — this is the one non-obvious piece of the whole guide, so
-it's worth being explicit about why. `Configure(IBenzeneApplicationBuilder app, ...)` only gets to act
-on the platform its `app` was built for: `app.UseHttp(...)` is a no-op unless `app` is an
-`AspApplicationBuilder`, and `app.UseWorker(...)` is a no-op unless it's a `WorkerApplicationBuilder` —
-by design, so a `Configure` written for one platform can't silently half-apply on another. A single
-`Startup` can therefore wire HTTP *or* the workers, never both. Two `BenzeneStartUp`s sharing the same
-`WebApplicationBuilder.Services`, on the other hand, works fine — each gets the `app` its own platform
-builds, and both land in the same dependency-injection container:
+One project, one `BenzeneStartUp`, one `Configure`. ASP.NET Core here is purely the HTTP host for
+Benzene — no controllers, no other ASP.NET middleware — so it doesn't get to own the program shape:
+`UseAspNet` (`Benzene.AspNet.Core`) hosts Kestrel **as a worker**, a peer of `UseSqs` and
+`UseKafka`, and `Program.cs` is the plain generic host.
 
 ```csharp
-// HttpStartup.cs
-using Benzene.Abstractions.Hosting;
-using Benzene.AspNet.Core;
-using Benzene.Core.MessageHandlers;
-using Benzene.Core.MessageHandlers.DI;
-using Benzene.Microsoft.Dependencies;
-
-public class HttpStartup : BenzeneStartUp
-{
-    public override IConfiguration GetConfiguration()
-        => new ConfigurationBuilder().AddEnvironmentVariables().Build();
-
-    public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
-    {
-        services.UsingBenzene(x => x
-            .AddMessageHandlers(new[] { typeof(PlaceOrderMessageHandler) })
-            .AddHttpMessageHandlers());
-    }
-
-    public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration)
-    {
-        app.UseHttp(asp => asp.UseMessageHandlers());
-    }
-}
-```
-
-```csharp
-// WorkerStartup.cs
+// Startup.cs - the whole service
 using Amazon.Runtime;
 using Amazon.SQS;
 using Benzene.Abstractions.Hosting;
+using Benzene.AspNet.Core;
 using Benzene.Aws.Sqs;
 using Benzene.Aws.Sqs.Consumer;
 using Benzene.Core.MessageHandlers;
+using Benzene.Core.MessageHandlers.DI;
+using Benzene.Http;
 using Benzene.Kafka.Core;
 using Benzene.Microsoft.Dependencies;
 using Benzene.SelfHost;
 using Confluent.Kafka;
 
-public class WorkerStartup : BenzeneStartUp
+public class Startup : BenzeneStartUp
 {
     public override IConfiguration GetConfiguration()
         => new ConfigurationBuilder().AddEnvironmentVariables().Build();
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
-        // UseSqs/UseKafka (below) wire their own mappers; UseMessageHandlers() discovers
-        // PlaceOrderMessageHandler by reflection because this project references Domain.
+        // One registration for all three transports: the handler (with its [Message] +
+        // [HttpEndpoint] attributes) and the HTTP route table built from it.
+        services.UsingBenzene(x => x
+            .AddMessageHandlers(new[] { typeof(PlaceOrderMessageHandler) })
+            .AddHttpMessageHandlers());
     }
 
     public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration)
@@ -197,10 +172,13 @@ public class WorkerStartup : BenzeneStartUp
             Topics = new[] { "order-place" },
         };
 
-        // UseSqs(...).UseKafka(...) chains - each registers its own worker with the same
-        // IBenzeneWorkerStartup, and Benzene.HostedService composes them into ONE IHostedService
-        // that starts/stops together with Kestrel, in this one process.
+        // Three transports, three UseX calls, one worker host. Benzene.HostedService composes the
+        // three workers into ONE IHostedService that starts/stops together. UseAspNet listens on the
+        // port Kubernetes gives the container (the readinessProbe and Service target this).
         app.UseWorker(worker => worker
+            .UseAspNet(
+                asp => asp.UseMessageHandlers(),
+                options => options.Urls = $"http://0.0.0.0:{configuration["PORT"] ?? "8080"}")
             .UseSqs(sqsConfig, new SqsClientFactory(sqsClient), sqs => sqs.UseMessageHandlers())
             .UseKafka<Ignore, string>(kafkaConfig, kafka => kafka.UseMessageHandlers()));
     }
@@ -208,24 +186,28 @@ public class WorkerStartup : BenzeneStartUp
 ```
 
 ```csharp
-// Program.cs
-using Benzene.AspNet.Core;
+// Program.cs - the plain generic host, nothing ASP.NET-shaped
 using Benzene.HostedService;
 
-var builder = WebApplication.CreateBuilder(args);
-builder.WebHost.UseUrls($"http://0.0.0.0:{Environment.GetEnvironmentVariable("PORT") ?? "8080"}");
+IHost host = Host.CreateDefaultBuilder(args)
+    .UseBenzene<Startup>()
+    .Build();
 
-// WebApplicationBuilder.UseBenzene<T> (Benzene.AspNet.Core) builds an AspApplicationBuilder;
-// IHostBuilder.UseBenzene<T> (Benzene.HostedService, reached via builder.Host - the same IHostBuilder
-// a Generic Host would use) builds a WorkerApplicationBuilder. Both register against this one
-// builder.Services.
-builder.UseBenzene<HttpStartup>();
-builder.Host.UseBenzene<WorkerStartup>();
-
-var app = builder.Build();
-app.UseBenzene();
-app.Run();
+await host.RunAsync();
 ```
+
+`UseAspNet`'s inner action is the exact same HTTP pipeline `UseHttp` builds (the `options` action is
+where the URL — and, via `options.ConfigureBuilder`, TLS or Kestrel limits — comes from), and the
+inner Kestrel host resolves nothing itself: handlers, singletons, and the pipeline all come from the
+one container your `ConfigureServices` populated. A request the pipeline doesn't route is a 404 —
+there are no controllers to fall through to in this mode.
+
+That last sentence is also the boundary of this shape. If the process ever grows real ASP.NET
+surface — controllers, minimal APIs, other middleware — switch the HTTP leg to the embedded mode:
+`WebApplicationBuilder.UseBenzene<HttpStartup>()` with `app.UseHttp(...)` for the HTTP side, plus
+`builder.Host.UseBenzene<WorkerStartup>()` for the workers, two startups sharing one
+`builder.Services` (each platform's `UseX` no-ops on the other's builder, so one `Configure` can't
+serve both there — see [Getting Started: ASP.NET Core](getting-started-aspnet.md)).
 
 `SqsConsumer` (`Benzene.Aws.Sqs`) and the Kafka consumer (`Benzene.Kafka.Core`) are long-running
 pollers, not Lambda/event-source triggers — the right shape for a pod that stays up. Each runs its
@@ -351,9 +333,8 @@ onto three transports from one project.
 
 ## One container, or one per transport?
 
-This guide combines all three transports into a single Deployment because that's the shape that
-actually needs explaining — two `BenzeneStartUp`s sharing one `WebApplicationBuilder` isn't something
-you'd discover by reading the framework's method signatures alone. It is not the *only* shape, though,
+This guide combines all three transports into a single Deployment because `UseAspNet` makes that
+shape essentially free — one startup, three `UseX` calls. It is not the *only* shape, though,
 and it is not always the right one. Splitting the transports into **separate** Deployments (one for
 HTTP, one for the SQS poller, one for the Kafka consumer, each its own `BenzeneStartUp`/`Program.cs`/
 image) is a legitimate alternative: each transport then scales, rolls back, and fails independently —

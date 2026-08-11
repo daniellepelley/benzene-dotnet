@@ -1,10 +1,13 @@
 using Amazon.Runtime;
 using Amazon.SQS;
 using Benzene.Abstractions.Hosting;
+using Benzene.AspNet.Core;
 using Benzene.Aws.Sqs;
 using Benzene.Aws.Sqs.Consumer;
 using Benzene.Core.MessageHandlers;
+using Benzene.Core.MessageHandlers.DI;
 using Benzene.Examples.K8sTransports.Domain;
+using Benzene.Http;
 using Benzene.Kafka.Core;
 using Benzene.Microsoft.Dependencies;
 using Benzene.SelfHost;
@@ -15,24 +18,28 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Benzene.Examples.K8sTransports.App;
 
 /// <summary>
-/// The SQS and Kafka legs, together: both dispatch to the same <see cref="PlaceOrderMessageHandler"/>
-/// the HTTP leg exposes over Kestrel. Wired via <c>IHostBuilder.UseBenzene&lt;WorkerStartup&gt;()</c>
-/// (through <c>builder.Host</c>) in <c>Program.cs</c>, which hands <see cref="Configure"/> a
-/// <c>WorkerApplicationBuilder</c> - calling <c>app.UseHttp(...)</c> here would silently no-op, the
-/// mirror image of <see cref="HttpStartup"/>'s comment. <c>worker.UseSqs(...).UseKafka(...)</c> below
-/// chains - each call registers its own worker with the same <c>IBenzeneWorkerStartup</c>, and
-/// <c>Benzene.HostedService</c> wraps the two of them as ONE <c>IHostedService</c>
-/// (a <c>CompositeBenzeneWorker</c>) that starts/stops together with Kestrel, in this one process.
+/// The whole service in one startup: HTTP (Kestrel via <c>UseAspNet</c>), SQS, and Kafka wired as
+/// three peer workers, all dispatching to the same <see cref="PlaceOrderMessageHandler"/>. ASP.NET
+/// Core here is purely the HTTP host for Benzene - no controllers, no other ASP.NET middleware - so
+/// it takes its place inside <c>UseWorker</c> exactly like the other transports, and
+/// <c>Program.cs</c> stays the plain generic host. If this process ever grows real ASP.NET surface
+/// (controllers, minimal APIs), switch the HTTP leg to the embedded mode instead:
+/// <c>WebApplicationBuilder.UseBenzene&lt;HttpStartup&gt;()</c> with <c>app.UseHttp(...)</c>,
+/// alongside <c>builder.Host.UseBenzene&lt;WorkerStartup&gt;()</c> for the workers - see
+/// docs/getting-started-aspnet.md.
 /// </summary>
-public class WorkerStartup : BenzeneStartUp
+public class Startup : BenzeneStartUp
 {
     public override IConfiguration GetConfiguration()
         => new ConfigurationBuilder().AddEnvironmentVariables().Build();
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
-        // UseSqs/UseKafka (below) wire their own mappers and UseMessageHandlers() discovers
-        // PlaceOrderMessageHandler - nothing Benzene-specific to register here.
+        // One registration for all three transports: the handler (with its [Message] +
+        // [HttpEndpoint] attributes) and the HTTP route table built from it.
+        services.UsingBenzene(x => x
+            .AddMessageHandlers(new[] { typeof(PlaceOrderMessageHandler) })
+            .AddHttpMessageHandlers());
     }
 
     public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration)
@@ -66,7 +73,12 @@ public class WorkerStartup : BenzeneStartUp
             Topics = new[] { "order-place" },
         };
 
+        // Three transports, three UseX calls, one worker host. UseAspNet listens on the port
+        // Kubernetes gives the container (the readinessProbe and Service target this).
         app.UseWorker(worker => worker
+            .UseAspNet(
+                asp => asp.UseMessageHandlers(),
+                options => options.Urls = $"http://0.0.0.0:{configuration["PORT"] ?? "8080"}")
             .UseSqs(sqsConfig, new SqsClientFactory(sqsClient), sqs => sqs.UseMessageHandlers())
             .UseKafka<Ignore, string>(kafkaConfig, kafka => kafka.UseMessageHandlers()));
     }

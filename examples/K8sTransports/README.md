@@ -11,26 +11,27 @@ running container:
         Kafka topic ─────────┘         (App/)                        (Domain/)
 ```
 
-Nothing in the handler knows which transport called it. That's the point: `App/Program.cs` hosts
-Kestrel (`POST /orders`), an SQS poller, and a Kafka consumer together, in the same process, all
-dispatching to the exact same handler class - plain ASP.NET Core alone gives you the HTTP leg;
-Benzene gives you all three from one class, one image, one Deployment.
+Nothing in the handler knows which transport called it. That's the point: `App/Startup.cs` wires
+Kestrel (`POST /orders`, via `UseAspNet`), an SQS poller, and a Kafka consumer as three peer workers
+in one `Configure`, all dispatching to the exact same handler class - plain ASP.NET Core alone gives
+you the HTTP leg; Benzene gives you all three from one class, one startup, one image, one Deployment.
 
 ## Projects
 
 | Path | What it is |
 |---|---|
 | `Domain/` | the shared handler - `[Message("order-place")] [HttpEndpoint("POST", "/orders")] PlaceOrderMessageHandler` |
-| `App/` | the one host - `Program.cs` wires **two** `BenzeneStartUp`s onto **one** `WebApplicationBuilder`: `HttpStartup` (Kestrel, via `Benzene.AspNet.Core`) and `WorkerStartup` (`Benzene.HostedService` + `Benzene.Aws.Sqs`'s `UseSqs` + `Benzene.Kafka.Core`'s `UseKafka`, composed as one background worker) |
+| `App/` | the one host - a single `Startup` whose `UseWorker` chains `UseAspNet` (`Benzene.AspNet.Core` hosting Kestrel as a worker), `UseSqs` (`Benzene.Aws.Sqs`), and `UseKafka` (`Benzene.Kafka.Core`), composed by `Benzene.HostedService` into one hosted service on the plain generic host |
 | `k8s/` | one Deployment + Service, pointed at a real SQS queue and Kafka cluster via env vars - no bundled infra |
 | `compose/` | `docker-compose.yml` - LocalStack (SQS) + a throwaway Kafka broker + the one app image, for a credential-free local run |
 
-See `App/Program.cs`, `App/HttpStartup.cs`, and `App/WorkerStartup.cs` for **why it's two
-`BenzeneStartUp`s and not one**: a single `Configure(IBenzeneApplicationBuilder app, ...)` can only
-own the platform its `app` was built for - `app.UseHttp(...)` no-ops on a worker builder and
-`app.UseWorker(...)` no-ops on an ASP.NET Core builder, by design (see each `BenzeneApplicationBuilder`
-subclass). Two `BenzeneStartUp`s sharing the same `builder.Services` is what lets one process own all
-three transports without either call becoming a silent no-op.
+ASP.NET Core here is purely the HTTP host for Benzene - no controllers, no other ASP.NET middleware -
+which is exactly the case `UseAspNet` exists for: HTTP takes its place inside the startup like every
+other transport, and `Program.cs` stays the plain generic host. If the process ever grows real
+ASP.NET surface, switch the HTTP leg to the embedded mode
+(`WebApplicationBuilder.UseBenzene<HttpStartup>()` + `app.UseHttp(...)`, alongside
+`builder.Host.UseBenzene<WorkerStartup>()` for the workers) - see `App/Startup.cs`'s comment and
+[Getting Started: ASP.NET Core](../../docs/getting-started-aspnet.md).
 
 ## Run it locally (no Kubernetes, no cloud account)
 
@@ -107,7 +108,6 @@ own `BenzeneStartUp`/`Program.cs`/image) is a legitimate pattern too, and someti
 each transport then scales, rolls back, and fails independently of the others - a Kafka outage or a
 bad Kafka-worker deploy no longer risks the HTTP leg's availability, the way it does when they share a
 process and a crash-loop. The tradeoff is real: more images to build, more Deployments to manage, and
-(per the two-`BenzeneStartUp`-sharing-one-image structure above) some duplicated `Program.cs`
-boilerplate per transport. Reach for that shape instead when the transports' traffic, failure modes,
-or scaling needs genuinely diverge - the handler in `Domain/` doesn't change either way, only how many
-`BenzeneStartUp`s and Dockerfiles wrap it.
+some duplicated `Program.cs`/`Startup.cs` boilerplate per transport. Reach for that shape instead when
+the transports' traffic, failure modes, or scaling needs genuinely diverge - the handler in `Domain/`
+doesn't change either way, only how many `BenzeneStartUp`s and Dockerfiles wrap it.

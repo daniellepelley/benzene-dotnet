@@ -1,6 +1,11 @@
 # Self-hosted ASP.NET: one startup for HTTP + workers
 
-Status: proposed (design only — nothing implemented yet)
+Status: implemented — `UseAspNet` (`AspNetSelfHostExtensions`), `AspNetServerWorker`, and
+`AspNetServerOptions` shipped in `Benzene.AspNet.Core`; `examples/K8sTransports` and the Kubernetes
+guide rewritten to the one-startup shape; end-to-end coverage in
+`test/Benzene.Core.Test/Hosting/UseAspNetWorkerTest.cs` (real socket, generic host, second worker
+alongside). The open questions below resolved as proposed (name: `UseAspNet`; default URL:
+`http://0.0.0.0:8080`, no env sniffing).
 
 ## The problem
 
