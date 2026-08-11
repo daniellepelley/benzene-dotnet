@@ -53,9 +53,9 @@ public class MeshHostConfig
     public MeshDispatchConfig Dispatch { get; set; } = new();
 
     /// <summary>
-    /// Reserved for slice 2 (auth in the host) - this slice only carries the key through config
-    /// binding, it acts on nothing here. Defaults to <c>"none"</c>, today's only behaviour: the host
-    /// requires no authentication.
+    /// Auth in the host (work/enterprise/slice-2-auth.md) - see <see cref="MeshAuthConfig"/> and
+    /// <see cref="MeshAuthGate"/>. Defaults to <c>"none"</c>, today's only pre-slice-2 behaviour: the
+    /// host requires no authentication.
     /// </summary>
     public MeshAuthConfig Auth { get; set; } = new();
 }

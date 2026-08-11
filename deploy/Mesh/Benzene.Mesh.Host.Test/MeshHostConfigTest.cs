@@ -93,4 +93,57 @@ public class MeshHostConfigTest
 
         Assert.Equal("none", config.Auth.Mode);
     }
+
+    // work/enterprise/slice-2-auth.md task 2.1 - the auth section's full shape, every field.
+    [Fact]
+    public void AuthSection_EveryFieldSet_BindsEveryField()
+    {
+        var config = Bind("""
+            {
+              "auth": {
+                "mode": "oidc",
+                "allowedEmailDomains": [ "example.com" ],
+                "requiredGroups": [ "mesh-admins" ],
+                "dispatchRole": "mesh-operator",
+                "proxy": { "userHeader": "X-Custom-User", "trustedProxies": [ "10.0.0.5" ] },
+                "oidc": {
+                  "authority": "https://accounts.google.com",
+                  "clientId": "my-client-id",
+                  "clientSecretEnvVar": "MY_CLIENT_SECRET",
+                  "callbackPath": "/custom-callback",
+                  "scopes": [ "openid", "email" ]
+                },
+                "ingestion": { "mode": "sharedSecret" }
+              }
+            }
+            """);
+
+        Assert.Equal("oidc", config.Auth.Mode);
+        Assert.Equal(new[] { "example.com" }, config.Auth.AllowedEmailDomains);
+        Assert.Equal(new[] { "mesh-admins" }, config.Auth.RequiredGroups);
+        Assert.Equal("mesh-operator", config.Auth.DispatchRole);
+        Assert.Equal("X-Custom-User", config.Auth.Proxy.UserHeader);
+        Assert.Equal(new[] { "10.0.0.5" }, config.Auth.Proxy.TrustedProxies);
+        Assert.Equal("https://accounts.google.com", config.Auth.Oidc.Authority);
+        Assert.Equal("my-client-id", config.Auth.Oidc.ClientId);
+        Assert.Equal("MY_CLIENT_SECRET", config.Auth.Oidc.ClientSecretEnvVar);
+        Assert.Equal("/custom-callback", config.Auth.Oidc.CallbackPath);
+        Assert.Equal(new[] { "openid", "email" }, config.Auth.Oidc.Scopes);
+        Assert.Equal("sharedSecret", config.Auth.Ingestion.Mode);
+    }
+
+    // Default when "auth" itself is omitted entirely - mode "none" binds and the host behaves exactly
+    // as it did before this slice (task 2.1's "Done when").
+    [Fact]
+    public void AuthSection_Omitted_DefaultsToModeNoneWithNoCredentialsAnywhere()
+    {
+        var config = Bind("{}");
+
+        Assert.Equal("none", config.Auth.Mode);
+        Assert.Empty(config.Auth.AllowedEmailDomains);
+        Assert.Empty(config.Auth.RequiredGroups);
+        Assert.Null(config.Auth.DispatchRole);
+        Assert.Empty(config.Auth.Proxy.TrustedProxies);
+        Assert.Equal("open", config.Auth.Ingestion.Mode);
+    }
 }
