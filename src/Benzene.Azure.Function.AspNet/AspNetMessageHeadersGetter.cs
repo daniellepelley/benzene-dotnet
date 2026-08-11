@@ -4,15 +4,20 @@ namespace Benzene.Azure.Function.AspNet;
 
 /// <summary>
 /// Extracts message headers from the HTTP request, mapping a fixed set of well-known headers
-/// (<c>x-user-id</c>, <c>x-correlation-id</c>) to shorter field names while passing all other headers
-/// through unchanged.
+/// (<c>x-user-id</c>) to shorter field names while passing all other headers through unchanged.
 /// </summary>
+/// <remarks>
+/// <c>x-correlation-id</c> is deliberately NOT remapped here (it used to rename it to
+/// <c>correlationId</c>): that silently diverged from every other header getter, which passes
+/// <c>x-correlation-id</c> through unchanged, so the diagnostics module's inbound trace tag (which
+/// reads <see cref="Benzene.Abstractions.CorrelationHeaderDefaults.HeaderKey"/>, itself
+/// <c>x-correlation-id</c>) never found it on this transport specifically.
+/// </remarks>
 public class AspNetMessageHeadersGetter : IMessageHeadersGetter<AspNetContext>
 {
     private readonly IDictionary<string, string> _headerMapping = new Dictionary<string, string>
     {
         {"x-user-id", "userId" },
-        {"x-correlation-id", "correlationId" },
     };
 
     /// <summary>

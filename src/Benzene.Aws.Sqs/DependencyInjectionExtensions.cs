@@ -45,7 +45,9 @@ public static class DependencyInjectionExtensions
         // TryAdd: a user registration made earlier (ConfigureServices runs before Configure, where
         // UseSqs calls this) wins over these per-context defaults.
         services.TryAddScoped<IMessageTopicGetter<SqsConsumerMessageContext>>(resolver =>
-            new PresetTopicMessageTopicGetter<SqsConsumerMessageContext>(new SqsConsumerMessageTopicGetter(topicAttributeKey), resolver.GetService<PresetTopicHolder>()));
+            new PresetTopicMessageTopicGetter<SqsConsumerMessageContext>(
+                new SqsConsumerMessageTopicGetter(ResolveTopicAttributeKey(resolver, topicAttributeKey)),
+                resolver.GetService<PresetTopicHolder>()));
         services.TryAddHeaderMessageVersionGetter<SqsConsumerMessageContext>();
         services.TryAddScoped<IMessageHeadersGetter<SqsConsumerMessageContext>, SqsConsumerMessageHeadersGetter>();
         services.TryAddScoped<IMessageBodyGetter<SqsConsumerMessageContext>, SqsConsumerMessageBodyGetter>();
@@ -58,5 +60,22 @@ public static class DependencyInjectionExtensions
         services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.Sqs));
 
         return services;
+    }
+
+    /// <summary>
+    /// Resolves the effective topic-attribute key: if the caller left <paramref name="topicAttributeKey"/>
+    /// at this transport's own default, a DI-registered <see cref="Benzene.Abstractions.IBenzeneWireNames"/>
+    /// (see <c>docs/specification/wire-contracts.md</c> §2) can still override it - so replacing
+    /// <see cref="Benzene.Abstractions.IBenzeneWireNames"/> changes the topic key here too, without
+    /// every transport needing its own separate override. An explicit non-default
+    /// <paramref name="topicAttributeKey"/> always wins - resolved at first use (this factory runs
+    /// lazily), not at registration time, so a later <see cref="Benzene.Abstractions.IBenzeneWireNames"/>
+    /// registration is still picked up regardless of registration order.
+    /// </summary>
+    private static string ResolveTopicAttributeKey(Benzene.Abstractions.DI.IServiceResolver resolver, string topicAttributeKey)
+    {
+        return topicAttributeKey == SqsConsumerMessageTopicGetter.DefaultTopicAttribute
+            ? resolver.TryGetService<Benzene.Abstractions.IBenzeneWireNames>()?.Topic ?? topicAttributeKey
+            : topicAttributeKey;
     }
 }

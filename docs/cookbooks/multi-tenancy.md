@@ -91,9 +91,11 @@ using Benzene.Diagnostics.Correlation;   // the GetHeader extension
 
 app.UseTenant<MyContext>((context, resolver) =>
 {
-    // GetHeader matches the key case-insensitively. Headers dictionaries are ordinal
-    // case-sensitive, so a raw headers.TryGetValue("x-tenant-id", ...) would silently resolve
-    // no tenant for a sender that spells it X-Tenant-Id.
+    // GetHeader matches the key case-insensitively - the guaranteed-safe way to look up a
+    // header regardless of which IMessageHeadersGetter<TContext> is in play. Every built-in
+    // getter's headers dictionary is also case-insensitive by construction, but a raw
+    // headers.TryGetValue("x-tenant-id", ...) still depends on that being true of whichever
+    // getter produced the dictionary - GetHeader doesn't have that assumption.
     var id = resolver.GetService<IMessageHeadersGetter<MyContext>>().GetHeader(context, "x-tenant-id");
     return string.IsNullOrEmpty(id) ? null : id;
 });

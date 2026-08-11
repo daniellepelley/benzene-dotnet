@@ -33,7 +33,8 @@ public class AspNetMessageHeadersGetterTest
 
         // Name lower-cased for stability; value untouched.
         Assert.Equal("Bearer AbCdEf123==", result["authorization"]);
-        // x-correlation-id is a well-known header mapped to "correlationId" - value still verbatim.
-        Assert.Equal("Corr-XYZ", result["correlationid"]);
+        // x-correlation-id passes through unmapped (like every other header getter), so the
+        // diagnostics module's inbound trace tag - which reads the same default key - finds it here.
+        Assert.Equal("Corr-XYZ", result["x-correlation-id"]);
     }
 }

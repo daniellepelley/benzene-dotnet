@@ -35,7 +35,7 @@ public class TimerMessageHeadersGetter : IMessageHeadersGetter<TimerContext>
     /// <returns>An empty dictionary.</returns>
     public IDictionary<string, string> GetHeaders(TimerContext context)
     {
-        return new Dictionary<string, string>();
+        return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     }
 }
 

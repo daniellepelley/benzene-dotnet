@@ -9,7 +9,7 @@ public class KafkaSendMessageHeadersGetter : IMessageHeadersGetter<KafkaSendMess
     {
         // Last-wins over the ordered header list (Kafka permits duplicate keys); ToDictionary would
         // throw on a duplicate. Matches the inbound getter and the RabbitMq/gRPC getters.
-        var dictionary = new Dictionary<string, string>();
+        var dictionary = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var header in context.Message.Headers)
         {
             dictionary[header.Key] = Encoding.UTF8.GetString(header.GetValueBytes() ?? System.Array.Empty<byte>());

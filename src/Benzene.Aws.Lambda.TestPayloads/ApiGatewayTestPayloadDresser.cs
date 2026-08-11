@@ -32,7 +32,7 @@ public class ApiGatewayTestPayloadDresser : ITestPayloadDresser
             HttpMethod = mapping.Method,
             Path = mapping.Path,
             Body = context.SerializedBody,
-            Headers = new Dictionary<string, string>(context.Headers),
+            Headers = new Dictionary<string, string>(context.Headers, StringComparer.OrdinalIgnoreCase),
         };
 
         return AwsEventJson.ToToken(request);

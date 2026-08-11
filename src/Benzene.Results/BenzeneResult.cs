@@ -15,8 +15,31 @@ public static class BenzeneResult
         return ServiceBenzeneResultInternal<T>.Internal(status, isSuccessful);
     }
 
+    /// <summary>
+    /// Builds a result with an explicit status and payload, deriving <c>IsSuccessful</c> from the
+    /// status class (see core-concepts.md: "Derived from status class") — a known failure status
+    /// yields an unsuccessful result even when a payload is supplied.
+    /// </summary>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="status"/> is not one of the framework's known statuses
+    /// (<see cref="BenzeneResultStatus.IsKnown"/>). Automatic derivation only makes sense for a
+    /// status the framework classifies itself; for an application-defined status, silently guessing
+    /// success/failure from an unrecognized string is exactly the kind of silent misclassification
+    /// this exercise exists to catch — use <see cref="Set{T}(string, T, bool)"/> instead so the
+    /// success/failure of a custom status is explicit, not inferred.
+    /// </exception>
     public static IBenzeneResult<T> Set<T>(string status, T payload)
     {
+        if (!BenzeneResultStatus.IsKnown(status))
+        {
+            throw new ArgumentException(
+                $"Set(status, payload) can only derive IsSuccessful automatically for one of the " +
+                $"framework's known statuses (see BenzeneResultStatus). '{status}' is an " +
+                $"application-defined status - use Set(status, payload, isSuccessful) instead so the " +
+                $"success/failure of a custom status is explicit, not inferred.",
+                nameof(status));
+        }
+
         return ServiceBenzeneResultInternal<T>.Internal(status, payload);
     }
 
@@ -33,10 +56,40 @@ public static class BenzeneResult
 
     public static IBenzeneResult Set(string status, params string[] errors)
     {
-        return Set<Void>(status, errors);
+        return ServiceBenzeneResultInternal<Void>.Internal(status, errors);
     }
 
+    /// <summary>
+    /// Builds a failed result carrying the given error messages under <paramref name="status"/>.
+    /// </summary>
+    /// <remarks>
+    /// Obsolete because of an overload-resolution trap: when <typeparamref name="T"/> isn't
+    /// assignable from a single <c>string</c> argument (the common case - <typeparamref name="T"/> is
+    /// usually a response DTO), a call meant for <see cref="Set{T}(string, T)"/> or
+    /// <see cref="Set{T}(string, T, bool)"/> - e.g. <c>Set&lt;OrderConfirmation&gt;(status, someString)</c>
+    /// intending <c>someString</c> as a payload placeholder - silently falls through to THIS overload
+    /// instead (C# expands a single non-array argument into <c>params string[]</c> when no better
+    /// candidate matches), turning what was meant as a payload into an error message and flipping
+    /// <c>IsSuccessful</c> to <c>false</c>. Prefer <see cref="Set{T}(string, T, bool)"/> (explicit
+    /// payload and success flag) or a named failure helper (<see cref="BadRequest{T}"/>,
+    /// <see cref="NotFound{T}"/>, etc.) - both make the failure intentional instead of an overload
+    /// resolution accident.
+    /// </remarks>
+    [Obsolete("Ambiguous when T isn't string/errors-shaped - a single string argument can silently " +
+              "bind here instead of to Set<T>(status, payload). Use SetFailed<T>(status, errors) " +
+              "instead - same behavior, a name that can't be confused with a payload overload.")]
     public static IBenzeneResult<T> Set<T>(string status, params string[] errors)
+    {
+        return ServiceBenzeneResultInternal<T>.Internal(status, errors);
+    }
+
+    /// <summary>
+    /// Builds a failed result under <paramref name="status"/> carrying the given error messages, with
+    /// no payload (<c>default(T)</c>). The unambiguous replacement for the obsolete
+    /// <see cref="Set{T}(string, string[])"/>: a distinct name means a single string argument here can
+    /// never be mistaken for a payload meant for <see cref="Set{T}(string, T)"/>.
+    /// </summary>
+    public static IBenzeneResult<T> SetFailed<T>(string status, params string[] errors)
     {
         return ServiceBenzeneResultInternal<T>.Internal(status, errors);
     }

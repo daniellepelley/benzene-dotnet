@@ -66,11 +66,11 @@ public class GrpcBenzeneMessageClient : IBenzeneMessageClient
             if (context.Status.StatusCode != StatusCode.OK)
             {
                 var errors = string.IsNullOrEmpty(context.Status.Detail) ? Array.Empty<string>() : new[] { context.Status.Detail };
-                return BenzeneResult.Set<TResponse>(status, errors);
+                return BenzeneResult.SetFailed<TResponse>(status, errors);
             }
 
             var payload = _adapter.ConvertRequest<TResponse>(context.Response);
-            return BenzeneResult.Set(status, payload!);
+            return BenzeneResult.Set(status, payload!, true);
         }
         catch (Exception ex)
         {

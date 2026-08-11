@@ -19,6 +19,12 @@ public class MappingRow
 {
     public string From { get; set; } = string.Empty;
     public string To { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Only meaningful for a <c>"&lt;unknown&gt;"</c> <see cref="From"/> row (wire-contracts.md §3):
+    /// which of the two unknown-status rows (isSuccessful true vs false/absent) this is.
+    /// </summary>
+    public bool? IsSuccessful { get; set; }
 }
 
 /// <summary>
@@ -30,18 +36,19 @@ public class HttpStatusMappingConformanceTest
     private static readonly Lazy<MappingFixture> Fixture = new(() =>
         ConformanceFixtures.Load<MappingFixture>("http-status-mapping.json"));
 
-    public static IEnumerable<object[]> ForwardRows() => Fixture.Value.Forward.Select(x => new object[] { x.From, x.To });
+    public static IEnumerable<object[]> ForwardRows() =>
+        Fixture.Value.Forward.Select(x => new object[] { x.From, x.To, x.IsSuccessful ?? false });
 
     public static IEnumerable<object[]> ReverseRows() => Fixture.Value.Reverse.Select(x => new object[] { x.From, x.To });
 
     [Theory]
     [MemberData(nameof(ForwardRows))]
-    public void Forward_BenzeneStatusMapsToHttpStatusCode(string benzeneStatus, string expectedHttpCode)
+    public void Forward_BenzeneStatusMapsToHttpStatusCode(string benzeneStatus, string expectedHttpCode, bool isSuccessful)
     {
         var mapper = new DefaultHttpStatusCodeMapper();
         var input = benzeneStatus == "<unknown>" ? "SomeUnknownStatus" : benzeneStatus;
 
-        Assert.Equal(expectedHttpCode, mapper.Map(input));
+        Assert.Equal(expectedHttpCode, mapper.Map(input, isSuccessful));
     }
 
     [Theory]
@@ -64,18 +71,19 @@ public class GrpcStatusMappingConformanceTest
     private static readonly Lazy<MappingFixture> Fixture = new(() =>
         ConformanceFixtures.Load<MappingFixture>("grpc-status-mapping.json"));
 
-    public static IEnumerable<object[]> ForwardRows() => Fixture.Value.Forward.Select(x => new object[] { x.From, x.To });
+    public static IEnumerable<object[]> ForwardRows() =>
+        Fixture.Value.Forward.Select(x => new object[] { x.From, x.To, x.IsSuccessful ?? false });
 
     public static IEnumerable<object[]> ReverseRows() => Fixture.Value.Reverse.Select(x => new object[] { x.From, x.To });
 
     [Theory]
     [MemberData(nameof(ForwardRows))]
-    public void Forward_BenzeneStatusMapsToGrpcStatusCode(string benzeneStatus, string expectedGrpcCode)
+    public void Forward_BenzeneStatusMapsToGrpcStatusCode(string benzeneStatus, string expectedGrpcCode, bool isSuccessful)
     {
         var mapper = new DefaultGrpcStatusCodeMapper();
         var input = benzeneStatus == "<unknown>" ? "SomeUnknownStatus" : benzeneStatus;
 
-        Assert.Equal(Enum.Parse<StatusCode>(expectedGrpcCode), mapper.Map(input));
+        Assert.Equal(Enum.Parse<StatusCode>(expectedGrpcCode), mapper.Map(input, isSuccessful));
     }
 
     [Theory]

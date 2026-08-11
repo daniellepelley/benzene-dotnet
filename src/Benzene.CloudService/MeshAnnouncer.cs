@@ -126,7 +126,7 @@ internal sealed class MeshAnnouncer : IAsyncDisposable, IDisposable
         try
         {
             var envelope = JsonSerializer.Serialize(
-                new { topic, headers = new Dictionary<string, string>(), body });
+                new { topic, headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase), body });
             using var content = new StringContent(envelope, Encoding.UTF8, "application/json");
             using var response = await _http.PostAsync(_collectorEnvelopeUrl, content, _stopping.Token);
             return response.IsSuccessStatusCode;

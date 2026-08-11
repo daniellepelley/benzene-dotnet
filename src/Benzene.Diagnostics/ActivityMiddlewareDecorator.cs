@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Benzene.Abstractions;
 using Benzene.Abstractions.DI;
 using Benzene.Abstractions.MessageHandlers;
 using Benzene.Abstractions.MessageHandlers.Info;
@@ -147,12 +148,16 @@ public class ActivityMiddlewareDecorator<TContext> : IMiddleware<TContext>
                 activity.SetTag("benzene.handler", handler.HandlerType.Name);
             }
 
-            // Only when the message actually carried a business correlation id (x-correlation-id) - the
-            // same source and null-when-absent rule as MeshTraceEvent.CorrelationId, so the mesh never
-            // fabricates one. This is what makes mesh:query:correlation answerable from a trace store: a
-            // trace-backed reader (Benzene.Mesh.Fleet.*) searches this tag - see
-            // work/otel-fleet-adapter-scope.md §6b. On the topic-bearing span only, like benzene.status.
-            var correlationId = getter!.GetHeader(context, "x-correlation-id");
+            // Only when the message actually carried a business correlation id - the same source and
+            // null-when-absent rule as MeshTraceEvent.CorrelationId, so the mesh never fabricates one.
+            // This is what makes mesh:query:correlation answerable from a trace store: a trace-backed
+            // reader (Benzene.Mesh.Fleet.*) searches this tag - see work/otel-fleet-adapter-scope.md
+            // §6b. On the topic-bearing span only, like benzene.status. The header key is DI-overridable
+            // via CorrelationHeaderOptions (see CorrelationHeaderDefaults) - the same key
+            // CorrelationIdMiddleware stamps outbound by default, so the two directions join up without
+            // separate configuration.
+            var correlationKey = _serviceResolver.TryGetService<CorrelationHeaderOptions>()?.HeaderKey ?? CorrelationHeaderDefaults.HeaderKey;
+            var correlationId = getter!.GetHeader(context, correlationKey);
             if (!string.IsNullOrEmpty(correlationId))
             {
                 activity.SetTag("benzene.correlation-id", correlationId);

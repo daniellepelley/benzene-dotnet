@@ -104,7 +104,7 @@ public class TestPayloadsBuilder
             [BenzeneMessageTransport] = new BenzeneMessagePayload
             {
                 Topic = request.Topic,
-                Headers = new Dictionary<string, string>(),
+                Headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
                 Body = serializedBody,
             },
         };
@@ -116,7 +116,7 @@ public class TestPayloadsBuilder
         {
             var context = new TestPayloadDressingContext(
                 request.Topic,
-                new Dictionary<string, string>(),
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
                 serializedBody,
                 transports,
                 httpMappings);

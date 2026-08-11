@@ -85,7 +85,12 @@ public static class BenzeneResultHttpMapper
     /// standard envelope contract - what <c>BenzeneMessageResponse.StatusCode</c> carries) passes
     /// through verbatim, preserving distinctions like <c>Updated</c> vs <c>Ok</c>; a numeric HTTP
     /// status code (older or HTTP-shaped services) is mapped via <see cref="MapBenzeneResultStatus"/>.
-    /// Returns <c>null</c> for anything unrecognized.
+    /// An application-defined status (not in the known vocabulary, not a numeric HTTP code) also
+    /// passes through verbatim, so a custom status round-trips to the caller instead of being
+    /// coerced to <c>unexpected-error</c> - the wire's <c>isSuccessful</c> field (read separately by
+    /// the caller, since this method only classifies the status text) is what tells the receiver
+    /// whether it was a success. Returns <c>null</c> only when <paramref name="statusCode"/> itself
+    /// is missing.
     /// </summary>
     public static string? NormalizeStatus(string? statusCode)
     {
@@ -120,7 +125,7 @@ public static class BenzeneResultHttpMapper
             case "504":
                 return MapBenzeneResultStatus(statusCode);
             default:
-                return null;
+                return statusCode;
         }
     }
 

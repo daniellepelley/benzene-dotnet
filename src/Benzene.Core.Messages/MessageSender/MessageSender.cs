@@ -45,7 +45,7 @@ public class MessageSender<TRequest, TResponse> : IMessageSender<TRequest, TResp
     public async Task<IBenzeneResult<TResponse>> SendMessageAsync(TRequest request)
     {
         var topic = _getTopic.GetTopic(typeof(TRequest));
-        var context = new BenzeneClientContext<TRequest, TResponse>(new BenzeneClientRequest<TRequest>(topic, request, new Dictionary<string, string>()));
+        var context = new BenzeneClientContext<TRequest, TResponse>(new BenzeneClientRequest<TRequest>(topic, request, new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)));
         await _middlewarePipeline.HandleAsync(context, _serviceResolver);
         return context.Response;
     }

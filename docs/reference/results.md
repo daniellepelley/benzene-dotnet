@@ -52,7 +52,9 @@ the HTTP status code HTTP transports map it to (via `DefaultHttpStatusCodeMapper
 | `BenzeneResult.ServiceUnavailable()` | `service-unavailable` | `503` | A dependency is unavailable; safe to retry. |
 | `BenzeneResult.Timeout()` | `timeout` | `504` | A downstream deadline elapsed; transient, but the operation may or may not have been applied — retry only if idempotent. |
 
-> Any status not in the map — or a `null` status — falls back to **HTTP 500**.
+> A `null` status falls back to **HTTP 500**. A status not in the map (an application-defined
+> status) falls back to **HTTP 200** when the result's `IsSuccessful` is `true`, else **500** — see
+> [Using an application-defined status](#using-an-application-defined-status).
 
 ## Payload vs. no-payload overloads
 
@@ -81,8 +83,9 @@ BenzeneResult.BadRequest("Invalid request");
 
 | Member | Purpose |
 |---|---|
-| `BenzeneResult.Set<T>(status, isSuccess)` | Build a result with an explicit status string and success flag — the escape hatch for custom statuses. (The non-generic `Set(status)` / `Set(status, params errors)` take no success flag.) |
-| `BenzeneResult.Set(status, payload, isSuccess)` | Explicit status *and* payload *and* success flag — for results whose success class shouldn't be derived from the status (e.g. an unhealthy health check: `service-unavailable` for the HTTP 503, successful so the report payload renders as the body). |
+| `BenzeneResult.Set<T>(status, isSuccess)` | Build a result with an explicit status string and success flag — the escape hatch for custom statuses. (The non-generic `Set(status)` derives success from the status class, so it's only valid for one of the framework's known statuses — see below.) |
+| `BenzeneResult.Set(status, payload, isSuccess)` | Explicit status *and* payload *and* success flag — for results whose success class shouldn't be derived from the status (e.g. an unhealthy health check: `service-unavailable` for the HTTP 503, successful so the report payload renders as the body). This is also the *only* way to give a custom status a payload — `Set<T>(status, payload)` throws for an application-defined status. |
+| `BenzeneResult.SetFailed<T>(status, errors)` | Build a *failed* result under a custom status with error messages, no payload. Replaces the obsolete `Set<T>(status, params string[] errors)`, which a single string argument could silently bind to instead of the payload overload. |
 | `result.IsSuccess()` | Extension method — true when the result's status is a success status. |
 | `result.IsAccepted()` | Extension method — true when the result is `accepted`. |
 | `*Internal` factories (`OkInternal`, `NotFoundInternal`, …) | Variants used for internal/inter-service results — e.g. results returned across a Benzene [message client](packages.md#outbound-messaging-clients) rather than mapped straight to an HTTP response. |
@@ -100,9 +103,11 @@ clients, and `IsSuccessful` all derive from it:
 | `BenzeneResultStatus.IsTransient(status)` | True for `service-unavailable`, `too-many-requests`, and `timeout` — a later retry may succeed. |
 | `result.IsTransient()` | Extension form of the above. |
 
-`IsSuccessful` on a result built with `BenzeneResult.Set(status)` / `Set(status, payload)` is
-derived from the status class: known failure statuses produce `IsSuccessful == false`;
-application-defined statuses default to successful (use `Set<T>(status, bool)` to be explicit).
+`IsSuccessful` on a result built with `BenzeneResult.Set(status)` / `Set<T>(status, payload)` is
+derived from the status class: known failure statuses produce `IsSuccessful == false`; success
+statuses produce `IsSuccessful == true`. An application-defined status isn't in either class, so
+these overloads **throw `ArgumentException`** for one rather than silently guessing — use
+`Set<T>(status, isSuccessful)` / `Set<T>(status, payload, isSuccessful)` to state it explicitly.
 
 **Retrying:** `RetryBenzeneMessageClient` (`Benzene.Clients`) retries `service-unavailable` and
 `too-many-requests` by default. `timeout` is transient but *not* retried by default — a timed-out
@@ -111,24 +116,27 @@ its `shouldRetry` constructor parameter (e.g. `r => BenzeneResultStatus.IsTransi
 
 ## Using an application-defined status
 
-Applications may use their own status strings (`BenzeneResult.Set("quarantined", payload)`), with
-caveats:
+Applications may use their own status strings (`BenzeneResult.Set("quarantined", payload, true)`),
+with caveats:
 
-- An application-defined status derives `IsSuccessful == true` (see above) — pass the explicit
-  `bool` overload to control the success class.
-- Transports map an unknown status to their generic-error row — HTTP `500`, gRPC `Internal` (a
-  thrown `RpcException`) — unless you replace `IHttpStatusCodeMapper` (`Benzene.Http`) /
-  `IGrpcStatusCodeMapper` (`Benzene.Grpc`). Both are registered with `TryAdd`, so a registration in
-  `ConfigureServices` wins.
+- An application-defined status has no known success class, so `Set<T>(status, payload)` **throws**
+  — use `Set<T>(status, payload, isSuccessful)` to state it explicitly. There is no silent default.
+- Transports honor `IsSuccessful` for an unmapped status by default: HTTP maps to `200`, gRPC to
+  `OK`, when `IsSuccessful` is `true` — `500`/`Internal` (a thrown `RpcException` for gRPC)
+  otherwise. To map your status to something more specific, replace `IHttpStatusCodeMapper`
+  (`Benzene.Http`) / `IGrpcStatusCodeMapper` (`Benzene.Grpc`). Both are registered with `TryAdd`, so
+  a registration in `ConfigureServices` wins.
 - Custom **validation** statuses: FluentValidation's per-rule `.WithStatus(...)`, the handler-level
   `[ValidationStatus]` attribute, and the replaceable `IValidationStatusMapper` set the status on
-  validation failures; `IDefaultStatuses` replaces the framework's own defaults. The mapper caveat
-  above still applies.
-- **Benzene clients do not round-trip custom statuses**: a client receiving an unknown envelope
-  status rewrites the result to `unexpected-error` ("Status code ... not mapped").
-- **Overload trap**: `Set("my-status", "some string")` binds to `Set(status, params string[]
-  errors)` — the string becomes an error message and the result a *failure*. For a string payload
-  use `Set<string>("my-status", "some string", isSuccessful: true)`.
+  validation failures; `IDefaultStatuses` replaces the framework's own defaults.
+- **Benzene clients round-trip custom statuses**, `IsSuccessful` included: the response envelope
+  carries an explicit `isSuccessful` field (wire-contracts.md §1.2) that a receiving client reads
+  directly. A sender that predates this field is still classified from the status text, so a
+  custom status from one arrives as `unexpected-error`.
+- **The overload trap is now `[Obsolete]`**: `Set<T>(status, params string[] errors)` — the
+  overload a single string argument could silently bind to instead of the payload overload — is
+  obsoleted in favor of `SetFailed<T>(status, errors)` (errors case) and
+  `Set<T>(status, payload, isSuccessful: true)` (string payload case).
 
 ## Mapping in both directions
 

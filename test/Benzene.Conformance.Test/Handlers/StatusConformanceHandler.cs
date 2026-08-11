@@ -28,7 +28,7 @@ public class StatusConformanceHandler : IMessageHandler<StatusRequest, StatusRep
     {
         var result = BenzeneResultStatus.IsSuccess(request.Status)
             ? BenzeneResult.Set(request.Status, new StatusReply { Applied = request.Status })
-            : BenzeneResult.Set<StatusReply>(request.Status, request.Errors ?? Array.Empty<string>());
+            : BenzeneResult.SetFailed<StatusReply>(request.Status, request.Errors ?? Array.Empty<string>());
 
         return Task.FromResult(result);
     }

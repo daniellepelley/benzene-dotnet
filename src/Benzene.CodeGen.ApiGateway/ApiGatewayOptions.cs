@@ -44,6 +44,6 @@ namespace Benzene.CodeGen.ApiGateway
         /// authorizer's context, e.g. <c>["x-user-id"] = "$context.authorizer.userid"</c>. Empty by
         /// default (only the transport headers Content-Type/CorrelationId/SourceIP/UserAgent are sent).
         /// </summary>
-        public IDictionary<string, string> IdentityHeaders { get; set; } = new Dictionary<string, string>();
+        public IDictionary<string, string> IdentityHeaders { get; set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     }
 }

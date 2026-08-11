@@ -1,8 +1,9 @@
 # Customization robustness review
 
-Status: all six obvious fixes DONE (see fix plan); the "Questions for the user" section below is
-awaiting decisions. Probes live in `test/Benzene.Core.Test/Customization/`. Findings verified by
-code-reading plus runtime probes (marked ✅ where probed over a real socket / real pipeline).
+Status: all six obvious fixes DONE, and all seven follow-up decisions ALSO DONE (see "Questions for
+the user, resolved" below). Probes/regression tests live in `test/Benzene.Core.Test/Customization/`.
+Findings verified by code-reading plus runtime probes (marked ✅ where probed over a real socket /
+real pipeline).
 
 ## The systemic finding: Add vs TryAdd decides whether "override X" works at all
 
@@ -168,17 +169,69 @@ application-defined statuses (unknown → each mapping's generic-error row, conf
 All six fixes verified: Benzene.Core.Test 2346/2346, Benzene.Conformance.Test 134/134. New tests in
 `test/Benzene.Core.Test/Customization/RobustnessFixesTest.cs`.
 
-## Questions for the user (non-obvious)
-1. Client-side `NormalizeStatus` destroys custom statuses (→ `unexpected-error`). Pass unknown
-   statuses through verbatim instead (preserving IsSuccessful=false? or deriving from HTTP code)?
-   Cross-port + conformance implications.
-2. `IBenzeneWireNames`: wire it up for real (all bindings resolve it) or de-advertise it?
-3. Correlation default key `correlationId` vs docs' `x-correlation-id` — change the default (wire
-   compat break) or fix the docs (done either way)?
-4. Case-insensitive header lookup as the framework default?
-5. gRPC throwing on custom success statuses: acceptable (mapper replacement documented) or should
-   unknown+IsSuccessful=true map to OK?
-6. `Set("custom", <string>)` overload trap — accept, or add an analyzer/obsolete overload?
-7. `ISerializer` never reaches HTTP body rendering (`JsonMediaFormat` wraps the concrete
-   `JsonSerializer`) — should the media-format path resolve `ISerializer` from DI, or should the
-   docs stop implying a replaced `ISerializer` changes HTTP bodies?
+## Questions for the user, resolved
+
+The user's answers and what was implemented for each, in order:
+
+1. **Custom statuses should round-trip verbatim.** `BenzeneResultHttpMapper.NormalizeStatus` now
+   passes an application-defined status through instead of collapsing it to `null`/`unexpected-error`.
+   Round-tripping `IsSuccessful` correctly (not just the status text) needed a wire change - see #2.
+2. **Custom `Set` needs a mandatory isSuccessful, and IsSuccessful must be honored over every
+   transport.** This was the big one:
+   - **Wire contract**: added `isSuccessful` (required bool) to the `BenzeneMessage` response
+     envelope (wire-contracts.md §1.2, spec repo commit 98a9b29) - the authoritative signal a
+     receiver now prefers over deriving classification from `statusCode` text. `IBenzeneMessageResponse`/
+     `BenzeneMessageResponse`/`BenzeneMessageClientResponse` carry it; `IBenzeneResponseAdapter<TContext>`
+     gained a default-interface `SetSuccessful` (no-op for numeric-status-code transports, wired for
+     the `BenzeneMessage` envelope); `DefaultResponseStatusHandler` sets it; `AsBenzeneResult` reads
+     it with a safe fallback (`IsSuccessStatus`) when the sender is an older service that doesn't
+     write it yet.
+   - **HTTP/gRPC mapper widening**: `IHttpStatusCodeMapper`/`IGrpcStatusCodeMapper` gained a
+     default-interface `Map(status, isSuccessful)` overload (old `Map(status)` overrides keep
+     compiling unchanged); the default mappers now map an unknown-but-successful status to 200/OK
+     instead of the generic-error row. wire-contracts.md §4.1/§4.2 updated to match; conformance
+     fixtures split their single `<unknown>` row into one per `isSuccessful` value.
+   - **`BenzeneResult.Set<T>(status, payload)` now throws `ArgumentException`** for a status outside
+     `BenzeneResultStatus.IsKnown` - forcing every custom-status call through the explicit
+     `Set<T>(status, payload, isSuccessful)` overload instead of silently guessing. Internal call
+     sites updated to pass the explicit flag.
+3. **`IBenzeneWireNames` should work.** It's now a real DI seam for the standalone consumer
+   packages: `AddSqsConsumer`, `AddServiceBusConsumer`, `AddEventHubConsumer`, `AddRabbitMq` each
+   resolve a registered `IBenzeneWireNames` (TryAdd-registered by `AddBenzene`) to seed their topic
+   getter's key, when the caller left that transport's own parameter at its default; an explicit
+   value always still wins. Proven end-to-end in `BenzeneWireNamesOverrideTest.cs`. **Not yet wired**:
+   outbound clients (they build converters eagerly, not through a lazy DI resolve, so honoring
+   `IBenzeneWireNames` there needs a deeper restructuring than this pass covers), the Lambda-triggered
+   consumer packages, Azure Functions-triggered consumers, GoogleCloud Pub/Sub, and Kafka (which has
+   no equivalent knob - topic is a routing concept there, not a message attribute). Also found and
+   fixed in passing: RabbitMq's `AddRabbitMq` was plain `Add`, not `TryAdd` - missed by fix 1's pass.
+4. **All expected headers should be able to change.** The correlation header key was two independent
+   hardcoded literals (`CorrelationIdMiddleware` defaulted outbound stamping to `"correlationId"`;
+   `ActivityMiddlewareDecorator` hardcoded its inbound trace-tag read to `"x-correlation-id"`) that
+   never matched by default. Added `Benzene.Abstractions.CorrelationHeaderDefaults`/`CorrelationHeaderOptions`
+   as the one shared, DI-overridable definition; both directions now default to `x-correlation-id`
+   (matching wire-contracts.md's own request example) and read the same optional DI registration.
+   Fixed `Benzene.Azure.Function.AspNet`'s header getter, which used to rename incoming
+   `x-correlation-id` to `correlationId` - a third, uncoordinated literal that made this specific
+   transport's diagnostics tag miss the header even before this fix.
+5. **Header lookup should be case-insensitive.** Swept ~45 files: every Benzene-owned headers
+   dictionary (request/response envelopes, every transport's `IMessageHeadersGetter`, client request
+   headers, test builders) now constructs with `StringComparer.OrdinalIgnoreCase`, matching the
+   precedent already set by `Benzene.Aws.Lambda.ApiGateway`. Also fixed the existing `.GetHeader(...)`
+   convenience extension, which was already case-insensitive by default but used
+   `StringComparer.CurrentCultureIgnoreCase` - locale-dependent and wrong for protocol-level keys;
+   changed to `OrdinalIgnoreCase`.
+6. **Fix the `Set(status, string)` overload trap.** Obsoleted the generic
+   `Set<T>(string status, params string[] errors)` overload (`[Obsolete]`, compiler warning) and
+   added `SetFailed<T>(status, errors)` as its unambiguous replacement - a distinct method name means
+   a single string argument can no longer be silently captured by the errors overload when it was
+   meant for `Set<T>(status, payload)`. All internal callers migrated.
+7. **Docs were wrong; fix the code instead.** `JsonMediaFormat<TContext>` now depends on `ISerializer`
+   (DI-resolved, TryAdd-registered) instead of the concrete `JsonSerializer` class it used to
+   construct directly - a replaced `ISerializer` now actually renders the HTTP response body, matching
+   what the docs already claimed.
+
+All fixes verified: Benzene.Core.Test 2352/2354 (2 skipped, unrelated), Benzene.Grpc.Test 105/105,
+Benzene.Conformance.Test 136/136 (was 134 - the 2 new `<unknown>`+isSuccessful mapping rows).
+Benzene.Aws.Tests (10 fail) and Benzene.Mesh.Test (2 fail) unchanged from the pre-existing,
+environment-dependent baseline (real AWS/mesh endpoints, fails identically on clean main).

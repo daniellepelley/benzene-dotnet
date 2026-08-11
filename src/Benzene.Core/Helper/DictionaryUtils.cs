@@ -95,7 +95,7 @@ public static class DictionaryUtils
     {
         // Single pass with TryGetValue/TryAdd (first-wins), replacing the per-entry double lookup +
         // GroupBy/First/ToDictionary. Only entries whose key is in the filter are kept.
-        var output = new Dictionary<string, string>();
+        var output = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var entry in source)
         {
@@ -119,7 +119,7 @@ public static class DictionaryUtils
     {
         // Single pass with TryGetValue/TryAdd (first-wins), replacing the per-entry double lookup +
         // GroupBy/First/ToDictionary. A key found in the filter is renamed; others pass through.
-        var output = new Dictionary<string, string>();
+        var output = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var entry in source)
         {

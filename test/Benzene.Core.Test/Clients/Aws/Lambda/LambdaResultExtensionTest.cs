@@ -185,13 +185,18 @@ public class LambdaResultExtensionTest
     }
 
     [Fact]
-    public void Map_UnrecognizedStatusCode_ReturnsUnexpectedError()
+    public void Map_UnrecognizedStatusCode_PassesThroughVerbatimButStaysUnsuccessful()
     {
+        // "999" is neither a known Benzene status nor one of the mapped numeric HTTP codes, so it
+        // round-trips verbatim (an application-defined status, per NormalizeStatus) instead of being
+        // coerced to unexpected-error. With no wire isSuccessful (this sender didn't provide one),
+        // classification falls back to the known-status vocabulary, which doesn't recognize "999" -
+        // so it still comes back unsuccessful, matching the historical safe default.
         var lambdaResponse = new BenzeneMessageClientResponse("999", null);
 
         var lambdaBenzeneResult = lambdaResponse.AsBenzeneResult<ExamplePayload>(new JsonSerializer());
 
-        Assert.Equal(BenzeneResultStatus.UnexpectedError, lambdaBenzeneResult.Status);
+        Assert.Equal("999", lambdaBenzeneResult.Status);
         Assert.False(lambdaBenzeneResult.IsSuccessful);
     }
 }

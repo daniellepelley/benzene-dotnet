@@ -32,7 +32,7 @@ public class ValidationMiddleware<TRequest, TResponse> : IMiddleware<IMessageHan
             if (context.Request == default)
             {
                 var status = _validationStatusMapper.GetStatus(context.HandlerType, typeof(TRequest), null);
-                context.Response = BenzeneResult.Set<TResponse>(status, "Request is null");
+                context.Response = BenzeneResult.SetFailed<TResponse>(status, "Request is null");
                 return;
             }
                 
@@ -41,7 +41,7 @@ public class ValidationMiddleware<TRequest, TResponse> : IMiddleware<IMessageHan
             {
                 var status = _validationStatusMapper.GetStatus(context.HandlerType, typeof(TRequest), validationResult);
                 context.Response =
-                    BenzeneResult.Set<TResponse>(status, validationResult.Errors.Select(x => x.ErrorMessage)
+                    BenzeneResult.SetFailed<TResponse>(status, validationResult.Errors.Select(x => x.ErrorMessage)
                         .ToArray());
                 return;
             }

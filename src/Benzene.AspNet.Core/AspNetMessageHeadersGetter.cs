@@ -35,7 +35,7 @@ public class AspNetMessageHeadersGetter : IMessageHeadersGetter<AspNetContext>
         // matching the old GroupBy(...).Select(g => g.First()). When there are no mappings (the common
         // case) the key isn't lowercased at all.
         var headers = context.HttpContext.Request.Headers;
-        var result = new Dictionary<string, string>(headers.Count);
+        var result = new Dictionary<string, string>(headers.Count, StringComparer.OrdinalIgnoreCase);
         var hasMappings = _headerMapping.Count != 0;
 
         foreach (var header in headers)

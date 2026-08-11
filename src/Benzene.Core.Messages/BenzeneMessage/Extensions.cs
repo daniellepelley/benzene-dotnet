@@ -5,6 +5,6 @@ public static class Extensions
     public static void EnsureResponseExists(this BenzeneMessageContext context)
     {
         context.BenzeneMessageResponse ??= new BenzeneMessageResponse();
-        context.BenzeneMessageResponse.Headers ??= new Dictionary<string, string>();
+        context.BenzeneMessageResponse.Headers ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     }
 }

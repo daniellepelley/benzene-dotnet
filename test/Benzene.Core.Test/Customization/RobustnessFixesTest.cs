@@ -52,12 +52,12 @@ public class RobustnessFixesTest
         mockCorrelationId.Setup(x => x.Get()).Returns(Guid.NewGuid().ToString());
 
         var context = new OutboundContext("my-topic", "hello",
-            new Dictionary<string, string> { ["correlationId"] = "inbound-abc-123" });
+            new Dictionary<string, string> { [CorrelationHeaderDefaults.HeaderKey] = "inbound-abc-123" });
         var middleware = new CorrelationIdMiddleware(mockCorrelationId.Object);
 
         await middleware.HandleAsync(context, () => Task.CompletedTask);
 
-        Assert.Equal("inbound-abc-123", context.Headers["correlationId"]);
+        Assert.Equal("inbound-abc-123", context.Headers[CorrelationHeaderDefaults.HeaderKey]);
     }
 
     [Fact]
@@ -71,7 +71,7 @@ public class RobustnessFixesTest
 
         await middleware.HandleAsync(context, () => Task.CompletedTask);
 
-        Assert.Equal("ambient-xyz", context.Headers["correlationId"]);
+        Assert.Equal("ambient-xyz", context.Headers[CorrelationHeaderDefaults.HeaderKey]);
     }
 
     public class AnnotatedRequest

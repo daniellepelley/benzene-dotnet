@@ -13,7 +13,7 @@ namespace Benzene.GoogleCloud.Functions.PubSub.TestHelpers;
 /// </summary>
 public class PubSubMessageBuilder
 {
-    private readonly IDictionary<string, string> _attributes = new Dictionary<string, string>();
+    private readonly IDictionary<string, string> _attributes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     private string _body = string.Empty;
     private string _messageId = Guid.NewGuid().ToString();
     private string _subscription = "projects/test-project/subscriptions/test-subscription";

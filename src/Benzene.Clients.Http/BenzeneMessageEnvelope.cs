@@ -12,6 +12,6 @@ namespace Benzene.Clients.Http;
 internal sealed class BenzeneMessageEnvelope
 {
     public string Topic { get; init; } = "";
-    public IDictionary<string, string> Headers { get; init; } = new Dictionary<string, string>();
+    public IDictionary<string, string> Headers { get; init; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     public string Body { get; init; } = "";
 }

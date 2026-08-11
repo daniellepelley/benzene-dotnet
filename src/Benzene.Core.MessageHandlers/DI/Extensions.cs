@@ -116,6 +116,10 @@ public static class Extensions
         services.TryAddSingleton<IVersionSelector, VersionSelector>();
         services.TryAddSingleton<ISerializer, JsonSerializer>();
         services.TryAddSingleton<JsonSerializer>();
+        // TryAdd, so a user registration in ConfigureServices wins. Each transport's Add*Consumer
+        // extension resolves this (when the caller left its own topic-attribute/-property key at that
+        // transport's default) to seed the wire's topic key from one place - see BenzeneWireNames.cs.
+        services.TryAddSingleton<Benzene.Abstractions.IBenzeneWireNames, Benzene.Abstractions.BenzeneWireNames>();
         services.AddServiceResolver();
         services.AddBenzeneMiddleware();
         return services;

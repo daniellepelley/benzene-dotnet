@@ -107,7 +107,7 @@ public class HttpBenzeneMessageClient : IBenzeneMessageClient
             // a Void-returning handler's body shape is undefined, so feeding it to AsBenzeneResult<Void> could
             // throw. Nulling the body drives AsBenzeneResult down its status-only branch.
             var result = typeof(TResponse) == typeof(Void)
-                ? new BenzeneMessageClientResponse(clientResponse.StatusCode, null!, clientResponse.Headers).AsBenzeneResult<TResponse>(_serializer)
+                ? new BenzeneMessageClientResponse(clientResponse.StatusCode, null!, clientResponse.Headers, clientResponse.IsSuccessful).AsBenzeneResult<TResponse>(_serializer)
                 : clientResponse.AsBenzeneResult<TResponse>(_serializer);
 
             _logger?.LogInformation("Message {receiverTopic} sent to {receiver} with status {receiverStatus}",

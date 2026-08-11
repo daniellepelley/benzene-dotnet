@@ -49,4 +49,24 @@ public class DefaultGrpcStatusCodeMapper : IGrpcStatusCodeMapper
             ? mapped
             : DefaultValue;
     }
+
+    /// <summary>
+    /// Maps a Benzene result status to a gRPC status code, honoring <paramref name="isSuccessful"/>
+    /// for a status outside the known vocabulary: an application-defined successful status maps to
+    /// <see cref="StatusCode.OK"/> instead of <see cref="StatusCode.Internal"/>, since the caller's
+    /// <c>IsSuccessful</c> is the framework's authoritative signal for a custom status. The raw status
+    /// string still reaches the client verbatim via the <c>benzene-status</c> trailer regardless.
+    /// </summary>
+    /// <param name="benzeneResultStatus">The Benzene result status string to map.</param>
+    /// <param name="isSuccessful">Whether the result was successful.</param>
+    /// <returns>The corresponding <see cref="StatusCode"/>.</returns>
+    public StatusCode Map(string? benzeneResultStatus, bool isSuccessful)
+    {
+        if (benzeneResultStatus != null && _dictionary.TryGetValue(benzeneResultStatus, out var mapped))
+        {
+            return mapped;
+        }
+
+        return isSuccessful ? StatusCode.OK : DefaultValue;
+    }
 }

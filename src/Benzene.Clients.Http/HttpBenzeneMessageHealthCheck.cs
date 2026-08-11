@@ -70,7 +70,7 @@ public class HttpBenzeneMessageHealthCheck : IHealthCheck
             var envelope = new BenzeneMessageEnvelope
             {
                 Topic = _healthCheckTopic,
-                Headers = new Dictionary<string, string>(),
+                Headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
                 Body = ""
             };
 

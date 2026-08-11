@@ -59,9 +59,10 @@ All the error-style factories (`NotFound`, `BadRequest`, `ValidationError`, `For
 `params string[] errors` and produce `IsSuccessful == false`. There's also a lower-level escape
 hatch, `BenzeneResult.Set(status, ...)`, for a custom status string that isn't one of the built-ins
 — used internally (e.g. `MessageRouter<TContext>` sets `validation-error`/`not-found` results this way
-when a topic is missing or unmatched). See
+when a topic is missing or unmatched). `BenzeneResult.SetFailed<T>(status, errors)` is the
+equivalent for a custom *failure* status (no payload) — see
 [Using an application-defined status](#using-an-application-defined-status) below before reaching
-for it.
+for either.
 
 ### `BenzeneResultExtensions`
 
@@ -102,36 +103,41 @@ public static class BenzeneResultStatus
 `Status` being a plain string means an application can use statuses beyond the built-ins —
 `BenzeneResult.Set("quarantined", payload)` builds one. Know what you're opting into:
 
-- **Success classification.** `Set(status)`/`Set(status, payload)` derive `IsSuccessful` from the
-  status class, and an application-defined status is not a known failure, so it comes out
-  **successful** (queue transports will ack/settle it). Use the explicit-flag overloads —
-  `Set<T>(status, isSuccessful)` / `Set<T>(status, payload, isSuccessful)` — to control it.
-- **Transport mapping.** A transport maps an unknown status to its generic-error row: HTTP responds
-  **500**, gRPC maps it to `Internal` and surfaces it as a thrown `RpcException` — even when the
-  result is successful. To map your status yourself, replace `IHttpStatusCodeMapper`
-  (`Benzene.Http`) / `IGrpcStatusCodeMapper` (`Benzene.Grpc`); both are registered with `TryAdd`,
-  so register yours in `ConfigureServices` and it wins.
+- **Success classification is mandatory, not derived.** `Set<T>(status, payload)` only derives
+  `IsSuccessful` for one of the framework's own known statuses (`BenzeneResultStatus`) — for an
+  application-defined status it **throws `ArgumentException`**, naming the fix. Use
+  `Set<T>(status, isSuccessful)` / `Set<T>(status, payload, isSuccessful)` to state it explicitly;
+  there is no silent default.
+- **Transport mapping honors `IsSuccessful` by default.** `DefaultHttpStatusCodeMapper` /
+  `DefaultGrpcStatusCodeMapper` map an unknown status to their generic-**success** row (`200`/`OK`)
+  when the result's `IsSuccessful` is `true`, and to the generic-error row (`500`/`Internal`)
+  otherwise — no split-brain between transport code and payload. To map your status to something
+  more specific than the generic row, replace `IHttpStatusCodeMapper` (`Benzene.Http`) /
+  `IGrpcStatusCodeMapper` (`Benzene.Grpc`); both are registered with `TryAdd`, so register yours in
+  `ConfigureServices` and it wins.
 - **Validation.** To make validation failures carry your status instead of `validation-error`,
   FluentValidation supports per-rule `.WithStatus(...)`, the handler-level
   `[ValidationStatus("...")]` attribute, and a replaceable `IValidationStatusMapper`; the
-  framework's own routing/validation defaults come from a replaceable `IDefaultStatuses`. The
-  mapper point above still applies — a custom validation status without a replaced HTTP/gRPC
-  mapper still surfaces as 500/`Internal`.
-- **Warning — Benzene clients don't round-trip custom statuses.** A Benzene *client* receiving an
-  envelope with an unknown status currently rewrites the result to `unexpected-error` ("Status code
-  ... not mapped"). A custom status survives to the wire, but not through a Benzene client on the
-  receiving end.
-- **Warning — the string-payload overload trap.** `Set("my-status", "some string")` binds to the
-  `Set(status, params string[] errors)` overload, not the payload overload — the string becomes an
-  *error message* and the result a **failure**. For a string payload, use the explicit form:
-  `Set<string>("my-status", "some string", isSuccessful: true)`.
+  framework's own routing/validation defaults come from a replaceable `IDefaultStatuses`.
+- **Benzene clients round-trip custom statuses**, including `IsSuccessful`: the `BenzeneMessage`
+  response envelope (wire-contracts.md §1.2) carries an explicit `isSuccessful` field alongside
+  `statusCode`, and a receiving Benzene client (this version or later) reads it directly rather than
+  guessing from the status text. A receiver talking to an older sender that predates this field
+  falls back to classifying by the known-status vocabulary, so a custom status from such a sender
+  still arrives as `unexpected-error`.
+- **The string-payload overload trap is now a compile-time signal.** `Set<T>(status, params
+  string[] errors)` — the overload a single string argument could silently bind to instead of the
+  payload overload — is `[Obsolete]`; use `SetFailed<T>(status, errors)` for the errors case (same
+  behavior, unambiguous name) and `Set<T>(status, payload, isSuccessful: true)` for a genuine string
+  payload.
 
 ## Transport mapping
 
 ### HTTP
 
 `Benzene.Http`'s `DefaultHttpStatusCodeMapper` (`IHttpStatusCodeMapper`) maps every
-`BenzeneResultStatus` value onto an HTTP status code; unrecognized/null statuses default to `500`:
+`BenzeneResultStatus` value onto an HTTP status code; an unrecognized status defaults to `200` when
+the result's `IsSuccessful` is `true`, else `500` (a null status is always `500`):
 
 | Status | HTTP code |
 |---|---|
@@ -145,7 +151,8 @@ public static class BenzeneResultStatus
 | `not-found` | 404 |
 | `conflict` | 409 |
 | `validation-error` | 422 |
-| `unexpected-error` (or anything unmapped) | 500 |
+| `unexpected-error`, or unmapped + `IsSuccessful == false` | 500 |
+| unmapped + `IsSuccessful == true` | 200 |
 | `not-implemented` | 501 |
 | `service-unavailable` | 503 |
 

@@ -22,7 +22,7 @@ public class CorrelationIdMiddlewareTest
         await middleware.HandleAsync(context, () => { nextCalled = true; return Task.CompletedTask; });
 
         Assert.True(nextCalled);
-        Assert.Equal("abc-123", context.Headers["correlationId"]);
+        Assert.Equal("abc-123", context.Headers[CorrelationHeaderDefaults.HeaderKey]);
     }
 
     [Fact]
@@ -32,10 +32,10 @@ public class CorrelationIdMiddlewareTest
         mockCorrelationId.Setup(x => x.Get()).Returns("abc-123");
 
         var context = new OutboundContext("my-topic", "hello");
-        var middleware = new CorrelationIdMiddleware(mockCorrelationId.Object, "x-correlation-id");
+        var middleware = new CorrelationIdMiddleware(mockCorrelationId.Object, "x-tenant-correlation-id");
 
         await middleware.HandleAsync(context, () => Task.CompletedTask);
 
-        Assert.Equal("abc-123", context.Headers["x-correlation-id"]);
+        Assert.Equal("abc-123", context.Headers["x-tenant-correlation-id"]);
     }
 }

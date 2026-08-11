@@ -25,7 +25,7 @@ public class AspNetHeadersToBodyGetter : IMessageHeadersGetter<AspNetContext>
         // Single pass with TryGetValue/TryAdd instead of a per-header double lookup + GroupBy/First/
         // ToDictionary - runs on every HTTP request. TryAdd keeps the first entry per mapped name,
         // matching the old GroupBy(...).Select(g => g.First()).
-        var result = new Dictionary<string, string>();
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var header in context.HttpRequest.Headers)
         {

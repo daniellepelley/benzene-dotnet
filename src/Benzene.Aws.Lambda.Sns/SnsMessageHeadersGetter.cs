@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Benzene.Abstractions.Messages.Mappers;
@@ -22,6 +23,6 @@ public class SnsMessageHeadersGetter : IMessageHeadersGetter<SnsRecordContext>
         // too, rather than NRE-ing out of the invocation on the same record.
         return context.SnsRecord.Sns?.MessageAttributes?
             .ToDictionary(x => x.Key, x => x.Value.Value)
-            ?? new Dictionary<string, string>();
+            ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     }
 }

@@ -7,19 +7,30 @@ namespace Benzene.Abstractions;
 /// <para>
 /// This type exists as the single definition of the DEFAULT names — each binding's own
 /// <c>DefaultTopicAttribute</c>/<c>DefaultTopicProperty</c> constant aliases it rather than
-/// repeating the literal. It is <strong>not a DI seam</strong>: no binding or outbound client
-/// resolves <see cref="IBenzeneWireNames"/> from the container, so registering a replacement
-/// currently has no effect.
+/// repeating the literal.
 /// </para>
 /// <para>
-/// To change a name on the wire, configure each binding directly:
-/// <c>SqsConsumerConfig.TopicAttributeKey</c>, <c>BenzeneServiceBusConfig.TopicPropertyKey</c>,
-/// <c>BenzeneEventHubConfig.TopicPropertyKey</c>, <c>RabbitMqConfig.TopicHeaderKey</c>, or the
-/// topic-attribute/-property parameter on the transport's Add/Use extension — and align the
-/// outbound clients to match. <strong>An override applies to both directions:</strong> the same
-/// names must be used by the service's inbound bindings and its outbound clients. Overriding only
-/// one side would send messages the service cannot itself receive, and the symptom — a message
-/// that arrives and never routes — is indistinguishable from a missing handler.
+/// <strong>It IS a DI seam for the standalone (non-Lambda, non-Azure-Function) consumer
+/// packages</strong> — <c>AddSqsConsumer</c>, <c>AddServiceBusConsumer</c>, <c>AddEventHubConsumer</c>,
+/// and <c>AddRabbitMq</c>: each resolves a registered <see cref="IBenzeneWireNames"/> (falling back to
+/// <see cref="Default"/>) to seed its topic getter's key, but only when the caller left that
+/// transport's own topic-attribute/-property/-header parameter at ITS default — an explicit
+/// non-default value passed to the transport's Add/Use extension, or set directly on its config
+/// (<c>SqsConsumerConfig.TopicAttributeKey</c>, <c>BenzeneServiceBusConfig.TopicPropertyKey</c>,
+/// <c>BenzeneEventHubConfig.TopicPropertyKey</c>, <c>RabbitMqConfig.TopicHeaderKey</c>), always wins
+/// over a registered <see cref="IBenzeneWireNames"/>. Kafka has no equivalent knob — for Kafka the
+/// topic is the Kafka topic itself (a routing concept), not a message attribute.
+/// </para>
+/// <para>
+/// <strong>It is NOT (yet) resolved by outbound clients</strong>, the Lambda-triggered consumer
+/// packages (<c>Benzene.Aws.Lambda.Sqs</c>/<c>.Sns</c>/<c>.Kafka</c>), the Azure Functions-triggered
+/// consumer packages, or GoogleCloud Pub/Sub — those still only take the topic-attribute/-property
+/// parameter directly. <strong>An override applies to both directions:</strong> the same name must be
+/// used by the service's inbound bindings and its outbound clients, so today a service must still
+/// configure its outbound clients to match whatever <see cref="IBenzeneWireNames"/> (or the
+/// transport-specific parameter) it set on the inbound side. Overriding only one side would send
+/// messages the service cannot itself receive, and the symptom — a message that arrives and never
+/// routes — is indistinguishable from a missing handler.
 /// </para>
 /// <para>
 /// The defaults are what let two untouched Benzene services interoperate; a service that changes

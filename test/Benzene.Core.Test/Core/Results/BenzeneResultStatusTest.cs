@@ -1,4 +1,5 @@
-﻿using System.Net;
+﻿using System;
+using System.Net;
 using Benzene.Results;
 using Xunit;
 
@@ -94,11 +95,14 @@ public class BenzeneResultStatusTest
         Assert.True(BenzeneResult.Set(BenzeneResultStatus.Ok).IsSuccessful);
         Assert.True(BenzeneResult.Set(BenzeneResultStatus.Updated, 42).IsSuccessful);
 
-        // Application-defined statuses keep the historical successful default.
-        Assert.True(BenzeneResult.Set("SomeCustomStatus").IsSuccessful);
-        Assert.True(BenzeneResult.Set("200", 42).IsSuccessful);
+        // An application-defined status can't be classified from its text alone, so the
+        // derive-from-status overload refuses to guess - it throws, directing the caller to the
+        // explicit isSuccessful overload instead of silently defaulting to successful.
+        Assert.Throws<ArgumentException>(() => BenzeneResult.Set("SomeCustomStatus"));
+        Assert.Throws<ArgumentException>(() => BenzeneResult.Set("200", 42));
 
-        // The explicit overloads remain the escape hatch, payload or not.
+        // The explicit overloads remain the one true way to set a custom status, payload or not.
+        Assert.True(BenzeneResult.Set<string>("SomeCustomStatus", true).IsSuccessful);
         Assert.False(BenzeneResult.Set<string>("SomeCustomStatus", false).IsSuccessful);
         var explicitWithPayload = BenzeneResult.Set(BenzeneResultStatus.ServiceUnavailable, 42, true);
         Assert.True(explicitWithPayload.IsSuccessful);

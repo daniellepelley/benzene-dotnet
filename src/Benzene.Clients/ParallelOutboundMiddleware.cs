@@ -68,7 +68,7 @@ internal class ParallelOutboundMiddleware : IMiddleware<OutboundContext>, ITermi
         }
 
         var errors = failures.Select(FormatError).ToArray();
-        context.Response = BenzeneResult.Set<Void>(BenzeneResultStatus.UnexpectedError, errors);
+        context.Response = BenzeneResult.SetFailed<Void>(BenzeneResultStatus.UnexpectedError, errors);
     }
 
     private static string FormatError(BranchOutcome outcome) => outcome.Exception is not null

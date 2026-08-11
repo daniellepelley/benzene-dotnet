@@ -577,7 +577,7 @@ public class BenzeneMessageContextConverter<TContext> : IContextConverter<TConte
     {
         _messageHandlerResultSetter.SetResultAsync(contextIn,
             new MessageHandlerResult(new Topic(contextOut.BenzeneMessageRequest.Topic),
-                MessageHandlerDefinition.Empty(), BenzeneResult.Set(contextOut.BenzeneMessageResponse.StatusCode)));
+                MessageHandlerDefinition.Empty(), BenzeneResult.Set<Benzene.Abstractions.Results.Void>(contextOut.BenzeneMessageResponse.StatusCode, true)));
         return Task.CompletedTask;
     }
 }
@@ -622,7 +622,7 @@ public class SqsMessageContextConverter<TContext> : IContextConverter<TContext, 
             : string.Empty;
         _messageHandlerResultSetter.SetResultAsync(contextIn,
             new MessageHandlerResult(new Topic(topicValue),
-                MessageHandlerDefinition.Empty(), BenzeneResult.Set(contextOut.Response.HttpStatusCode.ToString())));
+                MessageHandlerDefinition.Empty(), BenzeneResult.Set<Benzene.Abstractions.Results.Void>(contextOut.Response.HttpStatusCode.ToString(), true)));
 
         return Task.CompletedTask;
     }
@@ -667,7 +667,7 @@ public class SnsMessageContextConverter<TContext> : IContextConverter<TContext, 
             : string.Empty;
         _messageHandlerResultSetter.SetResultAsync(contextIn,
             new MessageHandlerResult(new Topic(topicValue),
-                MessageHandlerDefinition.Empty(), BenzeneResult.Set(contextOut.Response.HttpStatusCode.ToString())));
+                MessageHandlerDefinition.Empty(), BenzeneResult.Set<Benzene.Abstractions.Results.Void>(contextOut.Response.HttpStatusCode.ToString(), true)));
 
         return Task.CompletedTask;
     }

@@ -55,7 +55,7 @@ public class InProcessContextConverter : IContextConverter<OutboundContext, InPr
     /// <returns>A completed task.</returns>
     public Task MapResponseAsync(OutboundContext contextIn, InProcessSendMessageContext contextOut)
     {
-        contextIn.Response = new BenzeneMessageClientResponse(contextOut.Response.StatusCode, contextOut.Response.Body, contextOut.Response.Headers);
+        contextIn.Response = new BenzeneMessageClientResponse(contextOut.Response.StatusCode, contextOut.Response.Body, contextOut.Response.Headers, contextOut.Response.IsSuccessful);
         return Task.CompletedTask;
     }
 }

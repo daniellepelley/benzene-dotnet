@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Benzene.Abstractions.Messages.Mappers;
 
@@ -16,7 +17,7 @@ public class S3MessageHeadersGetter : IMessageHeadersGetter<S3RecordContext>
     public IDictionary<string, string> GetHeaders(S3RecordContext context)
     {
         var record = context.S3EventNotificationRecord;
-        var headers = new Dictionary<string, string>();
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         if (record.EventName != null)
         {

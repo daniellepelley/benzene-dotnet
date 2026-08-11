@@ -31,7 +31,7 @@ public class MeshDispatchResult
     {
         StatusCode = statusCode;
         Body = body;
-        Headers = headers ?? new Dictionary<string, string>();
+        Headers = headers ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>The status the service returned (a Benzene result status, or an HTTP status for HTTP targets).</summary>

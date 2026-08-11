@@ -100,7 +100,7 @@ public class LambdaMeshServiceSource : IMeshServiceSource
     // in the BenzeneMessage envelope. No current Activity -> no headers, exactly as before.
     private static IDictionary<string, string> BuildHeaders()
     {
-        var headers = new Dictionary<string, string>();
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var activity = Activity.Current;
         if (activity?.Id != null)
         {

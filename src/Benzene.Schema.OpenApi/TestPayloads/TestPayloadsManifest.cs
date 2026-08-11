@@ -42,7 +42,7 @@ public class BenzeneMessagePayload
     public string Topic { get; set; } = string.Empty;
 
     /// <summary>Message headers (empty by default).</summary>
-    public IDictionary<string, string> Headers { get; set; } = new Dictionary<string, string>();
+    public IDictionary<string, string> Headers { get; set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The JSON-serialized example message body.</summary>
     public string Body { get; set; } = string.Empty;

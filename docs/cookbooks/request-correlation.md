@@ -64,7 +64,7 @@ app.UseLogResult(x => x.WithCorrelationId());
 ```
 
 ```csharp
-// 3. Forward it downstream (stamps the current ICorrelationId onto the outgoing correlationId header)
+// 3. Forward it downstream (stamps the current ICorrelationId onto the outgoing x-correlation-id header)
 services.UsingBenzene(x => x.AddOutboundRouting(routing => routing
     .Route("order:process", pipeline => pipeline.UseCorrelationId().UseSqs(queueUrl))));
 ```
@@ -97,8 +97,8 @@ the receiving service's logs if forwarded.
 - Confirm the outbound route has `.UseCorrelationId()` — without it, nothing forwards the value
   and each service's `ICorrelationId` self-generates its own GUID.
 - Confirm the receiving service's populating middleware reads the same header the sender writes
-  (`correlationId` by default — pass a different `correlationKey` to `.UseCorrelationId(...)` on
-  both sides if you've customized it).
+  (`x-correlation-id` by default — register a `CorrelationHeaderOptions` or pass a different
+  `correlationKey` to `.UseCorrelationId(...)` on both sides if you've customized it).
 
 ## Further Reading
 

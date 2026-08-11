@@ -41,7 +41,10 @@ public class QuarantineRequest
 public class QuarantineHandler : IMessageHandler<QuarantineRequest, QuarantineDto>
 {
     public Task<IBenzeneResult<QuarantineDto>> HandleAsync(QuarantineRequest request)
-        => Task.FromResult(BenzeneResult.Set("quarantined", new QuarantineDto { Name = "acme" }));
+        // "quarantined" is application-defined, so Set(status, payload) - which can only derive
+        // IsSuccessful for the framework's own known statuses - throws; the explicit isSuccessful
+        // overload is the one true way to set a custom status.
+        => Task.FromResult(BenzeneResult.Set("quarantined", new QuarantineDto { Name = "acme" }, true));
 }
 
 public class CustomStatusStartUp : BenzeneStartUp
@@ -86,10 +89,9 @@ public class MapperOverrideStartUp : CustomStatusStartUp
 
 // Regression probe for the per-context transport seams: the user registers a custom ISerializer in
 // ConfigureServices. AddAspNetMessageHandlers registers its JsonSerializer default with TryAdd, so
-// the user's earlier registration now wins the ISerializer resolve. NOTE the HTTP response body still
-// does NOT carry the marker: the render/request-mapping path serializes via the media-format
-// negotiator, whose default JsonMediaFormat wraps the concrete JsonSerializer and never resolves the
-// ISerializer seam - a separate (pre-existing) fact from the Add-vs-TryAdd ordering this fixes.
+// the user's earlier registration wins the ISerializer resolve - and, now that JsonMediaFormat
+// resolves ISerializer from DI instead of the concrete JsonSerializer, the HTTP response body is
+// actually rendered through it too.
 public class SerializerOverrideStartUp : CustomStatusStartUp
 {
     public class MarkerSerializer : ISerializer
@@ -152,9 +154,10 @@ public class CustomStatusProbeTest
     {
         CustomStatusStartUp.Port = GetFreePort();
         var (status, body) = await PostAsync<CustomStatusStartUp>(CustomStatusStartUp.Port);
-        // A custom status maps to the generic-error row (500, spec-pinned) while IsSuccessful=true
-        // renders the SUCCESS payload as the body - the split-brain combination, confirmed here.
-        Assert.True(500 == status, $"status={status} body={body}");
+        // A custom status outside the known vocabulary now maps to 200 (not the generic-error 500
+        // row) because DefaultHttpStatusCodeMapper honors the result's IsSuccessful for an unknown
+        // status - no more split-brain between a 500 transport code and a successful payload body.
+        Assert.True(200 == status, $"status={status} body={body}");
         Assert.Contains("acme", body);
     }
 
@@ -173,11 +176,11 @@ public class CustomStatusProbeTest
     {
         CustomStatusStartUp.Port = GetFreePort();
         var (status, body) = await PostAsync<SerializerOverrideStartUp>(CustomStatusStartUp.Port);
-        // The body stays plain JSON: the response is rendered through the media-format negotiator's
-        // default JsonMediaFormat (which wraps the concrete JsonSerializer), not the ISerializer seam,
-        // so the marker cannot appear here regardless of registration order.
+        // The body now flows through the user's ISerializer: JsonMediaFormat resolves ISerializer
+        // from DI instead of wrapping the concrete JsonSerializer, so the marker prefix reaches the
+        // HTTP response body.
+        Assert.True(body.Contains("MARKER:"), $"body did not flow through the custom ISerializer: status={status} body={body}");
         Assert.Contains("acme", body);
-        Assert.True(!body.Contains("MARKER:"), $"body unexpectedly flowed through ISerializer: status={status} body={body}");
 
         // The seam itself IS now honored: the transport TryAdds its JsonSerializer default, so the
         // user's earlier ConfigureServices registration wins the single resolve (before the TryAdd

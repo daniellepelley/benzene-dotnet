@@ -29,14 +29,14 @@ public class KafkaMessageHeadersGetter : IMessageHeadersGetter<KafkaContext>
 
         if (headerBatches == null || headerBatches.Count == 0)
         {
-            return new Dictionary<string, string>();
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         }
 
         // The AWS Kafka wire format emits each record header as a separate single-entry element in the
         // Headers list (preserving Kafka's ordered, duplicate-key-capable headers). Flatten every
         // element rather than taking only the first (which dropped all headers after the first), and use
         // a last-wins indexer so a duplicate key doesn't throw (Kafka permits repeated keys).
-        var dictionary = new Dictionary<string, string>();
+        var dictionary = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var batch in headerBatches)
         {
             if (batch == null)

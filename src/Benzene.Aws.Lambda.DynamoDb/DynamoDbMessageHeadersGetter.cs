@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Benzene.Abstractions.Messages.Mappers;
 
@@ -18,7 +19,7 @@ public class DynamoDbMessageHeadersGetter : IMessageHeadersGetter<DynamoDbRecord
     public IDictionary<string, string> GetHeaders(DynamoDbRecordContext context)
     {
         var record = context.Record;
-        var headers = new Dictionary<string, string>();
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         AddIfPresent(headers, "dynamodb-event-name", record.EventName);
         AddIfPresent(headers, "dynamodb-event-id", record.EventId);

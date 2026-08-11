@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Text.Json;
 using Benzene.Abstractions.Messages.Mappers;
@@ -17,7 +18,7 @@ public class EventBridgeMessageHeadersGetter : IMessageHeadersGetter<EventBridge
 
     public IDictionary<string, string> GetHeaders(EventBridgeContext context)
     {
-        var headers = new Dictionary<string, string>();
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var @event = context.Event;
 
         AddIfPresent(headers, "eventbridge-id", @event.Id);

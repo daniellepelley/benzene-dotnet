@@ -20,12 +20,12 @@ public class KafkaMessageHeadersGetter : IMessageHeadersGetter<KafkaContext>
 
         if (headers == null || headers.Length == 0)
         {
-            return new Dictionary<string, string>();
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         }
 
         // Last-wins over the header array (Kafka permits duplicate keys); ToDictionary would throw on a
         // duplicate, aborting the record. Matches the AWS Lambda Kafka and Kafka.Core getters.
-        var dictionary = new Dictionary<string, string>();
+        var dictionary = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var header in headers)
         {
             dictionary[header.Key] = Encoding.UTF8.GetString(header.Value ?? System.Array.Empty<byte>());

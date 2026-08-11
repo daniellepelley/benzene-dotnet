@@ -16,7 +16,7 @@ public class EventGridMessageHeadersGetter : IMessageHeadersGetter<EventGridCont
     /// <returns>The message headers.</returns>
     public IDictionary<string, string> GetHeaders(EventGridContext context)
     {
-        var headers = new Dictionary<string, string>();
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         if (context.Event.Id != null)
         {

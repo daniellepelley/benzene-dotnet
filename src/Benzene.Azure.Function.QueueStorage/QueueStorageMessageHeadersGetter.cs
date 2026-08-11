@@ -16,6 +16,6 @@ public class QueueStorageMessageHeadersGetter : IMessageHeadersGetter<QueueStora
     /// <returns>An empty dictionary.</returns>
     public IDictionary<string, string> GetHeaders(QueueStorageContext context)
     {
-        return new Dictionary<string, string>();
+        return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     }
 }

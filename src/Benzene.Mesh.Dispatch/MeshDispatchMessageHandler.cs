@@ -41,7 +41,7 @@ public class MeshDispatchMessageHandler : IMessageHandler<MeshDispatchRequest, R
     {
         if (!_gate.IsAllowed)
         {
-            return BenzeneResult.Set<RawStringMessage>(BenzeneResultStatus.Forbidden, _gate.BlockedReason);
+            return BenzeneResult.SetFailed<RawStringMessage>(BenzeneResultStatus.Forbidden, _gate.BlockedReason);
         }
 
         if (request == null || string.IsNullOrWhiteSpace(request.Service) || string.IsNullOrWhiteSpace(request.Topic))
@@ -58,14 +58,14 @@ public class MeshDispatchMessageHandler : IMessageHandler<MeshDispatchRequest, R
         var dispatcher = _dispatchers.FirstOrDefault(d => string.Equals(d.Key, entry.Source, StringComparison.OrdinalIgnoreCase));
         if (dispatcher == null)
         {
-            return BenzeneResult.Set<RawStringMessage>(BenzeneResultStatus.NotImplemented,
+            return BenzeneResult.SetFailed<RawStringMessage>(BenzeneResultStatus.NotImplemented,
                 $"No dispatcher is registered for source '{entry.Source}' (service '{entry.Name}'). "
                 + "Register the matching transport dispatcher (e.g. AddMeshLambdaDispatcher() for AwsLambdaInvoke).");
         }
 
         var envelope = new MeshDispatchEnvelope(
             request.Topic!,
-            request.Headers ?? new Dictionary<string, string>(),
+            request.Headers ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
             request.Body ?? string.Empty);
 
         var result = await dispatcher.DispatchAsync(entry, envelope, CancellationToken.None);

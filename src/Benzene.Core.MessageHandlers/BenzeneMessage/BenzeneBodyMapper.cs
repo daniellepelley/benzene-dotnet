@@ -28,7 +28,7 @@ public class BenzeneMessageGetter : IMessageGetter<BenzeneMessageContext>, IMess
     /// <returns>The request's headers.</returns>
     public IDictionary<string, string> GetHeaders(BenzeneMessageContext context)
     {
-        return context.BenzeneMessageRequest.Headers ?? new Dictionary<string, string>();
+        return context.BenzeneMessageRequest.Headers ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>

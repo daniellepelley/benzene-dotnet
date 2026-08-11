@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Benzene.Abstractions.Messages.Mappers;
@@ -21,6 +22,6 @@ public class SqsConsumerMessageHeadersGetter : IMessageHeadersGetter<SqsConsumer
         return context.Message.MessageAttributes?
             .Where(x => x.Value.DataType == "String")
             .ToDictionary(x => x.Key, x => x.Value.StringValue)
-            ?? new Dictionary<string, string>();
+            ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     }
 }

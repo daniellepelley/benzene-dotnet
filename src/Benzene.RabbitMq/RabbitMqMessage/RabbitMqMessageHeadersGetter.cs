@@ -18,10 +18,10 @@ public class RabbitMqMessageHeadersGetter : IMessageHeadersGetter<RabbitMqContex
         var headers = context.DeliverEventArgs.BasicProperties.Headers;
         if (headers == null)
         {
-            return new Dictionary<string, string>();
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         }
 
-        var result = new Dictionary<string, string>();
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var header in headers)
         {
             if (header.Value == null)

@@ -98,7 +98,7 @@ public class ParallelOutboundTest
     {
         var sender = SenderFor(routing => routing.Route("order:create", p => p.UseParallel(
             ("sqs", b => b.OnRequest(ctx => ctx.Response = BenzeneResult.Ok<Void>())),
-            ("sns", b => b.OnRequest(ctx => ctx.Response = BenzeneResult.Set<Void>(BenzeneResultStatus.ServiceUnavailable))))));
+            ("sns", b => b.OnRequest(ctx => ctx.Response = BenzeneResult.SetFailed<Void>(BenzeneResultStatus.ServiceUnavailable))))));
 
         var result = await sender.SendAsync<string, Void>("order:create", "payload");
 

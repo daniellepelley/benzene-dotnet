@@ -81,4 +81,24 @@ public class DefaultHttpStatusCodeMapper : IHttpStatusCodeMapper
             ? map
             : DefaultValue;
     }
+
+    /// <summary>
+    /// Maps a Benzene result status to an HTTP status code, honoring <paramref name="isSuccessful"/>
+    /// for a status outside the known vocabulary: an application-defined successful status maps to
+    /// "200" instead of the generic-error "500" row, since the caller's <c>IsSuccessful</c> - not the
+    /// (necessarily incomplete) dictionary above - is the framework's authoritative signal for a
+    /// custom status.
+    /// </summary>
+    /// <param name="benzeneResultStatus">The Benzene result status string to map.</param>
+    /// <param name="isSuccessful">Whether the result was successful.</param>
+    /// <returns>The corresponding HTTP status code as a string.</returns>
+    public string Map(string? benzeneResultStatus, bool isSuccessful)
+    {
+        if (benzeneResultStatus != null && _dictionary.TryGetValue(benzeneResultStatus, out var map))
+        {
+            return map;
+        }
+
+        return isSuccessful ? "200" : DefaultValue;
+    }
 }

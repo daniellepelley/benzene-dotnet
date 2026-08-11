@@ -12,7 +12,7 @@ public class MessageBuilder<T> : IMessageBuilder<T>
     {
         Message = message;
         Topic = topic;
-        Headers = new Dictionary<string, string>();
+        Headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     }
 
     public MessageBuilder<T> WithHeader(string key, string value)

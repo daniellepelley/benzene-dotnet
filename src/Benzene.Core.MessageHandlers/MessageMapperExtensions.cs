@@ -42,7 +42,10 @@ public static class MessageMapperExtensions
             return headers;
         }
 
-        var output = new Dictionary<string, string>(StringComparer.CurrentCultureIgnoreCase);
+        // Ordinal, not CurrentCulture: header keys are protocol-level ASCII tokens, and a
+        // culture-sensitive comparison can misclassify them under some locales (e.g. the Turkish "I"
+        // problem) - the same reasoning as the headers dictionaries this mirrors.
+        var output = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var header in headers)
         {

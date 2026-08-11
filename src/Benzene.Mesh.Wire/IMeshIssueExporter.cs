@@ -174,7 +174,7 @@ public sealed class HttpMeshIssueExporter : IMeshIssueExporter, IAsyncDisposable
             var envelope = new
             {
                 topic = MeshTopics.Issues,
-                headers = new Dictionary<string, string>(),
+                headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
                 // An empty batch is deliberate: the liveness assertion ("feed alive, nothing failing").
                 body = MeshJson.Serialize(new MeshIssueBatch { Service = _service, Issues = issues })
             };

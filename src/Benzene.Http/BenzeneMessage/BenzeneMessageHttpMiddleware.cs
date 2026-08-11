@@ -100,7 +100,7 @@ public class BenzeneMessageHttpMiddleware<TContext> : IMiddleware<TContext>, ITe
 
         var response = await DispatchAsync(context);
 
-        _responseAdapter.SetStatusCode(context, _httpStatusCodeMapper.Map(response.StatusCode));
+        _responseAdapter.SetStatusCode(context, _httpStatusCodeMapper.Map(response.StatusCode, response.IsSuccessful));
         _responseAdapter.SetContentType(context, "application/json; charset=utf-8");
         _responseAdapter.SetBody(context, Serializer.Serialize(response));
         await _responseAdapter.FinalizeAsync(context);
@@ -143,7 +143,8 @@ public class BenzeneMessageHttpMiddleware<TContext> : IMiddleware<TContext>, ITe
         return new BenzeneMessageResponse
         {
             StatusCode = statusCode,
-            Headers = new Dictionary<string, string>(),
+            IsSuccessful = false,
+            Headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
             Body = Serializer.Serialize(new Dictionary<string, string> { ["message"] = message })
         };
     }

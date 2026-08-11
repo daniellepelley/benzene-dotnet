@@ -109,20 +109,26 @@ public static class BenzeneResultExtensions
            // projected success came back IsSuccessful=false (a 200 carrying an error body downstream,
            // and misread as a failure by saga/idempotency/SQS batch escalation).
            ? BenzeneResult.Set<TOutput>(serviceBenzeneResult.Status, true)
-           : BenzeneResult.Set<TOutput>(serviceBenzeneResult.Status, serviceBenzeneResult.Errors);
+           : BenzeneResult.SetFailed<TOutput>(serviceBenzeneResult.Status, serviceBenzeneResult.Errors);
     }
 
     public static IBenzeneResult<TOutput> As<T, TOutput>(this IBenzeneResult<T> serviceBenzeneResult,
         Func<T, TOutput> map)
     {
         return serviceBenzeneResult.IsSuccessful
-           ? BenzeneResult.Set(serviceBenzeneResult.Status, map(serviceBenzeneResult.Payload))
-           : BenzeneResult.Set<TOutput>(serviceBenzeneResult.Status, serviceBenzeneResult.Errors);
+           ? BenzeneResult.Set(serviceBenzeneResult.Status, map(serviceBenzeneResult.Payload), true)
+           : BenzeneResult.SetFailed<TOutput>(serviceBenzeneResult.Status, serviceBenzeneResult.Errors);
     }
 
+    /// <summary>
+    /// Re-wraps <paramref name="value"/> under the original result's status, preserving its success
+    /// class exactly (<see cref="IBenzeneResult.IsSuccessful"/>) rather than re-deriving it from the
+    /// status text — required for an application-defined status, which the derive-from-status overload
+    /// can't classify at all.
+    /// </summary>
     public static IBenzeneResult<TOutput> As<TOutput>(this IBenzeneResult serviceBenzeneResult, TOutput value)
     {
-        return BenzeneResult.Set(serviceBenzeneResult.Status, value);
+        return BenzeneResult.Set(serviceBenzeneResult.Status, value, serviceBenzeneResult.IsSuccessful);
     }
 
     public static async Task<IBenzeneResult<TOutput>> As<T, TOutput>(this Task<IBenzeneResult<T>> source,

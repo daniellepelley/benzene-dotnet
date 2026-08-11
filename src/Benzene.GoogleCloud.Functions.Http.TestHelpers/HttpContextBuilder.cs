@@ -13,7 +13,7 @@ namespace Benzene.GoogleCloud.Functions.Http.TestHelpers;
 /// </summary>
 public class HttpContextBuilder
 {
-    private readonly IDictionary<string, string> _headers = new Dictionary<string, string>();
+    private readonly IDictionary<string, string> _headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     private readonly string _httpMethod;
     private readonly string _path;
     private string _body = string.Empty;

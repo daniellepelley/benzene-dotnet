@@ -50,6 +50,22 @@ public interface IBenzeneResponseAdapter<TContext>
     string GetBody(TContext context);
 
     /// <summary>
+    /// Records the handler result's authoritative success/failure flag alongside the status code, for
+    /// adapters whose wire format can carry it (currently the <c>BenzeneMessage</c> envelope's
+    /// <c>isSuccessful</c> field - see <c>docs/specification/wire-contracts.md</c> §1.2). A receiver
+    /// cannot always classify success from <see cref="SetStatusCode"/>'s value alone: an
+    /// application-defined status is outside the framework's known vocabulary, so this is the signal
+    /// a client honors instead of guessing from status text. Default no-op, so numeric-status-code
+    /// transports (HTTP, gRPC, API Gateway) - where the status code itself already carries the
+    /// success/failure signal - don't need to implement it.
+    /// </summary>
+    /// <param name="context">The transport-specific context to write to.</param>
+    /// <param name="isSuccessful">Whether the handler result was successful.</param>
+    void SetSuccessful(TContext context, bool isSuccessful)
+    {
+    }
+
+    /// <summary>
     /// Completes the response after all response handlers have run (e.g. flushing it to the
     /// underlying transport). Called once by <see cref="IResponseHandlerContainer{TContext}"/> after
     /// its response handlers have finished writing to the context.

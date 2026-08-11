@@ -24,7 +24,7 @@ public class OutboundContext
         // Headers, so holding the caller's own dictionary would mutate it across sends. A caller that
         // reuses one dictionary would otherwise leak a stale traceparent/tracestate from a previous
         // send onto the next (and concurrent sends sharing a dict would race a non-thread-safe map).
-        Headers = headers is null ? new Dictionary<string, string>() : new Dictionary<string, string>(headers);
+        Headers = headers is null ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) : new Dictionary<string, string>(headers, StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>Gets the topic this send was routed to.</summary>

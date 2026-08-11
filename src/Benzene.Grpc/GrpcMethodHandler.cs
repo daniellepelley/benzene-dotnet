@@ -113,9 +113,10 @@ public class GrpcMethodHandler : IGrpcMethodHandler
         }
 
         var status = grpcContext.MessageHandlerResult?.BenzeneResult.Status;
+        var isSuccessful = grpcContext.MessageHandlerResult?.BenzeneResult.IsSuccessful ?? false;
         grpcContext.ResponseTrailers.Add("benzene-status", status ?? "Unknown");
 
-        var statusCode = resolver.GetService<IGrpcStatusCodeMapper>().Map(status);
+        var statusCode = resolver.GetService<IGrpcStatusCodeMapper>().Map(status, isSuccessful);
         if (statusCode != StatusCode.OK)
         {
             var errors = grpcContext.MessageHandlerResult?.BenzeneResult.Errors;

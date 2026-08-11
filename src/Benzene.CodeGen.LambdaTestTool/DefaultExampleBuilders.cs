@@ -39,7 +39,7 @@ public static class DefaultExampleBuilders
             new ExampleBuilder("benzene-message", (topic, payload) => new
             {
                 topic,
-                headers = new Dictionary<string, string>(),
+                headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
                 body = JsonConvert.SerializeObject(payload)
             }, knownValues),
             new ExampleBuilder("sns", (topic, payload) => MessageBuilder.Create(topic, payload).AsSns(), knownValues),

@@ -32,6 +32,7 @@ internal class DefaultResponseStatusHandler<TContext> : IResponseHandler<TContex
     public ValueTask HandleAsync(TContext context, IMessageHandlerResult messageHandlerResult)
     {
         _benzeneResponseAdapter.SetStatusCode(context, messageHandlerResult.BenzeneResult.Status);
+        _benzeneResponseAdapter.SetSuccessful(context, messageHandlerResult.BenzeneResult.IsSuccessful);
         return default;
     }
 }

@@ -9,7 +9,7 @@ public static class ClientExtensions
     public static Task<IBenzeneResult<TResponse>> SendMessageAsync<TMessage, TResponse>(
         this IBenzeneMessageClient source, string topic, TMessage message)
     {
-        return source.SendMessageAsync<TMessage, TResponse>(topic, message, new Dictionary<string, string>());
+        return source.SendMessageAsync<TMessage, TResponse>(topic, message, new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
     }
 
     public static Task<IBenzeneResult<TResponse>> SendMessageAsync<TMessage, TResponse>(
@@ -21,7 +21,7 @@ public static class ClientExtensions
     public static async Task<IBenzeneResult> SendMessageAsync<TRequest>(this IBenzeneMessageClient client,
         string topic, TRequest request)
     {
-        var clientRequest = new BenzeneClientRequest<TRequest>(topic, request, new Dictionary<string, string>());
+        var clientRequest = new BenzeneClientRequest<TRequest>(topic, request, new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
         return await client.SendMessageAsync<TRequest, Void>(clientRequest);
     }
 
@@ -45,7 +45,7 @@ public static class ClientExtensions
     /// </summary>
     public static IDictionary<string, string> WithVersion(this IDictionary<string, string>? headers, string version)
     {
-        var merged = headers is null ? new Dictionary<string, string>() : new Dictionary<string, string>(headers);
+        var merged = headers is null ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) : new Dictionary<string, string>(headers, StringComparer.OrdinalIgnoreCase);
         if (!string.IsNullOrEmpty(version))
         {
             merged[MessageVersionHeaders.Default] = version;

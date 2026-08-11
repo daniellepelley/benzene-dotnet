@@ -6,7 +6,7 @@ public class GrpcMessageHeadersGetter : IMessageHeadersGetter<GrpcContext>
 {
     public IDictionary<string, string> GetHeaders(GrpcContext context)
     {
-        var headers = new Dictionary<string, string>();
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var entry in context.CallContext.RequestHeaders)
         {

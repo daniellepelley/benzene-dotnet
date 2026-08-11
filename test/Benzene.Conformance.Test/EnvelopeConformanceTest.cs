@@ -42,6 +42,13 @@ public class EnvelopeConformanceTest
         public string StatusCode { get; set; } = string.Empty;
         public JsonElement? Body { get; set; }
         public Dictionary<string, string>? Headers { get; set; }
+
+        /// <summary>
+        /// Optional (wire-contracts.md §1.2): when present, asserted against the response envelope's
+        /// <c>isSuccessful</c> field - the wire's authoritative success/failure signal, which a
+        /// receiver honors over any classification it derives from <c>statusCode</c> text.
+        /// </summary>
+        public bool? IsSuccessful { get; set; }
     }
 
     private static readonly Lazy<EnvelopeFixture> Fixture = new(() =>
@@ -67,6 +74,12 @@ public class EnvelopeConformanceTest
 
         Assert.NotNull(response);
         Assert.Equal(envelopeCase.Expected.StatusCode, response.StatusCode);
+
+        if (envelopeCase.Expected.IsSuccessful is { } expectedIsSuccessful)
+        {
+            Assert.True(expectedIsSuccessful == response.IsSuccessful,
+                $"{caseName}: expected isSuccessful={expectedIsSuccessful} but found {response.IsSuccessful}");
+        }
 
         if (envelopeCase.Expected.Body is { } expectedBody)
         {

@@ -141,7 +141,7 @@ public sealed class HttpMeshTraceExporter : IMeshTraceExporter, IAsyncDisposable
             var envelope = new
             {
                 topic = MeshTopics.Traces,
-                headers = new Dictionary<string, string>(),
+                headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
                 body = MeshJson.Serialize(new MeshTraceBatch { Events = batch.ToList() })
             };
             using var content = new StringContent(JsonSerializer.Serialize(envelope), System.Text.Encoding.UTF8, "application/json");

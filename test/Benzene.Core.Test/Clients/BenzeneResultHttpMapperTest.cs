@@ -48,10 +48,20 @@ public class BenzeneResultHttpMapperTest
     }
 
     [Fact]
-    public void NormalizeStatus_UnrecognizedValues_ReturnNull()
+    public void NormalizeStatus_ApplicationDefinedOrUnmappedNumericStatus_PassesThroughVerbatim()
     {
-        Assert.Null(BenzeneResultHttpMapper.NormalizeStatus("418"));
-        Assert.Null(BenzeneResultHttpMapper.NormalizeStatus("SomeCustomStatus"));
+        // An application-defined status (not in the known vocabulary, not one of the mapped numeric
+        // HTTP codes) round-trips instead of being coerced to null (which callers used to turn into
+        // unexpected-error) - the caller's IsSuccessful, not this method, is what tells the receiver
+        // whether it was a success.
+        Assert.Equal("SomeCustomStatus", BenzeneResultHttpMapper.NormalizeStatus("SomeCustomStatus"));
+        Assert.Equal("418", BenzeneResultHttpMapper.NormalizeStatus("418"));
+    }
+
+    [Fact]
+    public void NormalizeStatus_MissingStatus_ReturnsNull()
+    {
         Assert.Null(BenzeneResultHttpMapper.NormalizeStatus(null));
+        Assert.Null(BenzeneResultHttpMapper.NormalizeStatus(string.Empty));
     }
 }

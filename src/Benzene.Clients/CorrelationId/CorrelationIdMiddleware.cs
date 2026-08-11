@@ -18,8 +18,12 @@ public class CorrelationIdMiddleware : IMiddleware<OutboundContext>
     /// Initializes a new instance of the <see cref="CorrelationIdMiddleware"/> class.
     /// </summary>
     /// <param name="correlationId">The correlation ID provider to read from.</param>
-    /// <param name="correlationKey">The header key to stamp the correlation ID onto.</param>
-    public CorrelationIdMiddleware(ICorrelationId correlationId, string correlationKey = "correlationId")
+    /// <param name="correlationKey">
+    /// The header key to stamp the correlation ID onto. Defaults to
+    /// <see cref="CorrelationHeaderDefaults.HeaderKey"/> - the same default the inbound diagnostics
+    /// trace tag reads, so the two directions join up without configuration.
+    /// </param>
+    public CorrelationIdMiddleware(ICorrelationId correlationId, string correlationKey = CorrelationHeaderDefaults.HeaderKey)
     {
         _correlationId = correlationId;
         _correlationKey = correlationKey;

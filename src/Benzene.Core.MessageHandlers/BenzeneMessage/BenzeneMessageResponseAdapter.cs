@@ -32,6 +32,13 @@ internal class BenzeneMessageResponseAdapter : IBenzeneResponseAdapter<BenzeneMe
     }
 
     /// <inheritdoc />
+    public void SetSuccessful(BenzeneMessageContext context, bool isSuccessful)
+    {
+        context.EnsureResponseExists();
+        context.BenzeneMessageResponse.IsSuccessful = isSuccessful;
+    }
+
+    /// <inheritdoc />
     public void SetBody(BenzeneMessageContext context, string body)
     {
         context.EnsureResponseExists();

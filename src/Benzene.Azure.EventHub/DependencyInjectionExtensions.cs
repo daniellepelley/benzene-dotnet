@@ -45,7 +45,9 @@ public static class DependencyInjectionExtensions
         // TryAdd: a user registration made earlier (ConfigureServices runs before Configure, where
         // UseEventHub calls this) wins over these per-context defaults.
         services.TryAddScoped<IMessageTopicGetter<EventHubConsumerContext>>(resolver =>
-            new PresetTopicMessageTopicGetter<EventHubConsumerContext>(new EventHubConsumerMessageTopicGetter(topicPropertyKey), resolver.GetService<PresetTopicHolder>()));
+            new PresetTopicMessageTopicGetter<EventHubConsumerContext>(
+                new EventHubConsumerMessageTopicGetter(ResolveTopicPropertyKey(resolver, topicPropertyKey)),
+                resolver.GetService<PresetTopicHolder>()));
         services.TryAddHeaderMessageVersionGetter<EventHubConsumerContext>();
         services.TryAddScoped<IMessageHeadersGetter<EventHubConsumerContext>, EventHubConsumerMessageHeadersGetter>();
         services.TryAddScoped<IMessageBodyGetter<EventHubConsumerContext>, EventHubConsumerMessageBodyGetter>();
@@ -56,5 +58,20 @@ public static class DependencyInjectionExtensions
         services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.EventHub));
 
         return services;
+    }
+
+    /// <summary>
+    /// Resolves the effective topic-property key: if the caller left <paramref name="topicPropertyKey"/>
+    /// at this transport's own default, a DI-registered <see cref="Benzene.Abstractions.IBenzeneWireNames"/>
+    /// (see <c>docs/specification/wire-contracts.md</c> §2) can still override it. An explicit
+    /// non-default <paramref name="topicPropertyKey"/> always wins - resolved lazily (this factory
+    /// runs at first use), so a later <see cref="Benzene.Abstractions.IBenzeneWireNames"/> registration
+    /// is still picked up regardless of registration order.
+    /// </summary>
+    private static string ResolveTopicPropertyKey(Benzene.Abstractions.DI.IServiceResolver resolver, string topicPropertyKey)
+    {
+        return topicPropertyKey == EventHubConsumerMessageTopicGetter.DefaultTopicProperty
+            ? resolver.TryGetService<Benzene.Abstractions.IBenzeneWireNames>()?.Topic ?? topicPropertyKey
+            : topicPropertyKey;
     }
 }

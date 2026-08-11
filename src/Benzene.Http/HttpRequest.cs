@@ -23,5 +23,5 @@ public class HttpRequest
     /// <summary>
     /// Gets or sets the HTTP headers included in the request.
     /// </summary>
-    public IDictionary<string, string> Headers { get; set; } = new Dictionary<string, string>();
+    public IDictionary<string, string> Headers { get; set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 }
