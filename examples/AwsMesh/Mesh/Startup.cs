@@ -8,6 +8,7 @@ using Benzene.Diagnostics;
 using Benzene.Http;
 using Benzene.Http.Cors;
 using Benzene.Http.BenzeneMessage;
+using Benzene.Mesh.Artifacts;
 using Benzene.Mesh.Aws.Lambda;
 using Benzene.Mesh.Aws.S3;
 using Benzene.Mesh.Collector;

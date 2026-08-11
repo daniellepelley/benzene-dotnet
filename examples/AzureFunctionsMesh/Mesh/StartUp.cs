@@ -7,6 +7,7 @@ using Benzene.Core.Middleware;
 using Benzene.Diagnostics;
 using Benzene.Http;
 using Benzene.Http.Cors;
+using Benzene.Mesh.Artifacts;
 using Benzene.Mesh.Azure.Blob;
 using Benzene.Mesh.Contracts;
 using Benzene.Mesh.Discovery.Azure;

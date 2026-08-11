@@ -7,6 +7,7 @@ using Benzene.Http;
 using Benzene.Http.BenzeneMessage;
 using Benzene.Http.Cors;
 using Benzene.Mesh.Aggregator;
+using Benzene.Mesh.Artifacts;
 using Benzene.Mesh.Collector;
 using Benzene.Mesh.Contracts;
 using Benzene.Mesh.Discovery.Kubernetes;

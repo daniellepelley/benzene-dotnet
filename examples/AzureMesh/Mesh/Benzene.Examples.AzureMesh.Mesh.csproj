@@ -22,6 +22,7 @@
     <ProjectReference Include="..\..\..\src\Benzene.Mesh.Aggregator\Benzene.Mesh.Aggregator.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Mesh.Discovery.Azure\Benzene.Mesh.Discovery.Azure.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Mesh.Azure.Blob\Benzene.Mesh.Azure.Blob.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Mesh.Artifacts\Benzene.Mesh.Artifacts.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Mesh.Ui\Benzene.Mesh.Ui.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Mesh.Contracts\Benzene.Mesh.Contracts.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Mesh.Usage.ApplicationInsights\Benzene.Mesh.Usage.ApplicationInsights.csproj" />

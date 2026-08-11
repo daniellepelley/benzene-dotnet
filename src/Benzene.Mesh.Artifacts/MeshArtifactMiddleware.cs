@@ -4,14 +4,15 @@ using Benzene.Http;
 using Benzene.Http.Cors;
 using Benzene.Mesh.Aggregator;
 
-namespace Benzene.Examples.AwsMesh.Mesh;
+namespace Benzene.Mesh.Artifacts;
 
 /// <summary>
 /// Serves the mesh aggregator's generated catalog artifacts (<c>manifest.json</c>, <c>topology.json</c>,
-/// <c>services/*.json</c>, <c>asyncapi.json</c>) over HTTP by reading them from the
-/// <see cref="IMeshArtifactStore"/> (S3), so the Mesh UI — a static page that fetches
-/// <c>manifest.json</c> relatively — has something to load. Mirrors <c>Benzene.Spec.Ui</c>'s
-/// middleware pattern (drives the response adapter directly).
+/// <c>services/*.json</c>, <c>usage.json</c>, <c>annotations.json</c>, <c>asyncapi.json</c>) over HTTP by
+/// reading them from the registered <see cref="IMeshArtifactStore"/> (filesystem, S3, Blob Storage,
+/// GCS - whichever adapter is wired), so the Mesh UI - a static page that fetches <c>manifest.json</c>
+/// relatively - has something to load regardless of which store backs the deployment. Mirrors
+/// <c>Benzene.Spec.Ui</c>'s middleware pattern (drives the response adapter directly).
 /// </summary>
 /// <remarks>
 /// When a <see cref="CorsSettings"/> is supplied it also stamps CORS headers on the artifact
@@ -104,28 +105,12 @@ public class MeshArtifactMiddleware<TContext> : IMiddleware<TContext> where TCon
         _responseAdapter.SetResponseHeader(context, "Access-Control-Allow-Methods", "GET,HEAD,OPTIONS");
     }
 
+    // The full artifact set the aggregator can produce - every adapter that serves it must offer all
+    // of these regardless of which IMeshArtifactStore backs the deployment (2026-08-11: a K8sMesh copy
+    // of this list was found missing usage.json/annotations.json before this package existed; keep the
+    // set complete here so it can't drift again per hosting model).
     private static bool IsArtifact(string key)
         => key is "manifest.json" or "topology.json" or "topics.json" or "registry.json" or "asyncapi.json"
                   or "usage.json" or "annotations.json"
            || (key.StartsWith("services/", StringComparison.Ordinal) && key.EndsWith(".json", StringComparison.Ordinal));
-}
-
-/// <summary>Pipeline wiring for <see cref="MeshArtifactMiddleware{TContext}"/>.</summary>
-public static class MeshArtifactExtensions
-{
-    /// <summary>
-    /// Serves the mesh catalog artifacts from the registered <see cref="IMeshArtifactStore"/>.
-    /// Pass a <paramref name="corsSettings"/> to also stamp CORS headers on the artifact responses
-    /// (e.g. so the AsyncAPI Studio deep-link can fetch <c>asyncapi.json</c> cross-origin).
-    /// </summary>
-    public static IMiddlewarePipelineBuilder<TContext> UseMeshArtifacts<TContext>(
-        this IMiddlewarePipelineBuilder<TContext> app, CorsSettings? corsSettings = null)
-        where TContext : IHttpContext
-    {
-        return app.Use(resolver => new MeshArtifactMiddleware<TContext>(
-            resolver.GetService<IMeshArtifactStore>(),
-            resolver.GetService<IHttpRequestAdapter<TContext>>(),
-            resolver.GetService<IBenzeneResponseAdapter<TContext>>(),
-            corsSettings));
-    }
 }
