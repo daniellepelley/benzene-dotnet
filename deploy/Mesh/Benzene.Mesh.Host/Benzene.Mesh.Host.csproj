@@ -11,7 +11,16 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Task 2.4 (work/enterprise/slice-2-auth.md) - the one new NuGet dependency this slice
+         authorizes, for interactive OIDC browser login (AddCookie + AddOpenIdConnect in Startup). -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\..\src\Benzene.AspNet.Core\Benzene.AspNet.Core.csproj" />
+    <!-- AuthenticationHolder (Benzene.Auth.Core) + IBasicAuthCredentialValidator (Benzene.Auth.Basic) -
+         reused by MeshAuthGate rather than rebuilt; see slice-2-auth.md's "what already exists". -->
+    <ProjectReference Include="..\..\..\src\Benzene.Auth.Basic\Benzene.Auth.Basic.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Microsoft.Dependencies\Benzene.Microsoft.Dependencies.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Mesh.Aggregator\Benzene.Mesh.Aggregator.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Mesh.Artifacts\Benzene.Mesh.Artifacts.csproj" />

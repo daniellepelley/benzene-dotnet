@@ -40,7 +40,7 @@ int ValidateConfig(string? meshConfigPath)
         Console.WriteLine($"  fleet: {config.Fleet.Source}");
         Console.WriteLine($"  topology: {config.Topology.Source}");
         Console.WriteLine($"  dispatch: {(config.Dispatch.Enabled ? $"enabled (allowInProduction={config.Dispatch.AllowInProduction})" : "disabled")}");
-        Console.WriteLine($"  auth: {config.Auth.Mode}");
+        Console.WriteLine($"  auth: {config.Auth.Mode} (ingestion={config.Auth.Ingestion.Mode})");
         return 0;
     }
     catch (Exception ex)

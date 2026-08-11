@@ -1,0 +1,360 @@
+using System.Net;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
+using Benzene.Auth.Basic;
+using Benzene.Auth.Core;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Benzene.Mesh.Host;
+
+/// <summary>
+/// The single auth gate for the whole host (work/enterprise/slice-2-auth.md, tasks 2.2-2.6). Registered
+/// as ASP.NET Core middleware in <see cref="Startup.Configure"/> immediately after
+/// <c>app.UseRouting()</c> and before <c>app.UseStaticFiles(...)</c> - the file-artifact-store branch
+/// serves <c>/artifacts/*</c> entirely outside the Benzene pipeline below, so a gate placed only inside
+/// <c>UseHttp</c> would leave that branch (the default) world-readable. See <c>Startup.cs</c>'s remarks
+/// for the two artifact-store branches this one placement has to cover.
+/// </summary>
+/// <remarks>
+/// One gate, not three mechanisms per mode: <c>proxy</c>/<c>basic</c>/<c>oidc</c> are all decided here,
+/// so <c>/artifacts</c> (outside the Benzene pipeline) and everything inside it are protected the same
+/// way. On success this also sets <see cref="AuthenticationHolder.Principal"/> - resolved from
+/// <see cref="HttpContext.RequestServices"/>, the same <see cref="IServiceProvider"/>
+/// <c>Benzene.Microsoft.Dependencies</c> backs Benzene's own <c>IServiceResolver</c> with, so a
+/// downstream Benzene-pipeline check (e.g. <c>AuthorizationExtensions.RequireRole</c>) sees the same
+/// scoped instance this gate populated.
+///
+/// The push-ingestion endpoint (<see cref="IngestionPath"/>) is deliberately exempt from all of the
+/// above - it is a service self-reporting, not a browser session, and is controlled independently by
+/// <c>auth.ingestion</c> instead (see <see cref="HandleIngestionAsync"/>).
+/// </remarks>
+public class MeshAuthGate
+{
+    /// <summary>The push-ingestion endpoint's route - see <c>MeshReportMessageHandler</c>'s <c>[HttpEndpoint]</c>.</summary>
+    public const string IngestionPath = "/mesh/report";
+
+    /// <summary>The header <c>auth.ingestion.mode: "sharedSecret"</c> reads its secret from.</summary>
+    public const string IngestSecretHeaderName = "X-Mesh-Ingest-Secret";
+
+    private static readonly string[] ValidModes = { "none", "proxy", "basic", "oidc" };
+    private static readonly string[] ValidIngestionModes = { "open", "sharedSecret" };
+
+    private readonly RequestDelegate _next;
+    private readonly MeshAuthConfig _config;
+    private readonly IBasicAuthCredentialValidator? _basicValidator;
+
+    /// <summary>Initializes a new instance of the <see cref="MeshAuthGate"/> class.</summary>
+    /// <exception cref="InvalidOperationException">The config is unsafe or incomplete for the selected mode - see <see cref="Validate"/>.</exception>
+    public MeshAuthGate(RequestDelegate next, MeshAuthConfig config)
+    {
+        Validate(config);
+        _next = next;
+        _config = config;
+        if (string.Equals(config.Mode, "basic", StringComparison.OrdinalIgnoreCase))
+        {
+            _basicValidator = new EnvBasicAuthCredentialValidator(
+                Environment.GetEnvironmentVariable("MESH_BASIC_USER")!,
+                Environment.GetEnvironmentVariable("MESH_BASIC_PASSWORD")!);
+        }
+    }
+
+    /// <summary>
+    /// Fails fast, naming the problem, rather than starting with a config that would silently under-
+    /// protect the host - the house rule this whole feature exists to uphold. Called both from the
+    /// constructor (so the running host refuses to start) and from <see cref="MeshConfigValidator"/>
+    /// (so <c>--validate-config</c> catches it before a deploy).
+    /// </summary>
+    public static void Validate(MeshAuthConfig config)
+    {
+        if (!ValidModes.Contains(config.Mode, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Unknown auth mode '{config.Mode}'. Valid values: {string.Join(", ", ValidModes)}.");
+        }
+
+        if (!ValidIngestionModes.Contains(config.Ingestion.Mode, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Unknown auth.ingestion mode '{config.Ingestion.Mode}'. Valid values: {string.Join(", ", ValidIngestionModes)}.");
+        }
+
+        switch (config.Mode.ToLowerInvariant())
+        {
+            case "proxy":
+                if (config.Proxy.TrustedProxies.Length == 0)
+                {
+                    throw new InvalidOperationException(
+                        "auth.mode 'proxy' requires at least one entry in auth.proxy.trustedProxies - " +
+                        "trusting a forwarded-identity header from an unrestricted set of peers is a " +
+                        "total authentication bypass (anyone who can reach the host could set it themselves).");
+                }
+
+                break;
+            case "basic":
+                if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MESH_BASIC_USER")) ||
+                    string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MESH_BASIC_PASSWORD")))
+                {
+                    throw new InvalidOperationException(
+                        "auth.mode 'basic' requires the MESH_BASIC_USER and MESH_BASIC_PASSWORD " +
+                        "environment variables to both be set.");
+                }
+
+                break;
+            case "oidc":
+                if (string.IsNullOrEmpty(config.Oidc.Authority) || string.IsNullOrEmpty(config.Oidc.ClientId))
+                {
+                    throw new InvalidOperationException("auth.mode 'oidc' requires auth.oidc.authority and auth.oidc.clientId to be set.");
+                }
+
+                if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(config.Oidc.ClientSecretEnvVar)))
+                {
+                    throw new InvalidOperationException(
+                        $"auth.mode 'oidc' requires the environment variable named by auth.oidc.clientSecretEnvVar " +
+                        $"('{config.Oidc.ClientSecretEnvVar}') to be set.");
+                }
+
+                break;
+        }
+
+        if (string.Equals(config.Ingestion.Mode, "sharedSecret", StringComparison.OrdinalIgnoreCase) &&
+            string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MESH_INGEST_SECRET")))
+        {
+            throw new InvalidOperationException("auth.ingestion.mode 'sharedSecret' requires the MESH_INGEST_SECRET environment variable to be set.");
+        }
+    }
+
+    /// <summary>Handles one request - see the class remarks for the overall shape.</summary>
+    public async Task InvokeAsync(HttpContext context)
+    {
+        if (context.Request.Path.Equals(IngestionPath, StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleIngestionAsync(context);
+            return;
+        }
+
+        if (string.Equals(_config.Mode, "none", StringComparison.OrdinalIgnoreCase))
+        {
+            await _next(context);
+            return;
+        }
+
+        var principal = _config.Mode.ToLowerInvariant() switch
+        {
+            "proxy" => await AuthenticateProxyAsync(context),
+            "basic" => await AuthenticateBasicAsync(context),
+            "oidc" => await AuthenticateOidcAsync(context),
+            _ => null,
+        };
+
+        if (principal == null)
+        {
+            // Each Authenticate* above has already written the 401 (or, for oidc, the redirect
+            // challenge) - nothing more to do.
+            return;
+        }
+
+        if (!IsPermitted(principal))
+        {
+            await WriteForbiddenAsync(context, "Not permitted (allowedEmailDomains/requiredGroups)");
+            return;
+        }
+
+        var holder = context.RequestServices.GetService<AuthenticationHolder>();
+        if (holder != null)
+        {
+            holder.Principal = principal;
+        }
+
+        await _next(context);
+    }
+
+    private async Task<ClaimsPrincipal?> AuthenticateProxyAsync(HttpContext context)
+    {
+        if (!context.Request.Headers.TryGetValue(_config.Proxy.UserHeader, out var userHeader) || string.IsNullOrWhiteSpace(userHeader))
+        {
+            await WriteUnauthorizedAsync(context, "Missing identity header");
+            return null;
+        }
+
+        var peer = context.Connection.RemoteIpAddress;
+        var isTrusted = peer != null && _config.Proxy.TrustedProxies.Any(p => IPAddress.TryParse(p, out var trusted) && trusted.Equals(peer));
+        if (!isTrusted)
+        {
+            await WriteUnauthorizedAsync(context, "Untrusted proxy");
+            return null;
+        }
+
+        var identity = new ClaimsIdentity("Proxy");
+        identity.AddClaim(new Claim(ClaimTypes.Name, userHeader.ToString()));
+        identity.AddClaim(new Claim(ClaimTypes.Email, userHeader.ToString()));
+        return new ClaimsPrincipal(identity);
+    }
+
+    private async Task<ClaimsPrincipal?> AuthenticateBasicAsync(HttpContext context)
+    {
+        const string schemePrefix = "Basic ";
+        if (!context.Request.Headers.TryGetValue("Authorization", out var authorization) ||
+            string.IsNullOrEmpty(authorization) ||
+            !authorization.ToString().StartsWith(schemePrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            await ChallengeBasicAsync(context, "Missing or malformed Authorization header");
+            return null;
+        }
+
+        string decoded;
+        try
+        {
+            decoded = Encoding.UTF8.GetString(Convert.FromBase64String(authorization.ToString()[schemePrefix.Length..].Trim()));
+        }
+        catch (FormatException)
+        {
+            await ChallengeBasicAsync(context, "Malformed Basic credentials");
+            return null;
+        }
+
+        var separator = decoded.IndexOf(':');
+        if (separator < 0)
+        {
+            await ChallengeBasicAsync(context, "Malformed Basic credentials");
+            return null;
+        }
+
+        var principal = await _basicValidator!.ValidateAsync(decoded[..separator], decoded[(separator + 1)..]);
+        if (principal == null)
+        {
+            await ChallengeBasicAsync(context, "Invalid credentials");
+            return null;
+        }
+
+        return principal;
+    }
+
+    private async Task<ClaimsPrincipal?> AuthenticateOidcAsync(HttpContext context)
+    {
+        if (context.User.Identity?.IsAuthenticated == true)
+        {
+            return context.User;
+        }
+
+        await context.ChallengeAsync(OpenIdConnectDefaults.AuthenticationScheme);
+        return null;
+    }
+
+    private bool IsPermitted(ClaimsPrincipal principal)
+    {
+        if (_config.AllowedEmailDomains.Length > 0)
+        {
+            var email = principal.FindFirst(ClaimTypes.Email)?.Value;
+            var domain = email != null && email.Contains('@') ? email[(email.IndexOf('@') + 1)..] : null;
+            if (domain == null || !_config.AllowedEmailDomains.Any(d => string.Equals(d, domain, StringComparison.OrdinalIgnoreCase)))
+            {
+                return false;
+            }
+        }
+
+        if (_config.RequiredGroups.Length > 0)
+        {
+            var granted = principal.FindAll("groups").Concat(principal.FindAll(ClaimTypes.Role))
+                .Concat(principal.FindAll("role")).Concat(principal.FindAll("roles"))
+                .Select(c => c.Value);
+            var hasGroup = _config.RequiredGroups.Any(g => granted.Contains(g, StringComparer.Ordinal)) ||
+                _config.RequiredGroups.Any(principal.IsInRole);
+            if (!hasGroup)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// <c>open</c> (default) preserves today's behaviour: self-reporting services need nothing.
+    /// <c>sharedSecret</c> requires <see cref="IngestSecretHeaderName"/> to match
+    /// <c>MESH_INGEST_SECRET</c>, compared in constant time - a naive <c>==</c> on a secret is a
+    /// timing oracle. Deliberately independent of <see cref="MeshAuthConfig.Mode"/>: a browser login
+    /// flow cannot cover a service-to-service write endpoint.
+    /// </summary>
+    private async Task HandleIngestionAsync(HttpContext context)
+    {
+        if (!string.Equals(_config.Ingestion.Mode, "sharedSecret", StringComparison.OrdinalIgnoreCase))
+        {
+            await _next(context);
+            return;
+        }
+
+        var expected = Environment.GetEnvironmentVariable("MESH_INGEST_SECRET") ?? string.Empty;
+        var provided = context.Request.Headers.TryGetValue(IngestSecretHeaderName, out var header) ? header.ToString() : string.Empty;
+        if (!FixedTimeEquals(provided, expected))
+        {
+            await WriteUnauthorizedAsync(context, "Missing or invalid ingestion secret");
+            return;
+        }
+
+        await _next(context);
+    }
+
+    private async Task ChallengeBasicAsync(HttpContext context, string detail)
+    {
+        context.Response.Headers.Append("WWW-Authenticate", "Basic realm=\"Benzene Mesh\"");
+        await WriteUnauthorizedAsync(context, detail);
+    }
+
+    private static async Task WriteUnauthorizedAsync(HttpContext context, string detail)
+    {
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        await context.Response.WriteAsync(detail);
+    }
+
+    private static async Task WriteForbiddenAsync(HttpContext context, string detail)
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        await context.Response.WriteAsync(detail);
+    }
+
+    /// <summary>
+    /// Constant-time string equality - a naive <c>==</c> on a secret is a timing oracle. Compares two
+    /// equal-length buffers derived from <paramref name="a"/> itself when lengths differ, so a length
+    /// mismatch doesn't return measurably faster than a same-length mismatch.
+    /// </summary>
+    internal static bool FixedTimeEquals(string a, string b)
+    {
+        var aBytes = Encoding.UTF8.GetBytes(a);
+        var bBytes = Encoding.UTF8.GetBytes(b);
+        return aBytes.Length == bBytes.Length
+            ? CryptographicOperations.FixedTimeEquals(aBytes, bBytes)
+            : CryptographicOperations.FixedTimeEquals(aBytes, aBytes) && false;
+    }
+}
+
+/// <summary>
+/// Mode <c>basic</c>'s <see cref="IBasicAuthCredentialValidator"/> - a single service-account-style
+/// credential pair from the environment (<c>MESH_BASIC_USER</c>/<c>MESH_BASIC_PASSWORD</c>), never
+/// <c>mesh.json</c>. Reuses <c>Benzene.Auth.Basic</c>'s validator contract rather than a bespoke shape.
+/// </summary>
+internal class EnvBasicAuthCredentialValidator : IBasicAuthCredentialValidator
+{
+    private readonly string _username;
+    private readonly string _password;
+
+    public EnvBasicAuthCredentialValidator(string username, string password)
+    {
+        _username = username;
+        _password = password;
+    }
+
+    public Task<ClaimsPrincipal?> ValidateAsync(string username, string password)
+    {
+        var matches = MeshAuthGate.FixedTimeEquals(username, _username) & MeshAuthGate.FixedTimeEquals(password, _password);
+        if (!matches)
+        {
+            return Task.FromResult<ClaimsPrincipal?>(null);
+        }
+
+        var identity = new ClaimsIdentity("Basic");
+        identity.AddClaim(new Claim(ClaimTypes.Name, username));
+        return Task.FromResult<ClaimsPrincipal?>(new ClaimsPrincipal(identity));
+    }
+}

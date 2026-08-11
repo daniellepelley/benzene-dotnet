@@ -41,7 +41,21 @@ alongside their other infra), rather than only against `examples/Mesh/`'s demo/f
 - `MeshConfigValidator` - backs `--validate-config` (see `Program.cs`): binds `mesh.json` and runs
   every `MeshSourceRegistrar` registration against a throwaway container, so a config mistake surfaces
   before a deploy rather than after one. No network call happens either way - every adapter package
-  registers its cloud client lazily.
+  registers its cloud client lazily. Also runs `MeshAuthGate.Validate` (work/enterprise/slice-2-auth.md),
+  the same fail-fast auth checks `Startup.Configure` runs.
+- `MeshAuthGate` - the single ASP.NET Core middleware every auth mode (`none`/`proxy`/`basic`/`oidc`)
+  goes through, registered in `Startup.Configure` immediately after `app.UseRouting()` and before
+  `app.UseStaticFiles(...)` so it covers both artifact-serving branches (the file store's
+  `UseStaticFiles` mount, entirely outside the Benzene pipeline, and the non-file stores'
+  `UseMeshArtifacts()` inside it) with one placement - see its own remarks for why. On success it sets
+  `Benzene.Auth.Core.AuthenticationHolder.Principal` (resolved off `HttpContext.RequestServices`, the
+  same provider `Benzene.Microsoft.Dependencies` backs Benzene's own `IServiceResolver` with), so a
+  downstream Benzene-pipeline check sees the same caller. Also decides `auth.ingestion` for
+  `/mesh/report` - exempt from every `auth.mode` above, since a self-reporting service is not a
+  browser session. `EnvBasicAuthCredentialValidator` (same file) is mode `basic`'s
+  `Benzene.Auth.Basic.IBasicAuthCredentialValidator`, backed by `MESH_BASIC_USER`/`MESH_BASIC_PASSWORD`.
+  `auth.dispatchRole` is bound/validated but **not yet enforced** - see the comment above
+  `UseMeshDispatch` in `Startup.cs` for why (a pre-existing dispatch-reachability gap, not an auth gap).
 - `MeshPollBackgroundService : BackgroundService` - runs `MeshAggregator.RunOnceAsync` on a timer
   (`MeshHostConfig.PollIntervalSeconds`) - new capability local to this Host app only, since a bare
   Compose deployment has no external scheduler the way a real deployment's `mesh:aggregate`
@@ -79,12 +93,29 @@ environment counts as Production). Because `MeshDispatchMessageHandler` carries 
 attribute, the default `.UseMessageHandlers()` scan does **not** expose it — unlike `/mesh/report`,
 it is genuinely absent until `Dispatch.Enabled` is set.
 
+**Found while writing slice 2 (auth) and not yet fixed, flagged rather than silently left:**
+`UseMeshDispatch()` (as wired here) only registers the handler *definition* into DI - unlike the
+fleet-query plane above, it is never placed on a `[HttpEndpoint]` route or a `UseBenzeneMessage`
+envelope. `AspNetMessageTopicGetter` resolves a request's topic purely by matching
+`[HttpEndpoint]`-attributed routes (`ReflectionHttpEndpointFinder` scans only that attribute), so
+even with `Dispatch.Enabled: true` there is today **no HTTP path in this host that reaches
+`mesh:dispatch`** - the registration exists, but nothing routes a request to it. This predates and is
+unrelated to slice 2; it blocked slice 2's `auth.dispatchRole` from being enforced (see
+`MeshAuthGate`'s doc entry above and the comment above `UseMeshDispatch` in `Startup.cs`). Fixing it
+means giving dispatch its own reachable endpoint (mirroring the fleet-query plane's
+`UseBenzeneMessage` pattern) - a deliberate design decision for whoever picks this up next, not made
+here.
+
 ## Dependencies on other Benzene packages
 Config schema v1 pulls in every `Benzene.Mesh.*` adapter package this host can select at runtime -
 see `Benzene.Mesh.Host.csproj` for the full list. **Deliberately absent: any
 `Benzene.Mesh.Discovery.*` package** - this host must stay physically incapable of enumerating a
 cloud account (see `../README.md`). The ones worth calling out by name:
 - **Benzene.AspNet.Core**, **Benzene.Microsoft.Dependencies** - the ASP.NET Core host wiring.
+- **Benzene.Auth.Basic** (transitively **Benzene.Auth.Core**) - `IBasicAuthCredentialValidator`
+  (`EnvBasicAuthCredentialValidator` implements it) and `AuthenticationHolder`, reused by
+  `MeshAuthGate` rather than rebuilt. `Microsoft.AspNetCore.Authentication.OpenIdConnect` (NuGet, not
+  a Benzene package) is `auth.mode: "oidc"`'s cookie + authorization-code wiring.
 - **Benzene.Mesh.Aggregator** - `AddMeshAggregator`, `MeshAggregator`, `MeshServiceRegistry`.
 - **Benzene.Mesh.Artifacts** - `UseMeshArtifacts()`, serving the catalog from any non-filesystem
   `IMeshArtifactStore` (`UseStaticFiles`/`PhysicalFileProvider` only ever covers the `file` case).
@@ -115,3 +146,11 @@ assertion checks a *registration*, never a resolved cloud client - see `AwsMeshP
 for why (constructing an unconfigured AWS/GCS SDK client throws immediately in any environment without
 an ambient region/ADC, which would make the test's pass/fail depend on the CI runner's environment
 rather than on this code).
+
+`MeshAuthGateTest` (unit-level, `MeshAuthGate` invoked directly against a `DefaultHttpContext` - no
+Kestrel needed for modes `proxy`/`basic`, the ingestion path, or oidc's "already authenticated"
+branch) and `MeshAuthAcceptanceTest` (slice 2's task 2.7 acceptance test - boots the *real* `Startup`
+on a real Kestrel-hosted pipeline via `UseStartup<Startup>()`, the same as `Program.cs`, and proves an
+unauthenticated request to every one of `/mesh-ui`, `/mesh-spec-ui.html`, the manifest, and a service
+artifact is refused in every non-`none` mode, against **both** artifact-store branches). See
+`MeshAuthAcceptanceTest`'s remarks for how it avoids needing a real OIDC provider or AWS credentials.

@@ -38,6 +38,10 @@ public static class MeshConfigValidator
         MeshSourceRegistrar.RegisterUsageSources(container, config.Usage);
         MeshSourceRegistrar.RegisterFleet(container, config.Fleet);
         MeshSourceRegistrar.RegisterTopology(container, config.Topology);
+        // Same fail-fast rules Startup.Configure() runs via MeshAuthGate.Validate (e.g. mode "proxy"
+        // with an empty trustedProxies list) - catch a config that would under-protect the host before
+        // a deploy, not after one.
+        MeshAuthGate.Validate(config.Auth);
 
         return config;
     }
