@@ -8,13 +8,13 @@ your worker has to do:
 | You want... | Use |
 |---|---|
 | A custom background loop (polling a database, a timer, a queue you talk to yourself), with the same `BenzeneStartUp` shape used by AWS/Azure/ASP.NET Core | **Part A** — `BenzeneStartUp` + `worker.Add(...)` |
-| A built-in consumer — Kafka (`Benzene.Kafka.Core`), RabbitMQ (`Benzene.RabbitMq`), Azure Service Bus (`Benzene.Azure.ServiceBus`), Azure Event Hubs (`Benzene.Azure.EventHub`), or a Cosmos DB Change Feed (`Benzene.Azure.CosmosDb`) — as part of the same process | **Part B** — `BenzeneStartUp` + `worker.UseKafka(...)`/`worker.UseRabbitMq(...)`/`worker.UseServiceBus(...)`/`worker.UseEventHub(...)`/`worker.UseCosmosDbChangeFeed(...)` |
+| A built-in consumer — SQS (`Benzene.Aws.Sqs`), Kafka (`Benzene.Kafka.Core`), RabbitMQ (`Benzene.RabbitMq`), Azure Service Bus (`Benzene.Azure.ServiceBus`), Azure Event Hubs (`Benzene.Azure.EventHub`), or a Cosmos DB Change Feed (`Benzene.Azure.CosmosDb`) — as part of the same process | **Part B** — `BenzeneStartUp` + `worker.UseSqs(...)`/`worker.UseKafka(...)`/`worker.UseRabbitMq(...)`/`worker.UseServiceBus(...)`/`worker.UseEventHub(...)`/`worker.UseCosmosDbChangeFeed(...)` |
 
 Both use the same `BenzeneStartUp` shape — the one exercised by
 `test/Benzene.Core.Test/Hosting/UnifiedStartUpTest.cs` and documented in
 [Unified Hosting Model](hosting.md). They differ only in what you register inside `UseWorker(...)`:
 Part A adds a worker class you wrote yourself, while Part B calls a built-in
-`UseKafka`/`UseRabbitMq`/`UseServiceBus`/`UseEventHub`/`UseCosmosDbChangeFeed` extension. Those built-in extensions
+`UseSqs`/`UseKafka`/`UseRabbitMq`/`UseServiceBus`/`UseEventHub`/`UseCosmosDbChangeFeed` extension. Those built-in extensions
 hang off the `IBenzeneWorkerStartup` builder that `UseWorker(...)` hands you — see
 [How `UseWorker` composes the built-in workers](#how-useworker-composes-the-built-in-workers) below
 for exactly how the two builders relate.
@@ -259,18 +259,27 @@ Note this bypasses `BenzeneStartUp`/`IBenzeneApplicationBuilder` entirely — `C
 receives an `IBenzeneWorkerStartup` directly (the same builder `UseWorker(...)` hands you), so it's
 a lighter-weight way to register a worker without going through the generic host.
 
-## Part B: built-in workers (Kafka, RabbitMQ, Service Bus, Event Hub, Cosmos DB)
+## Part B: built-in workers (SQS, Kafka, RabbitMQ, Service Bus, Event Hub, Cosmos DB)
 
-`Benzene.Kafka.Core` (see [Kafka Setup](getting-started-kafka.md)), `Benzene.RabbitMq` (see
-[RabbitMQ Setup](getting-started-rabbitmq.md)), `Benzene.Azure.ServiceBus`, `Benzene.Azure.EventHub`,
-and `Benzene.Azure.CosmosDb` ship built-in workers rather than asking you to write your own. Their
-`UseKafka`/`UseRabbitMq`/`UseServiceBus`/`UseEventHub`/`UseCosmosDbChangeFeed` extensions
-target `IBenzeneWorkerStartup` — the worker-specific builder that `UseWorker(...)` hands you — so you
-wire them up from the same `BenzeneStartUp` shape as Part A, just calling the built-in extensions
-inside `UseWorker(...)` instead of `worker.Add(...)`. (There is no self-hosted *HTTP* worker: for an
-HTTP endpoint alongside a worker, host on `Benzene.AspNet.Core` / Kestrel — see
-[Deprecations](deprecations.md) on why the former `HttpListener`-based `Benzene.SelfHost.Http` was
-removed.)
+`Benzene.Aws.Sqs` (below), `Benzene.Kafka.Core` (see [Kafka Setup](getting-started-kafka.md)),
+`Benzene.RabbitMq` (see [RabbitMQ Setup](getting-started-rabbitmq.md)), `Benzene.Azure.ServiceBus`,
+`Benzene.Azure.EventHub`, and `Benzene.Azure.CosmosDb` ship built-in workers rather than asking you
+to write your own. Their `UseSqs`/`UseKafka`/`UseRabbitMq`/`UseServiceBus`/`UseEventHub`/
+`UseCosmosDbChangeFeed` extensions target `IBenzeneWorkerStartup` — the worker-specific builder that
+`UseWorker(...)` hands you — so you wire them up from the same `BenzeneStartUp` shape as Part A, just
+calling the built-in extensions inside `UseWorker(...)` instead of `worker.Add(...)`. (There is no
+self-hosted *HTTP* worker: for an HTTP endpoint alongside a worker, host on `Benzene.AspNet.Core` /
+Kestrel — see [Deprecations](deprecations.md) on why the former `HttpListener`-based
+`Benzene.SelfHost.Http` was removed.)
+
+**Worth reaching for even when a queue/stream is the only transport this service will ever have.**
+None of the six give you anything HTTP doesn't already get for free from ASP.NET Core — routing to a
+handler and a middleware pipeline for cross-cutting concerns. Left to the raw SDK, an SQS/Kafka/
+RabbitMQ/Service Bus/Event Hub/Cosmos consumer hands you a message and stops there: deserializing the
+payload, dispatching on whatever identifies its type, and every cross-cutting concern (validation,
+correlation, retries, structured logging) is code you'd otherwise write yourself, usually inline in
+the receive loop. A built-in worker below is that missing layer for the one transport it wires up —
+you don't need a second transport in the picture to get value from it.
 
 Whichever built-in worker you use, host it exactly like Part A, with `Benzene.HostedService`'s
 `UseBenzene<StartUp>()`, which registers the worker as an `IHostedService`:
@@ -291,6 +300,50 @@ Add Kafka consumption the same way, inside the same `UseWorker(...)`, via
 see [Kafka Setup](getting-started-kafka.md#1-self-hosted-kafka-worker-benzenekafkacore) for the full
 walkthrough; `examples/Kafka/Benzene.Examples.Kafka` is a runnable version of exactly this Kafka
 worker.
+
+### AWS SQS (`Benzene.Aws.Sqs`)
+
+Poll an SQS queue directly — the self-hosted counterpart of the [Lambda SQS trigger](getting-started-aws.md),
+for a long-running process rather than a function invocation. `SqsConsumer` long-polls
+(`SqsConsumerConfig.WaitTimeSeconds`, default 20 — the maximum), runs each received batch through the
+pipeline, and by default (`SqsConsumerAckMode.PerMessage`) deletes only the messages whose handler
+reported an explicit success — a failed, thrown, or unrouted message is left on the queue individually
+for redelivery/DLQ redrive rather than lost with the rest of the batch.
+
+```bash
+dotnet add package Benzene.HostedService --prerelease
+dotnet add package Benzene.Aws.Sqs --prerelease
+```
+
+```csharp
+using Amazon.SQS;
+using Benzene.Aws.Sqs;
+using Benzene.Aws.Sqs.Consumer;
+using Benzene.Core.MessageHandlers;
+
+public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration)
+{
+    var config = new SqsConsumerConfig
+    {
+        QueueUrl = configuration["Sqs:QueueUrl"],
+        MaxNumberOfMessages = 10,
+    };
+
+    // The caller builds the AmazonSQSClient (default credential chain, a named profile, a LocalStack
+    // ServiceURL override, …), so Benzene never prescribes how you authenticate — same principle as
+    // the Service Bus/Event Hub workers below.
+    app.UseWorker(worker => worker.UseSqs(
+        config,
+        new SqsClientFactory(new AmazonSQSClient()),
+        sqs => sqs.UseMessageHandlers()));
+}
+```
+
+The topic comes from a `topic` message attribute by default (`SqsConsumerConfig.TopicAttributeKey`) —
+set a different key to consume messages a non-Benzene producer routes on another attribute. See
+[Getting Started: Kubernetes](getting-started-kubernetes.md) for this worker deployed alongside an
+HTTP and a Kafka host, all three dispatching into one shared handler
+(`examples/K8sTransports/SqsWorker`).
 
 ### RabbitMQ (`Benzene.RabbitMq`)
 
@@ -530,11 +583,12 @@ public static IBenzeneApplicationBuilder UseWorker(this IBenzeneApplicationBuild
 }
 ```
 
-`Benzene.Kafka.Core.Extensions.UseKafka`, `Benzene.RabbitMq.Extensions.UseRabbitMq`,
-`Benzene.Azure.ServiceBus.Extensions.UseServiceBus`, `Benzene.Azure.EventHub.Extensions.UseEventHub`,
-and `Benzene.Azure.CosmosDb.Extensions.UseCosmosDbChangeFeed`
+`Benzene.Aws.Sqs.Extensions.UseSqs`, `Benzene.Kafka.Core.Extensions.UseKafka`,
+`Benzene.RabbitMq.Extensions.UseRabbitMq`, `Benzene.Azure.ServiceBus.Extensions.UseServiceBus`,
+`Benzene.Azure.EventHub.Extensions.UseEventHub`, and
+`Benzene.Azure.CosmosDb.Extensions.UseCosmosDbChangeFeed`
 are all written directly against `IBenzeneWorkerStartup` (calling `.Add(...)` to register the built-in
-`BenzeneKafkaWorker`/`RabbitMqWorker`/`BenzeneServiceBusWorker`/`BenzeneEventHubWorker`/`BenzeneCosmosChangeFeedWorker`), so you
+`SqsConsumer`/`BenzeneKafkaWorker`/`RabbitMqWorker`/`BenzeneServiceBusWorker`/`BenzeneEventHubWorker`/`BenzeneCosmosChangeFeedWorker`), so you
 call them on the `worker` builder that `UseWorker(...)` hands you — not on `IBenzeneApplicationBuilder`
 directly. If you write your own `IBenzeneWorker` from scratch (Part A), you don't need any of those
 packages; you register it with the same `worker.Add(...)` those extensions call under the hood.
@@ -551,9 +605,10 @@ packages; you register it with the same `worker.Add(...)` those extensions call 
 - **Wrong `UseBenzene<TStartUp>()` resolves** — if a project references both `Benzene.HostedService`
   and `Benzene.Azure.Function.Core`, make sure the `using` in scope is the one you intend; both
   declare an identically-shaped extension method on `IHostBuilder`.
-- **Can't call `.UseKafka(...)`/`.UseRabbitMq(...)`/`.UseServiceBus(...)`/`.UseEventHub(...)` directly on
-  `IBenzeneApplicationBuilder`** — these extend `IBenzeneWorkerStartup`, not `IBenzeneApplicationBuilder`;
-  call them on the `worker` builder inside `app.UseWorker(worker => worker.UseKafka(...))` (Part B).
+- **Can't call `.UseSqs(...)`/`.UseKafka(...)`/`.UseRabbitMq(...)`/`.UseServiceBus(...)`/`.UseEventHub(...)`
+  directly on `IBenzeneApplicationBuilder`** — these extend `IBenzeneWorkerStartup`, not
+  `IBenzeneApplicationBuilder`; call them on the `worker` builder inside
+  `app.UseWorker(worker => worker.UseKafka(...))` (Part B).
 - **Azure worker consumes nothing, no error** — the message-handler router needs a full set of
   per-context services; `UseServiceBus`/`UseEventHub` register them for you, but if you hand-roll
   the registration make sure `AddServiceBusConsumer()`/`AddEventHubConsumer()` ran (they add the

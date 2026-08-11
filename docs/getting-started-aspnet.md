@@ -189,6 +189,24 @@ The handler in the middle never touched `HttpContext`. Swap the transport pipeli
 AWS Lambda or Azure Functions one and the same handler runs there — that's the portability Benzene's
 hexagonal design buys you.
 
+## Why not just a minimal API?
+
+Worth asking honestly: `app.MapGet("/hello/{name}", (string name) => new { message = $"Hello {name}!" })`
+is one line of plain ASP.NET Core, no package, no attributes. For an HTTP-only service that never talks
+to anything else, that line does the same job this guide's five steps do, and you don't need Benzene to
+get it — ASP.NET Core's own routing and middleware pipeline already give HTTP everything Benzene's
+pipeline gives it here.
+
+The payoff shows up the moment this same logic needs a **second** entry point — a queue another team
+publishes to, a Kafka topic, a batch job that used to call this endpoint but really just wants to drop a
+message. `MapGet` has no answer for that; you'd write a second, separate handler and keep both in sync by
+hand. With Benzene the handler above doesn't change at all: [`Benzene.Aws.Sqs`](getting-started-worker.md)
+or [`Benzene.Kafka.Core`](getting-started-kafka.md) point a worker at the *same*
+`HelloWorldMessageHandler`, because it was never written against `HttpContext` in the first place — see
+[`examples/K8sTransports`](../examples/K8sTransports) for that running as three independent Kubernetes
+Deployments from one handler. If HTTP genuinely is and always will be the only way in, reach for
+`MapGet`/`MapPost`/controllers instead — you'll write less code, not more.
+
 ## Next steps
 
 - **Add validation** — reject bad requests before they reach your handler with
