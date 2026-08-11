@@ -98,18 +98,21 @@ can use unmodified.
 
 ```bash
 mkdir ../App && cd ../App
-dotnet new web -f net10.0
+dotnet new worker -f net10.0
 dotnet add package Benzene.AspNet.Core --prerelease
 dotnet add package Benzene.HostedService --prerelease
 dotnet add package Benzene.Aws.Sqs --prerelease
 dotnet add package Benzene.Kafka.Core --prerelease
 dotnet add reference ../Domain
+rm Worker.cs   # the template's sample background service - Benzene's workers replace it
 ```
 
-One project, one `BenzeneStartUp`, one `Configure`. ASP.NET Core here is purely the HTTP host for
-Benzene — no controllers, no other ASP.NET middleware — so it doesn't get to own the program shape:
-`UseAspNet` (`Benzene.AspNet.Core`) hosts Kestrel **as a worker**, a peer of `UseSqs` and
-`UseKafka`, and `Program.cs` is the plain generic host.
+One project, one `BenzeneStartUp`, one `Configure` — and note that's `dotnet new worker`, not
+`dotnet new web`. ASP.NET Core here is purely the HTTP host for Benzene — no controllers, no other
+ASP.NET middleware — so it doesn't get to own the program shape *or* the project shape: `UseAspNet`
+(`Benzene.AspNet.Core`) hosts Kestrel **as a worker**, a peer of `UseSqs` and `UseKafka`,
+`Program.cs` is the plain generic host, and the ASP.NET shared-framework reference flows in
+transitively through `Benzene.AspNet.Core`.
 
 ```csharp
 // Startup.cs - the whole service
