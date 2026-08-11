@@ -17,12 +17,24 @@ alongside their other infra), rather than only against `examples/Mesh/`'s demo/f
   (`_fleetEnabled`) so `Configure()` knows whether to point the mesh UI's `envelopeUrl` at
   `/benzene/invoke` and wire the inner `MeshCollectorHandlers.Queries` pipeline there, and whether
   `ArtifactStore.Type == "file"` so it knows whether to mount `UseStaticFiles`/`PhysicalFileProvider`
-  (local disk) or `Benzene.Mesh.Artifacts.UseMeshArtifacts()` (any other configured store).
+  (local disk) or `Benzene.Mesh.Artifacts.UseMeshArtifacts()` (any other configured store). Its
+  constructor also builds the effective `MeshServiceRegistry` (`BuildRegistryEntries`,
+  `BuildArtifactStoreForReading` - `work/enterprise/slice-3-discovery.md` task 3.1):
+  `MeshHostConfig.RegistryDocuments` (if any) are read back through a throwaway `IMeshArtifactStore`
+  matching `ArtifactStore`'s backend and unioned with `Services`, with `Services` always winning a
+  name clash. The read is synchronous (`.GetAwaiter().GetResult()`) because it has to complete inside
+  the constructor, before the registry becomes a fixed DI singleton for the rest of the host's life -
+  it is not re-read per poll. This is the *read* half of the discovery seam; the *write* half
+  (`Benzene.Mesh.Discovery.Host`, a separate deployable under `deploy/Discovery/`) shares no code
+  with this class - see "Dependencies on other Benzene packages" below for why that separation is
+  load-bearing, not incidental.
 - `MeshHostConfig`/`MeshHostServiceConfig` - the `mesh.json` binding shape (mutable properties, for
   `IConfiguration.Get<T>()` - this repo's first use of that pattern to bind a *list* of objects, see
   `work/service-mesh-roadmap-1.0.md`'s Phase D note). `MeshHostServiceConfig.ToEntry()` converts to
   the immutable `Benzene.Mesh.Contracts.MeshServiceRegistryEntry` the rest of the mesh feature uses,
   including the optional `OwningTeam` (the "who do I talk to" field the UI renders).
+  `MeshHostConfig.RegistryDocuments` (paths resolved through `ArtifactStore`) is the discovery-output
+  read list `Startup` unions with `Services` - see above.
 - `MeshHostConfigSections.cs` (`MeshArtifactStoreConfig`, `MeshUsageSourceConfig`, `MeshFleetConfig`,
   `MeshTopologyConfig`, `MeshDispatchConfig`, `MeshAuthConfig`) - config schema v1's section types,
   all mutable/defaulted for the same binder reason as `MeshHostConfig` itself. Every source-selecting
@@ -140,11 +152,14 @@ or `Benzene.sln` - a `ProjectReference` to this host from there would pull the h
 `Benzene.sln`'s build graph, contradicting the independent-lifecycle reasoning above). It references
 this project directly and exercises `MeshConfigLoader`, `MeshHostServiceConfig.ToEntry()`,
 `MeshHostConfig` binding (`MeshHostConfigTest`), every `MeshSourceRegistrar` source/type name and its
-fail-fast paths (`MeshSourceRegistrarTest`), `MeshConfigValidator` (`MeshConfigValidatorTest`), and
-the AwsMesh capability-for-capability acceptance test (`AwsMeshParityTest`). Every AWS/Azure/GCS-backed
-assertion checks a *registration*, never a resolved cloud client - see `AwsMeshParityTest`'s remarks
-for why (constructing an unconfigured AWS/GCS SDK client throws immediately in any environment without
-an ambient region/ADC, which would make the test's pass/fail depend on the CI runner's environment
+fail-fast paths (`MeshSourceRegistrarTest`), `MeshConfigValidator` (`MeshConfigValidatorTest`),
+`registryDocuments`' union/precedence/failure rules (`StartupRegistryDocumentsTest`), and the AwsMesh
+capability-for-capability acceptance test (`AwsMeshParityTest`, which also asserts - at the assembly
+level - that this host references no `Benzene.Mesh.Discovery.*` package; the exhaustive transitive
+version of that check is `NoDiscoveryInVanillaHostTest`). Every AWS/Azure/GCS-backed assertion checks
+a *registration*, never a resolved cloud client - see `AwsMeshParityTest`'s remarks for why
+(constructing an unconfigured AWS/GCS SDK client throws immediately in any environment without an
+ambient region/ADC, which would make the test's pass/fail depend on the CI runner's environment
 rather than on this code).
 
 `MeshAuthGateTest` (unit-level, `MeshAuthGate` invoked directly against a `DefaultHttpContext` - no

@@ -22,6 +22,19 @@ public class MeshHostConfig
     public MeshHostServiceConfig[] Services { get; set; } = Array.Empty<MeshHostServiceConfig>();
 
     /// <summary>
+    /// Locations of discovery-generated registry documents (see
+    /// <c>work/enterprise/slice-3-discovery.md</c>) - each a relative path resolved through
+    /// <see cref="ArtifactStore"/> and read with
+    /// <c>Benzene.Mesh.Aggregator.IMeshArtifactStore.TryReadAsync</c>, so a document a separate
+    /// discovery job wrote (e.g. to S3) is read back from that same store, with no new credential
+    /// path. Read once at startup and unioned with <see cref="Services"/> - <see cref="Services"/>
+    /// always wins a name clash, so an operator can always override a discovered entry by naming it
+    /// explicitly ("discovery proposes, config disposes"). Empty by default: no documents, today's
+    /// behaviour (services alone) unchanged.
+    /// </summary>
+    public string[] RegistryDocuments { get; set; } = Array.Empty<string>();
+
+    /// <summary>
     /// Where the aggregator's generated catalog artifacts live. Defaults to the local filesystem
     /// (<see cref="ArtifactRootDirectory"/>) - see <see cref="MeshSourceRegistrar"/> for the other
     /// backends this can select and what each one reads from <see cref="MeshArtifactStoreConfig.Options"/>.

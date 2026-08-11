@@ -1,14 +1,22 @@
+using Amazon.S3;
+using Azure.Identity;
+using Azure.Storage.Blobs;
 using Benzene.AspNet.Core;
 using Benzene.Auth.Core;
 using Benzene.Core.MessageHandlers;
 using Benzene.Http.BenzeneMessage;
+using Benzene.Mesh.Aggregator;
 using Benzene.Mesh.Artifacts;
 using Benzene.Mesh.Aws.Lambda;
+using Benzene.Mesh.Aws.S3;
+using Benzene.Mesh.Azure.Blob;
 using Benzene.Mesh.Collector;
 using Benzene.Mesh.Contracts;
 using Benzene.Mesh.Dispatch;
+using Benzene.Mesh.GoogleCloud.Storage;
 using Benzene.Mesh.Ui;
 using Benzene.Microsoft.Dependencies;
+using Google.Cloud.Storage.V1;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Builder;
@@ -39,8 +47,138 @@ public class Startup
     public Startup(IConfiguration configuration)
     {
         _config = configuration.Get<MeshHostConfig>() ?? new MeshHostConfig();
-        _registry = new MeshServiceRegistry(_config.Services.Select(s => s.ToEntry()).ToArray());
+        _registry = new MeshServiceRegistry(BuildRegistryEntries(_config));
     }
+
+    /// <summary>
+    /// Builds the registry the aggregator polls: <see cref="MeshHostConfig.RegistryDocuments"/> (if
+    /// any - the discovery job's output, read back through the configured artifact store) unioned
+    /// with <see cref="MeshHostConfig.Services"/>, with <c>services</c> always winning a name clash
+    /// (<c>work/enterprise/slice-3-discovery.md</c>'s "discovery proposes, config disposes"). Read
+    /// once, synchronously, here at startup - the registry is a fixed singleton for the lifetime of
+    /// the host (see <see cref="MeshPollBackgroundService"/>), not re-read on every poll.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// <see cref="MeshHostConfig.RegistryDocuments"/> is non-empty but none of the documents could be
+    /// read and parsed - an operator who configured discovery and got an empty dashboard needs to be
+    /// told why, rather than silently starting with only the hand-written <c>services</c> list. A
+    /// document that is merely missing or unparseable does not throw by itself - it is logged and
+    /// skipped, so the estate keeps working on whatever could be read.
+    /// </exception>
+    private static MeshServiceRegistryEntry[] BuildRegistryEntries(MeshHostConfig config)
+    {
+        var byName = new Dictionary<string, MeshServiceRegistryEntry>(StringComparer.OrdinalIgnoreCase);
+
+        if (config.RegistryDocuments.Length > 0)
+        {
+            var store = BuildArtifactStoreForReading(config);
+            var readCount = 0;
+
+            foreach (var path in config.RegistryDocuments)
+            {
+                MeshServiceRegistry discovered;
+                try
+                {
+                    // Startup's own constructor is synchronous (IConfiguration in, wired object out) -
+                    // the registry has to be resolved before ConfigureServices/Configure run, so this
+                    // one-time read blocks rather than threading async through the whole class.
+                    var json = store.TryReadAsync(path).GetAwaiter().GetResult();
+                    if (json == null)
+                    {
+                        Console.Error.WriteLine($"mesh: registry document '{path}' was not found - continuing with what could be read.");
+                        continue;
+                    }
+
+                    discovered = MeshRegistryJson.Deserialize(json);
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"mesh: failed to read/parse registry document '{path}': {ex.Message} - continuing with what could be read.");
+                    continue;
+                }
+
+                readCount++;
+                foreach (var entry in discovered.Services)
+                {
+                    // First document listed wins a clash between documents - mirrors
+                    // MeshDiscoveryRunner's own earlier-provider-wins precedence, so the two behave
+                    // the same way.
+                    if (!byName.ContainsKey(entry.Name))
+                    {
+                        byName[entry.Name] = entry;
+                    }
+                }
+            }
+
+            if (readCount == 0)
+            {
+                throw new InvalidOperationException(
+                    $"registryDocuments configured ({config.RegistryDocuments.Length}) but none could be read. " +
+                    "Check the artifact store configuration and that the discovery job has run.");
+            }
+        }
+
+        // services always wins a name clash - the "config disposes" half of the position: an operator
+        // can always override a discovered entry by naming it explicitly.
+        foreach (var service in config.Services)
+        {
+            byName[service.Name] = service.ToEntry();
+        }
+
+        return byName.Values.ToArray();
+    }
+
+    /// <summary>
+    /// Constructs a throwaway <see cref="IMeshArtifactStore"/> for reading
+    /// <see cref="MeshHostConfig.RegistryDocuments"/> back, matching <see cref="MeshSourceRegistrar.RegisterArtifactStore"/>'s
+    /// backend selection. Kept separate from that DI-time registration: this one runs synchronously,
+    /// inside the constructor, before the service container exists.
+    /// </summary>
+    private static IMeshArtifactStore BuildArtifactStoreForReading(MeshHostConfig config)
+    {
+        var store = config.ArtifactStore;
+        switch (store.Type.ToLowerInvariant())
+        {
+            case "file":
+                return new FileSystemMeshArtifactStore(config.ArtifactRootDirectory);
+            case "s3":
+                {
+                    var bucket = RequireOption(store.Options, "bucket", "s3");
+                    var prefix = GetOption(store.Options, "prefix") ?? string.Empty;
+                    return new S3MeshArtifactStore(new AmazonS3Client(), bucket, prefix);
+                }
+            case "azureblob":
+                {
+                    var blobServiceUri = RequireOption(store.Options, "blobServiceUri", "azureBlob");
+                    var container = RequireOption(store.Options, "container", "azureBlob");
+                    var prefix = GetOption(store.Options, "prefix") ?? string.Empty;
+                    var containerClient = new BlobServiceClient(new Uri(blobServiceUri), new DefaultAzureCredential())
+                        .GetBlobContainerClient(container);
+                    return new BlobMeshArtifactStore(containerClient, prefix);
+                }
+            case "gcs":
+                {
+                    var bucket = RequireOption(store.Options, "bucket", "gcs");
+                    var prefix = GetOption(store.Options, "prefix") ?? string.Empty;
+                    return new GcsMeshArtifactStore(StorageClient.Create(), bucket, prefix);
+                }
+            default:
+                throw new InvalidOperationException(
+                    $"Unknown artifact store type '{store.Type}'. Valid values: {string.Join(", ", MeshSourceRegistrar.ValidArtifactStoreTypes)}.");
+        }
+    }
+
+    private static string RequireOption(Dictionary<string, string>? options, string key, string storeType)
+    {
+        if (options == null || !options.TryGetValue(key, out var value) || string.IsNullOrEmpty(value))
+        {
+            throw new InvalidOperationException($"artifact store '{storeType}' requires option '{key}'.");
+        }
+        return value;
+    }
+
+    private static string? GetOption(Dictionary<string, string>? options, string key)
+        => options != null && options.TryGetValue(key, out var value) ? value : null;
 
     /// <summary>Registers services.</summary>
     /// <param name="services">The service collection to register with.</param>
