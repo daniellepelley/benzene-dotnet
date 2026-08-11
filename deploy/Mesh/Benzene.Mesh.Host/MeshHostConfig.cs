@@ -55,6 +55,9 @@ public class MeshHostServiceConfig
     /// <summary>Source-specific configuration (e.g. <c>{"functionName": "...", "region": "..."}"</c> for <see cref="MeshServiceSource.AwsLambdaInvoke"/>).</summary>
     public Dictionary<string, string>? SourceOptions { get; set; }
 
+    /// <summary>The team or individual to contact about this service, if known - see <see cref="MeshServiceRegistryEntry.OwningTeam"/>.</summary>
+    public string? OwningTeam { get; set; }
+
     /// <summary>Converts this config entry to the registry shape <see cref="Benzene.Mesh.Aggregator.MeshAggregator"/> consumes.</summary>
-    public MeshServiceRegistryEntry ToEntry() => new(Name, SpecUrl ?? string.Empty, HealthUrl ?? string.Empty, Source, SourceOptions);
+    public MeshServiceRegistryEntry ToEntry() => new(Name, SpecUrl ?? string.Empty, HealthUrl ?? string.Empty, Source, SourceOptions, OwningTeam);
 }

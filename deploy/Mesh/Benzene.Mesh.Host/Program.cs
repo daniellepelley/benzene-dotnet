@@ -9,11 +9,7 @@ Host.CreateDefaultBuilder(args)
         // primary config path for a multi-service registry. Individual scalars (ArtifactRootDirectory,
         // PollIntervalSeconds) can also be overridden via plain environment variables, since
         // Host.CreateDefaultBuilder already adds those; only the JSON file needs wiring explicitly here.
-        var meshConfigPath = Environment.GetEnvironmentVariable("MESH_CONFIG_PATH");
-        if (!string.IsNullOrEmpty(meshConfigPath))
-        {
-            config.AddJsonFile(meshConfigPath, optional: true, reloadOnChange: false);
-        }
+        MeshConfigLoader.ConfigureMeshConfig(config, Environment.GetEnvironmentVariable("MESH_CONFIG_PATH"));
     })
     .ConfigureWebHost(webBuilder => webBuilder
         .UseKestrel()

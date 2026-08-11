@@ -12,6 +12,7 @@ on:
       - 'src/Benzene.Mesh.Aggregator/**'
       - 'src/Benzene.Mesh.Aws.Lambda/**'
       - 'src/Benzene.Mesh.Contracts/**'
+      - 'src/Benzene.Mesh.Dispatch/**'
       - 'src/Benzene.Mesh.Ui/**'
       - '.github/workflows/build-mesh-host.yml'
   pull_request:
@@ -21,6 +22,7 @@ on:
       - 'src/Benzene.Mesh.Aggregator/**'
       - 'src/Benzene.Mesh.Aws.Lambda/**'
       - 'src/Benzene.Mesh.Contracts/**'
+      - 'src/Benzene.Mesh.Dispatch/**'
       - 'src/Benzene.Mesh.Ui/**'
       - '.github/workflows/build-mesh-host.yml'
   workflow_dispatch:
@@ -41,3 +43,5 @@ jobs:
       run: dotnet restore deploy/Mesh/Benzene.Mesh.Host.sln
     - name: Build
       run: dotnet build deploy/Mesh/Benzene.Mesh.Host.sln --no-restore
+    - name: Test
+      run: dotnet test deploy/Mesh/Benzene.Mesh.Host.sln --no-build
