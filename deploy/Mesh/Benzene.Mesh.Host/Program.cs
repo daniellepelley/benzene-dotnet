@@ -2,6 +2,15 @@ using Benzene.Mesh.Host;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Hosting;
 
+// benzene-mesh --validate-config: binds and validates mesh.json without starting the host - the only
+// way to test a config change without deploying it. Reuses MeshConfigValidator, which itself reuses
+// Startup's own registration rules (MeshSourceRegistrar) - the two paths cannot silently disagree
+// about what a config means because there is only one set of rules.
+if (args.Contains("--validate-config"))
+{
+    return ValidateConfig(Environment.GetEnvironmentVariable("MESH_CONFIG_PATH"));
+}
+
 Host.CreateDefaultBuilder(args)
     .ConfigureAppConfiguration((_, config) =>
     {
@@ -16,3 +25,27 @@ Host.CreateDefaultBuilder(args)
         .UseStartup<Startup>())
     .Build()
     .Run();
+
+return 0;
+
+int ValidateConfig(string? meshConfigPath)
+{
+    try
+    {
+        var config = MeshConfigValidator.Validate(meshConfigPath);
+        Console.WriteLine("mesh.json is valid.");
+        Console.WriteLine($"  artifactStore: {config.ArtifactStore.Type}");
+        Console.WriteLine($"  services: {config.Services.Length}");
+        Console.WriteLine($"  usage: {(config.Usage.Length == 0 ? "(none)" : string.Join(", ", config.Usage.Select(u => u.Source)))}");
+        Console.WriteLine($"  fleet: {config.Fleet.Source}");
+        Console.WriteLine($"  topology: {config.Topology.Source}");
+        Console.WriteLine($"  dispatch: {(config.Dispatch.Enabled ? $"enabled (allowInProduction={config.Dispatch.AllowInProduction})" : "disabled")}");
+        Console.WriteLine($"  auth: {config.Auth.Mode}");
+        return 0;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"mesh.json is invalid: {ex.Message}");
+        return 1;
+    }
+}
