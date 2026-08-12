@@ -89,9 +89,11 @@ public class MapperOverrideStartUp : CustomStatusStartUp
 
 // Regression probe for the per-context transport seams: the user registers a custom ISerializer in
 // ConfigureServices. AddAspNetMessageHandlers registers its JsonSerializer default with TryAdd, so
-// the user's earlier registration wins the ISerializer resolve - and, now that JsonMediaFormat
-// resolves ISerializer from DI instead of the concrete JsonSerializer, the HTTP response body is
-// actually rendered through it too.
+// the user's earlier registration wins the ISerializer resolve - but JsonMediaFormat deliberately
+// does NOT resolve ISerializer (see its XML doc): ISerializer is format-agnostic (Benzene.Xml's
+// XmlSerializer implements it too), so a service that replaces ISerializer for an unrelated reason
+// (its outbound client should send XML, say) must not silently make the HTTP media format - which
+// always claims Content-Type: application/json - render that same XML. The HTTP body is unaffected.
 public class SerializerOverrideStartUp : CustomStatusStartUp
 {
     public class MarkerSerializer : ISerializer
@@ -106,6 +108,23 @@ public class SerializerOverrideStartUp : CustomStatusStartUp
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
         services.UsingBenzene(x => x.AddScoped<ISerializer, MarkerSerializer>());
+        base.ConfigureServices(services, configuration);
+    }
+}
+
+// The CORRECT way to customize JSON media rendering specifically: register a JsonSerializer
+// (concrete type, TryAdd'd separately from ISerializer by AddBenzene) - JsonMediaFormat wraps that
+// type directly, so this DOES reach the HTTP response body, unlike replacing ISerializer above.
+public class JsonSerializerOverrideStartUp : CustomStatusStartUp
+{
+    public class MarkerJsonSerializer : Benzene.Core.MessageHandlers.Serialization.JsonSerializer
+    {
+        public override string Serialize<T>(T payload) => "JSON-MARKER:" + base.Serialize(payload);
+    }
+
+    public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
+    {
+        services.UsingBenzene(x => x.AddScoped<Benzene.Core.MessageHandlers.Serialization.JsonSerializer, MarkerJsonSerializer>());
         base.ConfigureServices(services, configuration);
     }
 }
@@ -176,18 +195,29 @@ public class CustomStatusProbeTest
     {
         CustomStatusStartUp.Port = GetFreePort();
         var (status, body) = await PostAsync<SerializerOverrideStartUp>(CustomStatusStartUp.Port);
-        // The body now flows through the user's ISerializer: JsonMediaFormat resolves ISerializer
-        // from DI instead of wrapping the concrete JsonSerializer, so the marker prefix reaches the
-        // HTTP response body.
-        Assert.True(body.Contains("MARKER:"), $"body did not flow through the custom ISerializer: status={status} body={body}");
+        // The body stays plain JSON: JsonMediaFormat wraps the concrete JsonSerializer, not the
+        // format-agnostic ISerializer seam, so the marker cannot appear here regardless of
+        // registration order - see JsonMediaFormat's XML doc for why that's deliberate.
         Assert.Contains("acme", body);
+        Assert.True(!body.Contains("MARKER:"), $"body unexpectedly flowed through ISerializer: status={status} body={body}");
 
-        // The seam itself IS now honored: the transport TryAdds its JsonSerializer default, so the
-        // user's earlier ConfigureServices registration wins the single resolve (before the TryAdd
-        // conversion the framework's later plain AddScoped silently shadowed it).
+        // The seam itself IS honored for its own (non-HTTP-body) purposes: the transport TryAdds its
+        // ISerializer default, so the user's earlier ConfigureServices registration wins the resolve.
         using var host = new HostBuilder().UseBenzene<SerializerOverrideStartUp>().Build();
         using var scope = host.Services.CreateScope();
         Assert.IsType<SerializerOverrideStartUp.MarkerSerializer>(
             scope.ServiceProvider.GetRequiredService<ISerializer>());
+    }
+
+    [Fact]
+    public async Task CustomJsonSerializer_InConfigureServices_Probe()
+    {
+        // The correct customization point for JSON media rendering specifically: replace the
+        // concrete JsonSerializer (TryAdd'd separately from ISerializer by AddBenzene). This DOES
+        // reach the HTTP response body, without touching ISerializer or any other format.
+        CustomStatusStartUp.Port = GetFreePort();
+        var (status, body) = await PostAsync<JsonSerializerOverrideStartUp>(CustomStatusStartUp.Port);
+        Assert.True(body.Contains("JSON-MARKER:"), $"body did not flow through the custom JsonSerializer: status={status} body={body}");
+        Assert.Contains("acme", body);
     }
 }

@@ -30,8 +30,10 @@ getters + result setters on **AspNet, SQS (both flavors), SNS, Kafka, ServiceBus
 override honored at the seam, the AspNet request/response BODY never flows through `ISerializer` —
 the media-format path's default `JsonMediaFormat` wraps the concrete `JsonSerializer` directly, so a
 custom `ISerializer` affects only consumers that resolve the seam (clients, envelope handlers), not
-HTTP body rendering. Separate honesty question: is `ISerializer` over-advertised as "the" serializer
-seam?]
+HTTP body rendering. **Resolved (see fix 7 below, revisited): this is correct, deliberate behavior**
+— `ISerializer` is format-agnostic (`Benzene.Xml.XmlSerializer` also implements it) and is not meant
+to be "the" HTTP serializer; JSON media rendering has its own, separately-registered customization
+point, the concrete `JsonSerializer` class.]
 
 Consequences beyond the getters themselves:
 - `AddPayloadVersioning(...).ForContext<AspNetContext>()` in ConfigureServices is **silently
@@ -226,10 +228,23 @@ The user's answers and what was implemented for each, in order:
    added `SetFailed<T>(status, errors)` as its unambiguous replacement - a distinct method name means
    a single string argument can no longer be silently captured by the errors overload when it was
    meant for `Set<T>(status, payload)`. All internal callers migrated.
-7. **Docs were wrong; fix the code instead.** `JsonMediaFormat<TContext>` now depends on `ISerializer`
-   (DI-resolved, TryAdd-registered) instead of the concrete `JsonSerializer` class it used to
-   construct directly - a replaced `ISerializer` now actually renders the HTTP response body, matching
-   what the docs already claimed.
+7. **Revisited: the finding was correct behavior, not a bug.** The first pass changed
+   `JsonMediaFormat<TContext>` to depend on `ISerializer` instead of the concrete `JsonSerializer`,
+   reasoning that a replaced `ISerializer` should reach the HTTP body. The user caught the flaw:
+   `ISerializer` is a **format-agnostic** abstraction - `Benzene.Xml.XmlSerializer` also implements
+   it - so a service that replaces `ISerializer` for an unrelated reason (its outbound client should
+   send XML, say) would silently make `JsonMediaFormat`, which always advertises `Content-Type:
+   application/json`, render that XML instead. `Benzene.Xml`'s own `XmlMediaFormat` already
+   establishes the correct pattern: it wraps the **concrete** `XmlSerializer`, registered
+   independently of `ISerializer` (`AddXml` does `TryAddSingleton<XmlSerializer>()`, not
+   `TryAddSingleton<ISerializer, XmlSerializer>()`). Reverted `JsonMediaFormat` to the same shape -
+   it wraps the concrete `JsonSerializer` (unsealed, virtual members, already independently
+   TryAdd-registered by `AddBenzene`). **The correct way to customize JSON media rendering is to
+   register your own `JsonSerializer`** (custom `JsonSerializerOptions`, or a subclass overriding
+   its virtual methods) in `ConfigureServices` - not to replace `ISerializer`, which is for changing
+   the format used elsewhere (message/envelope serialization) without touching HTTP/JSON rendering.
+   `CustomJsonSerializer_InConfigureServices_Probe` proves the corrected path works; the original
+   `ISerializer` probe now asserts it correctly does *not* reach the HTTP body.
 
 All fixes verified: Benzene.Core.Test 2352/2354 (2 skipped, unrelated), Benzene.Grpc.Test 105/105,
 Benzene.Conformance.Test 136/136 (was 134 - the 2 new `<unknown>`+isSuccessful mapping rows).
