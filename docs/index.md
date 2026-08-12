@@ -71,6 +71,7 @@ Benzene is a hexagonal framework designed for services running in serverless env
 
 - **Code Generation**
   - [Contract Artifacts](contract-artifacts.md) — the `benzene-descriptor` build tool: emit `spec.json` / `service.json` from a built, non-deployed service, no network required
+  - **CLI Reference** (TODO, Phase 4 — `docs/cli.md` not written yet): the `benzene` CLI (`build`, `spec`, `healthcheck`, `lambda-test-tool`, `profile-check`, and, as of Phase 2, `diff`). `benzene diff --baseline <file> --current <file> [--fail-on breaking|warning|none] [--warn-only] [--format text|json]` compares two spec JSON files for backward compatibility and exits non-zero when the report trips `--fail-on`; wraps `Benzene.Schema.OpenApi.Compatibility.SchemaCompatibility`. Every CLI command now returns a real exit code (0 success / 1 failure) instead of always exiting 0.
   - [Terraform](terraform.md)
   - [Client SDKs](client-sdks.md)
   - [Spec Endpoint (OpenAPI / AsyncAPI / Benzene format)](spec.md) — a runtime feature of a Benzene service, not to be confused with the [Benzene Specification](https://benzene.app/docs/specification/index.html) above: this is a `UseSpec` middleware that serves *your* service's own schema
