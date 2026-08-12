@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Benzene.Descriptor — emits a service's contract artifacts (`{Service}.spec.json`, the
+    EventServiceDocument, and `{Service}.service.json`, the mesh §2 ServiceDescriptor) at BUILD TIME
+    from a non-running, non-deployed service, by constructing it in-process and reading the
+    descriptors it already computes. See src/Benzene.Descriptor/README.md and
+    work/deployment-descriptor-design.md.
+
+    Packaged as a dotnet tool (command: benzene-descriptor). sln-approved (implementation plan
+    Phase 1, work/spec-mesh-tooling-implementation-plan.md).
+
+    In-repo it uses ProjectReferences so it builds and tests against local source; the shipped package
+    would use PackageReferences pinned to the consuming service's Benzene version.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>benzene-descriptor</ToolCommandName>
+    <AssemblyName>Benzene.Descriptor</AssemblyName>
+    <RootNamespace>Benzene.Descriptor</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The construction substrate (public types the AWS Lambda host itself uses). -->
+    <ProjectReference Include="..\Benzene.Aws.Lambda.Core\Benzene.Aws.Lambda.Core.csproj" />
+    <ProjectReference Include="..\Benzene.Microsoft.Dependencies\Benzene.Microsoft.Dependencies.csproj" />
+    <ProjectReference Include="..\Benzene.Core\Benzene.Core.csproj" />
+    <!-- In-memory invoke + the descriptors the runtime already serves. -->
+    <ProjectReference Include="..\Benzene.Core.MessageHandlers.TestHelpers\Benzene.Core.MessageHandlers.TestHelpers.csproj" />
+    <ProjectReference Include="..\Benzene.Testing\Benzene.Testing.csproj" />
+    <ProjectReference Include="..\Benzene.Schema.OpenApi\Benzene.Schema.OpenApi.csproj" />
+    <ProjectReference Include="..\Benzene.Mesh.Wire\Benzene.Mesh.Wire.csproj" />
+    <!-- Cloud-neutral outbound routing model (for produces[].transportKind). -->
+    <ProjectReference Include="..\Benzene.Clients\Benzene.Clients.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Pack the MSBuild opt-in target into the tool package. NuGet does not auto-import a tool
+         package's targets (that only happens for PackageReference-style libraries), so this is
+         reach-in-and-copy-or-explicitly-import material — see README.md for both patterns. -->
+    <None Include="build\**" Pack="true" PackagePath="build\" />
+  </ItemGroup>
+
+</Project>

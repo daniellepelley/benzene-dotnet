@@ -1,0 +1,41 @@
+<Project>
+  <!--
+    Build integration for benzene-descriptor. Emits <service>.spec.json and <service>.service.json
+    into the output folder after every build, by running the tool against the just-built assembly
+    (which runs in the service's own output folder, so its full dependency closure is present).
+
+    Opt in per project:
+        <PropertyGroup>
+          <BenzeneEmitDescriptor>true</BenzeneEmitDescriptor>
+        </PropertyGroup>
+
+    Assumes the `benzene-descriptor` tool is on PATH (a global tool, or a local tool restored via a
+    .config/dotnet-tools.json manifest). Override BenzeneDescriptorCommand to invoke it another way
+    (e.g. `dotnet tool run benzene-descriptor`).
+
+    A failing emit fails the build (no ContinueOnError) — that is the point: a service that can't
+    produce its own contract artifact should not report a green build.
+  -->
+  <PropertyGroup>
+    <BenzeneEmitDescriptor Condition="'$(BenzeneEmitDescriptor)' == ''">false</BenzeneEmitDescriptor>
+    <BenzeneDescriptorCommand Condition="'$(BenzeneDescriptorCommand)' == ''">benzene-descriptor</BenzeneDescriptorCommand>
+    <BenzeneDescriptorEmit Condition="'$(BenzeneDescriptorEmit)' == ''">both</BenzeneDescriptorEmit>
+    <!-- The descriptor path when BenzeneDescriptorEmit is "both" (the default) or "descriptor"; the
+         spec path is derived from it (.service.json -> .spec.json) unless BenzeneDescriptorEmit is
+         "spec", in which case this IS the spec path. -->
+    <BenzeneDescriptorOutput Condition="'$(BenzeneDescriptorOutput)' == ''">$(TargetDir)$(AssemblyName).service.json</BenzeneDescriptorOutput>
+    <BenzeneDescriptorServiceName Condition="'$(BenzeneDescriptorServiceName)' == ''">$(AssemblyName)</BenzeneDescriptorServiceName>
+  </PropertyGroup>
+
+  <Target Name="BenzeneEmitDescriptor"
+          AfterTargets="Build"
+          Condition="'$(BenzeneEmitDescriptor)' == 'true'">
+    <Exec Command="&quot;$(BenzeneDescriptorCommand)&quot; --assembly &quot;$(TargetPath)&quot; --output &quot;$(BenzeneDescriptorOutput)&quot; --emit &quot;$(BenzeneDescriptorEmit)&quot; --service &quot;$(BenzeneDescriptorServiceName)&quot; --service-version &quot;$(Version)&quot; $(BenzeneDescriptorStartupArg)" />
+  </Target>
+
+  <!-- Set BenzeneDescriptorStartup (a full BenzeneStartUp type name) when the service assembly
+       defines more than one candidate; passed through as --startup. -->
+  <PropertyGroup Condition="'$(BenzeneDescriptorStartup)' != ''">
+    <BenzeneDescriptorStartupArg>--startup &quot;$(BenzeneDescriptorStartup)&quot;</BenzeneDescriptorStartupArg>
+  </PropertyGroup>
+</Project>
