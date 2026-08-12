@@ -130,6 +130,7 @@
     <ProjectReference Include="..\..\src\Benzene.Core.Middleware\Benzene.Core.Middleware.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Core.Versioning\Benzene.Core.Versioning.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Core\Benzene.Core.csproj" />
+    <ProjectReference Include="..\..\src\Benzene.Descriptor\Benzene.Descriptor.csproj" />
     <ProjectReference Include="..\..\src\Benzene.DataAnnotations\Benzene.DataAnnotations.csproj" />
     <ProjectReference Include="..\..\src\Benzene.ResponseEvents\Benzene.ResponseEvents.csproj" />
     <ProjectReference Include="..\..\src\Benzene.FluentValidation\Benzene.FluentValidation.csproj" />
@@ -167,6 +168,13 @@
     <ProjectReference Include="..\..\src\Benzene.Clients.Aws.Sns\Benzene.Clients.Aws.Sns.csproj" />
     <ProjectReference Include="..\..\src\Benzene.HealthChecks.DynamoDb\Benzene.HealthChecks.DynamoDb.csproj" />
     <ProjectReference Include="..\..\src\Benzene.HealthChecks.Azure.ServiceBus\Benzene.HealthChecks.Azure.ServiceBus.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- DescriptorEmitterTest points benzene-descriptor at a real, already-built example service.
+         Referencing the project (rather than hard-coding a bin/ path) guarantees it is built
+         alongside the test project and gives the test a reliable path via typeof(StartUp).Assembly.Location. -->
+    <ProjectReference Include="..\..\examples\Aws\Benzene.Examples.Aws.Minimal\Benzene.Examples.Aws.Minimal.csproj" />
   </ItemGroup>
 
   <ItemGroup>
