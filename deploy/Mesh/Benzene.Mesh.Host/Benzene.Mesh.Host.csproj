@@ -8,6 +8,17 @@
          host's own "correctness" changes on a different cadence than the library's version.txt. -->
     <VersionPrefix>0.1.0</VersionPrefix>
     <VersionSuffix>alpha</VersionSuffix>
+    <!-- Task 5.3 (work/enterprise/slice-5-packaging.md): packed as a dotnet tool, matching
+         tools/Benzene.Descriptor and src/Benzene.CodeGen.Cli's existing PackAsTool/ToolCommandName/
+         PackageOutputPath precedent - "dotnet tool install -g Benzene.Mesh.Host" then runs the same
+         binary the Docker image runs (including Program.cs's config-validation short circuit), just
+         without a container. Microsoft.NET.Sdk.Web sets IsPackable false by default (unlike the plain
+         SDK templates/Benzene.Templates.csproj and tools/Benzene.Descriptor.csproj use), so it has to
+         be turned back on explicitly here. -->
+    <IsPackable>true</IsPackable>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>benzene-mesh</ToolCommandName>
+    <PackageOutputPath>./nupkg</PackageOutputPath>
   </PropertyGroup>
 
   <ItemGroup>
