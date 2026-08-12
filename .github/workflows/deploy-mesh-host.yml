@@ -1,10 +1,12 @@
-# Publishes the Benzene.Mesh.Host Docker image to GHCR (ghcr.io/<owner>/benzene-mesh).
+# Publishes the Benzene.Mesh.Host Docker image to GHCR (ghcr.io/<owner>/benzene-mesh) and the
+# benzene-mesh dotnet tool package to GitHub Packages' NuGet feed.
 # The first Docker image publish anywhere in this repo - flagged explicitly, even though the
 # trigger pattern (manual workflow_dispatch, nothing auto-publishes) matches every other deploy
 # workflow already in this repo (deploy-benzene.yml, deploy-templates.yml).
 #
-# Uses the built-in GITHUB_TOKEN for GHCR auth (no separate secret needed, unlike the AWS/GCP
-# example deploy workflows) - requires the "packages: write" permission below.
+# Uses the built-in GITHUB_TOKEN for both jobs' auth (no separate secret needed, unlike the
+# AWS/GCP example deploy workflows or deploy-templates.yml's NuGet.org push) - requires the
+# "packages: write" permission below.
 
 name: Deploy Mesh Host
 
@@ -53,3 +55,39 @@ jobs:
         tags: |
           ${{ steps.tags.outputs.sha_tag }}
           ${{ steps.tags.outputs.latest_tag }}
+
+  publish-tool:
+    # Independent of the image job (task 5.4, work/enterprise/slice-5-packaging.md) - the tool
+    # (task 5.3) is the same binary packaged a different way, not a build artifact of the image
+    # job, so it packs and pushes on its own rather than depending on `deploy`.
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: 10.0.x
+
+    - name: Pack
+      run: dotnet pack deploy/Mesh/Benzene.Mesh.Host/Benzene.Mesh.Host.csproj -c Release -o ./mesh-host-pack
+
+    - name: Publish to GitHub Packages
+      run: |
+        dotnet nuget add source \
+          --username ${{ github.actor }} \
+          --password ${{ secrets.GITHUB_TOKEN }} \
+          --store-password-in-clear-text \
+          --name github \
+          "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
+        # --skip-duplicate: re-running this workflow against an unchanged VersionPrefix/
+        # VersionSuffix (deploy/Mesh/Benzene.Mesh.Host/Benzene.Mesh.Host.csproj) must not fail the
+        # job - the version bump is a separate, deliberate edit to that file, not something CI
+        # computes on every run.
+        dotnet nuget push ./mesh-host-pack/*.nupkg --source github --skip-duplicate
