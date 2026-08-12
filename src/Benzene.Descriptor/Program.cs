@@ -2,8 +2,11 @@ using Benzene.Descriptor;
 
 // benzene-descriptor --assembly <path-to-service.dll> [options]
 //
-// Emits a deployment descriptor (service.json) from a built, non-running Benzene AWS Lambda service.
-// Intended to run as a post-build step (see build/Benzene.Descriptor.targets).
+// Emits a service's contract artifacts — {name}.spec.json (the EventServiceDocument) and/or
+// {name}.service.json (the mesh §2 ServiceDescriptor) — from a built, non-running Benzene service.
+// Intended to run as a post-build step (see build/Benzene.Descriptor.targets). A thin shell: all the
+// real work is DescriptorEmitter's, kept callable in-process so it can be unit-tested without
+// spawning this executable.
 
 var opts = EmitOptions.Parse(args);
 if (opts is null)
@@ -14,17 +17,12 @@ if (opts is null)
 
 try
 {
-    var json = DescriptorEmitter.Emit(opts);
-    if (opts.OutputPath is null)
-    {
-        Console.WriteLine(json);
-    }
-    else
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(opts.OutputPath))!);
-        File.WriteAllText(opts.OutputPath, json);
-        Console.WriteLine($"benzene-descriptor: wrote {opts.OutputPath}");
-    }
+    var result = DescriptorEmitter.Emit(opts);
+    var (specPath, descriptorPath) = DescriptorEmitter.ResolveOutputPaths(opts);
+
+    Write(result.SpecJson, specPath, "spec");
+    Write(result.DescriptorJson, descriptorPath, "descriptor");
+
     return 0;
 }
 catch (Exception ex)
@@ -33,55 +31,17 @@ catch (Exception ex)
     return 1;
 }
 
-namespace Benzene.Descriptor
+static void Write(string? json, string? path, string label)
 {
-    internal sealed class EmitOptions
+    if (json is null) return;
+
+    if (path is null)
     {
-        public const string Usage =
-            "Usage: benzene-descriptor --assembly <service.dll> [--output <service.json>] " +
-            "[--service <name>] [--service-version <v>] [--cloud <aws>] [--region <r>]";
-
-        public required string AssemblyPath { get; init; }
-        public string? OutputPath { get; init; }
-        public required string ServiceName { get; init; }
-        public string? ServiceVersion { get; init; }
-        public string Cloud { get; init; } = "aws";
-        public string Region { get; init; } = "eu-west-1";
-        // Force a specific host adapter (e.g. "neutral" for the cloud-agnostic core); auto-selected if null.
-        public string? Host { get; init; }
-
-        public static EmitOptions? Parse(string[] args)
-        {
-            string? assembly = null, output = null, service = null, version = null, cloud = null, region = null, host = null;
-            for (var i = 0; i < args.Length; i++)
-            {
-                string? Next() => i + 1 < args.Length ? args[++i] : null;
-                switch (args[i])
-                {
-                    case "--assembly": assembly = Next(); break;
-                    case "--output": output = Next(); break;
-                    case "--service": service = Next(); break;
-                    case "--service-version": version = Next(); break;
-                    case "--cloud": cloud = Next(); break;
-                    case "--region": region = Next(); break;
-                    case "--host": host = Next(); break;
-                    default: return null;
-                }
-            }
-
-            if (string.IsNullOrWhiteSpace(assembly)) return null;
-
-            return new EmitOptions
-            {
-                AssemblyPath = assembly,
-                OutputPath = output,
-                // Default the service name to the assembly's simple name if not supplied.
-                ServiceName = service ?? Path.GetFileNameWithoutExtension(assembly),
-                ServiceVersion = version,
-                Cloud = cloud ?? "aws",
-                Region = region ?? "eu-west-1",
-                Host = host,
-            };
-        }
+        Console.WriteLine(json);
+        return;
     }
+
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+    File.WriteAllText(path, json);
+    Console.WriteLine($"benzene-descriptor: wrote {label} to {path}");
 }
