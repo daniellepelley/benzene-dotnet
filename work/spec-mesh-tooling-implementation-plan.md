@@ -326,6 +326,96 @@ Steps:
 --directory Generated/` works offline with no AWS SDK calls; `benzene spec --url https://…` prints
 the spec; `--mesh` resolves via a manifest; tests green.
 
+*(AMENDED 2026-08-12: step 4's singular `--topic <id>` is superseded by Phase 3b's `--topics`
+include-list — implement the list form directly, not the singular first.)*
+
+---
+
+## Phase 3b — Client generation configuration *(added 2026-08-12, owner requirements)*
+
+**Goal:** the two client shapes become first-class, configurable options, and a consumer can
+generate clients for **only the topics they use** — deliberately minimising the coupling surface
+between services. Configuration covers: mode (service-client vs per-topic), the generated
+namespace, and a topic include-list.
+**Depends on:** Phase 3 (same files: `BuildPayload`, `CodeBuilderFactory`; and `--file` makes any
+of this worth using). **Effort:** S–M.
+
+**What exists / what's absent (audited 2026-08-12):** both modes already exist —
+`MessageClientSdkBuilder` (service class, one method per topic) and `AtomicClientSdkBuilder`
+(self-contained client per topic, per-topic `RequiredTopics` + contract hash) — selected by
+`--output client|topic-client`, with a `default:` switch case that silently produces the service
+client on a typo. All builders take a `baseNamespace` ctor arg but hard-append `.{ServiceName}`
+in three places (`MessageClientSdkBuilder.cs` lines 19/63/178); the CLI derives the namespace from
+`--lambda-name` plus a hardcoded `"Client"`/`"Service"` literal, with no override. No topic
+filtering exists anywhere except atomic mode's reserved-topic `bool`. No options class exists —
+everything is positional ctor args.
+
+Steps:
+
+1. **`ClientSdkOptions`** (new, in `Benzene.CodeGen.Client`): `ServiceName`, `Namespace` (the FULL
+   generated namespace — no magic suffix), `Topics` (include-list; null/empty = all),
+   `IncludeReservedTopics` (default false). Builders gain an options ctor; existing ctors delegate
+   to it with today's values so current call sites and golden-file tests stay green.
+   `MessageHandlerBuilder` already treats its namespace as flat — the options object makes the two
+   client builders match it, ending the three-way ambiguity about what "baseNamespace" means.
+2. **Namespace semantics:** when `Namespace` is supplied it is used *exactly* — client, interface
+   and DTOs all in one namespace, one source of truth (collapse the three hardcoded concat sites
+   into one). Atomic mode appends `.{ClientName}` per client below the supplied root (its
+   duplicated-DTO self-containment requires per-client namespaces). When absent, today's
+   derivation stays, unchanged — this is additive.
+3. **Topic include-list — filter the document, not the builders.** Apply `Topics` as ONE upstream
+   projection of `EventServiceDocument.Requests` before any builder runs (Phase 3 step 4's
+   whole-document approach), so the three per-builder iteration sites (methods, interface,
+   `RequiredTopics`) can never disagree with each other. Rules, all fail-loud per house style:
+   - A topic named in the list that is not in the document → non-zero exit listing the document's
+     actual topics (a typo'd include-list that silently generates nothing is the worst outcome).
+   - `benzene:healthcheck` is exempt: `HealthCheckAsync()` and its `RequiredTopics` entry are
+     always emitted and never need naming in the list. Document this.
+   - Reserved topics: excluded by default in BOTH modes (today service-client mode generates
+     methods and `RequiredTopics` entries for `benzene:spec`/`benzene:mesh` etc. — treat that as
+     the bug it is; `IncludeReservedTopics` opts back in). Flag as a deliberate output change in
+     the commit.
+4. **Mode becomes validated:** explicit `case "client":`; unknown `--output` → non-zero exit
+   listing valid values (`client`, `topic-client`, `message-handlers`, `readme` — decide
+   `api-gateway`'s fate per the 2026-08-12 Amendment B freeze before documenting it). No silent
+   default.
+5. **CLI wiring:** `--namespace` and `--topics <a,b,c>` (comma-delimited — `PayloadMapper` is
+   string-only) on `BuildPayload` + `Constants` entries; thread through `CodeBuilderFactory` into
+   `ClientSdkOptions`. `--service-name` arrives in Phase 3 step 3 and feeds `ServiceName`.
+6. **Fix `CodeFileWriter`** to create subdirectories (`Path.GetDirectoryName` →
+   `Directory.CreateDirectory` per file). Today it throws `DirectoryNotFoundException` on atomic
+   mode's `{Client}/{File}.cs` names — `--output topic-client` cannot complete a write today, and
+   Phase 6's `%(Mode)` default of `topic-client` lands on exactly this path. Test with nested
+   names.
+7. **Tests** (atomic style — config-permutation asserts on the filename→source dictionary, not new
+   golden files per permutation): include-list scopes methods AND interface AND `RequiredTopics`
+   together in `client` mode; include-list scopes which per-topic clients exist in `topic-client`
+   mode; unknown topic in the list → error naming valid topics; explicit `Namespace` lands
+   identically on client/interface/DTOs; reserved excluded by default in `client` mode /
+   `IncludeReservedTopics` restores them; healthcheck exemption; `CodeFileWriter` nested paths;
+   `CodeBuilderFactory` rejects unknown output values (first tests this factory has ever had).
+8. **Docs:** extend `docs/client-sdks.md` with the two shapes side by side (when to pick which —
+   per-topic clients scope `RequiredTopics` and the contract hash to one topic, so unrelated
+   changes on the producing service neither drag in unused surface nor invalidate the client), the
+   coupling-surface rationale for `--topics`, and both new flags. Document `topic-client` and
+   `message-handlers` outputs at all (currently only the `client` mode is documented).
+
+**Explicitly out of scope (recorded so they aren't invented mid-implementation):** generating DI
+registration extensions (`services.AddUserServiceClient(...)`) — a real gap once per-topic clients
+multiply interfaces, but its shape (which lifetime? which container abstraction?) deserves its own
+decision; generating from `document.Events` (no client builder reads events today); CLI selection
+of `IMethodName` naming strategies; any change to the generated method bodies or
+`IBenzeneMessageSender` (transport injection stays exactly as-is: the generated code's only
+dependency is `IBenzeneMessageSender`, and `AddOutboundRouting` binds topics to transports at the
+consumer, out-of-band — verified, zero transport references in generated output).
+
+**Acceptance:** `benzene build --file Orders.spec.json --output topic-client --namespace
+Acme.Orders.Clients --topics "order:create,order:cancel" --directory Generated/` emits exactly two
+self-contained clients in the requested namespace root, whose `RequiredTopics` cover only their own
+topic plus healthcheck; the same `--topics` list on `--output client` emits one service client
+whose methods, interface and `RequiredTopics` cover exactly those topics; a typo'd topic or mode
+fails non-zero naming the valid values; all existing golden-file tests pass unmodified.
+
 ---
 
 ## Phase 4 — Docs pass (all DOC, code-free except snippets)
@@ -425,8 +515,12 @@ Steps:
    the `benzene` tool (same invocation-resolution pattern as Phase 1's targets:
    `$(BenzeneCliCommand)` overridable, default `benzene`, document the local-tool-manifest setup).
 2. **Targets logic:**
-   - Item: `<BenzeneServiceContract Include="..." Mode="client|topic-client" ServiceName="..."/>`
-     (`Mode` default `topic-client`; `ServiceName` default = file stem).
+   - Item: `<BenzeneServiceContract Include="..." Mode="client|topic-client" ServiceName="..."
+     Namespace="..." Topics="order:create,order:cancel"/>`
+     (`Mode` default `topic-client`; `ServiceName` default = file stem; `Namespace`/`Topics`
+     optional, passed through as `--namespace`/`--topics` — added 2026-08-12 with Phase 3b, whose
+     CLI flags this metadata maps onto 1:1. `Mode` values must stay in sync with
+     `CodeBuilderFactory`'s validated switch).
    - Target `BenzeneGenerateClients` running **before `CoreCompile`** (`BeforeTargets="CoreCompile"`),
      per item: `benzene build --file %(Identity) --output %(Mode) --service-name %(ServiceName)
      --directory $(IntermediateOutputPath)benzene/%(ServiceName)/`.
@@ -538,9 +632,10 @@ vendored copies byte-identical (`diff` them); guide updated; website build clean
 | T1 | Phase 1 | T2 |
 | T2 | Phase 2 | T1 |
 | T3 | Phase 3 | T4 after T2 merges |
+| T3b | Phase 3b | after T3 (same files: `BuildPayload`, `CodeBuilderFactory`) |
 | T4 | Phase 4 | anything (refresh at the end) |
 | T5 | Phase 5 | T6 |
-| T6 | Phase 6 | T5 |
+| T6 | Phase 6 | T5, after T3b (its `%(Mode)`/`Namespace`/`Topics` metadata maps onto 3b's flags) |
 | T7 | 7a, 7b, 7c (three sub-tasks) | each other, and T5/T6 |
 | T8 | Phase 8 | last (needs 3 + 7c shipped) |
 
