@@ -30,7 +30,7 @@ roadmap doc).
   artifacts live, additional usage/fleet/topology data sources, and opt-in live dispatch - the same
   capabilities the hand-wired examples under `examples/` (`AwsMesh`, `AzureMesh`,
   `AzureFunctionsMesh`, `GoogleCloudMesh`) demonstrate in C#, promoted to configuration. See
-  "Configuration" below for the full schema.
+  [`CONFIG.md`](CONFIG.md) for the full schema - every key, its type/default, and worked examples.
 - **What this host will never do, by design:** enumerate a cloud account and auto-discover
   services. That capability exists (`Benzene.Mesh.Discovery.*`, used by the `examples/` Lambda
   hosts), but this host has **no reference to any `Benzene.Mesh.Discovery.*` package** - not a config
@@ -44,219 +44,36 @@ roadmap doc).
 The primary path is a bind-mounted `mesh.json` (env var `MESH_CONFIG_PATH` points at it). Individual
 top-level scalars can also be overridden via plain environment variables (`Host.CreateDefaultBuilder`
 already wires those up, using .NET's standard double-underscore nesting, e.g. `Fleet__Source=xray`)
-for single-value smoke-testing without a mounted file - `services` and the array/object sections below
-are impractical to express that way, so `mesh.json` is the path for anything beyond a scalar or two.
+for single-value smoke-testing without a mounted file - `services` and the array/object sections
+below are impractical to express that way, so `mesh.json` is the path for anything beyond a scalar
+or two.
 
-**Credentials never go in `mesh.json`.** Every section below names an *endpoint* (a bucket, a
-workspace id, a Tempo URL) at most - never a secret. Cloud-backed sections authenticate off the
-container's ambient credential chain: an IAM role (AWS), a managed identity (Azure, via
-`DefaultAzureCredential`), or the attached service account (Google Cloud, via Application Default
-Credentials) - the same stance the AWS-Lambda-Invoke service source already took before this slice,
-now generalized to every new section.
+**[`CONFIG.md`](CONFIG.md) is the full reference** - every section (`artifactStore`, `services`,
+`registryDocuments`, `usage`, `fleet`, `topology`, `dispatch`, `auth`), one table per section with
+each key's type/default/required-when, worked examples for the filesystem+HTTP and S3+Lambda+X-Ray
+deployment shapes, and the per-source least-privilege permission matrix. This section only states
+the two invariants that hold across every section, because they're the two things worth knowing
+before you open that document:
 
-### `services` (existing, unchanged)
+1. **Credentials never go in `mesh.json`.** Every section names an *endpoint* (a bucket, a workspace
+   id, a Tempo URL) at most - never a secret. Cloud-backed sections authenticate off the container's
+   ambient credential chain: an IAM role (AWS), a managed identity (Azure, via
+   `DefaultAzureCredential`), or the attached service account (Google Cloud, via Application Default
+   Credentials). Where a credential genuinely has to exist (auth's `basic`/`oidc` modes, the
+   ingestion shared secret), it comes from a named environment variable instead.
+2. **Unknown source/type names fail at startup, listing the valid values.** A typo'd `source` or
+   `type` never silently falls back to a default. `--validate-config` (below) runs the identical
+   check, so this is caught before a deploy, not after one.
 
-```jsonc
-"services": [
-  {
-    "name": "orders-api",
-    "specUrl": "http://orders-api:8080/spec?type=benzene",
-    "healthUrl": "http://orders-api:8080/healthcheck"
-  },
-  {
-    "name": "payments-fn",
-    "source": "AwsLambdaInvoke",
-    "sourceOptions": { "functionName": "payments-fn", "region": "us-east-1" }
-  }
-]
-```
-
-- `source` defaults to `"Http"` (so it can be omitted, as in the `orders-api` entry above) - see
-  `Benzene.Mesh.Contracts.MeshServiceSource` for known values.
-- `specUrl`/`healthUrl` are optional for non-`"Http"` sources - the fetch itself doesn't use them,
-  but they're worth setting anyway purely so the Mesh UI's "spec"/"health" links have somewhere to
-  point.
-- `owningTeam` (optional) - the "who do I talk to" field the Mesh UI renders on each service card.
-
-### `registryDocuments` - discovery-generated service lists
-
-```jsonc
-"registryDocuments": [ "registry.json" ]                                                      // default: [] (none)
-```
-
-Zero or more locations of discovery-generated registry documents (see
-[`../Discovery`](../Discovery) - a separate deployable, not part of this host), each a relative path
-resolved through this host's own `artifactStore` above and read back with
-`IMeshArtifactStore.TryReadAsync` - so a document `../Discovery` wrote to (say) the same S3 bucket is
-read from that bucket with no new credential path. Read once at startup and unioned with `services`;
-**`services` always wins a name clash** - an operator can always override a discovered entry by
-naming it explicitly ("discovery proposes, config disposes"). A document that is missing or fails to
-parse is logged and the host keeps running on whatever else could be read; if `registryDocuments` is
-non-empty and **nothing** could be read, the host fails to start rather than silently serving an empty
-dashboard - see [`../Discovery/README.md`](../Discovery/README.md) for the full write-up of why
-discovery is a separate deployable and the recommended review/PR-gating pattern for promoting a
-discovered list into what this host actually reads.
-
-### `artifactStore` - where generated catalog artifacts live
-
-```jsonc
-"artifactStore": { "type": "file" }                                                            // default
-"artifactStore": { "type": "s3", "options": { "bucket": "my-mesh-bucket", "prefix": "mesh/" } }
-"artifactStore": { "type": "azureBlob", "options": {
-  "blobServiceUri": "https://myaccount.blob.core.windows.net", "container": "mesh-artifacts", "prefix": "" } }
-"artifactStore": { "type": "gcs", "options": { "bucket": "my-mesh-bucket", "prefix": "" } }
-```
-
-Valid `type` values: `file` (default), `s3`, `azureBlob`, `gcs`. `file` uses
-`artifactRootDirectory` (below) on local disk, served at `/artifacts/*`; the other three read/write
-the generated `manifest.json`/`services/*.json`/`topology.json`/etc. from the named cloud store
-instead, served at the artifact's own path (e.g. `/manifest.json`) via `Benzene.Mesh.Artifacts`.
-`s3`/`gcs` require `bucket`; `azureBlob` requires `blobServiceUri` and `container`; `prefix` is
-optional on all three (default: none).
-
-### `usage` - per-topic traffic feeds (array - zero or more)
-
-```jsonc
-"usage": [
-  { "source": "cloudwatch", "options": { "namespace": "Benzene/Mesh", "windowHours": "24" } },
-  { "source": "applicationInsights", "options": { "workspaceId": "00000000-0000-0000-0000-000000000000" } }
-]
-```
-
-Valid `source` values: `cloudwatch`, `applicationInsights`. Both read the
-`benzene.messages.processed` counter back from the named backend and merge it into `usage.json`;
-`cloudwatch` needs nothing (every option has a default); `applicationInsights` requires
-`workspaceId` (the Log Analytics workspace id, not the instrumentation key). Optional options on
-either: `metricName`, `windowHours`, `topicDimension`, `transportDimension`, `resultDimension`
-(CloudWatch also takes `periodSeconds`). An empty/omitted `usage` list means no usage feed - honestly
-empty, not fabricated.
-
-### `fleet` - the live-traffic view's data source (an object, not an array)
-
-```jsonc
-"fleet": { "source": "none" }                                                                  // default
-"fleet": { "source": "xray", "options": { "correlationLookbackHours": "24" } }
-"fleet": { "source": "tempo", "options": { "url": "http://tempo:3200", "recentFlowsLookbackHours": "1" } }
-"fleet": { "source": "jaeger", "options": { "url": "http://jaeger:16686", "services": "orders-api,payments-api" } }
-```
-
-Valid `source` values: `none` (default - no live Fleet plane, the dashboard shows only the declared
-catalog), `xray`, `tempo`, `jaeger`. Deliberately an object: `CompositeMeshFleetReadModel` composes a
-single trace source, so only one fleet source can be configured (see "Known limitations" below).
-`xray` needs nothing (every option has a default - the AWS execution role/environment supplies
-credentials and region). `tempo`/`jaeger` require `url`. Optional on all three:
-`correlationLookbackHours`, `recentFlowsLookbackHours`; `jaeger` additionally takes `services`
-(comma-separated, pins the search to specific service names instead of discovering them) and
-`searchLimitPerService`.
-
-When `fleet.source` is anything but `none`, the host also wires the read-only
-`mesh:query:*` handlers over an inner `/benzene/invoke` BenzeneMessage endpoint and points the mesh
-UI's live Fleet plane at it - the same shape `examples/AwsMesh` hand-wires.
-
-### `topology` - the service-graph view's extra (observed-traffic) edges
-
-```jsonc
-"topology": { "source": "none" }                                                               // default
-"topology": { "source": "tempo", "options": { "prometheusUrl": "http://prometheus:9090/api/v1/query", "windowMinutes": "5" } }
-```
-
-Valid `source` values: `none` (default - only the structural edges the aggregator always derives
-from each service's declared providers/consumers), `tempo` (adds `source: "tempo"` edges with real
-traffic stats, from Tempo's service-graph metrics via a Prometheus-compatible query endpoint).
-`tempo` requires `prometheusUrl`; `windowMinutes` is optional (default 5).
-
-### `dispatch` - opt-in live dispatch
-
-```jsonc
-"dispatch": { "enabled": false, "allowInProduction": false }                                   // default
-```
-
-Off by default: it invokes a registered service's REAL handler with a chosen payload (real
-side-effects execute). Two gates, both must pass: `enabled` (wires the feature at all) and, in a
-Production environment, `allowInProduction` too (an unset environment counts as Production).
-
-### `auth` - who may reach the dashboard (work/enterprise/slice-2-auth.md)
-
-```jsonc
-"auth": { "mode": "none" }                                                                     // default - unchanged from before this slice
-
-"auth": {
-  "mode": "proxy",
-  "proxy": { "userHeader": "X-Forwarded-User", "trustedProxies": ["10.0.0.5"] }
-}
-
-"auth": {
-  "mode": "basic"
-  // credentials come from MESH_BASIC_USER / MESH_BASIC_PASSWORD - never mesh.json
-}
-
-"auth": {
-  "mode": "oidc",
-  "oidc": { "authority": "https://accounts.google.com", "clientId": "..." }
-  // the client secret comes from the env var named by oidc.clientSecretEnvVar (default
-  // MESH_OIDC_CLIENT_SECRET) - never mesh.json
-}
-```
-
-One gate (`MeshAuthGate`) protects the whole host in every mode below - both `/artifacts/*` (served
-by `UseStaticFiles`, entirely outside the Benzene pipeline, when `artifactStore.type` is `file`) and
-everything inside the Benzene pipeline (`/mesh-ui`, `/mesh-spec-ui.html`, the non-file artifact
-store's root-relative paths, the `/benzene/invoke` envelope). `mode: "none"` (the default) leaves the
-host exactly as it was before this slice: no login, everything world-readable. **Do not expose this
-host on a network you don't trust with `mode: "none"`.**
-
-- **`proxy`** - trust an upstream front door (oauth2-proxy, an ALB+Cognito authenticator, Azure App
-  Proxy) that has already authenticated the caller and forwards identity in a header. Only the peer
-  addresses in `proxy.trustedProxies` are trusted to set that header - **this list must be non-empty**
-  or the host refuses to start, since an unrestricted forwarded-identity header is a total
-  authentication bypass (anyone who can reach the host could set it themselves).
-- **`basic`** - RFC 7617 HTTP Basic auth, one service-account-style credential pair from
-  `MESH_BASIC_USER`/`MESH_BASIC_PASSWORD`. The host refuses to start if either is unset.
-- **`oidc`** - interactive browser login (cookie + authorization-code redirect) against any
-  OIDC-compliant authority - the customer's own SSO and social login (Google, Okta, Entra ID, Auth0,
-  Keycloak, ...) are the same feature once the authority is configuration. `oidc.authority` and
-  `oidc.clientId` are required, and the client secret env var (named by `oidc.clientSecretEnvVar`,
-  default `MESH_OIDC_CLIENT_SECRET`) must be set, or the host refuses to start. **SAML is out of
-  scope** - every enterprise IdP that matters bridges SAML to OIDC, and `mode: "proxy"` covers the
-  rest.
-
-**Authorization**, once authenticated (any mode above): `auth.allowedEmailDomains` and
-`auth.requiredGroups` (both empty/unset by default - any authenticated caller is permitted) restrict
-who counts as permitted; a caller who authenticates but doesn't qualify gets `403 Forbidden`, not
-`401 Unauthorized`, matching `wire-contracts.md`'s distinction. There is no per-service RBAC in v1 -
-authenticated (and permitted) means full read access to the whole catalog.
-
-**`auth.dispatchRole`** is bound and validated (a config typo still fails fast), but is **not yet
-enforced**: `mesh:dispatch`, as this host currently wires it (`Startup.Configure`, gated behind
-`dispatch.enabled`), registers a handler with no HTTP route or envelope endpoint of its own - a
-pre-existing gap predating this slice (see `Benzene.Mesh.Dispatch/CLAUDE.md`'s "Follow-ups": the mesh
-UI's send leg is still unbuilt) - so there is no reachable request to attach a role check to yet.
-Giving dispatch its own reachable endpoint is dispatch-reachability work, not auth work; see the
-comment above `UseMeshDispatch` in `Startup.cs` for the full account.
-
-### `auth.ingestion` - the push-ingestion endpoint is a separate surface
-
-```jsonc
-"auth": { "ingestion": { "mode": "open" } }                                                    // default - unchanged from before this slice
-"auth": { "ingestion": { "mode": "sharedSecret" } }                                             // requires MESH_INGEST_SECRET
-```
-
-`/mesh/report` (`Benzene.Mesh.Aggregator`'s `MeshReportMessageHandler`) is how a service with no
-synchronous entry point self-reports into the mesh - the caller is a service, not a browser, so none
-of the `auth.mode` login flows above can cover it (a redirect-to-login response means nothing to a
-service POSTing a report). It is controlled independently by `auth.ingestion`:
-
-- **`open`** (default): no check, today's behaviour, unaffected by `auth.mode`.
-- **`sharedSecret`**: the request must carry an `X-Mesh-Ingest-Secret` header matching the
-  `MESH_INGEST_SECRET` environment variable (compared in constant time). Still independent of
-  `auth.mode` - a `basic`/`oidc`/`proxy`-protected dashboard does not itself protect `/mesh/report`.
-
-**The residual gap, stated plainly:** with `ingestion.mode: "open"` (the default) and `auth.mode` set
-to anything else, the **read** surface (the dashboard, the catalog) is protected and the **write**
-surface (`/mesh/report`) is not - any caller who can reach the host can inject a report for any
-service name. Set `ingestion.mode: "sharedSecret"` if that surface needs to be closed too; the longer-
-term answer is a proper service-to-service API-key package, deliberately deferred (see
-`work/enterprise/slice-2-auth.md`'s "what does not exist and must be built").
+`auth` (work/enterprise/slice-2-auth.md) is worth one callout here because it protects everything
+else: one gate (`MeshAuthGate`) covers both `/artifacts/*` (served outside the Benzene pipeline when
+`artifactStore.type` is `file`, the default) and everything inside the pipeline, in every mode.
+`mode: "none"` (the default) leaves the host exactly as it was before slice 2: no login, everything
+world-readable. **Do not expose this host on a network you don't trust with `mode: "none"`.**
+`auth.dispatchRole` is bound and validated but **not yet enforced** - `mesh:dispatch` (gated behind
+`dispatch.enabled`) has no HTTP route or envelope endpoint of its own yet (a pre-existing gap, see
+`Benzene.Mesh.Dispatch/CLAUDE.md`'s "Follow-ups" and the comment above `UseMeshDispatch` in
+`Startup.cs`), so there's no reachable request to attach a role check to.
 
 ### Known limitations (documented, not fixed by this slice)
 
@@ -269,31 +86,6 @@ term answer is a proper service-to-service API-key package, deliberately deferre
   `Benzene.Mesh.Collector`, not something this slice introduces or fixes. Fleet-wide data (the
   landing view, correlation search, individual trace lookup) all work; only the two per-entity
   drill-ins don't.
-
-## Least-privilege permission matrix
-
-Every credential comes from the container's ambient credential chain (AWS IAM role, Azure managed
-identity, Google Cloud service account) - never from `mesh.json`. Grant only what the sections you
-actually enable need. See [`../Discovery/README.md`](../Discovery/README.md#least-privilege-permission-matrix)
-for the separate, narrower permission matrix `../Discovery` needs - deliberately non-overlapping with
-this one on the interrogation axis (`lambda:InvokeFunction` and friends belong only to this host's
-role, never to discovery's).
-
-| Config section / value | Cloud API | Minimum permission | Scope it to |
-|---|---|---|---|
-| `services[].source: "AwsLambdaInvoke"` | AWS Lambda `Invoke` | `lambda:InvokeFunction` | The specific function ARNs named in `sourceOptions.functionName` across all entries |
-| `artifactStore.type: "s3"` | Amazon S3 | `s3:GetObject`, `s3:PutObject`, `s3:ListBucket` | The one bucket in `options.bucket` (and its `options.prefix`, if narrowing further) |
-| `artifactStore.type: "azureBlob"` | Azure Blob Storage | `Storage Blob Data Contributor` (or a custom role with blob read+write+list) | The one storage account/container in `options.blobServiceUri`/`options.container` |
-| `artifactStore.type: "gcs"` | Google Cloud Storage | `roles/storage.objectAdmin` (or a custom role with `storage.objects.get`/`create`/`list`) | The one bucket in `options.bucket` |
-| `usage[].source: "cloudwatch"` | Amazon CloudWatch | `cloudwatch:GetMetricData` | The namespace in `options.namespace` (default `Benzene/Mesh`) |
-| `usage[].source: "applicationInsights"` | Azure Monitor Logs | `Log Analytics Reader` | The one workspace in `options.workspaceId` |
-| `fleet.source: "xray"` | AWS X-Ray | `xray:GetTraceSummaries`, `xray:BatchGetTraces` | Account-wide (X-Ray has no per-trace-source scoping) |
-| `fleet.source: "tempo"` / `topology.source: "tempo"` | Grafana Tempo / Prometheus HTTP API | Read-only HTTP access to the query endpoint in `options.url`/`options.prometheusUrl` | Network-level (these are self-hosted HTTP services, not IAM-scoped) |
-| `fleet.source: "jaeger"` | Jaeger Query HTTP API | Read-only HTTP access to the query endpoint in `options.url` | Network-level (self-hosted, not IAM-scoped) |
-| `dispatch.enabled: true` | Whatever `services[].source` dispatches through (today: AWS Lambda `Invoke`) | Same as the matching `services[].source` row above | The specific dispatchable services - and see the "off by default, real side-effects" warning above before granting this at all |
-
-This is a first version, meant to be reviewed by `aws-product-owner` before it reaches customers -
-slice 5 moves it into a dedicated `CONFIG.md`.
 
 ## `--validate-config`
 
@@ -321,40 +113,10 @@ mesh.json is valid.
 
 ## Worked examples
 
-**Filesystem + HTTP** (the default - no cloud credentials needed, matches
-[`mesh.sample.json`](mesh.sample.json)):
-
-```jsonc
-{
-  "artifactRootDirectory": "mesh-artifacts",
-  "pollIntervalSeconds": 60,
-  "services": [
-    { "name": "orders-api", "specUrl": "http://orders-api:8080/spec?type=benzene", "healthUrl": "http://orders-api:8080/healthcheck" },
-    { "name": "payments-fn", "source": "AwsLambdaInvoke", "sourceOptions": { "functionName": "payments-fn", "region": "us-east-1" } }
-  ]
-}
-```
-
-**S3 + Lambda + X-Ray** (mirrors `examples/AwsMesh/Mesh/Startup.cs`'s wiring - see
-`deploy/Mesh/Benzene.Mesh.Host.Test/AwsMeshParityTest.cs` for the test that proves every one of these
-resolves from config):
-
-```jsonc
-{
-  "services": [
-    { "name": "orders-api", "source": "AwsLambdaInvoke", "sourceOptions": { "functionName": "orders-api" } }
-  ],
-  "artifactStore": { "type": "s3", "options": { "bucket": "mesh-artifacts-bucket", "prefix": "mesh/" } },
-  "usage": [ { "source": "cloudwatch" } ],
-  "fleet": { "source": "xray" }
-}
-```
-
-The one AwsMesh capability this cannot reach: `AddMeshAwsLambdaDiscovery()` (auto-discovering the
-Lambda functions to poll). That is deliberate - see "What this host will never do" above.
-
-**S3 + a discovered service list** (`../Discovery` writes `registry.json` to the same bucket; this
-host reads it back and unions it with a hand-pinned entry):
+The filesystem+HTTP and S3+Lambda+X-Ray examples live in [`CONFIG.md`](CONFIG.md#worked-examples).
+One more worth showing here, since it's a discovery-workflow example rather than a plain config
+reference: **S3 + a discovered service list** (`../Discovery` writes `registry.json` to the same
+bucket; this host reads it back and unions it with a hand-pinned entry):
 
 ```jsonc
 {
