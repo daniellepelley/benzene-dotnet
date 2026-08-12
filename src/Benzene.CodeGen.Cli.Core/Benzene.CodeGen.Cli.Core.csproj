@@ -35,6 +35,10 @@
     <ProjectReference Include="..\Benzene.CodeGen.Client\Benzene.CodeGen.Client.csproj" />
     <ProjectReference Include="..\Benzene.CodeGen.LambdaTestTool\Benzene.CodeGen.LambdaTestTool.csproj" />
     <ProjectReference Include="..\Benzene.CodeGen.Markdown\Benzene.CodeGen.Markdown.csproj" />
+    <!-- Already pulled in transitively via Benzene.CodeGen.Client -> Benzene.CodeGen.Core, but
+         DiffCommand calls SchemaCompatibility/EventServiceDocumentDeserializer directly, so make
+         the dependency explicit rather than relying on another project's transitive reference. -->
+    <ProjectReference Include="..\Benzene.Schema.OpenApi\Benzene.Schema.OpenApi.csproj" />
   </ItemGroup>
 
   <ItemGroup>

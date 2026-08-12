@@ -29,4 +29,15 @@ public static class Constants
     public const string HealthPathDescription = "Overrides the health endpoint path probed for R3. Defaults to /benzene/health";
     public const string NoTraceParentProbe = "no-traceparent-probe";
     public const string NoTraceParentProbeDescription = "Skips the R8 bonus traceparent header sent with the R4/R6 probe requests";
+    public const string Baseline = "baseline";
+    public const string BaselineDescription = "Path to the baseline (previous) Benzene spec JSON file";
+    public const string Current = "current";
+    public const string CurrentDescription = "Path to the current Benzene spec JSON file to compare against the baseline";
+    public const string FailOn = "fail-on";
+    public const string FailOnDefault = "breaking";
+    public const string FailOnDescription = "The change severity that fails the command: 'breaking', 'warning' or 'none'. Exits non-zero when a change at or above this level is found.";
+    public const string WarnOnly = "warn-only";
+    public const string WarnOnlyDescription = "Equivalent to --fail-on none: reports every change but always exits 0";
+    public const string DiffFormatDefault = "text";
+    public const string DiffFormatDescription = "The diff report format, either 'text' (human-readable, one line per change) or 'json' (the serialized compatibility report)";
 }
