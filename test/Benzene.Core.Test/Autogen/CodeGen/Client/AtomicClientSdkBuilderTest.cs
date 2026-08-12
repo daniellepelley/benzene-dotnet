@@ -89,6 +89,90 @@ public class AtomicClientSdkBuilderTest
         Assert.DoesNotContain("UserGet/UserGetServiceClient.cs", result.Keys);
     }
 
+    // Phase 3b: ClientSdkOptions-driven topic scoping/namespace configuration. See
+    // work/spec-mesh-tooling-implementation-plan.md Phase 3b step 7.
+
+    [Fact]
+    public void Topics_ScopesWhichPerTopicClientsExist()
+    {
+        var document = new Dictionary<string, (Type, Type, Type)>
+        {
+            { "user:get", (typeof(GetUserMessage), typeof(GetUserMessage), typeof(UserDto)) },
+            { "user:create", (typeof(CreateUserMessage), typeof(CreateUserMessage), typeof(string)) },
+        }.ToEventServiceDocument();
+
+        var options = new ClientSdkOptions { Namespace = BaseNameSpace, Topics = new[] { "user:get" } };
+        var result = new AtomicClientSdkBuilder(options).Build(document);
+
+        Assert.Contains("UserGet/UserGetServiceClient.cs", result.Keys);
+        Assert.DoesNotContain("UserCreate/UserCreateServiceClient.cs", result.Keys);
+    }
+
+    [Fact]
+    public void Topics_UnknownTopic_Throws_NamingTheDocumentsValidTopics()
+    {
+        var document = new Dictionary<string, (Type, Type, Type)>
+        {
+            { "user:get", (typeof(GetUserMessage), typeof(GetUserMessage), typeof(UserDto)) },
+        }.ToEventServiceDocument();
+
+        var options = new ClientSdkOptions { Namespace = BaseNameSpace, Topics = new[] { "user:delete" } };
+        var builder = new AtomicClientSdkBuilder(options);
+
+        var exception = Assert.Throws<ArgumentException>(() => builder.BuildCodeFiles(document));
+        Assert.Contains("user:delete", exception.Message);
+        Assert.Contains("user:get", exception.Message);
+    }
+
+    [Fact]
+    public void ExplicitNamespace_AppendsClientNameBelowTheSuppliedRoot()
+    {
+        var document = new Dictionary<string, (Type, Type, Type)>
+        {
+            { "user:get", (typeof(GetUserMessage), typeof(GetUserMessage), typeof(UserDto)) },
+        }.ToEventServiceDocument();
+
+        var options = new ClientSdkOptions { Namespace = "Acme.Orders.Clients" };
+        var result = new AtomicClientSdkBuilder(options).Build(document);
+
+        Assert.Contains("namespace Acme.Orders.Clients.UserGet", result["UserGet/UserGetServiceClient.cs"]);
+    }
+
+    [Fact]
+    public void IncludeReservedTopics_RestoresReservedClients()
+    {
+        var document = new Dictionary<string, (Type, Type, Type)>
+        {
+            { "benzene:mesh", (typeof(GetUserMessage), typeof(GetUserMessage), typeof(UserDto)) },
+        }.ToEventServiceDocument();
+
+        var excluded = new AtomicClientSdkBuilder(new ClientSdkOptions { Namespace = BaseNameSpace }).Build(document);
+        Assert.Empty(excluded);
+
+        var included = new AtomicClientSdkBuilder(new ClientSdkOptions { Namespace = BaseNameSpace, IncludeReservedTopics = true }).Build(document);
+        Assert.Contains("BenzeneMesh/BenzeneMeshServiceClient.cs", included.Keys);
+    }
+
+    [Fact]
+    public void HealthcheckTopic_NeverGetsItsOwnAtomicClient()
+    {
+        // Every atomic client already carries its own always-emitted HealthCheckAsync() and
+        // RequiredTopics entry (see EachClient_ScopesMethodAndRequiredTopics_ToItsOwnTopic above), so
+        // a document that happens to also declare an explicit benzene:healthcheck request/response
+        // must not spawn a redundant dedicated health-check client alongside them.
+        var document = new Dictionary<string, (Type, Type, Type)>
+        {
+            { "user:get", (typeof(GetUserMessage), typeof(GetUserMessage), typeof(UserDto)) },
+            { "benzene:healthcheck", (typeof(GetUserMessage), typeof(GetUserMessage), typeof(UserDto)) },
+        }.ToEventServiceDocument();
+
+        var result = new AtomicClientSdkBuilder(new ClientSdkOptions { Namespace = BaseNameSpace, IncludeReservedTopics = true })
+            .Build(document);
+
+        Assert.DoesNotContain(result.Keys, name => name.Contains("Healthcheck", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("RequiredTopics = { \"user:get\", \"benzene:healthcheck\" }", result["UserGet/UserGetServiceClient.cs"]);
+    }
+
     private static string HashLine(string clientSource) =>
         clientSource.Split('\n').First(line => line.Contains("HashCode =>"));
 }

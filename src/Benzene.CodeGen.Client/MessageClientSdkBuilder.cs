@@ -10,35 +10,64 @@ namespace Benzene.CodeGen.Client;
 public class MessageClientSdkBuilder : ICodeBuilder<EventServiceDocument>
 {
     private readonly string _serviceName;
-    private readonly string _baseNamespace;
+    private readonly ClientSdkOptions _options;
     private readonly ICodeBuilder<IDictionary<string, OpenApiSchema>> _typeBuilder;
     private readonly IMethodName _methodName;
     private readonly ITypeName _typeName;
 
     public MessageClientSdkBuilder(string serviceName, string baseNamespace)
-        :this(serviceName, baseNamespace, new OpenApiSchemaCSharpTypeBuilder($"{baseNamespace}.{serviceName}"), new CSharpTypeName(), new TopicReversedMethodName())
+        : this(LegacyOptions(serviceName, baseNamespace))
     { }
-    
+
     public MessageClientSdkBuilder(string serviceName, string baseNamespace, ICodeBuilder<IDictionary<string, OpenApiSchema>> typeBuilder, ITypeName typeName, IMethodName methodName)
+        : this(LegacyOptions(serviceName, baseNamespace), typeBuilder, typeName, methodName)
+    { }
+
+    /// <summary>
+    /// Initializes a client builder from <paramref name="options"/>: <see cref="ClientSdkOptions.Namespace"/>
+    /// is used exactly - no magic <c>.{ServiceName}</c> suffix - as the namespace for the client
+    /// class, its interface and its DTOs alike.
+    /// </summary>
+    public MessageClientSdkBuilder(ClientSdkOptions options)
+        : this(options, new OpenApiSchemaCSharpTypeBuilder(options.Namespace), new CSharpTypeName(), new TopicReversedMethodName())
+    { }
+
+    public MessageClientSdkBuilder(ClientSdkOptions options, ICodeBuilder<IDictionary<string, OpenApiSchema>> typeBuilder, ITypeName typeName, IMethodName methodName)
     {
-        _baseNamespace = baseNamespace;
-        _serviceName = serviceName;
+        if (string.IsNullOrWhiteSpace(options.ServiceName))
+        {
+            throw new ArgumentException("ClientSdkOptions.ServiceName is required for MessageClientSdkBuilder", nameof(options));
+        }
+
+        _options = options;
+        _serviceName = options.ServiceName;
         _typeBuilder = typeBuilder;
         _typeName = typeName;
         _methodName = methodName;
     }
 
+    // The legacy (serviceName, baseNamespace) constructors' derived namespace was always exactly
+    // "{baseNamespace}.{serviceName}" - resolving that here means ClientSdkOptions.Namespace can be
+    // used exactly everywhere else, with no separate "is a suffix needed?" branch downstream.
+    private static ClientSdkOptions LegacyOptions(string serviceName, string baseNamespace) => new()
+    {
+        ServiceName = serviceName,
+        Namespace = $"{baseNamespace}.{serviceName}",
+    };
+
     public ICodeFile[] BuildCodeFiles(EventServiceDocument eventServiceDocument)
     {
+        var scopedDocument = TopicScope.Apply(eventServiceDocument, _options);
+
         var output = new List<ICodeFile>();
 
-        var classString = BuildClass(eventServiceDocument);
-        var interfaceString = BuildInterface(eventServiceDocument);
+        var classString = BuildClass(scopedDocument);
+        var interfaceString = BuildInterface(scopedDocument);
 
         output.Add(new CodeFile($"{_serviceName}ServiceClient.cs", classString));
         output.Add(new CodeFile($"I{_serviceName}ServiceClient.cs", interfaceString));
 
-        foreach (var codeFile in _typeBuilder.BuildCodeFiles(eventServiceDocument.Components.Schemas))
+        foreach (var codeFile in _typeBuilder.BuildCodeFiles(scopedDocument.Components.Schemas))
         {
             output.Add(codeFile);
         }
@@ -60,7 +89,7 @@ public class MessageClientSdkBuilder : ICodeBuilder<EventServiceDocument>
         lineWriter.WriteLine("using System.Diagnostics.CodeAnalysis;");
         lineWriter.WriteLine("");
 
-        lineWriter.WriteLine($"namespace {_baseNamespace}.{_serviceName}");
+        lineWriter.WriteLine($"namespace {_options.Namespace}");
         lineWriter.WriteLine("{");
         lineWriter.WriteLine("[ExcludeFromCodeCoverage]", 1);
         lineWriter.WriteLine($"public class {_serviceName}ServiceClient : I{_serviceName}ServiceClient", 1);
@@ -175,7 +204,7 @@ public class MessageClientSdkBuilder : ICodeBuilder<EventServiceDocument>
         
         lineWriter.WriteLine("");
 
-        lineWriter.WriteLine($"namespace {_baseNamespace}.{_serviceName}");
+        lineWriter.WriteLine($"namespace {_options.Namespace}");
         lineWriter.WriteLine("{");
         lineWriter.WriteLine($"public interface I{_serviceName}ServiceClient : IHasHealthCheck", 1);
         lineWriter.WriteLine("{", 1);

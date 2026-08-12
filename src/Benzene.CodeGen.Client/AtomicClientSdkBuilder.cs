@@ -22,9 +22,8 @@ namespace Benzene.CodeGen.Client;
 /// </remarks>
 public class AtomicClientSdkBuilder : ICodeBuilder<EventServiceDocument>
 {
-    private readonly string _baseNamespace;
+    private readonly ClientSdkOptions _options;
     private readonly IMethodName _clientNameFormatter;
-    private readonly bool _includeReservedTopics;
 
     /// <summary>Initializes an atomic client builder that skips reserved utility topics.</summary>
     /// <param name="baseNamespace">The base namespace for the generated clients (each client lands in <c>{baseNamespace}.{ClientName}</c>).</param>
@@ -37,18 +36,32 @@ public class AtomicClientSdkBuilder : ICodeBuilder<EventServiceDocument>
     /// <param name="clientNameFormatter">Derives each topic's client name from its topic id (defaults to <see cref="TopicMethodName"/>).</param>
     /// <param name="includeReservedTopics">When false (the default), reserved Benzene utility topics (spec/health/mesh/…) are skipped so only domain topics get atomic clients.</param>
     public AtomicClientSdkBuilder(string baseNamespace, IMethodName clientNameFormatter, bool includeReservedTopics)
+        : this(new ClientSdkOptions { Namespace = baseNamespace, IncludeReservedTopics = includeReservedTopics }, clientNameFormatter)
+    { }
+
+    /// <summary>
+    /// Initializes an atomic client builder from <paramref name="options"/>.
+    /// <see cref="ClientSdkOptions.Namespace"/> is the root each per-topic client lands under
+    /// (<c>{Namespace}.{ClientName}</c>); <see cref="ClientSdkOptions.ServiceName"/> is unused, since
+    /// each client is named from its own topic.
+    /// </summary>
+    public AtomicClientSdkBuilder(ClientSdkOptions options)
+        : this(options, new TopicMethodName())
+    { }
+
+    public AtomicClientSdkBuilder(ClientSdkOptions options, IMethodName clientNameFormatter)
     {
-        _baseNamespace = baseNamespace;
+        _options = options;
         _clientNameFormatter = clientNameFormatter;
-        _includeReservedTopics = includeReservedTopics;
     }
 
     /// <inheritdoc />
     public ICodeFile[] BuildCodeFiles(EventServiceDocument eventServiceDocument)
     {
-        return eventServiceDocument.Requests
-            .Where(request => _includeReservedTopics || !request.Reserved)
-            .SelectMany(request => BuildForTopic(eventServiceDocument, request))
+        var scopedDocument = TopicScope.Apply(eventServiceDocument, _options);
+
+        return scopedDocument.Requests
+            .SelectMany(request => BuildForTopic(scopedDocument, request))
             .ToArray();
     }
 
@@ -67,11 +80,23 @@ public class AtomicClientSdkBuilder : ICodeBuilder<EventServiceDocument>
             Transports = document.Transports,
         };
 
-        // Each atomic client is fully self-contained in its own namespace ({baseNamespace}.{clientName}),
+        // Each atomic client is fully self-contained in its own namespace ({options.Namespace}.{clientName}),
         // so its files go under a per-client folder. This keeps a DTO shared by two topics (generated
         // once per client, each in that client's namespace) from colliding on a flat filename, and lets
-        // a consumer drop a single client folder in for the one topic it calls.
-        return new MessageClientSdkBuilder(clientName, _baseNamespace)
+        // a consumer drop a single client folder in for the one topic it calls. The inner builder's
+        // Topics is pinned to exactly this one topic (rather than re-deriving from _options) since
+        // `filtered` already carries only that one request - re-applying the outer include-list/
+        // reserved-topic policy here would be redundant at best and, for a reserved topic admitted by
+        // an explicit --topics entry, wrongly re-excluded at worst.
+        var innerOptions = new ClientSdkOptions
+        {
+            ServiceName = clientName,
+            Namespace = $"{_options.Namespace}.{clientName}",
+            Topics = new[] { request.Topic },
+            IncludeReservedTopics = true,
+        };
+
+        return new MessageClientSdkBuilder(innerOptions)
             .BuildCodeFiles(filtered)
             .Select(file => new CodeFile($"{clientName}/{file.Name}", file.Lines) as ICodeFile)
             .ToArray();

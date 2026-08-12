@@ -97,11 +97,90 @@ if (BenzeneResult.IsSuccess(result))
 ## Generating message handler stubs
 
 The same package includes `MessageHandlerBuilder`, which generates handler *stubs* from a service
-document — useful for scaffolding a new service from an existing contract:
+document — useful for scaffolding a new service from an existing contract (consumer-first
+scaffolding: point it at a producer's published contract and get compilable handler stubs to fill
+in, rather than hand-typing the `[Message(...)]` boilerplate):
 
 ```csharp
 var handlerFiles = new MessageHandlerBuilder("MyService.Handlers").BuildCodeFiles(document);
 ```
+
+From the CLI, this is `--output message-handlers`:
+
+```bash
+benzene build -file Orders.spec.json -output message-handlers -namespace MyService.Handlers -directory Generated/
+```
+
+## Two client shapes: whole-service vs. per-topic
+
+`Benzene.CodeGen.Client` generates two different client shapes from the same
+`EventServiceDocument`, both usable directly or via the `benzene` CLI's `build` command
+(`--output client` / `--output topic-client`):
+
+| | **`client`** (`MessageClientSdkBuilder`) | **`topic-client`** (`AtomicClientSdkBuilder`) |
+|---|---|---|
+| Shape | One `{Service}ServiceClient` class with one method per topic | One small, self-contained client class *per topic*, each in its own folder |
+| `RequiredTopics` / contract hash | Covers every topic the client was generated for | Scoped to just that one topic (+ health check) |
+| Best for | A consumer that calls most/all of a service's topics — one client, one thing to inject | A consumer that calls one or a handful of topics out of a larger service |
+
+The coupling difference is the point of `topic-client`: `ValidateOutboundRouting()`'s startup check
+and the client's contract hash are both driven by `RequiredTopics`, so a whole-service client's
+consumer is coupled to *every* topic the service happens to expose, including ones it never calls —
+an unrelated change to a topic it doesn't use still shows up as a hash change or a startup-check
+failure. A per-topic client scopes both to the one topic it actually calls, so unrelated producer
+changes neither drag in unused surface nor invalidate the client. The tradeoff is more types to
+inject when a consumer genuinely does call most of a service — that's when `client` mode is the
+better fit.
+
+Generating a per-topic client directly:
+
+```csharp
+var atomicBuilder = new AtomicClientSdkBuilder(new ClientSdkOptions { Namespace = "Acme.Orders.Clients" });
+var codeFiles = atomicBuilder.BuildCodeFiles(document);
+// -> OrderCreate/OrderCreateServiceClient.cs (namespace Acme.Orders.Clients.OrderCreate), etc.
+```
+
+From the CLI:
+
+```bash
+benzene build -file Orders.spec.json -output topic-client -namespace Acme.Orders.Clients -directory Generated/
+```
+
+## Scoping generation with `--topics`
+
+Both `client` and `topic-client` modes accept a `--topics <a,b,c>` comma-delimited include-list (or,
+programmatically, `ClientSdkOptions.Topics`) that limits generation to exactly those topics — the
+minimal-coupling-surface option for a consumer that only calls a handful of a service's topics.
+Naming a topic scopes it consistently everywhere: in `client` mode, only the named topics get
+methods on the class and interface, and only they appear in `RequiredTopics`; in `topic-client`
+mode, only the named topics get their own per-topic client at all. `benzene:healthcheck` never needs
+naming — the client's `HealthCheckAsync()` method and its `RequiredTopics` entry are always emitted.
+A topic named in `--topics` that the document doesn't have fails the build (a non-zero exit naming
+the document's actual topics), rather than silently generating a client that's missing what you
+asked for.
+
+Reserved Benzene utility topics (`benzene:spec`, `benzene:mesh`, …) are excluded by default in both
+modes, so a generated client only covers a service's domain surface unless you opt in
+(`ClientSdkOptions.IncludeReservedTopics = true`; there is no CLI flag for this yet).
+
+```bash
+# Only these two topics: one client, methods/interface/RequiredTopics scoped to exactly them.
+benzene build -file Orders.spec.json -output client -service-name Orders \
+  -topics "order:create,order:cancel" -directory Generated/
+
+# The same include-list on topic-client: exactly two per-topic clients, nothing else.
+benzene build -file Orders.spec.json -output topic-client -namespace Acme.Orders.Clients \
+  -topics "order:create,order:cancel" -directory Generated/
+```
+
+## Controlling the generated namespace with `--namespace`
+
+By default the generated namespace is derived from `--lambda-name` or `--service-name` (see
+[Generating from a deployed service](#generating-from-a-deployed-service) below). `--namespace`
+overrides that: given, it is used *exactly* — no magic suffix — across the client class, its
+interface and its DTOs alike (programmatically, `ClientSdkOptions.Namespace`). In `topic-client`
+mode it's the *root*: each per-topic client still lands in its own namespace one level below it
+(`{Namespace}.{ClientName}`), since every atomic client is self-contained.
 
 ## Generating from a deployed service
 
@@ -110,7 +189,9 @@ from the running service's [`spec` endpoint](spec.md) (the service must have
 [`UseSpec()`](reference/middleware.md#usespecstring-topic--spec) in its pipeline), then feed that
 document into `MessageClientSdkBuilder` exactly as above. The
 [`Benzene.CodeGen.Cli`](reference/packages.md#code-generation--tooling) tool wraps this flow for
-command-line use.
+command-line use — see the two shapes above, plus `--file`/`--url`/`--mesh` for where the spec comes
+from (Phase 1's build artifact, a running service's spec endpoint, or a mesh manifest, all offline
+of any deployed AWS Lambda).
 
 ## Further Reading
 

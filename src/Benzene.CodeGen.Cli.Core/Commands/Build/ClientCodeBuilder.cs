@@ -21,12 +21,13 @@ public class ClientCodeBuilder : ICliCodeBuilder
 
             var eventServiceDocument = new EventServiceDocumentDeserializer().Deserialize(json);
 
-            // TODO(Phase 3b): scope eventServiceDocument.Requests to a --topics include-list here,
-            // one upstream projection before any builder runs - see the plan doc's Phase 3b step 3
-            // (work/spec-mesh-tooling-implementation-plan.md). Phase 3's own singular --topic form
-            // was superseded by Phase 3b's --topics list and deliberately not implemented.
-
             payload.ServiceName = ServiceNameResolver.Resolve(payload, eventServiceDocument);
+
+            // The --topics include-list (Phase 3b step 3, superseding Phase 3 step 4's unimplemented
+            // singular --topic) is applied as one upstream projection of Requests before methods,
+            // interface or RequiredTopics are built from it - see CodeBuilderFactory, which threads
+            // payload.Topics into ClientSdkOptions, and Benzene.CodeGen.Client.TopicScope, which both
+            // client builders apply as the very first step of BuildCodeFiles below.
 
             var messageClientSdkBuilder = new CodeBuilderFactory().Create(payload);
             var codeFiles = messageClientSdkBuilder.BuildCodeFiles(eventServiceDocument);

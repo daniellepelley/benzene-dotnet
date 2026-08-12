@@ -40,4 +40,35 @@ public class CodeFileWriterTest
             }
         }
     }
+
+    [Fact]
+    public async Task CreateAsync_NestedFileNames_CreatesSubdirectoriesAndWritesEachFile()
+    {
+        // topic-client mode's per-client "{Client}/{File}.cs" names used to throw
+        // DirectoryNotFoundException here - CreateAsync only ever created directoryPath itself, never
+        // a code file's own subdirectory.
+        var directoryPath = Path.Combine(Path.GetTempPath(), "benzene-codefilewriter-nested-test-" + Guid.NewGuid());
+        try
+        {
+            var codeFiles = new ICodeFile[]
+            {
+                new TestCodeFile { Name = "UserGet/UserGetServiceClient.cs", Lines = new[] { "namespace UserGet;" } },
+                new TestCodeFile { Name = "UserGet/IUserGetServiceClient.cs", Lines = new[] { "namespace UserGet;" } },
+                new TestCodeFile { Name = "TenantGet/TenantGetServiceClient.cs", Lines = new[] { "namespace TenantGet;" } },
+            };
+
+            await new CodeFileWriter().CreateAsync(codeFiles, directoryPath);
+
+            Assert.True(File.Exists(Path.Combine(directoryPath, "UserGet", "UserGetServiceClient.cs")));
+            Assert.True(File.Exists(Path.Combine(directoryPath, "UserGet", "IUserGetServiceClient.cs")));
+            Assert.True(File.Exists(Path.Combine(directoryPath, "TenantGet", "TenantGetServiceClient.cs")));
+        }
+        finally
+        {
+            if (Directory.Exists(directoryPath))
+            {
+                Directory.Delete(directoryPath, recursive: true);
+            }
+        }
+    }
 }

@@ -22,5 +22,9 @@ public class BuildPayload : ICommandPayload
     public string Output { get; set; }
     [Arg(Name = Constants.Directory, Description = Constants.DirectoryDescription)]
     public string Directory { get; set; }
+    [Arg(Name = Constants.Namespace, Description = Constants.NamespaceDescription)]
+    public string Namespace { get; set; }
+    [Arg(Name = Constants.Topics, Description = Constants.TopicsDescription)]
+    public string Topics { get; set; }
 }
 
