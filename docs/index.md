@@ -70,6 +70,7 @@ Benzene is a hexagonal framework designed for services running in serverless env
   - [Rate Limiting](rate-limiting.md) — best-effort, per-instance protection for public endpoints (health checks, spec); authoritative limits belong at the gateway
 
 - **Code Generation**
+  - [Contract Artifacts](contract-artifacts.md) — the `benzene-descriptor` build tool: emit `spec.json` / `service.json` from a built, non-deployed service, no network required
   - [Terraform](terraform.md)
   - [Client SDKs](client-sdks.md)
   - [Spec Endpoint (OpenAPI / AsyncAPI / Benzene format)](spec.md) — a runtime feature of a Benzene service, not to be confused with the [Benzene Specification](https://benzene.app/docs/specification/index.html) above: this is a `UseSpec` middleware that serves *your* service's own schema

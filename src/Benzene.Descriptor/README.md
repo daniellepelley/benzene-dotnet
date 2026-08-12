@@ -1,99 +1,149 @@
 # Benzene.Descriptor
 
-A `dotnet` tool (`benzene-descriptor`) that emits a service's **deployment descriptor** (`service.json`)
-at **build time** from a **built but non-running, non-deployed** Benzene service — by constructing it
-in-process and reading the `spec` it already computes. No deploy, no socket, no AWS. See
-[`work/deployment-descriptor-design.md`](../../work/deployment-descriptor-design.md) for the design and
-rationale.
+A `dotnet` tool (`benzene-descriptor`) that emits a service's **contract artifacts** —
+`{name}.spec.json` and `{name}.service.json` — at **build time** from a **built but non-running,
+non-deployed** Benzene service, by constructing it in-process and reading the descriptors it already
+computes. No deploy, no socket, no AWS. See
+[`work/deployment-descriptor-design.md`](../../work/deployment-descriptor-design.md) for the design
+and rationale, and [`docs/contract-artifacts.md`](../../docs/contract-artifacts.md) for the
+consumer-facing guide.
 
-> **Status:** working spike-grade tool. The introspection is **cloud-agnostic** (see below); an
-> **AWS Lambda** host adapter additionally supplies the inbound transport-name list. Not yet in
-> `Benzene.sln` or `deploy-benzene.yml` — wiring it into the solution + publish pipeline is a follow-up
-> that needs approval (the repo forbids changing `.sln` structure without it). In-repo it uses
-> `ProjectReference`s so it builds/tests against local source; the shipped package would use
-> `PackageReference`s pinned to the consuming service's Benzene version.
+> **Status:** sln-approved (implementation plan Phase 1,
+> [`work/spec-mesh-tooling-implementation-plan.md`](../../work/spec-mesh-tooling-implementation-plan.md)),
+> packed and published like any other `src/` package — no longer a spike. The introspection is
+> **cloud-agnostic** (see below); an **AWS Lambda** host adapter additionally supplies the inbound
+> transport-name list.
+
+## Two artifacts, both wire-exact
+
+- **`{name}.spec.json`** — the `EventServiceDocument` (`SpecBuilder`'s `"benzene"` type, the same
+  JSON the [`spec` topic](../../docs/spec.md) serves), codegen/gate input.
+- **`{name}.service.json`** — the mesh **§2 `ServiceDescriptor`**, serialized exactly as
+  `benzene:mesh:register` sends it (`MeshJson.Serialize(MeshDescriptorFactory.Create(...))` —
+  `docs/specification/mesh.md` §2 in the [Benzene repo](https://github.com/daniellepelley/Benzene),
+  covered by `conformance/mesh-descriptor-cases.json`). Because the mesh stores a fetched spec
+  **verbatim, never deserialized**, and `benzene:mesh:register`'s body *is* the §2 shape, a
+  build-emitted `service.json` is drop-in indistinguishable from a live fetch.
+
+Neither is a bespoke projection — both are exact wire shapes already covered by conformance
+fixtures, so no new envelope was invented for this tool.
+
+> An earlier, more opinionated distilled shape (`descriptorVersion`, `consumes[]`/`produces[]` with
+> a per-topic `transportKind`) was this tool's original spike output. It is **deferred**, not
+> shipped: its most IaC-relevant field rests on `OutboundRouteInspector`'s best-effort
+> private-field reflection into the built outbound routing table (kept in-tree, unused, for when a
+> proper outbound read-model lands — see the design note). `--emit` does not accept it.
 
 ## Cloud-agnostic by design
 
-The descriptor content is cloud-neutral, and the tool is built that way. Everything except the inbound
-transport-name list comes from host-neutral `ConfigureServices` — so the same service (which in Benzene
-can target multiple clouds from one codebase) yields the same logical descriptor regardless of host:
+Everything in `spec.json`/`service.json` except the *inbound* transport-name list comes from
+host-neutral `ConfigureServices` — so the same service (which in Benzene can target multiple clouds
+from one codebase) yields the same logical contract regardless of host:
 
-- **Cloud-agnostic core** (`NeutralHostAdapter`, works for any host): service identity, `consumes`
-  (topics + HTTP routes + base schemas), `produces` (topics + payload schemas + **outbound
-  `transportKind`**). No cloud coupling.
+- **Cloud-agnostic core** (`NeutralHostAdapter`, works for any host): service identity, consumed
+  topics + HTTP routes + schemas (from `spec.json`'s `requests[]`), produced topics + payload
+  schemas (`spec.json`'s `events[]`). No cloud coupling.
 - **Host adapter** (AWS Lambda today): runs the host-specific `Configure` so the **inbound
-  transport-name list** and validation-enriched schemas are populated. A new cloud is just a new
-  adapter of the same shape — nothing else changes.
+  transport-name list** (`spec.json`'s top-level `transports[]`) and validation-enriched schemas are
+  populated. A new cloud is just a new adapter of the same shape — nothing else changes.
 
-`transportsResolved` in the output says whether a host adapter ran (inbound transports present) or the
-neutral core was used. Force one with `--host neutral` / `--host aws-lambda`.
-
-Outbound `transportKind` (`sqs`/`sns`/`eventbridge`/`servicebus`/…) is recovered cloud-agnostically
-from the route's converter type name — no hard-coded per-cloud list. The outbound **destination** is
-deliberately *not* emitted: that value is resolved (its env-var name is lost) and is the crux of the
-paused outbound-routing redesign.
+Force one with `--host neutral` / `--host aws-lambda`; auto-selected otherwise (AWS Lambda if the
+assembly references `Benzene.Aws.Lambda.Core`).
 
 ## What it produces
 
-Against the real `examples/AwsMesh/Payments` service (a compiled `.dll`, never deployed):
+Against the real `examples/AwsMesh/Payments` service (a compiled `.dll`, never deployed),
+`--emit descriptor`:
 
 ```jsonc
 {
-  "descriptorVersion": "0.1",
   "service": "payments",
   "serviceVersion": "1.0.0",
+  "instanceId": "payments",
+  "runtime": "dotnet",
   "placement": { "cloud": "aws", "region": "eu-west-1" },
-  "transports": [ "api-gateway", "benzene", "sqs", "sns", "eventbridge" ],
-  "consumes": [
-    { "topic": "payments:capture", "http": [ { "method": "POST", "path": "/payments" } ],
-      "requestSchema": { "required": ["Currency","OrderId"], ... }, "responseSchema": { ... } },
-    { "topic": "payments:get-all", "http": [ { "method": "GET", "path": "/payments" } ], ... }
-  ],
-  "host": "aws-lambda",
-  "transportsResolved": true,
-  "produces": [
-    { "topic": "shipping:book",     "transportKind": "sqs",         "messageSchema": { ... } },
-    { "topic": "payment:captured",  "transportKind": "eventbridge", "messageSchema": { ... } }
+  "topics": [
+    { "id": "payments:capture",
+      "requestSchema": { "type": "object", "required": ["orderId","amount","currency"], "properties": {...} },
+      "responseSchema": { "type": "object", "required": ["id","orderId","amount","currency","status"], "properties": {...} } },
+    { "id": "payments:get-all", "requestSchema": {...}, "responseSchema": {...} }
   ],
   "descriptorHash": "sha256:4906226bb54a53eb6352cb0189ead3d13c547d848dabeb9f288dffc3d76fd70b"
 }
 ```
 
-`produces[]` carries topic + payload schema + the outbound **transportKind**. The per-egress
-**destination env-var** is deliberately omitted — that is paused pending the outbound-routing design
-(see the design note). Everything else is the service's real, code-derived surface.
+`--emit spec` (the same real service):
+
+```jsonc
+{
+  "openapi": "3.0.1",
+  "transports": [ "api-gateway", "benzene", "sqs", "sns", "eventbridge" ],
+  "requests": [
+    { "topic": "payments:capture", "httpMappings": [ { "method": "POST", "path": "/payments" } ],
+      "request": { "$ref": "#/components/schemas/CapturePayment" },
+      "response": { "$ref": "#/components/schemas/PaymentDto" } },
+    { "topic": "payments:get-all", "httpMappings": [ { "method": "GET", "path": "/payments" } ], ... }
+  ],
+  "events": [
+    { "topic": "shipping:book",    "message": { "$ref": "#/components/schemas/OutboundShipmentBook" } },
+    { "topic": "payment:captured", "message": { "$ref": "#/components/schemas/OutboundPaymentCaptured" } }
+  ],
+  "components": { "schemas": { "...": "..." } }
+}
+```
+
+Note the mesh descriptor's `topics[]` covers what the service **consumes** (request/response
+topics); produced events live in `spec.json`'s `events[]` — the two artifacts are complementary, not
+overlapping.
 
 ## How it works
 
 1. Loads the built service assembly in a plugin `AssemblyLoadContext` (`ServiceLoadContext`) that
    defers Benzene/Microsoft/System contract assemblies to the tool's own copies (keeping type identity)
    and loads the service's unique transports/deps from its output folder.
-2. Selects a host adapter (`HostAdapters`): the AWS Lambda adapter if the service references
+2. Compares the `Benzene.Core` version the service was compiled against to the tool's own — a
+   mismatch fails loudly rather than silently running the service's registration against an API
+   surface it wasn't built for (see the version-pinning caveat below).
+3. Selects a host adapter (`HostAdapters`): the AWS Lambda adapter if the service references
    `Benzene.Aws.Lambda.Core`, else the cloud-agnostic `NeutralHostAdapter`. The adapter runs the
    service's registration (`ConfigureServices`, plus host-specific `Configure` for AWS) **without** the
    run/listen step. Network-free.
-3. Runs `SpecBuilder` directly against the built container for `consumes`/`produces`/schemas/transports,
-   derives the mesh `descriptorHash` from the handler types, and recovers each outbound topic's
-   `transportKind` via `OutboundRouteInspector`.
-4. Distils the neutral `service.json`.
+4. For `--emit spec`/`both`: runs `SpecBuilder` directly against the built container.
+   For `--emit descriptor`/`both`: builds `MeshDescriptorFactory.Create(...)` from the handler
+   definitions and serializes it with `MeshJson`.
+
+`DescriptorEmitter.Emit` is the whole core, callable in-process (no process spawn) — `Program.cs` is
+a thin shell around it plus argument parsing, output-path resolution, and exit codes, so tests drive
+it directly (`test/Benzene.Core.Test/Autogen/Descriptor/DescriptorEmitterTest.cs`).
 
 ## Run it directly
 
 ```bash
-dotnet run --project tools/Benzene.Descriptor -- \
+dotnet run --project src/Benzene.Descriptor -- \
   --assembly examples/AwsMesh/Payments/bin/Debug/net10.0/Benzene.Examples.AwsMesh.Payments.dll \
-  --service payments --service-version 1.0.0 --output service.json
+  --service payments --service-version 1.0.0
 ```
 
-Options: `--assembly <dll>` (required), `--output <path>` (stdout if omitted), `--service <name>`
-(defaults to the assembly name), `--service-version <v>`, `--cloud <aws>`, `--region <r>`,
-`--host <neutral|aws-lambda>` (force an adapter; auto-selected otherwise).
+With no `--output`, both `Benzene.Examples.AwsMesh.Payments.spec.json` and `...service.json` are
+written next to the assembly.
+
+Options: `--assembly <dll>` (required), `--emit spec|descriptor|both` (default `both`),
+`--output <path>` (single-artifact `--emit`: exact path; `--emit both`: the *descriptor* path, spec
+path derived from it; omit for both files next to the assembly), `--service <name>` (defaults to the
+assembly name), `--service-version <v>`, `--cloud <aws>`, `--region <r>`,
+`--host <neutral|aws-lambda>` (force an adapter; auto-selected otherwise), `--startup <fullTypeName>`
+(pick the `BenzeneStartUp` type explicitly — needed only when the assembly defines more than one
+candidate).
+
+Exit codes: `0` success; `2` bad/unparseable arguments (usage printed to stderr); `1` any failure
+during construction — assembly not found, no `BenzeneStartUp` found, ambiguous `BenzeneStartUp`
+without `--startup`, `Benzene.Core` version mismatch, or any exception the service's own
+registration throws — always with a one-line reason on stderr.
 
 ## As a build step
 
-Install the tool (once published), then either call it from a CI step, or import the example
-`build/Benzene.Descriptor.targets` and opt in:
+Install the tool, then either call it from a CI step, or import
+`build/Benzene.Descriptor.targets` (packed into the tool's NuGet package) and opt in:
 
 ```xml
 <PropertyGroup>
@@ -101,19 +151,24 @@ Install the tool (once published), then either call it from a CI step, or import
 </PropertyGroup>
 ```
 
-That runs `benzene-descriptor` after `Build`, writing `<AssemblyName>.service.json` next to the output.
-The `.targets` is shipped here as an **example** (not packed into the tool package — a `dotnet` tool is
-installed and run, not `<PackageReference>`d); a service copies/imports it or wires its own CI step.
+That runs `benzene-descriptor --emit both` after `Build`, writing
+`<AssemblyName>.spec.json` / `<AssemblyName>.service.json` next to the output — and **fails the
+build** if the emit fails (no `ContinueOnError`). A NuGet tool package does not auto-import its
+`.targets` (that only happens for `PackageReference` libraries), so either copy the file into the
+repo or `<Import Project="...">` it explicitly from the restored package path; both patterns are
+legitimate and documented in [`docs/contract-artifacts.md`](../../docs/contract-artifacts.md).
 
 ## Caveats
 
 - **Inbound transports need a host adapter** — AWS Lambda is implemented; other hosts (self-host
-  worker, ASP.NET, Azure Functions) fall back to the neutral core (full logical descriptor, but
-  `transports: []` and `transportsResolved: false`) until their adapter is added.
-- **Outbound `transportKind` uses best-effort reflection** into the built routing table (today's
-  outbound model exposes no read-model). It degrades to `"unknown"` on any failure, and is meant to be
-  replaced when the outbound-routing redesign lands. Destination binding is intentionally not surfaced.
+  worker, ASP.NET, Azure Functions) fall back to the neutral core (full logical contract, but
+  `spec.json`'s `transports: []`) until their adapter is added.
 - The plugin ALC assumes the tool and the service resolve the shared `Benzene.*` assemblies to the
-  **same version** — pin the tool to the service's Benzene version.
+  **same version** — pin the tool to the service's Benzene version. The tool detects a `Benzene.Core`
+  mismatch between what the service was compiled against and what it carries, and fails loudly
+  (printing both versions) rather than silently coercing to its own.
 - A `StartUp` that does real I/O in `ConfigureServices`/`Configure` (reads a secret, pings a DB) would
   have build-time side effects. Benzene's convention is registration-only.
+- `OutboundRouteInspector` (best-effort reflection recovering each outbound topic's transport kind)
+  is kept in the tree but currently unused — it backed the deferred distilled projection above and
+  is the starting point when that lands as `--emit deploy`.
