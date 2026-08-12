@@ -1,0 +1,21 @@
+Benzene Mesh Host installed as {{ include "benzene-mesh.fullname" . }} in namespace {{ .Release.Namespace }}.
+
+{{- if .Values.ingress.enabled }}
+The dashboard is reachable via the Ingress at:
+  http{{ if .Values.ingress.tls }}s{{ end }}://{{ .Values.ingress.host }}/mesh-ui
+{{- else if eq .Values.service.type "LoadBalancer" }}
+The dashboard will be reachable once the LoadBalancer's external IP is assigned:
+  kubectl get svc {{ include "benzene-mesh.fullname" . }} -n {{ .Release.Namespace }} -w
+{{- else }}
+Port-forward to reach the dashboard:
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "benzene-mesh.fullname" . }} 8090:{{ .Values.service.port }}
+Then browse http://localhost:8090/mesh-ui
+{{- end }}
+
+{{- if not .Values.existingSecretName }}
+
+NOTE: values.existingSecretName is unset. If meshConfig.auth.mode is "basic" or "oidc", or
+meshConfig.auth.ingestion.mode is "sharedSecret", the host will refuse to start until you create a
+Secret with the required keys (see ../../CONFIG.md's "credentials referenced above") and set
+existingSecretName to its name.
+{{- end }}

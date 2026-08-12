@@ -1,0 +1,81 @@
+# Default values for benzene-mesh.
+# See ../../CONFIG.md for the full mesh.json schema - meshConfig below is that document rendered
+# to JSON, not a chart-specific shape.
+
+image:
+  repository: ghcr.io/daniellepelley/benzene-mesh
+  # .github/workflows/deploy-mesh-host.yml publishes only {sha, latest} tags - there is no semver
+  # Docker tag today, so "latest" is the honest default. Pin to a sha tag for anything beyond a
+  # demo/eval install.
+  tag: latest
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+# mesh.json's content - rendered verbatim to templates/configmap.yaml as JSON (values here are
+# YAML only because this file is; the ConfigMap itself gets real JSON). See ../../CONFIG.md for
+# every key, its type/default, and worked examples. This default matches
+# ../../mesh.sample.json (filesystem artifact store + one HTTP service) - replace it with your
+# own services/artifactStore/usage/fleet/topology/dispatch/auth before deploying for real.
+#
+# NEVER put a credential under any key here (an artifactStore/usage/fleet/topology option, an
+# auth.oidc.clientId, etc. are all fine - a secret value is not). Secrets come from
+# existingSecretName below instead. See ../../CONFIG.md's "the two invariants".
+meshConfig:
+  artifactRootDirectory: /data/mesh-artifacts
+  pollIntervalSeconds: 60
+  services:
+    - name: orders-api
+      specUrl: "http://orders-api:8080/spec?type=benzene"
+      healthUrl: "http://orders-api:8080/healthcheck"
+
+# The name of an EXISTING Kubernetes Secret (created separately, e.g. `kubectl create secret
+# generic mesh-secrets --from-literal=MESH_OIDC_CLIENT_SECRET=...`) - never the secret itself.
+# Wired into the mesh container via envFrom/secretRef (templates/deployment.yaml), so its keys
+# become environment variables. Leave empty ("") for auth.mode "none"/"proxy" with no shared-secret
+# ingestion, where nothing in ../../CONFIG.md's "credentials referenced" table applies. Populate it
+# with whichever of these your meshConfig.auth actually needs:
+#   MESH_OIDC_CLIENT_SECRET  - auth.mode: "oidc" (or the env var named by auth.oidc.clientSecretEnvVar)
+#   MESH_BASIC_USER / MESH_BASIC_PASSWORD - auth.mode: "basic"
+#   MESH_INGEST_SECRET       - auth.ingestion.mode: "sharedSecret"
+existingSecretName: ""
+
+persistence:
+  # Only relevant when meshConfig.artifactStore is unset or {"type": "file"} (the default) - a
+  # cloud-backed artifactStore (s3/azureBlob/gcs) needs no volume at all, since the container
+  # itself is stateless in that case.
+  enabled: false
+  size: 1Gi
+  storageClassName: ""
+  accessMode: ReadWriteOnce
+  # existingClaim, if set, is mounted instead of a chart-managed PersistentVolumeClaim.
+  existingClaim: ""
+
+resources: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+serviceAccount:
+  create: true
+  name: ""
+  # Cloud-backed sections (artifactStore/usage/fleet/topology) authenticate off the pod's ambient
+  # identity, never mesh.json (see ../../CONFIG.md's invariants) - for AWS EKS that's IRSA
+  # (eks.amazonaws.com/role-arn here), for GKE it's Workload Identity
+  # (iam.gke.io/gcp-service-account here). Grant only the least-privilege permissions
+  # ../../CONFIG.md's matrix lists for the sections you actually enable.
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  # Required when enabled is true - templates/ingress.yaml fails the render otherwise.
+  host: ""
+  tls: []

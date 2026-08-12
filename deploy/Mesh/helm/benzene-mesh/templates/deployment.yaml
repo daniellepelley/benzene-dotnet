@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "benzene-mesh.fullname" . }}
+  labels:
+    {{- include "benzene-mesh.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "benzene-mesh.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "benzene-mesh.selectorLabels" . | nindent 8 }}
+      annotations:
+        # A ConfigMap volume mount doesn't itself trigger a rollout when mesh.json changes - this
+        # forces one, the same trick `helm create`'s own scaffold uses for its Secret checksum.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "benzene-mesh.serviceAccountName" . }}
+      containers:
+        - name: mesh
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.targetPort }}
+              protocol: TCP
+          env:
+            # Mirrors examples/K8sMesh/compose/docker-compose.yml's `mesh` service - the primary
+            # config path, a bind-mounted mesh.json (here, a ConfigMap volume instead of a bind
+            # mount). See ../../CONFIG.md for everything mesh.json can carry.
+            - name: MESH_CONFIG_PATH
+              value: /config/mesh.json
+          {{- if .Values.existingSecretName }}
+          envFrom:
+            # Secrets never go in mesh.json (../../CONFIG.md's invariants) - they arrive here as
+            # environment variables from a Secret you create and name in values.existingSecretName,
+            # e.g. MESH_OIDC_CLIENT_SECRET / MESH_BASIC_USER / MESH_BASIC_PASSWORD /
+            # MESH_INGEST_SECRET, depending which auth.mode/auth.ingestion.mode you configured.
+            - secretRef:
+                name: {{ .Values.existingSecretName }}
+          {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: mesh-artifacts
+              mountPath: {{ include "benzene-mesh.artifactMountPath" . }}
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "benzene-mesh.fullname" . }}
+        - name: mesh-artifacts
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (printf "%s-artifacts" (include "benzene-mesh.fullname" .)) }}
+          {{- else }}
+          # Fine for a single replica; artifacts are lost on pod restart/reschedule. Set
+          # persistence.enabled: true for a PersistentVolumeClaim instead - or configure a
+          # cloud-backed meshConfig.artifactStore (s3/azureBlob/gcs), which needs no volume at all.
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

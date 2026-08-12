@@ -155,6 +155,34 @@ volumes:
 
 Then browse `http://localhost:8090/mesh-ui`.
 
+## Deploying with Helm
+
+[`helm/benzene-mesh/`](helm/benzene-mesh) is a chart for running the same image in Kubernetes -
+the Deployment mounts a ConfigMap at `/config/mesh.json` and sets `MESH_CONFIG_PATH` to it, the
+same wiring [`examples/K8sMesh/compose/docker-compose.yml`](../../examples/K8sMesh/compose/docker-compose.yml)'s
+`mesh` service does with a bind mount. `values.yaml`'s `meshConfig` is that same `mesh.json` shape
+(see [`CONFIG.md`](CONFIG.md)) rendered to the ConfigMap as JSON.
+
+```bash
+helm install my-mesh deploy/Mesh/helm/benzene-mesh \
+  --set meshConfig.services[0].name=orders-api \
+  --set meshConfig.services[0].specUrl=http://orders-api/spec?type=benzene \
+  --set meshConfig.services[0].healthUrl=http://orders-api/healthcheck
+# or: helm install my-mesh deploy/Mesh/helm/benzene-mesh -f my-values.yaml
+```
+
+**Secrets never go into the chart's ConfigMap** - the same invariant CONFIG.md states for
+`mesh.json` itself. Auth client secrets and any source credentials come from a Kubernetes `Secret`
+you create separately and name in `values.existingSecretName`; the chart wires it into the mesh
+container via `envFrom`/`secretRef`, never templates it into the ConfigMap. See the chart's
+`values.yaml` for which environment variable each `auth.mode`/`auth.ingestion.mode` needs.
+
+The chart also supports (all optional, off by default): a `PersistentVolumeClaim` for
+`mesh-artifacts` instead of an `emptyDir` (`persistence.enabled`), an `Ingress`
+(`ingress.enabled`), and a `ServiceAccount` with cloud-identity annotations for IRSA/Workload
+Identity (`serviceAccount.annotations`) - matching [`CONFIG.md`](CONFIG.md#per-source-least-privilege-permission-matrix)'s
+permission matrix.
+
 ## Local development (without Docker)
 
 ```bash

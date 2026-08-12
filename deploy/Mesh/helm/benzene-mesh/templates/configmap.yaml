@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "benzene-mesh.fullname" . }}
+  labels:
+    {{- include "benzene-mesh.labels" . | nindent 4 }}
+data:
+  # mesh.json - see ../../CONFIG.md for every key. NEVER put a credential under any key here
+  # (see CONFIG.md's "the two invariants") - auth client secrets and source credentials belong in
+  # a Kubernetes Secret named by values.existingSecretName instead, wired via envFrom in
+  # templates/deployment.yaml, never templated into this ConfigMap.
+  mesh.json: |
+    {{- .Values.meshConfig | toPrettyJson | nindent 4 }}

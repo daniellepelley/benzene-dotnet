@@ -1,0 +1,23 @@
+apiVersion: v2
+name: benzene-mesh
+description: >-
+  Benzene Mesh Aggregator + UI (deploy/Mesh/Benzene.Mesh.Host) - a config-driven Helm chart for
+  running the mesh dashboard against your own services in Kubernetes. See ../../CONFIG.md for the
+  full mesh.json schema this chart's values.meshConfig renders into a ConfigMap.
+type: application
+keywords:
+  - benzene
+  - service-mesh
+  - observability
+home: https://github.com/daniellepelley/benzene-dotnet/tree/main/deploy/Mesh
+sources:
+  - https://github.com/daniellepelley/benzene-dotnet/tree/main/deploy/Mesh
+# Independent of both the library's version.txt and the host's own VersionPrefix/VersionSuffix
+# (deploy/Mesh/Benzene.Mesh.Host/Benzene.Mesh.Host.csproj) - a chart bump (a templates/values
+# change) and an app bump (a new image) are different events on different cadences, the same
+# reasoning that already governs every other deploy/ artifact's independent versioning.
+version: 0.1.0
+# .github/workflows/deploy-mesh-host.yml publishes ghcr.io/<owner>/benzene-mesh tagged only
+# {sha, latest} - there is no semver Docker tag to mirror here, so this is nominal, not a real
+# release number. values.yaml's image.tag default matches it.
+appVersion: "latest"
