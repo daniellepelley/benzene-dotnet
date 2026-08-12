@@ -26,6 +26,10 @@ roadmap doc).
   this host) and POST to this host's `/mesh/report` ingestion endpoint.
 - Serves the Mesh UI dashboard at `/mesh-ui` and the per-service Spec UI at `/mesh-spec-ui.html`,
   self-served from the same host (`Benzene.Mesh.Ui`).
+- Logs the effective configuration once, at startup, before the first poll - every source it
+  registered, with its options, secret-shaped keys (`password`/`secret`/`token`/`key`/`credential`/
+  `connectionstring`, case-insensitive) redacted to `***`. The single highest-value support tool in
+  the package: "it isn't picking up my Tempo URL" is otherwise unanswerable without a debugger.
 - **The whole catalog is reachable from `mesh.json` alone** (config schema v1): where generated
   artifacts live, additional usage/fleet/topology data sources, and opt-in live dispatch - the same
   capabilities the hand-wired examples under `examples/` (`AwsMesh`, `AzureMesh`,
@@ -198,6 +202,36 @@ to get wrong (and, since a set-but-missing path now fails loudly, would surface 
 "no file exists there" rather than quietly starting empty). Copy `mesh.sample.json` and edit it for
 your own services once you're past the first run.
 
+## Installing as a dotnet tool
+
+The same binary the Docker image runs is also packed as a dotnet tool (`Benzene.Mesh.Host.csproj`'s
+`PackAsTool`/`ToolCommandName`, matching `tools/Benzene.Descriptor`'s existing pattern for a
+repo-packed tool, command name `benzene-mesh`) - useful when you want `--validate-config` or a
+quick local run without a container. `.github/workflows/deploy-mesh-host.yml`'s `publish-tool` job
+publishes it to this repo's GitHub Packages NuGet feed; add that as a source once, then install
+normally:
+
+```bash
+dotnet nuget add source --username <github-username> --password <a PAT with read:packages> \
+  --store-password-in-clear-text --name benzene-github "https://nuget.pkg.github.com/<owner>/index.json"
+dotnet tool install -g Benzene.Mesh.Host --add-source benzene-github
+```
+
+Or pack and install locally from source without waiting on a publish - this is what
+`work/enterprise/slice-5-packaging.md` task 5.3's verification does:
+
+```bash
+dotnet pack deploy/Mesh/Benzene.Mesh.Host/Benzene.Mesh.Host.csproj -c Release
+dotnet tool install -g Benzene.Mesh.Host --add-source deploy/Mesh/Benzene.Mesh.Host/nupkg
+```
+
+Either way, the installed tool works the same as the container:
+
+```bash
+MESH_CONFIG_PATH="$(pwd)/mesh.sample.json" benzene-mesh --validate-config
+MESH_CONFIG_PATH="$(pwd)/mesh.sample.json" benzene-mesh
+```
+
 ## Building the image locally
 
 ```bash
@@ -209,9 +243,12 @@ docker run -p 8090:8080 -e MESH_CONFIG_PATH=/config/mesh.json -v "$(pwd)/mesh.js
 ## Publishing
 
 `.github/workflows/deploy-mesh-host.yml` (manual `workflow_dispatch`, same trigger pattern as every
-other Benzene deploy workflow) builds and pushes this image to GHCR. `.github/workflows/build-mesh-host.yml`
-runs on every push/PR touching this folder, compiling `Benzene.Mesh.Host.sln` - this deployable gets
-real CI coverage, unlike `examples/`, since it's a production-ready primitive, not a demo.
+other Benzene deploy workflow) has two independent jobs: `deploy` builds and pushes the Docker image
+to GHCR, and `publish-tool` packs and pushes the dotnet tool package (above) to GitHub Packages'
+NuGet feed - both authenticate with the built-in `GITHUB_TOKEN`, neither runs on anything but a
+manual dispatch. `.github/workflows/build-mesh-host.yml` runs on every push/PR touching this folder,
+compiling `Benzene.Mesh.Host.sln` - this deployable gets real CI coverage, unlike `examples/`, since
+it's a production-ready primitive, not a demo.
 
 ## Why this isn't in `Benzene.sln`/`Benzene.Examples.sln`
 

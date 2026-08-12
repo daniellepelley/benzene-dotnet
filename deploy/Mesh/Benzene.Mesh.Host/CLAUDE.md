@@ -76,12 +76,24 @@ alongside their other infra), rather than only against `examples/Mesh/`'s demo/f
 - `Program.cs` - `Host.CreateDefaultBuilder(args)` with an extra `ConfigureAppConfiguration` step
   that delegates to `MeshConfigLoader.ConfigureMeshConfig`, layered on top of
   `Host.CreateDefaultBuilder`'s own default sources (env vars, etc.). `--validate-config` short-circuits
-  before any of that: it calls `MeshConfigValidator.Validate` directly and exits.
+  before any of that: it calls `MeshConfigValidator.Validate` directly and exits. After `Build()`
+  and before `host.Run()` it also logs `MeshConfigSummary.Format` of the resolved `MeshHostConfig`
+  once, at `Information` - work/enterprise/slice-5-packaging.md task 5.1, the single highest-value
+  support tool in the package ("it isn't picking up my Tempo URL" is otherwise unanswerable without
+  a debugger).
 - `MeshConfigLoader` - loads `MESH_CONFIG_PATH` (if set) as an additional JSON config source.
   Pulled out of `Program.cs`'s top-level statements so it's directly unit-testable
   (`Benzene.Mesh.Host.Test`). A **set but missing** path throws `FileNotFoundException` naming the
   path at startup, rather than silently starting an empty mesh (`optional: true`'s old failure mode)
   - unset stays a no-op, the legitimate env-var-only local-dev path this package's README documents.
+- `MeshConfigSummary` - formats a `MeshHostConfig` as the multi-line, human-readable summary
+  `Program.cs` logs at startup (above). Redacts by key name across every options dictionary
+  (`Services[].SourceOptions`, `ArtifactStore.Options`, `Usage[].Options`, `Fleet.Options`,
+  `Topology.Options`): any key containing `password`/`secret`/`token`/`key`/`credential`/
+  `connectionstring` (case-insensitive) prints its value as `***` - the key itself always prints, so
+  an operator can see a value was supplied without seeing what it was. A second line of defence, not
+  the primary one: credentials should never reach `mesh.json` at all (see `../README.md`'s house
+  rule) - this covers a value pasted in against that advice, or a connection string that embeds one.
 
 ## Deviations from the original design sketch
 - **No `selfReportIngestion.enabled` config toggle.** The original design considered gating whether
@@ -143,6 +155,21 @@ cloud account (see `../README.md`). The ones worth calling out by name:
   read-side wiring `fleet`-enabled configs use.
 - **Benzene.Mesh.Ui** - `UseMeshUi`, `UseMeshSpecUi`, the dashboard itself.
 
+## Packaging (work/enterprise/slice-5-packaging.md)
+Three ways to consume this package beyond building it from source, all documented in `../README.md`:
+the Docker image (`Dockerfile`, unchanged by slice 5), a `dotnet tool` (`Benzene.Mesh.Host.csproj`'s
+`PackAsTool`/`ToolCommandName: benzene-mesh` - `Microsoft.NET.Sdk.Web` sets `IsPackable` false by
+default, unlike the plain-SDK precedents `templates/Benzene.Templates.csproj`/
+`tools/Benzene.Descriptor.csproj` use, so that has to be turned back on explicitly), and a Helm
+chart (`../helm/benzene-mesh/`, for Kubernetes - mounts the same `mesh.json` shape as a ConfigMap
+volume instead of a bind mount, models the wiring on
+`examples/K8sMesh/compose/docker-compose.yml`'s `mesh` service). `.github/workflows/deploy-mesh-host.yml`
+publishes the image and the tool from two independent jobs, both gated by the same manual
+`workflow_dispatch`/built-in-`GITHUB_TOKEN` pattern the image job already used. `../CONFIG.md` is the
+full `mesh.json` schema reference every one of these three paths reads the same way; the
+per-source least-privilege permission matrix lives there too (moved out of `../README.md`, not
+duplicated).
+
 ## Why this isn't part of `Benzene.sln`/`Benzene.Examples.sln`
 See `../README.md`'s own section on this - same reasoning as `templates/Benzene.Templates.sln`.
 
@@ -153,14 +180,15 @@ or `Benzene.sln` - a `ProjectReference` to this host from there would pull the h
 this project directly and exercises `MeshConfigLoader`, `MeshHostServiceConfig.ToEntry()`,
 `MeshHostConfig` binding (`MeshHostConfigTest`), every `MeshSourceRegistrar` source/type name and its
 fail-fast paths (`MeshSourceRegistrarTest`), `MeshConfigValidator` (`MeshConfigValidatorTest`),
-`registryDocuments`' union/precedence/failure rules (`StartupRegistryDocumentsTest`), and the AwsMesh
+`registryDocuments`' union/precedence/failure rules (`StartupRegistryDocumentsTest`), the AwsMesh
 capability-for-capability acceptance test (`AwsMeshParityTest`, which also asserts - at the assembly
 level - that this host references no `Benzene.Mesh.Discovery.*` package; the exhaustive transitive
-version of that check is `NoDiscoveryInVanillaHostTest`). Every AWS/Azure/GCS-backed assertion checks
-a *registration*, never a resolved cloud client - see `AwsMeshParityTest`'s remarks for why
-(constructing an unconfigured AWS/GCS SDK client throws immediately in any environment without an
-ambient region/ADC, which would make the test's pass/fail depend on the CI runner's environment
-rather than on this code).
+version of that check is `NoDiscoveryInVanillaHostTest`), and `MeshConfigSummary`'s redaction rule
+(`MeshConfigSummaryTest` - a config with a secret-shaped option key prints the key, never the value).
+Every AWS/Azure/GCS-backed assertion checks a *registration*, never a resolved cloud client - see
+`AwsMeshParityTest`'s remarks for why (constructing an unconfigured AWS/GCS SDK client throws
+immediately in any environment without an ambient region/ADC, which would make the test's pass/fail
+depend on the CI runner's environment rather than on this code).
 
 `MeshAuthGateTest` (unit-level, `MeshAuthGate` invoked directly against a `DefaultHttpContext` - no
 Kestrel needed for modes `proxy`/`basic`, the ingestion path, or oidc's "already authenticated"
