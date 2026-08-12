@@ -1,7 +1,8 @@
 using System.Net;
-using System.Net.Sockets;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -34,15 +35,6 @@ namespace Benzene.Mesh.Host.Test;
 /// </remarks>
 public class MeshAuthAcceptanceTest
 {
-    private static int GetFreeTcpPort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
-    }
-
     private static string[] BlockedPaths(bool fileStore) => fileStore
         ? new[] { "/mesh-ui", "/mesh-spec-ui.html", "/artifacts/manifest.json", "/artifacts/services/orders-api.json" }
         : new[] { "/mesh-ui", "/mesh-spec-ui.html", "manifest.json", "services/orders-api.json" };
@@ -76,13 +68,17 @@ public class MeshAuthAcceptanceTest
 
         var configPath = Path.Combine(Path.GetTempPath(), $"mesh-auth-acceptance-{Guid.NewGuid():N}.json");
         File.WriteAllText(configPath, meshJson);
-        var port = GetFreeTcpPort();
 
         var host = global::Microsoft.Extensions.Hosting.Host.CreateDefaultBuilder()
             .ConfigureAppConfiguration((_, config) => config.AddJsonFile(configPath, optional: false))
             .ConfigureWebHost(webBuilder => webBuilder
                 .UseKestrel()
-                .UseUrls($"http://127.0.0.1:{port}")
+                // Port 0 - Kestrel picks and binds an ephemeral port itself, atomically. Pre-selecting
+                // a "free" port with a throwaway TcpListener (the previous approach) has a real gap
+                // between closing that listener and Kestrel binding the same port, which a concurrent
+                // test can win - the intermittent failures this replaced. The bound port is read back
+                // below, after StartAsync, from the server's own IServerAddressesFeature.
+                .UseUrls("http://127.0.0.1:0")
                 .UseEnvironment("Development")
                 .UseStartup<Startup>()
                 .ConfigureServices(services =>
@@ -113,9 +109,11 @@ public class MeshAuthAcceptanceTest
             .Build();
 
         await host.StartAsync();
+        var address = host.Services.GetRequiredService<IServer>().Features
+            .Get<IServerAddressesFeature>()!.Addresses.First();
         var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = allowAutoRedirect })
         {
-            BaseAddress = new Uri($"http://127.0.0.1:{port}"),
+            BaseAddress = new Uri(address),
         };
         return new TestHost { Host = host, Client = client, PreviousEnv = previous };
     }
