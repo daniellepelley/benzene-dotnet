@@ -17,6 +17,103 @@ phase's "Depends on" says otherwise.
 
 ---
 
+## 2026-08-12 — owner design review: Phase 1 reconfirmed, three amendments
+
+The owner independently re-stated Phase 1 as the first deliverable — a build tool that pulls a
+service's metadata (the spec, the mesh endpoint descriptor) out at build time into JSON files that
+can be stored or fed straight into code generation — without having this plan in front of them.
+That is a reconfirmation, not a new requirement. A review against the code
+(`tools/Benzene.Descriptor`, the spike outputs, the codegen estate) settled the open deltas.
+**A Phase 1 implementer must read this section before the phase; where it conflicts with the phase
+text below, this section wins.**
+
+### Amendment A — `--emit descriptor` emits the mesh §2 wire shape, not the distilled projection
+
+Phase 1 step 3 says `descriptor` → "current `service.json` output". That current output
+(`DescriptorEmitter.Distil`, `descriptorVersion: 0.1`) is a bespoke deployment projection — neither
+of the two wire shapes. Amended: **`--emit descriptor` emits the mesh ServiceDescriptor exactly as
+pinned by the spec repo** (`Benzene/docs/specification/mesh.md` §2, hash per §2.2 — i.e.
+`MeshJson.Serialize(MeshDescriptorFactory.Create(...))`, which `DescriptorEmitter.BuildMesh` already
+computes internally and then mostly discards). The default for `--emit` flips from `descriptor` to
+`both`.
+
+Why exact wire shapes: interchangeability is already real in the code — the mesh stores a fetched
+spec **verbatim, never deserialized** (`MeshServiceSnapshot.SpecJson`), and `benzene:mesh:register`'s
+body *is* the §2 shape, so a build-emitted artifact is drop-in indistinguishable from a live fetch
+(the static-floor story). And the §2 shape is already covered by
+`conformance/mesh-descriptor-cases.json`, so the build artifact gets conformance coverage for free —
+no new envelope, no new fixture. Provenance (built-at, git sha) stays out-of-band in CI artifact
+metadata, never inside the contract document.
+
+The distilled deployment projection (`consumes`/`produces`/`transportKind`/`transportsResolved`) is
+**renamed `--emit deploy` → `.deploy.json` and deferred**: its most IaC-relevant field rests on
+`OutboundRouteInspector`'s best-effort private-field reflection (the README says it is "meant to be
+replaced"), and `destinationRef` is absent pending the outbound read-model
+([`benzene-clients-redesign-plan.md`](benzene-clients-redesign-plan.md) §2.2 /
+[`benzene-outbound-model-plan.md`](benzene-outbound-model-plan.md)). Shipping a versioned public
+artifact whose load-bearing fields are spike-grade creates a compat obligation we should not take
+yet.
+
+### Amendment B — `Benzene.CodeGen.Terraform` is deprecated (supersedes the design doc's stance)
+
+The owner's call: the opinionated codegen outputs, Terraform first among them, "are not
+particularly useful and should be deprecated." This **supersedes**
+[`deployment-descriptor-design.md`](deployment-descriptor-design.md)'s recorded position
+("Repositions, doesn't deprecate") and its recommendation 5 ("Keep `Benzene.CodeGen.Terraform`").
+The descriptor makes the correct boundary obvious — logical needs + env-var contracts are the
+product; rendering IaC is the operator's house style — and a Benzene-owned `.tf` renderer is a
+liability that implies support for every dialect decision it bakes in.
+
+Path (the package never shipped to NuGet — `IsPackable=false` — so `[Obsolete]` serves nobody):
+1. **In Phase 1 (docs-only, one paragraph):** deprecation banner on `docs/terraform.md`, fix its
+   overclaim ("Benzene includes tools to automatically generate Terraform configuration" — it is
+   not shipped), and note the replacement posture (descriptor artifact + reference generator).
+   Update `docs/index.md`'s Code Generation entry accordingly. Freeze the package: no new features,
+   no new tests; resolve `src/Benzene.CodeGen.Terraform/CLAUDE.md`'s "fork in the road" note to
+   "resolved: deprecated, frozen."
+2. **After the reference cookbook exists (follow-up, not Phase 1):** delete
+   `Benzene.CodeGen.Terraform`, its tests (`test/Benzene.Core.Test/Autogen/CodeGen/Terraform/`),
+   and `docs/terraform.md`. `Benzene.CodeGen.ApiGateway` gets the same treatment unless a real
+   consumer surfaces (its CLI `--output api-gateway` switch case goes with it).
+   `Benzene.CodeGen.Markdown` is already superseded by `Benzene.Spec.Ui` (its consumer was removed)
+   and retires on the same pass.
+3. **Salvage as documentation, not code:** the event-wiring semantics buried in the generators —
+   SNS `filter_policy` over Benzene topics, EventBridge `event_pattern` matching `detail-type`
+   against topics verbatim — move into the planned reference "`.json` → your-house-style IaC"
+   cookbook ("teach the pattern, don't own the policy").
+
+**Explicitly not deprecated:** `Benzene.CodeGen.Client` (+ Atomic/MessageHandler builders — the
+strategic clients-from-spec surface, per [`benzene-clients-vision.md`](benzene-clients-vision.md)
+§2.5), `CodeGen.Core`, `CodeGen.LambdaTestTool`, the `benzene` CLI, and the source generators.
+
+### Amendment C — small Phase 1 additions and settled questions
+
+- **Implement `--startup <fullTypeName>`**: `DescriptorEmitter.FindStartUpType`'s
+  multiple-candidates error message already tells the user to pass a flag that does not exist in
+  the parser. Add it in step 3's parser work.
+- **Input contract is settled — the DLL, full stop.** csproj-as-input is the wrong layer (the tool
+  would re-implement what MSBuild already knows; the `.targets` file passing `$(TargetPath)` is the
+  csproj integration). Source-level extraction is structurally insufficient: produced events and
+  wired transports are imperative (`AddResponseEventDeclarations(...)`, `.UseSqs(...)`) and only
+  executing registration materialises them — the design doc's extractability table is the
+  authority. The source generators remain a complement (consumer-side static scans), never the
+  mechanism.
+- **Architecture is settled — keep the standalone ALC tool.** The design doc preferred an
+  in-build-context MSBuild task; the prototype shipped the standalone tool and inherited the ALC
+  version-pinning risk the doc predicted. Step 4's loud version-skew detection is the accepted
+  mitigation; revisit the in-context task only if skew failures show up in real use.
+- **Output location:** next to build output (`$(TargetDir)$(AssemblyName).spec.json` /
+  `.service.json`), `--output` overridable. No new well-known artifacts folder — decision 2 above
+  stands: the mesh artifact store is the contract registry; build outputs are transient.
+- **Cross-language:** the descriptor shape is already language-neutral and conformance-pinned
+  (mesh.md §2 + fixture); the spec document (`EventServiceDocument`) is deliberately .NET-side and
+  is not being promoted to the spec repo in this round. The extraction mechanism is per-language by
+  nature. At most, when a second port actually builds this, the porting guide gains one informative
+  sentence ("a build-time-emitted descriptor MUST equal the wire descriptor for the same build,
+  `instanceId` aside") — nothing goes in the spec now.
+
+---
+
 ## §0. Ground rules for every phase — READ FIRST
 
 **Repos.** Main work is in **benzene-dotnet**. Phase 8 also touches the cross-language **Benzene**
@@ -93,9 +190,12 @@ Steps:
    repo's pack pipeline decides output); align the PropertyGroup with sibling csprojs (add
    `GenerateDocumentationFile` only if it compiles clean — this is an exe, doc-comments optional).
 2. **Register in `Benzene.sln`** per §0 (project entry + config block).
-3. **Add `--emit spec|descriptor|both`** (default `descriptor`, preserving current behaviour) to
-   `Program.cs`'s parser and thread it through `DescriptorEmitter`:
-   - `descriptor` → current `service.json` output.
+3. **Add `--emit spec|descriptor|both`** to `Program.cs`'s parser and thread it through
+   `DescriptorEmitter`. *(AMENDED 2026-08-12 — see the amendments section above, which wins:
+   `descriptor` emits the mesh §2 ServiceDescriptor wire shape, not the distilled `Distil()`
+   output; the default is `both`; the distilled projection is deferred as `--emit deploy`. Also
+   add the `--startup <fullTypeName>` flag per Amendment C.)*
+   - `descriptor` → ~~current `service.json` output~~ the mesh §2 ServiceDescriptor (Amendment A).
    - `spec` → serialize the `EventServiceDocument` the emitter already computes internally
      (it constructs the app and reads the spec — find where it obtains the document and add a
      serialization path reusing `Benzene.Schema.OpenApi`'s existing serializer, the same shape

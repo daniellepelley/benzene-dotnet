@@ -1,9 +1,14 @@
 # Design note: a build-time deployment descriptor for Benzene services
 
-**Status:** investigation / proposal — not committed to the roadmap. Captures the conclusion of the
-"descriptor-first infra generation" investigation and is backed by a runnable spike
-(`work/spikes/deployment-descriptor/`) that produced the real output quoted below against the
-`examples/AwsMesh/Payments` service.
+**Status:** rationale for approved work. The follow-on
+[`spec-mesh-tooling-implementation-plan.md`](spec-mesh-tooling-implementation-plan.md) (maintainer
+approved 2026-08-09; owner design review 2026-08-12) committed Phase 1 of this to the roadmap —
+read this document for the *why*, the plan for the *what*. **Two positions below are superseded**
+by the plan's 2026-08-12 amendments: the "repositions, doesn't deprecate" stance on
+`Benzene.CodeGen.Terraform` and recommendation 5 — the owner's call is deprecation (freeze now,
+delete once the reference cookbook exists). Captures the conclusion of the "descriptor-first infra
+generation" investigation and is backed by a runnable spike (`work/spikes/deployment-descriptor/`)
+that produced the real output quoted below against the `examples/AwsMesh/Payments` service.
 
 ---
 
@@ -216,9 +221,12 @@ the same aggregation the Mesh does over polled specs, fed by static descriptors 
 - **Reuses:** `Benzene.Mesh.Wire` (`MeshServiceDescriptor`, `MeshDescriptorFactory`, `MeshJson`),
   `Benzene.Schema.OpenApi` (`SpecBuilder`, `MeshSchemaGenerator`), `Benzene.Testing`
   (`BenzeneTestHost`), the Cloud Service Profile (`docs/specification/cloud-service-profile.md`).
-- **Complements:** the dormant `Benzene.CodeGen.SourceGenerators` (the pure-static partial path).
-- **Repositions, doesn't deprecate:** `Benzene.CodeGen.Terraform` becomes one opinionated reference
-  renderer among several, not the strategic path.
+- **Complements:** `Benzene.CodeGen.SourceGenerators` (the pure-static partial path — no longer
+  dormant; it ships as an analyzer wired into `Benzene.Core.MessageHandlers`, but remains
+  structurally blind to produced events/transports, so it complements rather than replaces this).
+- ~~**Repositions, doesn't deprecate:** `Benzene.CodeGen.Terraform` becomes one opinionated reference
+  renderer among several, not the strategic path.~~ *(Superseded 2026-08-12: the owner's call is
+  deprecation — see the implementation plan's Amendment B.)*
 
 ## Recommendation
 
@@ -226,4 +234,6 @@ the same aggregation the Mesh does over polled specs, fed by static descriptors 
 2. Ship **`Benzene.Descriptor`** (MSBuild target) emitting `service.json` per service at build.
 3. Provide a **reference `service.json` → Terraform** example generator (not a package).
 4. Wire the per-service emit into **`MeshAggregator`** for the estate view.
-5. Keep `Benzene.CodeGen.Terraform`; fix `docs/terraform.md`'s overclaims and re-position it.
+5. ~~Keep `Benzene.CodeGen.Terraform`; fix `docs/terraform.md`'s overclaims and re-position it.~~
+   *(Superseded 2026-08-12: deprecate — freeze now with a docs-only notice, delete once the
+   reference cookbook of item 3 exists. Implementation plan, Amendment B.)*
