@@ -20,7 +20,13 @@ public static class Constants
     public const string FormatDefault = "json";
     public const string FormatDescription = "The document format, either 'yaml' or 'json'";
     public const string Url = "url";
-    public const string UrlDescription = "The base URL of the Benzene Cloud Service to probe, e.g. https://orders.example.com";
+    public const string UrlDescription = "The base URL of a Benzene Cloud Service, e.g. https://orders.example.com. For 'profile-check' the service is probed for R1-R8 conformance; for 'spec'/'build' its spec document is fetched from {url}/benzene/spec instead of invoking a lambda.";
+    public const string Mesh = "mesh";
+    public const string MeshDescription = "The URL of a mesh manifest.json to resolve the service's spec from, e.g. https://mesh.example.com/manifest.json. The service's services/{name}.json snapshot is resolved relative to this URL, mirroring the Mesh UI. Requires --service.";
+    public const string Service = "service";
+    public const string ServiceDescription = "The service name to look up in the mesh manifest (required with --mesh)";
+    public const string ServiceName = "service-name";
+    public const string ServiceNameDescription = "Overrides the generated service name / namespace root for 'build'. Defaults when not given: --mesh uses the mesh service name; --file uses the spec document's own title, else the file's stem; --url uses the host's first label; --lambda-name keeps deriving the name from the lambda name.";
     public const string InvokePath = "invoke-path";
     public const string InvokePathDescription = "Overrides the wire-envelope endpoint path probed for R4/R6. Defaults to /benzene/invoke";
     public const string SpecPath = "spec-path";

@@ -35,6 +35,9 @@
     <ProjectReference Include="..\Benzene.CodeGen.Client\Benzene.CodeGen.Client.csproj" />
     <ProjectReference Include="..\Benzene.CodeGen.LambdaTestTool\Benzene.CodeGen.LambdaTestTool.csproj" />
     <ProjectReference Include="..\Benzene.CodeGen.Markdown\Benzene.CodeGen.Markdown.csproj" />
+    <!-- MeshSpecSource reads manifest.json / services/{name}.json (Benzene.Mesh.Contracts shapes)
+         to resolve a spec source from a mesh manifest URL, offline of any deployed AWS Lambda. -->
+    <ProjectReference Include="..\Benzene.Mesh.Contracts\Benzene.Mesh.Contracts.csproj" />
     <!-- Already pulled in transitively via Benzene.CodeGen.Client -> Benzene.CodeGen.Core, but
          DiffCommand calls SchemaCompatibility/EventServiceDocumentDeserializer directly, so make
          the dependency explicit rather than relying on another project's transitive reference. -->

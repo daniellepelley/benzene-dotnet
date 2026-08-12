@@ -1,7 +1,4 @@
-﻿using Benzene.Clients.Aws.Lambda;
-using Benzene.CodeGen.Cli.Core.Commands.Build;
-using Benzene.Schema.OpenApi;
-using Microsoft.Extensions.Logging.Abstractions;
+﻿using Benzene.Schema.OpenApi;
 
 namespace Benzene.CodeGen.Cli.Core.Commands.Spec;
 
@@ -12,11 +9,17 @@ public class SpecCommand : CommandBase<SpecPayload>
     { }
     public override async Task ExecuteAsync(SpecPayload payload)
     {
-        var client = AmazonLambdaClientFactory.CreateClient(payload.Profile);
-        var awsLambdaClient = new AwsLambdaSpecClient(payload.LambdaName, new AwsLambdaClient(client),
-            NullLogger.Instance);
-        var json = await awsLambdaClient.GetSpecAsync(new SpecRequest(payload.Type, payload.Format));
-        Console.WriteLine(json);
+        var source = SpecSourceResolver.Resolve(payload.File, payload.Url, payload.Mesh, payload.Service,
+            payload.LambdaName, payload.Profile);
+        try
+        {
+            var json = await source.GetSpecJsonAsync(new SpecRequest(payload.Type, payload.Format));
+            Console.WriteLine(json);
+        }
+        finally
+        {
+            (source as IDisposable)?.Dispose();
+        }
     }
 }
 
