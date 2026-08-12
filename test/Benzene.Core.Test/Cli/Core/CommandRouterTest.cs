@@ -27,24 +27,32 @@ namespace Benzene.Test.Cli.Core
         }
 
         [Fact]
-        public async Task RouteAsync_UnknownCommandName_WritesErrorInsteadOfThrowing()
+        public async Task RouteAsync_UnknownCommandName_PrintsHelpThenThrows()
         {
+            // Phase 2: an unknown command must fail the process (real exit codes), not just log and
+            // return as if nothing happened - so this now prints help and throws instead of quietly
+            // writing to stderr and returning a completed task.
             var router = new CommandRouter();
             var args = new CommandArguments { Name = "does-not-exist", Attributes = new Dictionary<string, string?>() };
 
+            var originalOut = Console.Out;
             var originalError = Console.Error;
+            using var capturedOut = new StringWriter();
             using var capturedError = new StringWriter();
+            Console.SetOut(capturedOut);
             Console.SetError(capturedError);
             try
             {
-                await router.RouteAsync(args);
+                await Assert.ThrowsAsync<InvalidOperationException>(() => router.RouteAsync(args));
             }
             finally
             {
+                Console.SetOut(originalOut);
                 Console.SetError(originalError);
             }
 
             Assert.Contains("does-not-exist", capturedError.ToString());
+            Assert.Contains("Available commands:", capturedOut.ToString());
         }
 
         [Fact]

@@ -11,32 +11,28 @@ public class ClientCodeBuilder : ICliCodeBuilder
 {
     public async Task Build(BuildPayload payload)
     {
-        try
-        {
-            var client = AmazonLambdaClientFactory.CreateClient(payload.Profile);
-            var awsLambdaClient = new AwsLambdaSpecClient(payload.LambdaName, new AwsLambdaClient(client),
-                NullLogger.Instance);
-            var json = await awsLambdaClient.GetSpecAsync(new SpecRequest("benzene", "json"));
+        // No try/catch: a failure here (bad profile, unreachable lambda, malformed spec) must
+        // propagate so the CLI exits non-zero (Phase 2 - a swallowed exception here used to mean
+        // `benzene build` always exited 0, even when it produced nothing).
+        var client = AmazonLambdaClientFactory.CreateClient(payload.Profile);
+        var awsLambdaClient = new AwsLambdaSpecClient(payload.LambdaName, new AwsLambdaClient(client),
+            NullLogger.Instance);
+        var json = await awsLambdaClient.GetSpecAsync(new SpecRequest("benzene", "json"));
 
-            var eventServiceDocument = new EventServiceDocumentDeserializer().Deserialize(json);
+        var eventServiceDocument = new EventServiceDocumentDeserializer().Deserialize(json);
 
-            var messageClientSdkBuilder = new CodeBuilderFactory().Create(payload);
-            var codeFiles = messageClientSdkBuilder.BuildCodeFiles(eventServiceDocument);
-            Console.WriteLine("{0} code files created", codeFiles.Length);
+        var messageClientSdkBuilder = new CodeBuilderFactory().Create(payload);
+        var codeFiles = messageClientSdkBuilder.BuildCodeFiles(eventServiceDocument);
+        Console.WriteLine("{0} code files created", codeFiles.Length);
 
-            var writer = new CodeFileWriter();
+        var writer = new CodeFileWriter();
 
-            var directory = string.IsNullOrEmpty(payload.Directory)
-                ? Directory.GetCurrentDirectory()
-                : payload.Directory;
-            
-            await writer.CreateAsync(codeFiles, directory);
-            Console.WriteLine("Completed");
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine(ex);
-        }
+        var directory = string.IsNullOrEmpty(payload.Directory)
+            ? Directory.GetCurrentDirectory()
+            : payload.Directory;
+
+        await writer.CreateAsync(codeFiles, directory);
+        Console.WriteLine("Completed");
     }
 
 }

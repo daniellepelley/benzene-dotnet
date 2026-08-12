@@ -1,3 +1,4 @@
+using System;
 using System.Threading.Tasks;
 using Benzene.CodeGen.Cli.Core;
 using Benzene.CodeGen.Cli.Core.Commands.Build;
@@ -42,9 +43,13 @@ public class CodePayloadMapperTest
     [Fact]
     public async Task Map_ConsoleApplication()
     {
+        // A bogus profile/lambda name can't reach a real service. Before Phase 2 this passed only
+        // because ClientCodeBuilder/AwsLambdaSpecClient swallowed the resulting failure and the CLI
+        // exited 0 regardless; now that CLI commands are fail-loud, wiring the arguments through
+        // ConsoleApplication end-to-end is expected to throw instead of silently doing nothing.
         var input = "build -profile developer@darwindevelopment -lambda-name \"benzene-main-core-func\" -directory \"C:/Users/Daniel.Le.Pelley/source/repos/Benzene/Output\" -output some-output";
-    
-        await new ConsoleApplication().ExecuteAsync(input);
+
+        await Assert.ThrowsAnyAsync<Exception>(() => new ConsoleApplication().ExecuteAsync(input));
     }
 
 }

@@ -17,25 +17,20 @@ public class LambdaTestToolCommand : CommandBase<LambdaTestToolPayload>
 
     public override async Task ExecuteAsync(LambdaTestToolPayload payload)
     {
-        try
-        {
-            var json = await GetSpecJsonAsync(payload);
-            var eventServiceDocument = new EventServiceDocumentDeserializer().Deserialize(json);
+        // No try/catch: same reasoning as ClientCodeBuilder.Build (Phase 2) - swallowing here meant
+        // this command always exited 0, even on a bad --file/--lambda-name or a malformed spec.
+        var json = await GetSpecJsonAsync(payload);
+        var eventServiceDocument = new EventServiceDocumentDeserializer().Deserialize(json);
 
-            var codeFiles = new LambdaTestFilesBuilder().BuildCodeFiles(eventServiceDocument);
-            Console.WriteLine("{0} test payload files created", codeFiles.Length);
+        var codeFiles = new LambdaTestFilesBuilder().BuildCodeFiles(eventServiceDocument);
+        Console.WriteLine("{0} test payload files created", codeFiles.Length);
 
-            var directory = string.IsNullOrEmpty(payload.Directory)
-                ? Directory.GetCurrentDirectory()
-                : payload.Directory;
+        var directory = string.IsNullOrEmpty(payload.Directory)
+            ? Directory.GetCurrentDirectory()
+            : payload.Directory;
 
-            await new CodeFileWriter().CreateAsync(codeFiles, directory);
-            Console.WriteLine("Completed");
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine(ex);
-        }
+        await new CodeFileWriter().CreateAsync(codeFiles, directory);
+        Console.WriteLine("Completed");
     }
 
     private static async Task<string> GetSpecJsonAsync(LambdaTestToolPayload payload)

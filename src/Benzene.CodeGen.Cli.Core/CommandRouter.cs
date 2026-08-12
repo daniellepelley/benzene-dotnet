@@ -14,15 +14,22 @@ public class CommandRouter
         }).ToArray();
     }
 
-    public Task RouteAsync(CommandArguments args)
+    public async Task RouteAsync(CommandArguments args)
     {
         var command = _commands.FirstOrDefault(x => x.Name == args.Name);
         if (command == null)
         {
             Console.Error.WriteLine($"Command {args.Name} not found");
-            return Task.CompletedTask;
+            Console.Error.WriteLine();
+
+            // Print the available commands before failing, so a mistyped command name is
+            // recoverable from the CLI's own output rather than just a non-zero exit code.
+            var help = _commands.First(x => x.Name == "help");
+            await help.ExecuteAsync(new CommandArguments { Name = "help", Attributes = new Dictionary<string, string?>() });
+
+            throw new InvalidOperationException($"Command '{args.Name}' not found");
         }
 
-        return command.ExecuteAsync(args);
+        await command.ExecuteAsync(args);
     }
 }

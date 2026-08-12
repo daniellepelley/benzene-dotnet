@@ -31,7 +31,12 @@ public class AwsLambdaSpecClient
         catch (Exception ex)
         {
             _logger.LogError(ex, "Sending message {receiverTopic} to {receiver} failed", Benzene.Abstractions.BenzeneTopic.Spec, _lambdaName);
-            return null;
+            // Returning null here used to leave callers to NRE on the result (e.g.
+            // EventServiceDocumentDeserializer.Deserialize(null)) with no indication of the real
+            // cause. Throw with a diagnosable message instead - Phase 2's CLI commands are fail-loud.
+            throw new InvalidOperationException(
+                $"Lambda '{_lambdaName}' did not answer the spec topic — is UseSpec() registered and the function name/profile correct?",
+                ex);
         }
     }
     public void Dispose()
