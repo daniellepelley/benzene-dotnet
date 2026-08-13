@@ -542,6 +542,48 @@ touching the contract file regenerates; a second build with no changes skips gen
 
 ---
 
+## 2026-08-13 — owner decision: dogfood both tools in this repo's own build
+
+Both `Benzene.Descriptor` (`benzene-descriptor`) and `Benzene.CodeGen.Cli` (`benzene`) are already
+`PackAsTool` and already in `Benzene.sln`, so both already get packed and pushed to NuGet by
+`deploy-benzene.yml` on the next release run — no new packaging work needed there. What's missing is
+that nothing in this repo actually *exercises* either tool: no example imports
+`Benzene.Descriptor.targets`, and Phase 6 (client generation via MSBuild) was never dispatched. The
+owner approved closing both gaps now, as two sequential slices sharing this repo's established
+worktree → personal-verify → merge discipline:
+
+### Phase 6a — Dogfood `benzene-descriptor` on an existing example
+
+**Goal:** `examples/AwsMesh/Payments` opts into `BenzeneEmitDescriptor` and its
+`.spec.json`/`.service.json` get produced on every build, proving the Phase 1 tool and its MSBuild
+target work outside a hand-run smoke test. **Depends on:** nothing (Phase 1 already merged).
+**Effort:** S.
+
+Constraint specific to this repo's CI topology: `build-benzene.yml`'s `examples-build` job (which
+builds `Benzene.Examples.sln`) is a separate GitHub Actions job from the one that builds `Benzene.sln`
+(where `Benzene.Descriptor` lives) — no build artifacts are shared between jobs by default, so
+`benzene-descriptor` cannot be assumed to already be on `PATH` as a built tool when `Payments` builds.
+Don't solve this by wiring cross-job artifact upload/download; simpler and self-contained is pointing
+`BenzeneDescriptorCommand` at `dotnet run --project <path-to-Benzene.Descriptor.csproj> -c
+$(Configuration) --`, which builds-then-runs the tool on demand from source, same-repo, no packaging
+or PATH dependency required. Verify locally that a clean `dotnet build` of the Payments example alone
+(not the whole solution) still produces both JSON files.
+
+### Phase 6b — Implement Phase 6 (MSBuild one-liner client generation) as originally planned
+
+Do Phase 6 above exactly as written, with one addition to its step 3: the new consumer example
+project must be **wired into `Benzene.Examples.sln`** so `build-benzene.yml`'s existing
+`examples-build` job (`dotnet build Benzene.Examples.sln`) compiles it on every push/PR without any
+new CI workflow changes — that job is deliberately the regression gate already described in that
+workflow's own comment ("a library change could break the copy-paste example surface... without CI
+noticing"). Note `examples/CodeGen/Benzene.Examples.CodeGen.Client` already exists but is a unit-test-style
+demonstration of calling `MessageClientSdkBuilder` in-process, not an MSBuild-driven generate-then-
+compile project — it does not satisfy Phase 6's acceptance criterion and should be left alone (not
+repurposed, not deleted) unless it's clearly in the way. **Depends on:** Phase 6a is not a strict
+prerequisite (different files) but should land first per this repo's one-slice-at-a-time discipline.
+
+---
+
 ## Phase 7 — Mesh data foundations
 
 Three independent sub-items; each can be its own task. **Effort:** S each.
