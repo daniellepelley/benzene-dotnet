@@ -96,6 +96,13 @@ A NuGet tool package does not auto-import its `.targets` (that only happens for 
 libraries) — either copy the file into the repo, or `<Import>` it explicitly from the restored
 package path.
 
+**See it in action:** `examples/AwsMesh/Payments` in this repo opts in exactly this way — its csproj
+sets `BenzeneEmitDescriptor` and imports the targets file from source, and
+`examples/Directory.Build.props` supplies the `BenzeneDescriptorCommand` override every example
+under `examples/` inherits (a `dotnet run --project` form, since this repo's CI builds
+`Benzene.Descriptor` and the examples in separate jobs with no shared `PATH`). Copy that pattern for
+a new service.
+
 ## CI: upload the artifacts
 
 ```yaml

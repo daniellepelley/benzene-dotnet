@@ -15,4 +15,16 @@
                       ReferenceOutputAssembly="false" />
   </ItemGroup>
 
+  <PropertyGroup>
+    <!-- Shared default for any example that opts into <BenzeneEmitDescriptor>true</BenzeneEmitDescriptor>
+         (see src/Benzene.Descriptor/build/Benzene.Descriptor.targets). This repo's CI builds
+         Benzene.sln (where Benzene.Descriptor lives) and Benzene.Examples.sln (where the examples
+         live) as separate GitHub Actions jobs with no shared filesystem state, so the packaged
+         `benzene-descriptor` tool cannot be assumed to be on PATH when an example builds. Run it
+         from source instead — `dotnet run` builds-then-runs it on demand, same-repo, no packaging or
+         PATH dependency required. Anchored on $(MSBuildThisFileDirectory) rather than a per-project
+         relative path so it stays correct no matter how deeply an opting-in example is nested. -->
+    <BenzeneDescriptorCommand Condition="'$(BenzeneDescriptorCommand)' == ''">dotnet run --project "$(MSBuildThisFileDirectory)..\src\Benzene.Descriptor\Benzene.Descriptor.csproj" -c $(Configuration) --</BenzeneDescriptorCommand>
+  </PropertyGroup>
+
 </Project>

@@ -20,21 +20,37 @@
     <BenzeneEmitDescriptor Condition="'$(BenzeneEmitDescriptor)' == ''">false</BenzeneEmitDescriptor>
     <BenzeneDescriptorCommand Condition="'$(BenzeneDescriptorCommand)' == ''">benzene-descriptor</BenzeneDescriptorCommand>
     <BenzeneDescriptorEmit Condition="'$(BenzeneDescriptorEmit)' == ''">both</BenzeneDescriptorEmit>
-    <!-- The descriptor path when BenzeneDescriptorEmit is "both" (the default) or "descriptor"; the
-         spec path is derived from it (.service.json -> .spec.json) unless BenzeneDescriptorEmit is
-         "spec", in which case this IS the spec path. -->
-    <BenzeneDescriptorOutput Condition="'$(BenzeneDescriptorOutput)' == ''">$(TargetDir)$(AssemblyName).service.json</BenzeneDescriptorOutput>
     <BenzeneDescriptorServiceName Condition="'$(BenzeneDescriptorServiceName)' == ''">$(AssemblyName)</BenzeneDescriptorServiceName>
   </PropertyGroup>
 
   <Target Name="BenzeneEmitDescriptor"
           AfterTargets="Build"
           Condition="'$(BenzeneEmitDescriptor)' == 'true'">
-    <Exec Command="&quot;$(BenzeneDescriptorCommand)&quot; --assembly &quot;$(TargetPath)&quot; --output &quot;$(BenzeneDescriptorOutput)&quot; --emit &quot;$(BenzeneDescriptorEmit)&quot; --service &quot;$(BenzeneDescriptorServiceName)&quot; --service-version &quot;$(Version)&quot; $(BenzeneDescriptorStartupArg)" />
+    <!-- The BenzeneDescriptorOutput default is computed here, inside the Target, not in the
+         top-level PropertyGroup above. $(TargetDir) is set by the SDK's own build targets
+         (Microsoft.Common.CurrentVersion.targets, imported implicitly AFTER this file's content
+         when a consuming project does <Import Project="...Benzene.Descriptor.targets" /> from its
+         own body, the normal way to import a targets file). A top-level PropertyGroup referencing
+         $(TargetDir) would evaluate before that import runs, capture an empty value, and silently
+         write the descriptor into the project's source directory instead of its build output. A
+         PropertyGroup nested inside a Target is instead evaluated at execution time, once every
+         import has already been fully evaluated, so $(TargetDir) is resolved correctly by then. -->
+    <PropertyGroup>
+      <!-- The descriptor path when BenzeneDescriptorEmit is "both" (the default) or "descriptor"; the
+           spec path is derived from it (.service.json to .spec.json) unless BenzeneDescriptorEmit is
+           "spec", in which case this IS the spec path. -->
+      <BenzeneDescriptorOutput Condition="'$(BenzeneDescriptorOutput)' == ''">$(TargetDir)$(AssemblyName).service.json</BenzeneDescriptorOutput>
+    </PropertyGroup>
+    <!-- BenzeneDescriptorCommand is NOT quoted as a single token: it must also support a multi-word
+         invocation (for example running the tool via "dotnet tool run", or building and running it
+         from source with a "dotnet run" form when it isn't installed on PATH) — quoting it as one
+         token would make a shell look for a single literal executable named after the whole phrase. -->
+    <Exec Command="$(BenzeneDescriptorCommand) --assembly &quot;$(TargetPath)&quot; --output &quot;$(BenzeneDescriptorOutput)&quot; --emit &quot;$(BenzeneDescriptorEmit)&quot; --service &quot;$(BenzeneDescriptorServiceName)&quot; --service-version &quot;$(Version)&quot; $(BenzeneDescriptorStartupArg)" />
   </Target>
 
   <!-- Set BenzeneDescriptorStartup (a full BenzeneStartUp type name) when the service assembly
-       defines more than one candidate; passed through as --startup. -->
+       defines more than one candidate; forwarded to the CLI's startup-selection flag below.
+       (Note: literal double-hyphens can't appear in an XML comment, hence the paraphrase.) -->
   <PropertyGroup Condition="'$(BenzeneDescriptorStartup)' != ''">
     <BenzeneDescriptorStartupArg>--startup &quot;$(BenzeneDescriptorStartup)&quot;</BenzeneDescriptorStartupArg>
   </PropertyGroup>

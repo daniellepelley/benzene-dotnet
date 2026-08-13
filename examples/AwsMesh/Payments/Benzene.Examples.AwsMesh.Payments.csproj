@@ -11,6 +11,12 @@
     <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
     <!-- provided.al2023 ships no libicu; run globalization-invariant so the apphost starts. -->
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Dogfoods benzene-descriptor (docs/contract-artifacts.md): emits
+         Benzene.Examples.AwsMesh.Payments.spec.json / .service.json into bin/ on every build.
+         BenzeneDescriptorCommand is set in examples/Directory.Build.props (runs the tool from
+         source, since this repo's CI builds Benzene.Examples.sln in a job separate from the one
+         that builds Benzene.Descriptor). -->
+    <BenzeneEmitDescriptor>true</BenzeneEmitDescriptor>
   </PropertyGroup>
 
   <ItemGroup>
@@ -34,5 +40,10 @@
     <ProjectReference Include="..\..\..\src\Benzene.Spec.Ui\Benzene.Spec.Ui.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Microsoft.Dependencies\Benzene.Microsoft.Dependencies.csproj" />
   </ItemGroup>
+
+  <!-- benzene-descriptor is a dotnet tool, not consumed via PackageReference in-tree, so its MSBuild
+       target is imported directly from source (same relative-path pattern as the ProjectReferences
+       above). See docs/contract-artifacts.md "MSBuild opt-in". -->
+  <Import Project="..\..\..\src\Benzene.Descriptor\build\Benzene.Descriptor.targets" />
 
 </Project>
