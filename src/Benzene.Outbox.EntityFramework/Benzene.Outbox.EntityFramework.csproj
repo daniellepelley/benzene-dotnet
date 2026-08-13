@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Benzene.Outbox.EntityFramework</AssemblyName>
+    <RootNamespace>Benzene.Outbox.EntityFramework</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- No provider package on purpose - the consuming application brings its own EF Core provider
+         (SQL Server/PostgreSQL/SQLite/...) via its own DbContext registration.
+         Microsoft.EntityFrameworkCore.Relational is the provider-neutral relational conventions layer
+         every relational provider builds on (ToTable/HasIndex-with-a-name/ExecuteUpdate etc.) - it is
+         not itself a provider, so it doesn't violate that rule. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.9" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.9" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Benzene.Outbox\Benzene.Outbox.csproj" />
+  </ItemGroup>
+
+</Project>
