@@ -60,9 +60,11 @@ an `OutboundRoutingBuilder.Route(...)` pipeline:
   §2.1 two-arg snippet**, added while implementing Step 2 because the pre-existing generated
   client's public API already had a real per-call headers overload that migrating away from
   `IBenzeneMessageClientFactory` would otherwise have silently dropped.
-- `OutboundContext` - the outbound pipeline context: `Topic`, `Request`, `Headers` (per-call, never
-  null), and a settable `Response` slot. Deliberately non-generic, matching every other
-  `IMiddleware<TContext>` in this codebase.
+- `OutboundContext` - the outbound pipeline context: `Topic`, `Request` (settable - a pre-converter
+  middleware can substitute what actually gets sent, e.g. `Benzene.ClaimCheck`'s offload middleware
+  swapping an oversized request for a small placeholder), `Headers` (per-call, never null), and a
+  settable `Response` slot. Deliberately non-generic, matching every other `IMiddleware<TContext>` in
+  this codebase.
 - `OutboundRoutingBuilder` / `AddOutboundRouting(...)` - builds one `IMiddlewarePipeline<OutboundContext>`
   per topic via `.Route(topic, pipeline => ...)`; `Build()` throws `DuplicateOutboundRouteException`
   for a repeated topic. `AddOutboundRouting(...)` registers the resulting `IBenzeneMessageSender`

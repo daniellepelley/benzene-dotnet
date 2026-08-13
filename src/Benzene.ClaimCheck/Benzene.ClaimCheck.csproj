@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Benzene.ClaimCheck</AssemblyName>
+    <RootNamespace>Benzene.ClaimCheck</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Description>Claim-check middleware for oversized message payloads: an outbound middleware offloads a serialized body that exceeds a configured threshold to a pluggable IClaimCheckStore and carries an opaque reference on the benzene-claim-check header; an inbound middleware hydrates the reference back to the real body before deserialization. Ships an in-memory store for tests and local development - production stores (S3, Azure Blob Storage) ship as separate packages.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Benzene.Abstractions\Benzene.Abstractions.csproj" />
+    <ProjectReference Include="..\Benzene.Abstractions.Middleware\Benzene.Abstractions.Middleware.csproj" />
+    <ProjectReference Include="..\Benzene.Abstractions.Messages\Benzene.Abstractions.Messages.csproj" />
+    <ProjectReference Include="..\Benzene.Clients\Benzene.Clients.csproj" />
+    <ProjectReference Include="..\Benzene.Core.Middleware\Benzene.Core.Middleware.csproj" />
+  </ItemGroup>
+
+</Project>

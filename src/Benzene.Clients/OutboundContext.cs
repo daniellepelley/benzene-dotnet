@@ -30,8 +30,15 @@ public class OutboundContext
     /// <summary>Gets the topic this send was routed to.</summary>
     public string Topic { get; }
 
-    /// <summary>Gets the request payload being sent.</summary>
-    public object Request { get; }
+    /// <summary>
+    /// Gets or sets the request payload being sent. Settable so pre-converter outbound middleware can
+    /// substitute what actually gets serialized/sent - e.g. <c>Benzene.ClaimCheck</c>'s offload
+    /// middleware replaces an oversized request with a small placeholder that carries a claim-check
+    /// reference, after having stored the real serialized body out-of-band. Middleware that does this
+    /// must run before the terminal transport converter, which is the only thing that reads
+    /// <see cref="Request"/> downstream.
+    /// </summary>
+    public object Request { get; set; }
 
     /// <summary>Gets the per-call headers supplied by the caller.</summary>
     public IDictionary<string, string> Headers { get; }
