@@ -37,6 +37,61 @@ namespace Benzene.CodeGen.SourceGenerators
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);
 
+        /// <summary>
+        /// A handler registered on one of Benzene's own reserved topic ids (Benzene.Abstractions'
+        /// <c>BenzeneTopic</c> — kept in sync by hand, the same way the interface/attribute full
+        /// names below are: an analyzer project doesn't take a runtime dependency on the library it
+        /// inspects). These specific ids are always intercepted by dedicated framework middleware
+        /// (health checks, the mesh descriptor endpoint, ...), never served by an ordinary
+        /// <c>[Message]</c> handler — so a handler declaring one is either unreachable dead code (the
+        /// interception wins) or, if that interception is ever removed from the pipeline, silently
+        /// answering as the framework's own endpoint. Deliberately narrower than "any benzene:-prefixed
+        /// topic": the wider <c>benzene:mesh:*</c> namespace is legitimately extended by a mesh
+        /// collector implementing mesh.md §4's ingest topics as ordinary handlers (see
+        /// examples/AwsMesh/Mesh/MeshAggregateHandler.cs's <c>benzene:mesh:aggregate</c>), which this
+        /// rule must not flag.
+        /// </summary>
+        public static readonly DiagnosticDescriptor ReservedTopicHandler = new(
+            id: "BENZ003",
+            title: "Handler registered on a reserved Benzene topic",
+            messageFormat: "'{0}' is registered on '{1}', one of Benzene's own reserved topic ids. This topic is always intercepted by dedicated framework middleware before handler dispatch, so this handler can never run (or, if that interception is ever disabled, will answer in place of the framework's own endpoint). Choose an application topic id instead.",
+            category: "Benzene",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
+
+        /// <summary>
+        /// A handler's request or response type is one that <c>Benzene.Mesh.Wire.MeshSchemaGenerator</c>
+        /// derives an unconstrained (<c>{}</c>) JSON Schema for — checked at the top level only (the
+        /// exact same construct list the generator special-cases before it would otherwise walk
+        /// properties, per docs/specification/mesh.md §2.1): <c>object</c>, <c>dynamic</c>, an enum,
+        /// or a <c>System.Text.Json</c> dynamic-document type. Not an error: an unconstrained schema is
+        /// legal and sometimes deliberate (a genuinely dynamic payload), but it means this topic's
+        /// mesh descriptor and derived spec carry no shape for the flagged side, so any generated
+        /// client, mesh UI schema view, or OpenAPI/AsyncAPI document for it degrades to "any JSON" —
+        /// worth an explicit choice, not a surprise found by whoever reads the fleet view later.
+        /// </summary>
+        public static readonly DiagnosticDescriptor UnconstrainedSchemaType = new(
+            id: "BENZ004",
+            title: "Handler payload type publishes an unconstrained mesh schema",
+            messageFormat: "'{0}' is the {1} type of handler '{2}'; its mesh descriptor and derived spec will publish an unconstrained ('{{}}') schema for it — {1}s of this shape carry no discoverable contract for generated clients, the mesh UI, or OpenAPI/AsyncAPI. Prefer a concrete type over '{0}' if one exists; otherwise this is fine as a deliberate escape hatch.",
+            category: "Benzene",
+            defaultSeverity: DiagnosticSeverity.Info,
+            isEnabledByDefault: true);
+
+        /// <summary>
+        /// Benzene.Abstractions.BenzeneTopic.All, hand-copied (see <see cref="ReservedTopicHandler"/>'s
+        /// doc comment for why an analyzer can't just reference it). Update alongside that type.
+        /// </summary>
+        private static readonly ImmutableHashSet<string> KnownReservedTopicIds = ImmutableHashSet.Create(
+            StringComparer.OrdinalIgnoreCase,
+            "benzene:spec",
+            "benzene:test-payloads",
+            "benzene:healthcheck",
+            "benzene:liveness",
+            "benzene:readiness",
+            "benzene:mesh",
+            "benzene:ping");
+
         public void Initialize(IncrementalGeneratorInitializationContext context)
         {
             var provider = context.SyntaxProvider
@@ -55,6 +110,11 @@ namespace Benzene.CodeGen.SourceGenerators
             // attribute doesn't invalidate the diagnostic for every other handler in the compilation.
             context.RegisterSourceOutput(unrouted, (spc, handler) => spc.ReportDiagnostic(
                 Diagnostic.Create(HttpEndpointWithoutMessage, handler!.Location, handler.HandlerFullType)));
+
+            // BENZ003/BENZ004 are per-handler, single-item checks (unlike BENZ001's cross-handler
+            // duplicate-topic check below) - reported off the same pre-Collect() provider as `unrouted`,
+            // for the same incremental-caching reason.
+            context.RegisterSourceOutput(provider, (spc, handler) => ReportValidationDiagnostics(spc, handler!));
 
             // Drive the output straight off the collected handlers. Combining with CompilationProvider
             // (as this used to) re-runs the whole output on every compilation - i.e. every keystroke -
@@ -155,9 +215,14 @@ namespace Benzene.CodeGen.SourceGenerators
             // be captured by something else that is visible from there - a request type called Request
             // in the global namespace resolved to the Benzene.Core.MessageHandlers.Request *namespace*
             // and the generated file stopped compiling.
-            var requestType = handlerInterface.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-            var responseType = handlerInterface.TypeArguments.Length > 1
-                ? handlerInterface.TypeArguments[1].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+            var requestTypeSymbol = handlerInterface.TypeArguments[0];
+            var requestType = requestTypeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+            // TypeArguments.Length == 1 means IMessageHandler<TRequest> (no declared response type,
+            // Void) - deliberately not checked for an unconstrained schema; Void isn't a payload.
+            var hasResponseType = handlerInterface.TypeArguments.Length > 1;
+            var responseTypeSymbol = hasResponseType ? handlerInterface.TypeArguments[1] : null;
+            var responseType = hasResponseType
+                ? responseTypeSymbol!.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
                 : "global::Benzene.Abstractions.Results.Void";
 
             return new MessageHandlerInfo(
@@ -166,8 +231,76 @@ namespace Benzene.CodeGen.SourceGenerators
                 requestType,
                 responseType,
                 typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-                classDeclaration.Identifier.GetLocation()
+                classDeclaration.Identifier.GetLocation(),
+                isReservedTopicHandler: KnownReservedTopicIds.Contains(topic),
+                requestIsUnconstrainedSchema: IsUnconstrainedSchemaType(requestTypeSymbol),
+                responseIsUnconstrainedSchema: hasResponseType && IsUnconstrainedSchemaType(responseTypeSymbol!)
             );
+        }
+
+        /// <summary>
+        /// Mirrors the top-level special-cases of <c>Benzene.Mesh.Wire.MeshSchemaGenerator.SchemaFor</c>
+        /// (the reflection-based schema deriver, over <see cref="System.Type"/>) using Roslyn symbols
+        /// instead - the same "an analyzer inspects via symbols, not by referencing the runtime type"
+        /// split as everywhere else in this file. Deliberately shallow: it does not walk into object
+        /// properties or detect recursive cycles the way the runtime deriver does, so it only catches a
+        /// handler's own top-level request/response type being one of these constructs directly, not
+        /// one nested inside a property. That is the sound subset - going deeper risks false positives
+        /// this analyzer cannot cheaply rule out (e.g. a property genuinely meant to be dynamic).
+        /// </summary>
+        private static bool IsUnconstrainedSchemaType(ITypeSymbol type)
+        {
+            if (type is INamedTypeSymbol { ConstructedFrom.SpecialType: SpecialType.System_Nullable_T } nullable)
+            {
+                type = nullable.TypeArguments[0];
+            }
+
+            if (type.SpecialType == SpecialType.System_Object || type.TypeKind == TypeKind.Dynamic || type.TypeKind == TypeKind.Enum)
+            {
+                return true;
+            }
+
+            // The plain (non-fully-qualified) display string for a type outside the current
+            // compilation's usings is already "System.Text.Json.JsonElement" with no "global::"
+            // prefix to strip, unlike the FullyQualifiedFormat used elsewhere in this file for
+            // generated-code emission.
+            var fullName = type.ToDisplayString();
+            if (fullName == "System.Text.Json.JsonElement" || fullName == "System.Text.Json.JsonDocument")
+            {
+                return true;
+            }
+
+            for (var baseType = type.BaseType; baseType != null; baseType = baseType.BaseType)
+            {
+                if (baseType.ToDisplayString() == "System.Text.Json.Nodes.JsonNode")
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static void ReportValidationDiagnostics(SourceProductionContext context, MessageHandlerInfo handler)
+        {
+            var handlerName = handler.HandlerFullType.Replace("global::", "");
+
+            if (handler.IsReservedTopicHandler)
+            {
+                context.ReportDiagnostic(Diagnostic.Create(
+                    ReservedTopicHandler, handler.Location, handlerName, handler.Topic));
+            }
+
+            if (handler.RequestIsUnconstrainedSchema)
+            {
+                context.ReportDiagnostic(Diagnostic.Create(
+                    UnconstrainedSchemaType, handler.Location, handler.RequestFullType.Replace("global::", ""), "request", handlerName));
+            }
+            if (handler.ResponseIsUnconstrainedSchema)
+            {
+                context.ReportDiagnostic(Diagnostic.Create(
+                    UnconstrainedSchemaType, handler.Location, handler.ResponseFullType.Replace("global::", ""), "response", handlerName));
+            }
         }
 
         private static void Execute(SourceProductionContext context, ImmutableArray<MessageHandlerInfo> handlers)
@@ -284,8 +417,20 @@ namespace Benzene.CodeGen.SourceGenerators
         public string ResponseFullType { get; }
         public string HandlerFullType { get; }
         public Location Location { get; }
+        public bool IsReservedTopicHandler { get; }
+        public bool RequestIsUnconstrainedSchema { get; }
+        public bool ResponseIsUnconstrainedSchema { get; }
 
-        public MessageHandlerInfo(string topic, string version, string requestFullType, string responseFullType, string handlerFullType, Location location)
+        public MessageHandlerInfo(
+            string topic,
+            string version,
+            string requestFullType,
+            string responseFullType,
+            string handlerFullType,
+            Location location,
+            bool isReservedTopicHandler,
+            bool requestIsUnconstrainedSchema,
+            bool responseIsUnconstrainedSchema)
         {
             Topic = topic;
             Version = version;
@@ -293,6 +438,9 @@ namespace Benzene.CodeGen.SourceGenerators
             ResponseFullType = responseFullType;
             HandlerFullType = handlerFullType;
             Location = location;
+            IsReservedTopicHandler = isReservedTopicHandler;
+            RequestIsUnconstrainedSchema = requestIsUnconstrainedSchema;
+            ResponseIsUnconstrainedSchema = responseIsUnconstrainedSchema;
         }
 
         public bool Equals(MessageHandlerInfo? other)
@@ -303,7 +451,10 @@ namespace Benzene.CodeGen.SourceGenerators
                 && RequestFullType == other.RequestFullType
                 && ResponseFullType == other.ResponseFullType
                 && HandlerFullType == other.HandlerFullType
-                && Location.Equals(other.Location);
+                && Location.Equals(other.Location)
+                && IsReservedTopicHandler == other.IsReservedTopicHandler
+                && RequestIsUnconstrainedSchema == other.RequestIsUnconstrainedSchema
+                && ResponseIsUnconstrainedSchema == other.ResponseIsUnconstrainedSchema;
         }
 
         public override bool Equals(object? obj) => Equals(obj as MessageHandlerInfo);
@@ -319,6 +470,9 @@ namespace Benzene.CodeGen.SourceGenerators
                 hash = hash * 31 + (ResponseFullType?.GetHashCode() ?? 0);
                 hash = hash * 31 + (HandlerFullType?.GetHashCode() ?? 0);
                 hash = hash * 31 + (Location?.GetHashCode() ?? 0);
+                hash = hash * 31 + IsReservedTopicHandler.GetHashCode();
+                hash = hash * 31 + RequestIsUnconstrainedSchema.GetHashCode();
+                hash = hash * 31 + ResponseIsUnconstrainedSchema.GetHashCode();
                 return hash;
             }
         }

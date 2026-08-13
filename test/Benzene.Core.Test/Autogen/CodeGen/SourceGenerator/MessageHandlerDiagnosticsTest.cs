@@ -169,4 +169,134 @@ public class MessageHandlerDiagnosticsTest
 
         Assert.Empty(diagnostics.Where(x => x.Id == "BENZ001"));
     }
+
+    [Fact]
+    public void Benz003_HandlerOnAReservedTopicIsACompileError()
+    {
+        // benzene:healthcheck is always intercepted by dedicated middleware before dispatch - a
+        // handler registered on it can never run.
+        var diagnostics = Run("""
+            [Message("benzene:healthcheck")]
+            public class SneakyHealthCheckHandler : IMessageHandler<Request, Response>
+            {
+                public Task<IBenzeneResult<Response>> HandleAsync(Request message) => null;
+            }
+            """);
+
+        var reported = Assert.Single(diagnostics.Where(x => x.Id == "BENZ003"));
+        Assert.Equal(DiagnosticSeverity.Error, reported.Severity);
+        Assert.Contains("SneakyHealthCheckHandler", reported.GetMessage());
+        Assert.Contains("benzene:healthcheck", reported.GetMessage());
+    }
+
+    [Fact]
+    public void Benz003_IsSilentOnAnOrdinaryApplicationTopic()
+    {
+        var diagnostics = Run("""
+            [Message("order:create")]
+            public class CreateOrderHandler : IMessageHandler<Request, Response>
+            {
+                public Task<IBenzeneResult<Response>> HandleAsync(Request message) => null;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Where(x => x.Id == "BENZ003"));
+    }
+
+    [Fact]
+    public void Benz003_IsSilentOnAMeshCollectorExtendingTheReservedNamespace()
+    {
+        // benzene:mesh:aggregate is a real, shipped handler (examples/AwsMesh/Mesh/MeshAggregateHandler.cs):
+        // a mesh collector is an ordinary Benzene service serving mesh.md §4's ingest topics as
+        // handlers, so the wider benzene:mesh:* namespace is legitimately extended this way. Only
+        // Benzene's own specific known ids (BenzeneTopic.All) are always wrong to register on.
+        var diagnostics = Run("""
+            [Message("benzene:mesh:aggregate")]
+            public class MeshAggregateHandler : IMessageHandler<Request, Response>
+            {
+                public Task<IBenzeneResult<Response>> HandleAsync(Request message) => null;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Where(x => x.Id == "BENZ003"));
+    }
+
+    [Fact]
+    public void Benz004_ObjectRequestTypeIsFlaggedAsUnconstrained()
+    {
+        var diagnostics = Run("""
+            [Message("order:create")]
+            public class CreateOrderHandler : IMessageHandler<object, Response>
+            {
+                public Task<IBenzeneResult<Response>> HandleAsync(object message) => null;
+            }
+            """);
+
+        var reported = Assert.Single(diagnostics.Where(x => x.Id == "BENZ004"));
+        Assert.Equal(DiagnosticSeverity.Info, reported.Severity);
+        Assert.Contains("request", reported.GetMessage());
+        Assert.Contains("CreateOrderHandler", reported.GetMessage());
+    }
+
+    [Fact]
+    public void Benz004_JsonElementResponseTypeIsFlaggedAsUnconstrained()
+    {
+        var diagnostics = Run("""
+            [Message("order:create")]
+            public class CreateOrderHandler : IMessageHandler<Request, System.Text.Json.JsonElement>
+            {
+                public Task<IBenzeneResult<System.Text.Json.JsonElement>> HandleAsync(Request message) => null;
+            }
+            """);
+
+        var reported = Assert.Single(diagnostics.Where(x => x.Id == "BENZ004"));
+        Assert.Equal(DiagnosticSeverity.Info, reported.Severity);
+        Assert.Contains("response", reported.GetMessage());
+    }
+
+    [Fact]
+    public void Benz004_EnumRequestTypeIsFlaggedAsUnconstrained()
+    {
+        var diagnostics = Run("""
+            public enum OrderKind { Standard, Express }
+
+            [Message("order:create")]
+            public class CreateOrderHandler : IMessageHandler<OrderKind, Response>
+            {
+                public Task<IBenzeneResult<Response>> HandleAsync(OrderKind message) => null;
+            }
+            """);
+
+        Assert.Single(diagnostics.Where(x => x.Id == "BENZ004"));
+    }
+
+    [Fact]
+    public void Benz004_IsSilentOnOrdinaryConcreteTypes()
+    {
+        var diagnostics = Run("""
+            [Message("order:create")]
+            public class CreateOrderHandler : IMessageHandler<Request, Response>
+            {
+                public Task<IBenzeneResult<Response>> HandleAsync(Request message) => null;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Where(x => x.Id == "BENZ004"));
+    }
+
+    [Fact]
+    public void Benz004_IsSilentOnAResponselessHandlersImpliedVoid()
+    {
+        // IMessageHandler<TRequest> has no declared response type argument - Void isn't a payload
+        // and must not be flagged.
+        var diagnostics = Run("""
+            [Message("order:archive")]
+            public class ArchiveOrderHandler : IMessageHandler<Request>
+            {
+                public Task<IBenzeneResult<Void>> HandleAsync(Request message) => null;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Where(x => x.Id == "BENZ004"));
+    }
 }

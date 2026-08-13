@@ -58,6 +58,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   around them was removed.
 
 ### Added
+- **Two new compile-time diagnostics from `Benzene.CodeGen.SourceGenerators`** (referenced by
+  `Benzene.Core.MessageHandlers`, so every handler-carrying project gets them for free, in Visual
+  Studio, Rider, and `dotnet build`/CI alike — no separate analyzer install):
+  - **`BENZ003`** (error): a `[Message]` handler registered on one of Benzene's own reserved
+    topic ids (`benzene:spec`, `benzene:healthcheck`, `benzene:mesh`, ...). These are always
+    intercepted by dedicated framework middleware before dispatch, so such a handler can never
+    run — or, if that interception is ever disabled, would silently answer in the framework's own
+    endpoint's place. Deliberately narrower than "any `benzene:`-prefixed topic": a mesh collector
+    legitimately extends the wider `benzene:mesh:*` namespace with its own ingest-topic handlers
+    (mesh.md §4, e.g. `examples/AwsMesh/Mesh/MeshAggregateHandler.cs`'s
+    `benzene:mesh:aggregate`), which this rule does not flag.
+  - **`BENZ004`** (info): a handler's request or response type is one that
+    `Benzene.Mesh.Wire.MeshSchemaGenerator` derives an unconstrained (`{}`) JSON Schema for —
+    `object`, `dynamic`, an enum, or a `System.Text.Json` dynamic-document type
+    (`JsonElement`/`JsonDocument`/`JsonNode`) — checked at the handler's own top level only (it
+    does not walk into object properties or detect recursive cycles, the sound subset of what the
+    runtime schema deriver does). Not an error: an unconstrained schema is sometimes deliberate,
+    but it means the topic's mesh descriptor and derived spec carry no discoverable shape for
+    generated clients, the mesh UI, or OpenAPI/AsyncAPI, so it's worth an explicit choice rather
+    than a surprise found later in the fleet view.
 - **New `Benzene.Mesh.Usage.CloudWatch` package — the first metrics-backend usage adapter.** A
   `CloudWatchUsageSource : IMeshUsageSource` (pins only `AWSSDK.CloudWatch`) reads the
   `benzene.messages.processed` counter (tags `topic`/`transport`/`result`, emitted by every
