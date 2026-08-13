@@ -144,3 +144,8 @@ lacking the configured header still routes by its AMQP routing key.
   `RabbitMqRealPipelineTest` (real DI registration completeness).
 - Live (`test/Benzene.Integration.Test/RabbitMq/`, CI-only, needs Docker): `RabbitMqWorkerLiveTest`
   round-trips a real message through a real broker, mirroring `BenzeneKafkaWorkerLiveTest`.
+
+## Claim-check hydration
+Not wired here yet: `Benzene.ClaimCheck`'s hydrate middleware needs an
+`IMessageBodySetter<RabbitMqContext>` registered — the same 5-line pattern as
+`Benzene.Aws.Lambda.Sqs`/`.Sns`/`.EventBridge` ship (see `work/claim-check-plan.md` Phase 2 step 4).

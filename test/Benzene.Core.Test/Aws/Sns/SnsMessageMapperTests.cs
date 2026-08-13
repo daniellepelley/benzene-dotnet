@@ -90,5 +90,21 @@ namespace Benzene.Test.Aws.Sns
             Assert.Empty(headers);
             Assert.Equal(Constants.Missing, topic.Id);
         }
+
+        [Fact]
+        public async System.Threading.Tasks.Task SnsMessageBodySetter_ReplacesTheRawMessage()
+        {
+            var snsRecordContext = SnsRecordContext.CreateInstance(null, new SNSEvent.SNSRecord
+            {
+                Sns = new SNSEvent.SNSMessage
+                {
+                    Message = "{\"_benzeneClaimCheck\":\"memory://claim-check/abc\"}"
+                }
+            });
+
+            await new SnsMessageBodySetter().SetBody(snsRecordContext, "{\"name\":\"some-name\"}");
+
+            Assert.Equal("{\"name\":\"some-name\"}", snsRecordContext.SnsRecord.Sns.Message);
+        }
     }
 }

@@ -217,3 +217,8 @@ producer support. This is one of the "self-hosted worker" startup modes document
   wiring (still exercised only indirectly through `BoundedConcurrentDispatcher<T>`'s isolated unit
   tests, since asserting ordering/concurrency against a real, timing-sensitive broker would be
   flaky).
+
+## Claim-check hydration
+Not wired here yet: `Benzene.ClaimCheck`'s hydrate middleware needs an
+`IMessageBodySetter<KafkaRecordContext<TKey, TValue>>` registered — the same 5-line pattern as
+`Benzene.Aws.Lambda.Sqs`/`.Sns`/`.EventBridge` ship (see `work/claim-check-plan.md` Phase 2 step 4).

@@ -92,3 +92,9 @@ read real message attributes. Separately, `UseSqs(...)` now auto-wires `UseBenze
 resolves inside each message's dispatch (`InvocationId` = the message's SQS `MessageId`, `Platform`
 = `"Worker"`) - a long-running worker has no Lambda-style outer invocation boundary at all, so this
 is the only invocation identity available here. No application code changes needed for either fix.
+
+## Claim-check hydration
+Not wired here yet: `Benzene.ClaimCheck`'s hydrate middleware needs an
+`IMessageBodySetter<SqsConsumerMessageContext>` registered — the same 5-line pattern as
+`Benzene.Aws.Lambda.Sqs`/`.Sns`/`.EventBridge` ship (see `work/claim-check-plan.md` Phase 2 step 4,
+and Phase 4's integration test, which is expected to add it if still missing by then).

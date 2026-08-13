@@ -149,3 +149,9 @@ buildTransitive). The hand-written form still works. See `docs/azure-functions.m
   (`EventHubMessageHeadersGetter`), `EventHubW3CTraceContextTest.cs` (in
   `test/Benzene.Core.Test/Diagnostics/` - `.UseW3CTraceContext<EventHubContext>()` end to end).
   Streaming shares the engine tests in `Core/Middleware/Streaming/`.
+
+## Claim-check hydration
+Not wired here yet, and less mechanical than the other transports: there is already an
+`IMessageBodyGetter<EventHubContext>`, but hydration needs the matching
+`IMessageBodySetter<EventHubContext>` registered too — the same 5-line pattern as
+`Benzene.Aws.Lambda.Sqs`/`.Sns`/`.EventBridge` ship (see `work/claim-check-plan.md` Phase 2 step 4).

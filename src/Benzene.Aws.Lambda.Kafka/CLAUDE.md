@@ -113,3 +113,8 @@ code changes needed for either fix.
   first failed offset and stops that partition while others complete; a thrown exception is contained
   to its partition; an unset outcome is skipped (not reported); `FailWholeBatch` throws listing
   failed partitions; all-success returns an empty `KafkaBatchResponse`; option defaults.
+
+## Claim-check hydration
+Not wired here yet: `Benzene.ClaimCheck`'s hydrate middleware needs an
+`IMessageBodySetter<KafkaContext>` registered — the same 5-line pattern as
+`Benzene.Aws.Lambda.Sqs`/`.Sns`/`.EventBridge` ship (see `work/claim-check-plan.md` Phase 2 step 4).

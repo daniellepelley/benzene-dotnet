@@ -90,3 +90,10 @@ already the whole helper — a `.TestHelpers` package would be an identity funct
   routing of raw payloads (also proves the `AddAzureQueueStorage` registration set is complete
   for `.UseMessageHandlers()`), non-envelope deferral, exception propagation, metadata flow, and
   envelope-path `RaiseOnFailureStatus` escalation + opt-out (`EnvelopeHandlerReturnsFailure_*`).
+
+## Claim-check hydration
+Not wired here yet: `Benzene.ClaimCheck`'s hydrate middleware needs an
+`IMessageBodySetter<QueueStorageContext>` registered — the same 5-line pattern as
+`Benzene.Aws.Lambda.Sqs`/`.Sns`/`.EventBridge` ship (see `work/claim-check-plan.md` Phase 2 step 4).
+Note Azure Queue Storage's 64 KB message limit makes this transport the most likely to actually need
+the pattern.

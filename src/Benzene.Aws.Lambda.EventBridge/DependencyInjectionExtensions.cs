@@ -31,6 +31,7 @@ public static class DependencyInjectionExtensions
         services.AddHeaderMessageVersionGetter<EventBridgeContext>();
         services.AddScoped<IMessageHeadersGetter<EventBridgeContext>, EventBridgeMessageHeadersGetter>();
         services.AddScoped<IMessageBodyGetter<EventBridgeContext>, EventBridgeMessageBodyGetter>();
+        services.AddScoped<IMessageBodySetter<EventBridgeContext>, EventBridgeMessageBodySetter>();
         services.AddScoped<IMessageHandlerResultSetter<EventBridgeContext>, EventBridgeMessageHandlerResultSetter>();
         services.AddMediaFormatNegotiation<EventBridgeContext>();
         services

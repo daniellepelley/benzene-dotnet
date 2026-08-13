@@ -47,6 +47,7 @@ public static class DependencyInjectionExtensions
         services.TryAddHeaderMessageVersionGetter<SqsMessageContext>();
         services.TryAddScoped<IMessageHeadersGetter<SqsMessageContext>, SqsMessageHeadersGetter>();
         services.TryAddScoped<IMessageBodyGetter<SqsMessageContext>, SqsMessageBodyGetter>();
+        services.TryAddScoped<IMessageBodySetter<SqsMessageContext>, SqsMessageBodySetter>();
         services.TryAddScoped<IMessageHandlerResultSetter<SqsMessageContext>, SqsMessageHandlerResultSetter>();
         services.AddMediaFormatNegotiation<SqsMessageContext>();
         services

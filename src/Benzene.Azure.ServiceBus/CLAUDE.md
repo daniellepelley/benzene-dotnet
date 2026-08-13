@@ -137,3 +137,9 @@ through the shared internal `IServiceBusMessageSettler` adapter over `ProcessMes
   processor-consume-dispatch path is covered end to end against the Service Bus emulator in
   `test/Benzene.Integration.Test/ServiceBus/BenzeneServiceBusWorkerLiveTest.cs` (own queue,
   `benzene-worker-queue`, so it doesn't compete with the trigger-pipeline test's queue)
+
+## Claim-check hydration
+Not wired here yet: `Benzene.ClaimCheck`'s hydrate middleware needs an
+`IMessageBodySetter<ServiceBusConsumerMessageContext>` (`Benzene.Abstractions.Messages.Mappers`) to
+replace the raw body before deserialization — the same 5-line pattern as the getters above and as
+`Benzene.Aws.Lambda.Sqs`/`.Sns`/`.EventBridge` ship (see `work/claim-check-plan.md` Phase 2 step 4).

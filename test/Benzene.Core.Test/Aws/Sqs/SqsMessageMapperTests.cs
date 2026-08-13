@@ -64,5 +64,18 @@ namespace Benzene.Test.Aws.Sqs
 
             Assert.Equal("some-topic", topic.Id);
         }
+
+        [Fact]
+        public async System.Threading.Tasks.Task SqsMessageBodySetter_ReplacesTheRawBody()
+        {
+            var sqsMessageContext = SqsMessageContext.CreateInstance(null, new SQSEvent.SQSMessage
+            {
+                Body = "{\"_benzeneClaimCheck\":\"memory://claim-check/abc\"}"
+            });
+
+            await new SqsMessageBodySetter().SetBody(sqsMessageContext, "{\"name\":\"some-name\"}");
+
+            Assert.Equal("{\"name\":\"some-name\"}", sqsMessageContext.SqsMessage.Body);
+        }
     }
 }

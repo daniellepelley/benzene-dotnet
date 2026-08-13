@@ -136,3 +136,8 @@ buildTransitive). The hand-written form still works. See `docs/azure-functions.m
   is `Explicit`) - dispatches through `IMiddlewareApplication<ServiceBusTriggerBatch>` directly with
   a mocked `Microsoft.Azure.Functions.Worker.ServiceBusMessageActions` (mockable: non-sealed, virtual
   methods, protected constructor Moq's proxy can call).
+
+## Claim-check hydration
+Not wired here yet: `Benzene.ClaimCheck`'s hydrate middleware needs an
+`IMessageBodySetter<ServiceBusContext>` registered — the same 5-line pattern as
+`Benzene.Aws.Lambda.Sqs`/`.Sns`/`.EventBridge` ship (see `work/claim-check-plan.md` Phase 2 step 4).

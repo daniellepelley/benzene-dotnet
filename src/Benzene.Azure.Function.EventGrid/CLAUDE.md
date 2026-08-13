@@ -72,3 +72,8 @@ buildTransitive). The hand-written form still works. See `docs/azure-functions.m
 ## Tests
 - `test/Benzene.Core.Test/Azure/EventGridPipelineTest.cs` — end-to-end routing for both schemas,
   `Parse` field mapping for both schemas, headers surface, empty-data body fallback.
+
+## Claim-check hydration
+Not wired here yet: `Benzene.ClaimCheck`'s hydrate middleware needs an
+`IMessageBodySetter<EventGridContext>` registered — the same 5-line pattern as
+`Benzene.Aws.Lambda.Sqs`/`.Sns`/`.EventBridge` ship (see `work/claim-check-plan.md` Phase 2 step 4).

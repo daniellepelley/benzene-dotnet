@@ -47,6 +47,7 @@ public static class DependencyInjectionExtensions
         services.TryAddHeaderMessageVersionGetter<SnsRecordContext>();
         services.TryAddScoped<IMessageHeadersGetter<SnsRecordContext>, SnsMessageHeadersGetter>();
         services.TryAddScoped<IMessageBodyGetter<SnsRecordContext>, SnsMessageBodyGetter>();
+        services.TryAddScoped<IMessageBodySetter<SnsRecordContext>, SnsMessageBodySetter>();
         services.TryAddScoped<IMessageHandlerResultSetter<SnsRecordContext>, SnsMessageHandlerResultSetter>();
         services.AddMediaFormatNegotiation<SnsRecordContext>();
         services
