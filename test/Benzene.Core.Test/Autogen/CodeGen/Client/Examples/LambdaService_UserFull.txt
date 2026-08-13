@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Benzene.Abstractions.Results;
 using Benzene.Clients;
 using Benzene.Clients.HealthChecks;
 using Benzene.HealthChecks.Core;
@@ -43,7 +44,7 @@ namespace Benzene.Service.Clients.User
 
         public async Task<IBenzeneResult<HealthCheckResponse>> HealthCheckAsync()
         {
-            var benzeneResult = await _sender.SendAsync<NullPayload, HealthCheckResponse>("benzene:healthcheck", new NullPayload());
+            var benzeneResult = await _sender.SendAsync<Benzene.Abstractions.Results.Void, HealthCheckResponse>("benzene:healthcheck", new Benzene.Abstractions.Results.Void());
             if (benzeneResult.Payload == null)
             {
                 return benzeneResult;

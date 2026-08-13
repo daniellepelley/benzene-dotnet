@@ -82,6 +82,7 @@ public class MessageClientSdkBuilder : ICodeBuilder<EventServiceDocument>
         lineWriter.WriteLine("using System;");
         lineWriter.WriteLine("using System.Collections.Generic;");
         lineWriter.WriteLine("using System.Threading.Tasks;");
+        lineWriter.WriteLine("using Benzene.Abstractions.Results;");
         lineWriter.WriteLine("using Benzene.Clients;");
         lineWriter.WriteLine("using Benzene.Clients.HealthChecks;");
         lineWriter.WriteLine("using Benzene.HealthChecks.Core;");
@@ -151,8 +152,21 @@ public class MessageClientSdkBuilder : ICodeBuilder<EventServiceDocument>
         lineWriter.WriteLine(
             $"public async Task<IBenzeneResult<HealthCheckResponse>> HealthCheckAsync()", 2);
         lineWriter.WriteLine("{", 2);
+        // Benzene.Abstractions.Results.Void, not a nonexistent "NullPayload" - the request payload for
+        // the no-body benzene:healthcheck topic. Every server-side handler for it (Benzene.HealthChecks'
+        // middleware) reads the topic, not the body, so any serializable empty type would work on the
+        // wire; Void is the one this codebase already established for exactly this "no meaningful
+        // request" case (see e.g. AtomicClientSdkBuilder's own generated Void.cs DTO for a Void-request
+        // topic). Fully qualified rather than relying on the "using Benzene.Abstractions.Results;" above:
+        // a topic-scoped client (AtomicClientSdkBuilder) whose own request/response schema happens to
+        // include a component literally named "Void" emits its OWN same-namespace Void DTO (see
+        // OpenApiSchemaCSharpTypeBuilder), and a bare "Void" here would then bind to THAT type instead -
+        // fine when the shapes happen to match, but the two are unrelated types; when no such local type
+        // exists, a bare "Void" is instead ambiguous with System.Void (CS0104, displayed as "void") once
+        // this using and any other Void-bearing using are both in scope. Full qualification is correct in
+        // every case: same-namespace, ambiguous, and unambiguous alike.
         lineWriter.WriteLine(
-            $@"var benzeneResult = await _sender.SendAsync<NullPayload, HealthCheckResponse>(""benzene:healthcheck"", new NullPayload());",
+            $@"var benzeneResult = await _sender.SendAsync<Benzene.Abstractions.Results.Void, HealthCheckResponse>(""benzene:healthcheck"", new Benzene.Abstractions.Results.Void());",
             3);
         lineWriter.WriteLine("if (benzeneResult.Payload == null)", 3);
         lineWriter.WriteLine("{", 3);
@@ -198,10 +212,11 @@ public class MessageClientSdkBuilder : ICodeBuilder<EventServiceDocument>
         lineWriter.WriteLine("using System;");
         lineWriter.WriteLine("using System.Collections.Generic;");
         lineWriter.WriteLine("using System.Threading.Tasks;");
+        lineWriter.WriteLine("using Benzene.Abstractions.Results;");
         lineWriter.WriteLine("using Benzene.Clients;");
         lineWriter.WriteLine("using Benzene.Clients.HealthChecks;");
         lineWriter.WriteLine("using Benzene.Results;");
-        
+
         lineWriter.WriteLine("");
 
         lineWriter.WriteLine($"namespace {_options.Namespace}");
