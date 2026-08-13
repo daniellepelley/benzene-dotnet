@@ -2,11 +2,13 @@
 
 Benzene runs efficiently in AWS Lambda, supporting multiple event sources (API Gateway, SQS,
 SNS, EventBridge, Kafka, S3) through a single middleware pipeline. This guide starts from an empty folder
-and ends with a deployed Lambda function handling API Gateway, SQS, and SNS events.
+and ends with **one handler, deployed as one function, answering both an HTTP request and an SQS
+message** — the thing a plain Lambda handler can't do without becoming two Lambdas.
 
-This is Benzene's flagship host: **one function, every event source.** The same handler you write below is
-reached over API Gateway (HTTP), SNS, SQS and EventBridge — adding a transport is one line of wiring, never
-a change to your logic.
+This is Benzene's flagship host: **one function, every event source.** The same handler you write below
+is reached over API Gateway (HTTP) and SQS in this guide, and over SNS, EventBridge, Kafka, and more with
+one more line each — adding a transport is wiring, never a change to your logic. See
+[Supported Event Sources](#supported-event-sources) for the rest.
 
 > **Runnable version:** [`examples/Aws/Benzene.Examples.Aws.Minimal`](../examples/Aws/Benzene.Examples.Aws.Minimal)
 > is the smallest form of this guide — one handler over API Gateway + SNS + SQS + EventBridge, with a test
@@ -106,6 +108,7 @@ pipeline via `UseAwsLambda(...)`, which hands you an
 using Benzene.Abstractions.Hosting;
 using Benzene.Aws.Lambda.ApiGateway;
 using Benzene.Aws.Lambda.Core;
+using Benzene.Aws.Lambda.Sqs;
 using Benzene.Core.MessageHandlers;
 using Benzene.Microsoft.Dependencies;
 using Microsoft.Extensions.Configuration;
@@ -131,10 +134,18 @@ public class StartUp : BenzeneStartUp
     {
         app.UseAwsLambda(eventPipeline => eventPipeline
             .UseApiGateway(apiGatewayApp => apiGatewayApp
+                .UseMessageHandlers())
+            .UseSqs(sqsApp => sqsApp
                 .UseMessageHandlers()));
     }
 }
 ```
+
+That's the whole pitch in two lines: `UseApiGateway` and `UseSqs` both call `UseMessageHandlers()`
+against the *same* handler registry, so an API Gateway `GET /hello/{name}` request and an SQS message
+on the `hello:world` topic both resolve to the identical `HelloWorldMessageHandler` from step 3 —
+nothing about the handler changes. Wire up [SNS, EventBridge, Kafka, or any other supported source](#supported-event-sources)
+the same way, one more `.Use...(...)` call each.
 
 Notice there is **no Benzene registration in `ConfigureServices`** — no `AddBenzene()`, no
 `AddMessageHandlers()`. `UseMessageHandlers()` in `Configure` discovers your `[Message]`/`[HttpEndpoint]`
@@ -182,6 +193,7 @@ Add the test-helper packages to your test project:
 dotnet add package Benzene.Testing --prerelease
 dotnet add package Benzene.Aws.Lambda.Core.TestHelpers --prerelease
 dotnet add package Benzene.Aws.Lambda.ApiGateway.TestHelpers --prerelease
+dotnet add package Benzene.Aws.Lambda.Sqs.TestHelpers --prerelease
 ```
 
 `BenzeneTestHost.Create<TStartUp>().BuildAwsLambdaTestHost()` runs your real `GetConfiguration()`/
@@ -190,8 +202,9 @@ real deployment — and returns a ready-to-use test host you can send events int
 responses back from, all in one fluent chain:
 
 ```csharp
-using Benzene.Aws.Lambda.Core.TestHelpers;
 using Benzene.Aws.Lambda.ApiGateway.TestHelpers;
+using Benzene.Aws.Lambda.Core.TestHelpers;
+using Benzene.Aws.Lambda.Sqs.TestHelpers;
 using Benzene.Testing;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -199,9 +212,17 @@ var host = BenzeneTestHost.Create<StartUp>()
     .WithServices(services => services.AddScoped(_ => mockSomeDependency.Object))
     .BuildAwsLambdaTestHost();
 
-var request = HttpBuilder.Create("GET", "/hello/world");
-var response = await host.SendApiGatewayAsync(request);
+// Same host, same handler, two transports:
+var httpRequest = HttpBuilder.Create("GET", "/hello/world");
+var httpResponse = await host.SendApiGatewayAsync(httpRequest);
+
+var sqsMessage = MessageBuilder.Create("hello:world", new HelloWorldRequest { Name = "world" });
+var sqsResponse = await host.SendSqsAsync(sqsMessage);
 ```
+
+Both calls exercise the identical `HelloWorldMessageHandler` on the identical host — proof, before a
+single byte reaches AWS, that "one handler, two transports" isn't just a wiring convenience, it's the
+same code path.
 
 `WithServices(...)` runs immediately after `ConfigureServices`, so it's the standard way to
 swap in a mock or fake for a test; `WithConfiguration(...)` does the same for configuration
@@ -224,24 +245,42 @@ Globals:
   Function:
     Timeout: 30
     MemorySize: 1024
-    # .NET 10 has no AWS-managed Lambda runtime yet - dotnet8 is the current managed
-    # runtime and works fine for a net10.0 project, since it targets a compatible Lambda ABI.
-    Runtime: dotnet8
+    # AWS added a managed .NET 10 Lambda runtime in Jan 2026 (built on provided.al2023),
+    # so this net10.0 project runs on the matching managed runtime directly.
+    Runtime: dotnet10
     Architectures:
       - arm64
 
 Resources:
+  MyQueue:
+    Type: AWS::SQS::Queue
+
   MyFunction:
     Type: AWS::Serverless::Function
     Metadata:
-      BuildMethod: dotnet8
+      BuildMethod: dotnet10
     Properties:
       FunctionName: my-function
       Handler: MyFunction::MyFunction.Function::FunctionHandlerAsync
       CodeUri: ./
+      Policies:
+        # SAM policy template - grants exactly the SQS actions the event source mapping
+        # needs. See "SQS trigger" in aws-iam-permissions.md.
+        - SQSPollerPolicy:
+            QueueName: !GetAtt MyQueue.QueueName
       Events:
         HttpApi:
           Type: HttpApi
+        SqsEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt MyQueue.Arn
+            BatchSize: 10
+
+Outputs:
+  QueueUrl:
+    Description: URL of the SQS queue (for the send-message verification below)
+    Value: !Ref MyQueue
 ```
 
 Then build and deploy:
@@ -252,8 +291,23 @@ sam deploy --guided
 ```
 
 `sam deploy --guided` walks you through stack name, region, and parameter values on first run,
-then remembers them in `samconfig.toml` for subsequent deploys. Once deployed, SAM prints the
-API Gateway URL — `GET` it at `/hello/world` to confirm the handler above responds.
+then remembers them in `samconfig.toml` for subsequent deploys. SAM prints the API Gateway URL and
+the `QueueUrl` output on completion — both routes into the same deployed function:
+
+```bash
+# HTTP, via API Gateway:
+curl https://<api-id>.execute-api.<region>.amazonaws.com/hello/world
+
+# SQS, via the queue - a manually-sent message needs the topic message attribute a real Benzene
+# client would set automatically, so the router can dispatch it (see the SQS section below):
+aws sqs send-message \
+  --queue-url <QueueUrl from the SAM output> \
+  --message-body '{"Name":"world"}' \
+  --message-attributes '{"topic":{"DataType":"String","StringValue":"hello:world"}}'
+```
+
+Both reach the same `HelloWorldMessageHandler`. `CloudWatch Logs` for the function shows one
+invocation per call, regardless of which transport triggered it.
 
 See [`examples/Aws/Benzene.Examples.Aws/template.yaml`](../examples/Aws/Benzene.Examples.Aws/template.yaml)
 for a fuller example covering SQS, SNS, and an optional MSK/Kafka event source.

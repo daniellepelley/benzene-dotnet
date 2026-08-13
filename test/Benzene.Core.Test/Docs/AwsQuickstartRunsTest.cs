@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Benzene.Aws.Lambda.ApiGateway.TestHelpers;
 using Benzene.Aws.Lambda.Core.TestHelpers;
 using LambdaTestHostExtensions = Benzene.Aws.Lambda.Core.TestHelpers.BenzeneTestHostExtensions;
+using SqsTestHostExtensions = Benzene.Aws.Lambda.Sqs.TestHelpers.BenzeneTestHostExtensions;
 using Benzene.Testing;
 using Xunit;
 
@@ -34,15 +35,34 @@ public class AwsQuickstartRunsTest
         var snippet = DocSnippetCompiler.Discover()
             .Single(x => x.DocPath == "docs/getting-started-aws.md" && x.Unit == "quickstart");
 
-        var startUp = DocSnippetCompiler.Emit(snippet).GetType("StartUp");
+        // Emit once and read both types off the one assembly: StartUp and HelloWorldRequest must be
+        // the identical runtime type the guide's handler was compiled against, not two unrelated
+        // types with the same name from separate compilations (which is what a second Emit() call
+        // would produce, since it loads a fresh assembly every time).
+        var assembly = DocSnippetCompiler.Emit(snippet);
+        var startUp = assembly.GetType("StartUp");
         Assert.NotNull(startUp);
+        var requestType = assembly.GetType("HelloWorldRequest");
+        Assert.NotNull(requestType);
 
         using var host = BuildAwsLambdaTestHost(startUp);
 
-        var response = await host.SendApiGatewayAsync(HttpBuilder.Create("GET", "/hello/world"));
+        var httpResponse = await host.SendApiGatewayAsync(HttpBuilder.Create("GET", "/hello/world"));
 
-        Assert.Equal(200, response.StatusCode);
-        Assert.Contains("Hello world!", response.Body);
+        Assert.Equal(200, httpResponse.StatusCode);
+        Assert.Contains("Hello world!", httpResponse.Body);
+
+        // The guide's whole point, as of the step-4/step-6 edits: the same handler also answers over
+        // SQS, on the same host, with no wiring change. dynamic sidesteps needing MessageBuilder.Create<T>
+        // resolved reflectively for a T that only exists at runtime. SendSqsAsync<T> is called in its
+        // static (non-extension) form - the DLR can dynamically bind a static call, but not extension-
+        // method syntax (CS1973: "Extension methods cannot be dynamically dispatched").
+        dynamic sqsRequestBody = Activator.CreateInstance(requestType!)!;
+        sqsRequestBody.Name = "world";
+        dynamic sqsMessage = MessageBuilder.Create("hello:world", sqsRequestBody);
+        var sqsResponse = await SqsTestHostExtensions.SendSqsAsync(host, sqsMessage);
+
+        Assert.Empty(sqsResponse.BatchItemFailures);
     }
 
     // BenzeneTestHost.Create<TStartUp>() is generic over a type that only exists at runtime here, so
