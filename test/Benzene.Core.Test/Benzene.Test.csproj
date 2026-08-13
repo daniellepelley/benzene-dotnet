@@ -155,6 +155,7 @@
     <ProjectReference Include="..\..\src\Benzene.Kafka.Core\Benzene.Kafka.Core.csproj" />
     <ProjectReference Include="..\..\src\Benzene.MessagePack\Benzene.MessagePack.csproj" />
     <ProjectReference Include="..\..\src\Benzene.NewtonsoftJson\Benzene.NewtonsoftJson.csproj" />
+    <ProjectReference Include="..\..\src\Benzene.Outbox\Benzene.Outbox.csproj" />
     <ProjectReference Include="..\..\src\Benzene.OpenTelemetry\Benzene.OpenTelemetry.csproj" />
     <ProjectReference Include="..\..\src\Benzene.RabbitMq\Benzene.RabbitMq.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Resilience\Benzene.Resilience.csproj" />
