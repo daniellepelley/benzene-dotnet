@@ -73,14 +73,14 @@ public class BenzeneResultStatusTest
         Assert.False(tooManyRequests.IsSuccessful);
         Assert.True(tooManyRequests.IsTooManyRequests());
         Assert.True(tooManyRequests.IsTransient());
-        Assert.Contains("throttled", tooManyRequests.Errors);
+        Assert.Contains(tooManyRequests.Errors, e => e.Message == "throttled");
 
         var timeout = BenzeneResult.Timeout("deadline elapsed");
         Assert.Equal(BenzeneResultStatus.Timeout, timeout.Status);
         Assert.False(timeout.IsSuccessful);
         Assert.True(timeout.IsTimeout());
         Assert.True(timeout.IsTransient());
-        Assert.Contains("deadline elapsed", timeout.Errors);
+        Assert.Contains(timeout.Errors, e => e.Message == "deadline elapsed");
     }
 
     [Fact]

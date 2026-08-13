@@ -233,7 +233,7 @@ public class BenzeneResultExtensionsTest
 
         Assert.Equal(BenzeneResultStatus.ValidationError, projected.Status);
         Assert.False(projected.IsSuccessful);
-        Assert.Contains("bad", projected.Errors);
+        Assert.Contains(projected.Errors, e => e.Message == "bad");
     }
 
     [Fact]

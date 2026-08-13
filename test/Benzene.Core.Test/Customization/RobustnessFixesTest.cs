@@ -165,6 +165,6 @@ public class RobustnessFixesTest
 
         Assert.NotNull(captured);
         Assert.Equal("not-found", captured!.BenzeneResult.Status);
-        Assert.Contains("No topic could be resolved", string.Join(" ", captured.BenzeneResult.Errors ?? Array.Empty<string>()));
+        Assert.Contains("No topic could be resolved", string.Join(" ", captured.BenzeneResult.Errors));
     }
 }

@@ -11,15 +11,19 @@ with a validation-status result carrying the FluentValidation error messages. Th
 ## Key types/interfaces
 - `ValidationMiddleware<TRequest, TResponse> : IMiddleware<IMessageHandlerContext<TRequest, TResponse>>`
   (Name `"FluentValidation"`) - the inbound (handler-side) validator. `TryGetService<IValidator<TRequest>>()`;
-  no validator registered → pass through to `next()`. Null request → `BenzeneResult.Set<TResponse>(status, "Request is null")`.
-  Invalid → `BenzeneResult.Set<TResponse>(status, validationResult.Errors.Select(e => e.ErrorMessage))`.
+  no validator registered → pass through to `next()`. Null request → `BenzeneResult.SetFailed<TResponse>(status, "Request is null")`.
+  Invalid → `BenzeneResult.Set<TResponse>(status, errors)` with one `BenzeneError` per
+  `ValidationFailure`: `Message` = `ErrorMessage`, `Field` = `PropertyName` (empty → `null`), `Code` =
+  `ErrorCode` **verbatim** (FluentValidation's default is the validator type name, e.g.
+  `NotEmptyValidator` - never stripped or normalized; empty → `null`).
   The `status` comes from `IValidationStatusMapper`, not a hardcoded HTTP code.
 - `ValidationMiddlewareBuilder : IHandlerMiddlewareBuilder` - builds the above per handler, resolving
   the registered `IValidationStatusMapper`.
 - `ValidationClientMiddleware<TRequest, TResponse> : IMiddleware<IBenzeneClientContext<TRequest, TResponse>>`
   / `ValidationClientMiddlewareBuilder : IBenzeneClientContextMiddlewareBuilder` - the **outbound**
   counterpart, validating a request before it's sent via `IBenzeneClient`. This path has no status
-  mapper - it always uses `BenzeneResult.ValidationError<TResponse>(...)`.
+  mapper - it always uses `BenzeneResult.ValidationError<TResponse>(errors)` with the same
+  `Field`/`Code` mapping as the inbound middleware above.
 - `IValidationStatusMapper` (from `Benzene.Abstractions.Validation`) + `DefaultValidationStatusMapper`
   - resolves the result status in precedence order: (1) a per-failure `BenzeneValidationState.Status`
   (set on a rule via `.WithStatus(...)`), (2) a handler-level `[ValidationStatus]`
@@ -62,6 +66,10 @@ with a validation-status result carrying the FluentValidation error messages. Th
 - **FluentValidation** (NuGet) - the validation engine itself.
 
 ## Important conventions
+- The result's errors are structured `BenzeneError`s (`Message`/`Field`/`Code`), not bare strings -
+  see `Benzene.Results/CLAUDE.md`'s capability table for how each validation package populates
+  `Field`/`Code`. `Code` is FluentValidation's `ErrorCode`, emitted **verbatim** - do not assume it's
+  a stable, hand-authored taxonomy unless every rule sets `.WithErrorCode(...)` explicitly.
 - You author `AbstractValidator<T>` classes; `UseFluentValidation` discovers and registers them. A
   request type with no registered validator is simply not validated (pass-through), not rejected.
 - The result status is never a hardcoded HTTP code here - it flows through `IValidationStatusMapper`

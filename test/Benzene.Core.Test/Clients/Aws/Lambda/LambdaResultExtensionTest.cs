@@ -83,7 +83,7 @@ public class LambdaResultExtensionTest
         var lambdaBenzeneResult = lambdaResponse.AsBenzeneResult<Guid>(new JsonSerializer());
 
         Assert.Equal(expectedStatus, lambdaBenzeneResult.Status);
-        Assert.Equal("some-error", lambdaBenzeneResult.Errors[0]);
+        Assert.Equal("some-error", lambdaBenzeneResult.Errors[0].Message);
     }
 
     [Theory]
@@ -101,7 +101,7 @@ public class LambdaResultExtensionTest
         var lambdaBenzeneResult = lambdaResponse.AsBenzeneResult<object>(new JsonSerializer());
 
         Assert.Equal(expectedStatus, lambdaBenzeneResult.Status);
-        Assert.Equal("some-error", lambdaBenzeneResult.Errors[0]);
+        Assert.Equal("some-error", lambdaBenzeneResult.Errors[0].Message);
     }
 
     [Theory]
@@ -181,7 +181,7 @@ public class LambdaResultExtensionTest
 
         Assert.Equal(benzeneStatus, lambdaBenzeneResult.Status);
         Assert.False(lambdaBenzeneResult.IsSuccessful);
-        Assert.Equal("some-error", lambdaBenzeneResult.Errors[0]);
+        Assert.Equal("some-error", lambdaBenzeneResult.Errors[0].Message);
     }
 
     [Fact]

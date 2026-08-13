@@ -1,10 +1,21 @@
-﻿using System.Net;
+﻿using System.Linq;
+using System.Net;
 using Benzene.Abstractions.Results;
 
 namespace Benzene.Results;
 
 public static class BenzeneResultExtensions
 {
+    /// <summary>
+    /// Projects a result's structured <see cref="IBenzeneResult.Errors"/> down to their message text -
+    /// for callers that want the pre-<see cref="BenzeneError"/> <c>string[]</c> shape back (e.g. an
+    /// older log statement or comparison that only cares about the text).
+    /// </summary>
+    public static string[] ErrorMessages(this IBenzeneResult result)
+    {
+        return result.Errors.Select(e => e.Message).ToArray();
+    }
+
     public static bool IsAccepted(this IBenzeneResult serviceBenzeneResult)
     {
         return serviceBenzeneResult.Status == BenzeneResultStatus.Accepted;
@@ -109,7 +120,9 @@ public static class BenzeneResultExtensions
            // projected success came back IsSuccessful=false (a 200 carrying an error body downstream,
            // and misread as a failure by saga/idempotency/SQS batch escalation).
            ? BenzeneResult.Set<TOutput>(serviceBenzeneResult.Status, true)
-           : BenzeneResult.SetFailed<TOutput>(serviceBenzeneResult.Status, serviceBenzeneResult.Errors);
+           // The structured (IReadOnlyList<BenzeneError>) overload, not SetFailed, so a re-wrap keeps
+           // each error's Field/Code intact instead of collapsing to message-only text.
+           : BenzeneResult.Set<TOutput>(serviceBenzeneResult.Status, serviceBenzeneResult.Errors);
     }
 
     public static IBenzeneResult<TOutput> As<T, TOutput>(this IBenzeneResult<T> serviceBenzeneResult,
@@ -117,7 +130,7 @@ public static class BenzeneResultExtensions
     {
         return serviceBenzeneResult.IsSuccessful
            ? BenzeneResult.Set(serviceBenzeneResult.Status, map(serviceBenzeneResult.Payload), true)
-           : BenzeneResult.SetFailed<TOutput>(serviceBenzeneResult.Status, serviceBenzeneResult.Errors);
+           : BenzeneResult.Set<TOutput>(serviceBenzeneResult.Status, serviceBenzeneResult.Errors);
     }
 
     /// <summary>

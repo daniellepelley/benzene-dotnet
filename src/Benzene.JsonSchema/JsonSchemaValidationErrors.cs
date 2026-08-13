@@ -1,11 +1,13 @@
+using Benzene.Abstractions.Results;
 using Json.Schema;
 
 namespace Benzene.JsonSchema;
 
 /// <summary>
-/// Formats a JSON Schema evaluation failure into the same shape the other validation libraries
-/// (<c>Benzene.FluentValidation</c>, <c>Benzene.DataAnnotations</c>) produce: an array of
-/// human-readable, property-scoped messages, served as the <c>ValidationError</c> result's payload.
+/// Formats a JSON Schema evaluation failure into the same failure shape the other validation
+/// libraries (<c>Benzene.FluentValidation</c>, <c>Benzene.DataAnnotations</c>) produce: one
+/// <see cref="BenzeneError"/> per failed keyword, served as the <c>ValidationError</c> result's
+/// errors.
 /// </summary>
 public static class JsonSchemaValidationErrors
 {
@@ -17,26 +19,30 @@ public static class JsonSchemaValidationErrors
 
     /// <summary>
     /// Flattens an <see cref="EvaluationResults"/> (evaluated with <see cref="OutputFormat.List"/>)
-    /// into one message per failed keyword, prefixed with the JSON Pointer of the failing value
-    /// (e.g. <c>"/name: Value is longer than 5 characters"</c>; root-level failures carry no prefix).
+    /// into one <see cref="BenzeneError"/> per failed keyword. Unlike the other validation
+    /// integrations, the JSON Pointer of the failing value is already in wire form here, so it
+    /// travels as <see cref="BenzeneError.Field"/> rather than being prefixed into the message text
+    /// (a root-level failure carries no <c>Field</c>); the failed keyword (e.g. <c>maxLength</c>,
+    /// <c>required</c>) travels as <see cref="BenzeneError.Code"/>.
     /// </summary>
     /// <param name="results">The failed evaluation.</param>
-    /// <returns>De-duplicated, ordered messages; a generic fallback if the evaluation carries no detail.</returns>
-    public static string[] Format(EvaluationResults results)
+    /// <returns>De-duplicated, ordered errors; a generic fallback if the evaluation carries no detail.</returns>
+    public static IReadOnlyList<BenzeneError> Format(EvaluationResults results)
     {
-        var messages = results.Details
+        var errors = results.Details
             .Where(x => !x.IsValid && x.Errors is { Count: > 0 })
-            .SelectMany(x => x.Errors!.Values.Select(message => Format(x.InstanceLocation.ToString(), message)))
+            .SelectMany(x => x.Errors!.Select(keywordAndMessage =>
+                new BenzeneError(keywordAndMessage.Value, NormalizeField(x.InstanceLocation.ToString()), keywordAndMessage.Key)))
             .Distinct()
             .ToArray();
 
-        return messages.Length > 0
-            ? messages
-            : new[] { "Request body does not match the schema" };
+        return errors.Length > 0
+            ? errors
+            : new[] { new BenzeneError("Request body does not match the schema") };
     }
 
-    private static string Format(string instanceLocation, string message)
+    private static string? NormalizeField(string instanceLocation)
     {
-        return string.IsNullOrEmpty(instanceLocation) ? message : $"{instanceLocation}: {message}";
+        return string.IsNullOrEmpty(instanceLocation) ? null : instanceLocation;
     }
 }

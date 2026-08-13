@@ -14,16 +14,35 @@ status string rather than thrown exceptions. Transport adapters map the status t
   `TooManyRequests`, `Timeout`), plus low-level `Set(...)` overloads including
   `Set<T>(status, payload, isSuccessful)` for the case where the success class must not be derived
   from the status (e.g. a health check reporting `ServiceUnavailable` while staying successful so
-  the body renders the report).
+  the body renders the report). Every failure-carrying factory keeps its original
+  `params string[] errors` overload (projected to message-only `BenzeneError`s); `Set`/`Set<T>`,
+  `ValidationError`/`ValidationError<T>` and `BadRequest`/`BadRequest<T>` additionally have a
+  non-`params` `IReadOnlyList<BenzeneError>` overload for callers that already have structured
+  errors (field/code, not just text) - see `work/benzene-result-errors-ruling.md`.
 - `BenzeneResultStatus` - the framework-defined status-string vocabulary (`const string` values)
   plus classifiers `IsSuccess`, `IsFailure`, `IsKnown`, `IsTransient`. Success is derived from the
   status class: a known failure status yields an unsuccessful result even with a payload; unknown
   application-defined statuses default to successful.
 - `BenzeneResultExtensions` - `IsOk`/`IsNotFound`/`IsTransient`/... status predicates, `As<...>`
-  mapping/projection helpers (sync and `Task`-returning), `AsTask`, and `HttpStatusCode.Convert(...)`
-  to/from Benzene statuses.
+  mapping/projection helpers (sync and `Task`-returning), `AsTask`, `HttpStatusCode.Convert(...)`
+  to/from Benzene statuses, and `ErrorMessages()` - projects a result's structured
+  `IBenzeneResult.Errors` (`IReadOnlyList<BenzeneError>`) down to the pre-`BenzeneError` `string[]`
+  shape, for callers that only want the message text.
 - `ProblemDetails` / `ErrorPayload` - RFC-7807-style error body shapes used when rendering a
-  failure result's errors.
+  failure result's errors. Still the pre-`BenzeneError` `{ status, detail }` shape as of this
+  package's current state (`errors` reaching the wire is a later phase of
+  `work/problem-details-plan.md`) - `DefaultResponsePayloadMapper` builds `ErrorPayload` from
+  `IBenzeneResult.ErrorMessages()`, not `.Errors` directly.
+
+### Structured errors - which validation integration populates what
+`BenzeneError` (`Benzene.Abstractions.Results`) is `{ Message, Field?, Code? }`. Each validation
+integration populates `Field`/`Code` differently - see each package's own `CLAUDE.md` for detail:
+
+| Integration | `Field` | `Code` |
+|---|---|---|
+| `Benzene.FluentValidation` | `ValidationFailure.PropertyName` (.NET property path) | `ValidationFailure.ErrorCode`, verbatim (e.g. `NotEmptyValidator` - not stripped/normalized) |
+| `Benzene.DataAnnotations` | `ValidationResult.MemberNames` (one error per member; `null` when the result names no member) | always `null` - `ValidationResult` doesn't expose the attribute that produced it |
+| `Benzene.JsonSchema` | the failing value's JSON Pointer (e.g. `/name`; `null` at the root) | the failed schema keyword (e.g. `maxLength`, `required`) |
 
 Note: `IBenzeneResult` and `IBenzeneResult<T>` themselves (and `Void`) are declared in
 `Benzene.Abstractions.Results`, not here. This package supplies the concrete builders and helpers.

@@ -60,6 +60,17 @@ public static class BenzeneResult
     }
 
     /// <summary>
+    /// Builds a failed result carrying the given structured errors under <paramref name="status"/> -
+    /// the structured counterpart of <see cref="Set(string, string[])"/>, for producers (validation
+    /// integrations, application code) that know the field and/or machine-readable code behind each
+    /// error, not just its message.
+    /// </summary>
+    public static IBenzeneResult Set(string status, IReadOnlyList<BenzeneError> errors)
+    {
+        return ServiceBenzeneResultInternal<Void>.Internal(status, errors);
+    }
+
+    /// <summary>
     /// Builds a failed result carrying the given error messages under <paramref name="status"/>.
     /// </summary>
     /// <remarks>
@@ -79,6 +90,17 @@ public static class BenzeneResult
               "bind here instead of to Set<T>(status, payload). Use SetFailed<T>(status, errors) " +
               "instead - same behavior, a name that can't be confused with a payload overload.")]
     public static IBenzeneResult<T> Set<T>(string status, params string[] errors)
+    {
+        return ServiceBenzeneResultInternal<T>.Internal(status, errors);
+    }
+
+    /// <summary>
+    /// Builds a failed result carrying the given structured errors under <paramref name="status"/> -
+    /// the structured, non-<c>params</c> counterpart of <see cref="Set{T}(string, string[])"/>. Unlike
+    /// that overload this one isn't ambiguous with <see cref="Set{T}(string, T)"/> (its argument type
+    /// can never be mistaken for a payload), so it isn't obsolete.
+    /// </summary>
+    public static IBenzeneResult<T> Set<T>(string status, IReadOnlyList<BenzeneError> errors)
     {
         return ServiceBenzeneResultInternal<T>.Internal(status, errors);
     }
@@ -189,6 +211,26 @@ public static class BenzeneResult
         return ServiceBenzeneResultInternal<T>.ValidationErrorInternal(errors);
     }
 
+    /// <summary>
+    /// Builds a <see cref="BenzeneResultStatus.ValidationError"/> result carrying the given structured
+    /// errors - the structured counterpart of <see cref="ValidationError(string[])"/>, for the
+    /// validation integrations (<c>Benzene.FluentValidation</c>, <c>Benzene.DataAnnotations</c>,
+    /// <c>Benzene.JsonSchema</c>) that can attach a field and/or code to each failure.
+    /// </summary>
+    public static IBenzeneResult ValidationError(IReadOnlyList<BenzeneError> errors)
+    {
+        return ServiceBenzeneResultInternal<Void>.ValidationErrorInternal(errors);
+    }
+
+    /// <summary>
+    /// Builds a <see cref="BenzeneResultStatus.ValidationError"/> result carrying the given structured
+    /// errors - the structured counterpart of <see cref="ValidationError{T}(string[])"/>.
+    /// </summary>
+    public static IBenzeneResult<T> ValidationError<T>(IReadOnlyList<BenzeneError> errors)
+    {
+        return ServiceBenzeneResultInternal<T>.ValidationErrorInternal(errors);
+    }
+
     public static IBenzeneResult NotFound(params string[] errors)
     {
         return ServiceBenzeneResultInternal<Void>.NotFoundInternal(errors);
@@ -204,6 +246,24 @@ public static class BenzeneResult
     }
 
     public static IBenzeneResult<T> BadRequest<T>(params string[] errors)
+    {
+        return ServiceBenzeneResultInternal<T>.BadRequestInternal(errors);
+    }
+
+    /// <summary>
+    /// Builds a <see cref="BenzeneResultStatus.BadRequest"/> result carrying the given structured
+    /// errors - the structured counterpart of <see cref="BadRequest(string[])"/>.
+    /// </summary>
+    public static IBenzeneResult BadRequest(IReadOnlyList<BenzeneError> errors)
+    {
+        return ServiceBenzeneResultInternal<Void>.BadRequestInternal(errors);
+    }
+
+    /// <summary>
+    /// Builds a <see cref="BenzeneResultStatus.BadRequest"/> result carrying the given structured
+    /// errors - the structured counterpart of <see cref="BadRequest{T}(string[])"/>.
+    /// </summary>
+    public static IBenzeneResult<T> BadRequest<T>(IReadOnlyList<BenzeneError> errors)
     {
         return ServiceBenzeneResultInternal<T>.BadRequestInternal(errors);
     }
@@ -291,11 +351,15 @@ public static class BenzeneResult
 
     private class ServiceBenzeneResultInternal<T> : IBenzeneResult<T>
     {
+        // Shared across every successful (and error-less) result so that path allocates nothing for
+        // Errors - see work/benzene-result-errors-ruling.md §3.2.
+        private static readonly IReadOnlyList<BenzeneError> EmptyErrors = Array.Empty<BenzeneError>();
+
         private ServiceBenzeneResultInternal(string status, bool isSuccessful)
         {
             Status = status;
             IsSuccessful = isSuccessful;
-            Errors = [];
+            Errors = EmptyErrors;
         }
 
         // IsSuccessful is derived from the status class (see core-concepts.md: "Derived from
@@ -316,12 +380,20 @@ public static class BenzeneResult
         private ServiceBenzeneResultInternal(string status, string[] errors)
             : this(status, false)
         {
-            Errors = errors;
+            Errors = errors is { Length: > 0 }
+                ? Array.ConvertAll(errors, static message => new BenzeneError(message))
+                : EmptyErrors;
+        }
+
+        private ServiceBenzeneResultInternal(string status, IReadOnlyList<BenzeneError> errors)
+            : this(status, false)
+        {
+            Errors = errors is { Count: > 0 } ? errors : EmptyErrors;
         }
 
         public string Status { get; }
         public bool IsSuccessful { get; }
-        public string[] Errors { get; }
+        public IReadOnlyList<BenzeneError> Errors { get; }
 
         public T Payload { get; }
 
@@ -343,6 +415,11 @@ public static class BenzeneResult
         }
 
         public static IBenzeneResult<T> Internal(string status, params string[] errors)
+        {
+            return new ServiceBenzeneResultInternal<T>(status, errors);
+        }
+
+        public static IBenzeneResult<T> Internal(string status, IReadOnlyList<BenzeneError> errors)
         {
             return new ServiceBenzeneResultInternal<T>(status, errors);
         }
@@ -381,12 +458,22 @@ public static class BenzeneResult
             return new ServiceBenzeneResultInternal<T>(BenzeneResultStatus.ValidationError, errors);
         }
 
+        public static IBenzeneResult<T> ValidationErrorInternal(IReadOnlyList<BenzeneError> errors)
+        {
+            return new ServiceBenzeneResultInternal<T>(BenzeneResultStatus.ValidationError, errors);
+        }
+
         public static IBenzeneResult<T> NotFoundInternal(params string[] errors)
         {
             return new ServiceBenzeneResultInternal<T>(BenzeneResultStatus.NotFound, errors);
         }
 
         public static IBenzeneResult<T> BadRequestInternal(params string[] errors)
+        {
+            return new ServiceBenzeneResultInternal<T>(BenzeneResultStatus.BadRequest, errors);
+        }
+
+        public static IBenzeneResult<T> BadRequestInternal(IReadOnlyList<BenzeneError> errors)
         {
             return new ServiceBenzeneResultInternal<T>(BenzeneResultStatus.BadRequest, errors);
         }

@@ -17,13 +17,18 @@ OpenAPI feature (that is `Benzene.Schema.OpenApi`).
   through to `next()`. Reads the body via `IMessageBodyGetter<TContext>`; a `null`/malformed body,
   or one that fails `schema.Evaluate(...)` (`OutputFormat.List`), short-circuits with
   `BenzeneResult.Set(defaultStatuses.ValidationError, errors)` via
-  `IMessageHandlerResultSetter<TContext>` - the messages travel as the result's **errors** (same
-  as FluentValidation/DataAnnotations), so the response body is the serialized `ErrorPayload`
-  (`{ status, errors }`). The topic's handler definition is attached to the result so the response
-  payload mapper writes that body (it skips definition-less results).
-- `JsonSchemaValidationErrors` - flattens a failed evaluation into one message per failed keyword,
-  prefixed with the failing value's JSON Pointer (`"/name: Value is longer than 5 characters"`;
-  root-level failures unprefixed); also the `MissingBody`/`MalformedBody` message constants.
+  `IMessageHandlerResultSetter<TContext>` - the structured `BenzeneError`s travel as the result's
+  **errors** (same failure contract as FluentValidation/DataAnnotations). The topic's handler
+  definition is attached to the result so the response payload mapper writes a body (it skips
+  definition-less results); as of this package's current state the wire body itself
+  (`ErrorPayload`/`ProblemDetails`) still only carries the joined message text, not `Field`/`Code` -
+  see `Benzene.Results/CLAUDE.md`.
+- `JsonSchemaValidationErrors.Format(EvaluationResults) : IReadOnlyList<BenzeneError>` - flattens a
+  failed evaluation into one `BenzeneError` per failed keyword: `Field` is the failing value's JSON
+  Pointer (e.g. `/name`; `null` at the root - **not** folded into the message text, unlike
+  FluentValidation/DataAnnotations' .NET property paths, because a JSON Pointer is already the wire
+  name), `Code` is the failed schema keyword (e.g. `maxLength`, `required`). Also the
+  `MissingBody`/`MalformedBody` message constants.
 - `IJsonSchemaProvider<TContext>` - `Json.Schema.JsonSchema? Get(TContext context)`. Return `null`
   to skip validation for a message.
 - `DefaultJsonSchemaProvider<TContext>` - the default implementation. Resolves the topic
@@ -61,10 +66,13 @@ OpenAPI feature (that is `Benzene.Schema.OpenApi`).
 - **JsonSchema.Net.Generation** (NuGet, 7.3.10) - CLR-type → schema generation.
 
 ## Important conventions
-- The failure result matches the other validation libraries: `ValidationError` status with the
-  property-scoped messages as the result's errors, serialized in the response as `ErrorPayload`.
-  (Until 2026-07 this was a bare `false` payload with no detail - flagged as a behavior change,
-  along with `JsonSchemaMiddleware`'s constructor gaining the topic getter + definition lookup.)
+- The failure result matches the other validation libraries: `ValidationError` status with one
+  structured `BenzeneError` per failed keyword as the result's errors (`Field`/`Code` populated per
+  the table above), serialized in the response as `ErrorPayload`. (Until 2026-07 this was a bare
+  `false` payload with no detail - flagged as a behavior change, along with `JsonSchemaMiddleware`'s
+  constructor gaining the topic getter + definition lookup. As of 2026-08 the messages stopped
+  carrying an inline `"<pointer>: "` prefix - the pointer moved to `Field` - see
+  `work/benzene-result-errors-ruling.md` §5.1.)
 - Validation runs on the **raw wire body**, before deserialization - unlike FluentValidation/
   DataAnnotations (which validate the mapped request object in the handler pipeline), so it also
   catches malformed and missing bodies.

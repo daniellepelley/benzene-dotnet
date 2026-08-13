@@ -3,6 +3,7 @@ using Benzene.Abstractions.MessageHandlers;
 using Benzene.Abstractions.MessageHandlers.Mappers;
 using Benzene.Abstractions.Messages.Mappers;
 using Benzene.Abstractions.Middleware;
+using Benzene.Abstractions.Results;
 using Benzene.Core.MessageHandlers;
 using Benzene.Results;
 using Json.Schema;
@@ -87,7 +88,12 @@ public class JsonSchemaMiddleware<TContext> : IMiddleware<TContext> where TConte
 
     private Task SetValidationErrorAsync(TContext context, params string[] errors)
     {
-        // Same failure contract as Benzene.FluentValidation/Benzene.DataAnnotations: the messages
+        return SetValidationErrorAsync(context, errors.Select(e => new BenzeneError(e)).ToArray());
+    }
+
+    private Task SetValidationErrorAsync(TContext context, IReadOnlyList<BenzeneError> errors)
+    {
+        // Same failure contract as Benzene.FluentValidation/Benzene.DataAnnotations: the errors
         // travel as the result's errors, which the response pipeline serializes as an ErrorPayload
         // ({ status, errors }). The topic's handler definition is attached so the response payload
         // mapper actually writes that body (it skips definition-less results).

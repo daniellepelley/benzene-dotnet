@@ -10,10 +10,14 @@ scanning, no per-rule status mapping, and no schema-builder integration.
 
 ## Key types/interfaces
 - `ValidationMiddleware<TRequest, TResponse> : IMiddleware<IMessageHandlerContext<TRequest, TResponse>>`
-  (Name `"DataAnnotationValidation"`) - null request → `BenzeneResult.ValidationError<TResponse>("Request is null")`;
+  (Name `"DataAnnotationValidation"`) - null request → `BenzeneResult.SetFailed<TResponse>(status, "Request is null")`;
   otherwise runs `Validator.TryValidateObject(request, ctx, results, validateAllProperties: true)` and,
-  if any `ValidationResult` was produced, sets `BenzeneResult.ValidationError<TResponse>(errorMessages)`
-  and stops the pipeline. No errors → `next()`.
+  if any `ValidationResult` was produced, sets `BenzeneResult.Set<TResponse>(status, errors)` and
+  stops the pipeline. Each `ValidationResult` becomes one `BenzeneError` per entry in its
+  `MemberNames` (so a result naming two members yields two errors, same `Message`, different
+  `Field`); a result naming no member yields one field-less error. `Code` is always `null` -
+  `System.ComponentModel.DataAnnotations.ValidationResult` doesn't expose the attribute that
+  produced it. No errors → `next()`.
 - `ValidationMiddlewareBuilder : IHandlerMiddlewareBuilder` - constructs the middleware per handler
   (no dependencies to resolve; unlike FluentValidation there is no status mapper).
 - `DependencyExtensions.UseDataAnnotationsValidation(this IMessageRouterBuilder)` - the single entry
@@ -35,6 +39,8 @@ scanning, no per-rule status mapping, and no schema-builder integration.
 - `System.ComponentModel.DataAnnotations` is part of the BCL - no NuGet package reference.
 
 ## Important conventions
+- The result's errors are structured `BenzeneError`s (`Message`/`Field`/`Code`), not bare strings -
+  `Field` is populated, `Code` is always `null` (see `Benzene.Results/CLAUDE.md`'s capability table).
 - Put `ValidationAttribute`s on the request type's properties; the middleware validates all
   properties (`validateAllProperties: true`).
 - The result is always the `ValidationError` status - this package has no per-rule status mapping.

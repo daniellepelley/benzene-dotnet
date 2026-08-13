@@ -157,7 +157,7 @@ public class RedisCacheServiceTest
         var result = await entry.WriteThroughAsync(() => Task.FromResult(BenzeneResult.BadRequest<TestDataType>(TEST_ERROR_MESSAGE)));
 
         Assert.Equal(BenzeneResultStatus.BadRequest, result.Status);
-        Assert.Equivalent(TEST_ERROR_MESSAGE, Assert.Single(result.Errors));
+        Assert.Equal(TEST_ERROR_MESSAGE, Assert.Single(result.Errors).Message);
     }
 
     [Fact]
@@ -206,7 +206,7 @@ public class RedisCacheServiceTest
         var result = await entry.WriteThroughAsync(() => Task.FromResult(BenzeneResult.BadRequest<TestDataType>(TEST_ERROR_MESSAGE)), x => x.Payload);
 
         Assert.Equal(BenzeneResultStatus.BadRequest, result.Status);
-        Assert.Equivalent(TEST_ERROR_MESSAGE, Assert.Single(result.Errors));
+        Assert.Equal(TEST_ERROR_MESSAGE, Assert.Single(result.Errors).Message);
     }
 
     [Fact]
@@ -235,7 +235,7 @@ public class RedisCacheServiceTest
         var result = await entry.WriteThroughInvalidateAsync(() => Task.FromResult(BenzeneResult.BadRequest<TestDataType>(TEST_ERROR_MESSAGE)));
 
         Assert.Equal(BenzeneResultStatus.BadRequest, result.Status);
-        Assert.Equivalent(TEST_ERROR_MESSAGE, Assert.Single(result.Errors));
+        Assert.Equal(TEST_ERROR_MESSAGE, Assert.Single(result.Errors).Message);
     }
 
     [Fact]

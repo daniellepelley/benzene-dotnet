@@ -40,7 +40,10 @@ public class DefaultResponsePayloadMapper<TContext> : IResponsePayloadMapper<TCo
 
     private static ErrorPayload AsErrorPayload(IBenzeneResult benzeneResult)
     {
-        return new ErrorPayload(benzeneResult.Status, benzeneResult.Errors);
+        // ErrorPayload's ctor still takes the pre-BenzeneError string[] shape (Phase 3 of
+        // work/problem-details-plan.md reconciles ErrorPayload/ProblemDetails with the structured
+        // model); ErrorMessages() is the documented projection back to that shape.
+        return new ErrorPayload(benzeneResult.Status, benzeneResult.ErrorMessages());
     }
 
     private string SerializePayload(Type type, object payload, ISerializer serializer)

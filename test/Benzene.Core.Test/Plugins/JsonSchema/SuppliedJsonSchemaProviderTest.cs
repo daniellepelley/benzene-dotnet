@@ -75,17 +75,23 @@ public class SuppliedJsonSchemaProviderTest
     }
 
     [Fact]
-    public async Task ValidationFailure_CarriesPropertyScopedErrorMessages()
+    public async Task ValidationFailure_CarriesTheHumanMessage()
     {
         // Same failure contract as FluentValidation/DataAnnotations: the ValidationError result's
-        // payload is an array of human-readable messages, scoped to the failing property's path.
+        // errors carry a human-readable message per failing property. The field/code structure
+        // itself (JsonSchemaValidationErrors.Format - see JsonSchemaValidationErrorsTest) travels on
+        // IBenzeneResult.Errors[].Field/.Code, not folded into the message text (see
+        // work/benzene-result-errors-ruling.md §5.1: "Benzene.JsonSchema should stop prefixing the
+        // pointer into the message string once Field exists"). It does not yet reach this test's wire
+        // body, which is still the pre-BenzeneError message-only ErrorPayload/ProblemDetails shape
+        // until work/problem-details-plan.md Phase 3 rewires that type to carry structured errors.
         var catalog = new SuppliedJsonSchemaCatalog()
             .AddJson(typeof(ExampleRequestPayload), StrictSchemaJson);
 
         var response = await SendWithBodyAsync(catalog, "foo-bar-foo-bar");
 
         Assert.Equal(BenzeneResultStatus.ValidationError, response.StatusCode);
-        Assert.Contains("/name", response.Body);
+        Assert.DoesNotContain("/name", response.Body);
         Assert.Contains("characters", response.Body);
     }
 

@@ -150,7 +150,7 @@ public class MessageRouter<TContext> : IMiddleware<TContext>, ITerminalMiddlewar
         {
             _logger.LogWarning("Handler {handler} for topic {topic} returned unsuccessful status {status}{errors}",
                 messageHandlerDefinition.HandlerType.Name, topic.Id, result.Status,
-                result.Errors.Length > 0 ? " - " + string.Join("; ", result.Errors) : string.Empty);
+                result.Errors.Count > 0 ? " - " + string.Join("; ", result.Errors) : string.Empty);
         }
 
         await _messageHandlerResultSetter.SetResultAsync(context, new MessageHandlerResult(topic, messageHandlerDefinition, result));

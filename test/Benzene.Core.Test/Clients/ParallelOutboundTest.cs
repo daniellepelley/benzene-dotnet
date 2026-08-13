@@ -90,7 +90,7 @@ public class ParallelOutboundTest
 
         Assert.False(result.IsSuccessful);
         Assert.True(snsRan); // a failing branch must not abort the fan-out
-        Assert.Contains(result.Errors, e => e.Contains("sqs") && e.Contains("access denied"));
+        Assert.Contains(result.Errors, e => e.Message.Contains("sqs") && e.Message.Contains("access denied"));
     }
 
     [Fact]
@@ -103,6 +103,6 @@ public class ParallelOutboundTest
         var result = await sender.SendAsync<string, Void>("order:create", "payload");
 
         Assert.False(result.IsSuccessful);
-        Assert.Contains(result.Errors, e => e.Contains("sns"));
+        Assert.Contains(result.Errors, e => e.Message.Contains("sns"));
     }
 }

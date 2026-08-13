@@ -36,7 +36,7 @@ internal class CastMessageHandlerResult : IMessageHandlerResult
 
         public string Status => _original.Status;
         public bool IsSuccessful => _original.IsSuccessful;
-        public string[] Errors => _original.Errors;
+        public IReadOnlyList<BenzeneError> Errors => _original.Errors;
         public object PayloadAsObject { get; }
     }
 }

@@ -44,7 +44,7 @@ public class GrpcBenzeneMessageClientTest
 
         Assert.False(result.IsSuccessful);
         Assert.Equal(BenzeneResultStatus.NotFound, result.Status);
-        Assert.Contains("no such thing", result.Errors);
+        Assert.Contains(result.Errors, e => e.Message == "no such thing");
     }
 
     [Fact]

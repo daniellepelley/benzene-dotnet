@@ -112,7 +112,7 @@ public class MessageHandlerTest
 
         var result = await messageHandler.HandleAsync(mockRequestFactory.Object);
         Assert.Equal(BenzeneResultStatus.BadRequest, result.Status);
-        Assert.Equal(errorMessage, result.Errors[1]);
+        Assert.Equal(errorMessage, result.Errors[1].Message);
         mockMessageHandler.Verify(x => x.HandleAsync(It.IsAny<ExampleRequestPayload>()), Times.Never);
     }
 

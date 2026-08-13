@@ -24,7 +24,19 @@ Benzene-specific logger interface. What remains here is the scope-enrichment bui
 - `IPayloadSerializer : ISerializer` - Additive byte-oriented extension (`Serialize(Type, object, IBufferWriter<byte>)` / `Deserialize(Type, ReadOnlySpan<byte>)`), avoiding an intermediate string allocation when both the serializer and the transport's body getter support bytes
 
 ### Results
-- `IBenzeneResult` - result contract: `Status`, `IsSuccessful`, `Errors`, `PayloadAsObject`
+- `IBenzeneResult` - result contract: `Status`, `IsSuccessful`, `Errors`, `PayloadAsObject`.
+  `Errors` is `IReadOnlyList<BenzeneError>` (never `null`; a shared empty instance on
+  success/error-less results, so that path allocates nothing).
+- `BenzeneError` (namespace `Benzene.Abstractions.Results`) - one error in a failed result:
+  `Message`, optional `Field` (the producer's property path - a .NET property name for the
+  validation middlewares, a JSON Pointer for `Benzene.JsonSchema`) and optional `Code`
+  (machine-readable, producer-specific - e.g. FluentValidation's `ErrorCode`, emitted verbatim). A
+  `sealed record` with a public parameterless constructor and init-only properties (not positional -
+  it doubles as a wire DTO across several serializers); `ToString()` returns `Message`, so
+  `string.Join(", ", result.Errors)` keeps working unchanged. `Benzene.Results.BenzeneResult`'s
+  factories still accept `params string[]` (projected to message-only `BenzeneError`s); structured
+  `IReadOnlyList<BenzeneError>` overloads exist on `Set`/`Set<T>`/`ValidationError`/`BadRequest`. See
+  `work/benzene-result-errors-ruling.md` for the full design rationale.
 - `IBenzeneResult<T>` - adds the strongly-typed `Payload`
 - `Void` - Unit type (a class) for handlers with no response payload
 

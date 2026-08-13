@@ -57,6 +57,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `KafkaBenzeneMessageClient`) are **unaffected** - only the resolution/factory/decorator layer
   around them was removed.
 
+### Changed
+- **BREAKING:** `IBenzeneResult.Errors` (`Benzene.Abstractions.Results`) changes from `string[]` to
+  `IReadOnlyList<BenzeneError>` - Phase 2 of `work/problem-details-plan.md`, implementing the
+  already-approved `work/benzene-result-errors-ruling.md` (ruled 2026-07-25) as written. **New type
+  `BenzeneError`** (`Message`, `Field?`, `Code?`; parameterless ctor + init-only properties;
+  `ToString() => Message`, so pre-existing `string.Join(", ", result.Errors)`-style call sites
+  compile unchanged and keep producing the same text) - a `sealed record`, so
+  `Assert.Equal(new BenzeneError(...), result.Errors[0])` is a natural test assertion. `Errors` is
+  never `null`; a successful (or otherwise error-less) result's `Errors` is a shared empty instance,
+  so the success path allocates nothing.
+  - **Source-compatible for every result *construction* site** (324 of them, measured): every
+    existing `params string[] errors` factory overload (`BenzeneResult.Set(...)`, `.NotFound(...)`,
+    `.BadRequest(...)`, `.ValidationError(...)`, etc.) is retained unchanged and simply projects each
+    string to a message-only `BenzeneError`.
+  - **New structured, non-`params` `IReadOnlyList<BenzeneError>` overloads** on `Set`/`Set<T>`,
+    `ValidationError`/`ValidationError<T>` and `BadRequest`/`BadRequest<T>` only (the general escape
+    hatch plus the two statuses the validation integrations actually produce) - the rest can grow
+    structured variants later without a breaking change. New `ErrorMessages()` extension
+    (`Benzene.Results`) projects a result's structured errors back down to the pre-`BenzeneError`
+    `string[]` shape, for callers that only want the text.
+  - **Breaking for *readers* of `.Errors`**: any code (in or outside this repo) that reads
+    `IBenzeneResult.Errors` as `string[]` - including anyone implementing `IBenzeneResult` externally
+    - needs a source change (typically `.Errors[i]` → `.Errors[i].Message`, or a one-line switch to
+    `ErrorMessages()`). All in-repo read sites were fixed in this commit: 8 statements across 6
+    `src/` files and 23 test assertions across 11 `test/` files, per the ruling's 2026-07-25 measured
+    blast radius (re-verified against the current tree while implementing this phase).
+  - **Validation integrations now emit structured errors** (ruling §5.1): `Benzene.FluentValidation`
+    (`ValidationMiddleware`/`ValidationClientMiddleware`) populates `Field` from
+    `ValidationFailure.PropertyName` and `Code` from `ValidationFailure.ErrorCode` **verbatim** - no
+    suffix-stripping, so the default code is e.g. `NotEmptyValidator`, not `NotEmpty`.
+    `Benzene.DataAnnotations` (`ValidationMiddleware`) populates `Field` from
+    `ValidationResult.MemberNames` (one `BenzeneError` per member; a member-less result still yields
+    one field-less error) and leaves `Code` `null` (`ValidationResult` doesn't expose the attribute
+    that produced it). `Benzene.JsonSchema` (`JsonSchemaValidationErrors.Format`) populates `Field`
+    from the failing value's JSON Pointer and `Code` from the failed schema keyword (e.g.
+    `maxLength`, `required`), and **stops prefixing the pointer into the message text** - the pointer
+    now lives only in `Field`, so it no longer appears twice.
+  - `[JsonIgnore(Condition = WhenWritingNull)]` on `BenzeneError.Field`/`.Code`, and round-trip tests
+    for both the default `System.Text.Json` serializer and Newtonsoft.Json (ruling R2/R3).
+  - **Not yet changed** (later phases of `work/problem-details-plan.md`): the wire shape
+    (`ErrorPayload`/`ProblemDetails` still carry only the joined `detail` string - `errors` reaching
+    the wire is Phase 3), the client round-trip (`ClientResultExtensions` still reads only `Detail` -
+    Phase 5), and gRPC's `FieldViolation.Field` fill-in (`GrpcMethodHandler.AddRichErrorDetails` still
+    only sets `Description` - Phase 5, ruling §5.3).
+  - `docs/migration-alpha-to-1.0.md` (owed by the ruling's R1) is created in a later phase of
+    `work/problem-details-plan.md` (Phase 7), which folds this entry in alongside the Phase 3-4 wire
+    changes rather than duplicating a migration doc per phase.
+
 ### Added
 - **`benzene profile-check` is now a real CI gate.** Added `--fail-on` (`not-satisfied` default,
   `inconclusive`, or `none`) and `--format` (`text` default, or `json` — the full

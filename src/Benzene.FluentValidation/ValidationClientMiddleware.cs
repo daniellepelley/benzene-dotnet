@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Messages.BenzeneClient;
 using Benzene.Abstractions.Middleware;
+using Benzene.Abstractions.Results;
 using Benzene.Results;
 using FluentValidation;
 
@@ -35,9 +36,14 @@ public class ValidationClientMiddleware<TRequest, TResponse> : IMiddleware<IBenz
             var validationResult = await validator.ValidateAsync(context.Request.Message);
             if (!validationResult.IsValid)
             {
-                context.Response =
-                    BenzeneResult.ValidationError<TResponse>(validationResult.Errors.Select(x => x.ErrorMessage)
-                        .ToArray());
+                // Verbatim PropertyName/ErrorCode - see ValidationMiddleware for the same rule.
+                var errors = validationResult.Errors
+                    .Select(x => new BenzeneError(
+                        x.ErrorMessage,
+                        string.IsNullOrEmpty(x.PropertyName) ? null : x.PropertyName,
+                        string.IsNullOrEmpty(x.ErrorCode) ? null : x.ErrorCode))
+                    .ToArray();
+                context.Response = BenzeneResult.ValidationError<TResponse>(errors);
                 return;
             }
         }

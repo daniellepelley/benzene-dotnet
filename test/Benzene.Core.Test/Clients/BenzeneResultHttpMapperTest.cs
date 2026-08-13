@@ -26,7 +26,7 @@ public class BenzeneResultHttpMapperTest
         var result = BenzeneResultHttpMapper.Map<string>("418");
 
         Assert.Equal(BenzeneResultStatus.UnexpectedError, result.Status);
-        Assert.Contains(result.Errors, x => x.Contains("418"));
+        Assert.Contains(result.Errors, x => x.Message.Contains("418"));
     }
 
     [Theory]

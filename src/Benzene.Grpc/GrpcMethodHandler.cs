@@ -120,7 +120,7 @@ public class GrpcMethodHandler : IGrpcMethodHandler
         if (statusCode != StatusCode.OK)
         {
             var errors = grpcContext.MessageHandlerResult?.BenzeneResult.Errors;
-            var detail = errors is { Length: > 0 } ? string.Join("; ", errors) : status ?? "Error";
+            var detail = errors is { Count: > 0 } ? string.Join("; ", errors) : status ?? "Error";
             AddRichErrorDetails(grpcContext.ResponseTrailers, statusCode, detail, status, errors);
             throw new RpcException(new Status(statusCode, detail));
         }
@@ -137,7 +137,7 @@ public class GrpcMethodHandler : IGrpcMethodHandler
     /// <see cref="Benzene.Results.BenzeneResultStatus.ValidationError"/> maps its error messages to a
     /// <c>google.rpc.BadRequest</c> with one field violation per message.
     /// </summary>
-    private static void AddRichErrorDetails(Metadata trailers, StatusCode statusCode, string detail, string? status, string[]? errors)
+    private static void AddRichErrorDetails(Metadata trailers, StatusCode statusCode, string detail, string? status, IReadOnlyList<Benzene.Abstractions.Results.BenzeneError>? errors)
     {
         var richStatus = new Google.Rpc.Status
         {
@@ -145,12 +145,15 @@ public class GrpcMethodHandler : IGrpcMethodHandler
             Message = detail,
         };
 
-        if (status == Benzene.Results.BenzeneResultStatus.ValidationError && errors is { Length: > 0 })
+        if (status == Benzene.Results.BenzeneResultStatus.ValidationError && errors is { Count: > 0 })
         {
             var badRequest = new Google.Rpc.BadRequest();
             foreach (var error in errors)
             {
-                badRequest.FieldViolations.Add(new Google.Rpc.BadRequest.Types.FieldViolation { Description = error });
+                // FieldViolation.Field is left unset here - filling it from BenzeneError.Field is
+                // Phase 5 of work/problem-details-plan.md ("gRPC gets a free correctness win",
+                // ruling §5.3), not this phase.
+                badRequest.FieldViolations.Add(new Google.Rpc.BadRequest.Types.FieldViolation { Description = error.Message });
             }
 
             richStatus.Details.Add(Google.Protobuf.WellKnownTypes.Any.Pack(badRequest));

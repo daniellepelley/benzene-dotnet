@@ -22,9 +22,13 @@ public interface IBenzeneResult
     object PayloadAsObject { get; }
 
     /// <summary>
-    /// Gets the collection of error messages, if any occurred during the operation.
+    /// Gets the structured errors, if any occurred during the operation. Never <c>null</c> - an empty
+    /// list when the result carries no errors (the common case for a successful result, backed by a
+    /// shared empty instance so the success path allocates nothing). Ordered; when more than one error
+    /// is present, the order is significant. For the pre-<see cref="BenzeneError"/> <c>string[]</c>
+    /// shape, project with <c>ErrorMessages()</c> (<c>Benzene.Results</c>).
     /// </summary>
-    string[] Errors { get; }
+    IReadOnlyList<BenzeneError> Errors { get; }
 }
 
 /// <summary>

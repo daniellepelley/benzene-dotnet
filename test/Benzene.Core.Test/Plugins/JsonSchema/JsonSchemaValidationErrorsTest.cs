@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using System.Text.Json;
+using Benzene.Abstractions.Results;
 using Benzene.JsonSchema;
 using Json.Schema;
 using Xunit;
@@ -26,7 +28,7 @@ public class JsonSchemaValidationErrorsTest
         }
         """);
 
-    private static string[] Evaluate(string json)
+    private static IReadOnlyList<BenzeneError> Evaluate(string json)
     {
         using var document = JsonDocument.Parse(json);
         var results = Schema.Evaluate(document.RootElement, new EvaluationOptions { OutputFormat = OutputFormat.List });
@@ -40,17 +42,18 @@ public class JsonSchemaValidationErrorsTest
         var errors = Evaluate("""{ "name": "far-too-long-a-name" }""");
 
         var error = Assert.Single(errors);
-        Assert.StartsWith("/name: ", error);
+        Assert.Equal("/name", error.Field);
+        Assert.False(error.Message.StartsWith("/"), error.Message);
     }
 
     [Fact]
-    public void Format_RootFailure_HasNoPointerPrefix()
+    public void Format_RootFailure_HasNoFieldSet()
     {
         var errors = Evaluate("""{ }""");
 
         var error = Assert.Single(errors);
-        Assert.False(error.StartsWith("/"), error);
-        Assert.Contains("name", error);
+        Assert.Null(error.Field);
+        Assert.Contains("name", error.Message);
     }
 
     [Fact]
@@ -59,17 +62,26 @@ public class JsonSchemaValidationErrorsTest
         var errors = Evaluate("""{ "name": "ok", "lines": [ { "sku": "ABC" }, { } ] }""");
 
         var error = Assert.Single(errors);
-        Assert.StartsWith("/lines/1: ", error);
-        Assert.Contains("sku", error);
+        Assert.Equal("/lines/1", error.Field);
+        Assert.Contains("sku", error.Message);
     }
 
     [Fact]
-    public void Format_MultipleFailures_YieldOneMessageEach()
+    public void Format_MultipleFailures_YieldOneErrorEach()
     {
         var errors = Evaluate("""{ "name": "far-too-long-a-name", "lines": [ { } ] }""");
 
-        Assert.Equal(2, errors.Length);
-        Assert.Contains(errors, x => x.StartsWith("/name: "));
-        Assert.Contains(errors, x => x.StartsWith("/lines/0: "));
+        Assert.Equal(2, errors.Count);
+        Assert.Contains(errors, x => x.Field == "/name");
+        Assert.Contains(errors, x => x.Field == "/lines/0");
+    }
+
+    [Fact]
+    public void Format_KeywordFailure_CarriesTheFailedKeywordAsCode()
+    {
+        var errors = Evaluate("""{ "name": "far-too-long-a-name" }""");
+
+        var error = Assert.Single(errors);
+        Assert.False(string.IsNullOrEmpty(error.Code));
     }
 }

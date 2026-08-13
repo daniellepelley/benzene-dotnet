@@ -67,7 +67,7 @@ public class ClientHealthCheck : IHealthCheck
             if (result != null)
             {
                 data["status"] = result.Status;
-                if (result.Errors is { Length: > 0 })
+                if (result.Errors is { Count: > 0 })
                 {
                     data["errors"] = result.Errors;
                 }

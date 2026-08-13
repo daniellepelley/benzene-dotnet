@@ -86,7 +86,7 @@ public class EventBridgeClientTest
 
         Assert.False(result.IsSuccessful);
         Assert.Equal(BenzeneResultStatus.ServiceUnavailable, result.Status);
-        Assert.Contains("ThrottlingException", result.Errors[0]);
+        Assert.Contains("ThrottlingException", result.Errors[0].Message);
     }
 
     [Fact]
