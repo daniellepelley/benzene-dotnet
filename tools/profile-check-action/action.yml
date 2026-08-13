@@ -1,0 +1,136 @@
+name: 'Benzene Cloud Service Profile Check'
+description: >-
+  Probes a deployed Benzene Cloud Service over plain HTTP for Cloud Service Profile (R1-R8)
+  conformance, using the language-neutral `benzene profile-check` live-probe checker, and fails
+  the job per --fail-on. Works against any conforming service regardless of implementation
+  language - the checker is BCL-only and audits over the wire, not by inspecting the target's
+  code.
+author: 'Benzene'
+branding:
+  icon: 'check-circle'
+  color: 'blue'
+
+inputs:
+  url:
+    description: 'Base URL of the Benzene Cloud Service to probe, e.g. https://orders.example.com'
+    required: true
+  fail-on:
+    description: >-
+      The verdict that fails the job: 'not-satisfied' (default) fails if any requirement was
+      independently observed as unmet; 'inconclusive' additionally fails on a requirement the
+      probe could not determine (note: R8, and half of R6, are structurally unobservable by a
+      single-service HTTP probe and will almost always come back Inconclusive on any real
+      service - 'inconclusive' is rarely the right choice); 'none' reports only and always
+      succeeds.
+    required: false
+    default: 'not-satisfied'
+  cli-version:
+    description: >-
+      Exact version of the Benzene.CodeGen.Cli NuGet package to install. Must be a version whose
+      `profile-check` command supports --fail-on/--format (added after Benzene.CodeGen.Cli
+      0.0.2.18-alpha; check https://www.nuget.org/packages/Benzene.CodeGen.Cli for the first
+      version that includes it). Leave empty to install the latest prerelease, which is only
+      safe once such a version has been published.
+    required: false
+    default: ''
+  invoke-path:
+    description: 'Overrides the wire-envelope endpoint path probed for R4/R6 (default /benzene/invoke)'
+    required: false
+    default: ''
+  spec-path:
+    description: 'Overrides the derived spec endpoint path probed for R5 (default /benzene/spec)'
+    required: false
+    default: ''
+  health-path:
+    description: 'Overrides the health endpoint path probed for R3 (default /benzene/health)'
+    required: false
+    default: ''
+  no-traceparent-probe:
+    description: "Skip the R8 bonus traceparent header sent with the R4/R6 probe requests. Set 'true' to skip."
+    required: false
+    default: 'false'
+
+outputs:
+  verdict:
+    description: "'pass' or 'fail', per the resolved --fail-on threshold"
+    value: ${{ steps.probe.outputs.verdict }}
+  not-satisfied:
+    description: 'JSON array of requirement ids the probe independently observed as unmet'
+    value: ${{ steps.probe.outputs.not-satisfied }}
+  inconclusive:
+    description: 'JSON array of requirement ids the probe could not determine from outside the service'
+    value: ${{ steps.probe.outputs.inconclusive }}
+  report-json:
+    description: 'The full probe report (every R1-R8 requirement, verdict, and reason) as JSON'
+    value: ${{ steps.probe.outputs.report-json }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+
+    - name: Install benzene CLI
+      shell: bash
+      run: |
+        set -eo pipefail
+        if [ -n "${{ inputs.cli-version }}" ]; then
+          dotnet tool install --global Benzene.CodeGen.Cli --version "${{ inputs.cli-version }}"
+        else
+          dotnet tool install --global Benzene.CodeGen.Cli --prerelease
+        fi
+        # actions/setup-dotnet doesn't always leave ~/.dotnet/tools on PATH for later steps in a
+        # composite action - add it explicitly rather than relying on the runner image's default.
+        echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+    - name: Run profile-check
+      id: probe
+      shell: bash
+      run: |
+        set -eo pipefail
+
+        ARGS=(--url "${{ inputs.url }}" --format json --fail-on "${{ inputs.fail-on }}")
+        if [ -n "${{ inputs.invoke-path }}" ]; then ARGS+=(--invoke-path "${{ inputs.invoke-path }}"); fi
+        if [ -n "${{ inputs.spec-path }}" ]; then ARGS+=(--spec-path "${{ inputs.spec-path }}"); fi
+        if [ -n "${{ inputs.health-path }}" ]; then ARGS+=(--health-path "${{ inputs.health-path }}"); fi
+        if [ "${{ inputs.no-traceparent-probe }}" = "true" ]; then ARGS+=(--no-traceparent-probe); fi
+
+        # --format json writes the report to stdout unconditionally, BEFORE the CLI throws (and
+        # exits non-zero) if --fail-on trips - so the report is captured regardless of pass/fail.
+        # `set -e` is suspended just for this line so a non-zero exit doesn't abort the script
+        # before EXIT_CODE is read.
+        set +e
+        REPORT=$(benzene profile-check "${ARGS[@]}")
+        EXIT_CODE=$?
+        set -e
+
+        echo "$REPORT" > report.json
+
+        VERDICT="pass"
+        if [ "$EXIT_CODE" -ne 0 ]; then VERDICT="fail"; fi
+        echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
+        echo "not-satisfied=$(jq -c '.NotSatisfied' report.json)" >> "$GITHUB_OUTPUT"
+        echo "inconclusive=$(jq -c '.Inconclusive' report.json)" >> "$GITHUB_OUTPUT"
+
+        DELIMITER="report-json-$(uuidgen)"
+        {
+          echo "report-json<<$DELIMITER"
+          cat report.json
+          echo "$DELIMITER"
+        } >> "$GITHUB_OUTPUT"
+
+        {
+          echo "### Benzene Cloud Service Profile: \`${{ inputs.url }}\`"
+          echo ""
+          echo "| Requirement | Verdict | Description | Reason |"
+          echo "|---|---|---|---|"
+          # Escape pipes in free-text fields so a Reason/Description containing '|' can't break
+          # the table.
+          jq -r '.Requirements[] | "| \(.Id) | \(.Verdict) | \(.Description | gsub("\\|"; "\\|")) | \(.Reason | gsub("\\|"; "\\|")) |"' report.json
+          echo ""
+          jq -r '"**Summary:** \([.Requirements[] | select(.Verdict=="Satisfied")] | length)/\(.Requirements | length) satisfied, \(.NotSatisfied | length) not satisfied, \(.Inconclusive | length) inconclusive"' report.json
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        exit "$EXIT_CODE"
