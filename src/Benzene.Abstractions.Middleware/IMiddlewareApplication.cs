@@ -1,4 +1,5 @@
-﻿using Benzene.Abstractions.DI;
+﻿using System.Threading;
+using Benzene.Abstractions.DI;
 
 namespace Benzene.Abstractions.Middleware;
 
@@ -32,6 +33,31 @@ public interface IMiddlewareApplication<TEvent>
     /// - Ensure proper disposal of the service resolver scope
     /// </remarks>
     Task HandleAsync(TEvent @event, IServiceResolverFactory serviceResolverFactory);
+
+    /// <summary>
+    /// Handles the event by executing it through a middleware pipeline, seeding the created scope
+    /// with the host's cancellation token so any component that resolves
+    /// <c>ICancellationTokenAccessor</c> can observe it.
+    /// </summary>
+    /// <param name="event">The event to process.</param>
+    /// <param name="serviceResolverFactory">The factory for creating scoped service resolvers for dependency injection within the pipeline.</param>
+    /// <param name="cancellationToken">
+    /// The host's cancellation token for this event, or <see cref="CancellationToken.None"/> if the
+    /// host has no cancellation signal.
+    /// </param>
+    /// <returns>A task that represents the asynchronous operation.</returns>
+    /// <remarks>
+    /// A default interface method that delegates to
+    /// <see cref="HandleAsync(TEvent, IServiceResolverFactory)"/>, so every existing implementor -
+    /// including user-written ones - remains source- and binary-compatible without an override.
+    /// Implementations that seed the scope (for example <c>Benzene.Core.Middleware.MiddlewareApplication{TEvent,TContext}</c>)
+    /// declare a matching public member and thereby become the interface implementation directly,
+    /// no override keyword required. The guarantee documented on <c>ICancellationTokenAccessor</c>
+    /// applies: the token defaults to <see cref="CancellationToken.None"/>, and it is advisory - a
+    /// component that never resolves the accessor behaves exactly as if this overload did not exist.
+    /// </remarks>
+    Task HandleAsync(TEvent @event, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
+        => HandleAsync(@event, serviceResolverFactory);
 }
 
 /// <summary>
@@ -66,4 +92,31 @@ public interface IMiddlewareApplication<TRequest, TResponse>
     /// - Ensure proper disposal of the service resolver scope
     /// </remarks>
     Task<TResponse> HandleAsync(TRequest @event, IServiceResolverFactory serviceResolverFactory);
+
+    /// <summary>
+    /// Handles the request by executing it through a middleware pipeline and returns a response,
+    /// seeding the created scope with the host's cancellation token so any component that resolves
+    /// <c>ICancellationTokenAccessor</c> can observe it.
+    /// </summary>
+    /// <param name="event">The request to process.</param>
+    /// <param name="serviceResolverFactory">The factory for creating scoped service resolvers for dependency injection within the pipeline.</param>
+    /// <param name="cancellationToken">
+    /// The host's cancellation token for this request, or <see cref="CancellationToken.None"/> if the
+    /// host has no cancellation signal.
+    /// </param>
+    /// <returns>A task that represents the asynchronous operation and contains the response.</returns>
+    /// <remarks>
+    /// A default interface method that delegates to
+    /// <see cref="HandleAsync(TRequest, IServiceResolverFactory)"/>, so every existing implementor -
+    /// including user-written ones - remains source- and binary-compatible without an override.
+    /// Implementations that seed the scope (for example
+    /// <c>Benzene.Core.Middleware.MiddlewareApplication{TEvent,TContext,TResult}</c> and
+    /// <c>Benzene.Core.Middleware.MiddlewareMultiApplication{TEvent,TContext,TResult}</c>) declare a
+    /// matching public member and thereby become the interface implementation directly, no override
+    /// keyword required. The guarantee documented on <c>ICancellationTokenAccessor</c> applies: the
+    /// token defaults to <see cref="CancellationToken.None"/>, and it is advisory - a component that
+    /// never resolves the accessor behaves exactly as if this overload did not exist.
+    /// </remarks>
+    Task<TResponse> HandleAsync(TRequest @event, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
+        => HandleAsync(@event, serviceResolverFactory);
 }

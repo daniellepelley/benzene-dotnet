@@ -1,4 +1,6 @@
-﻿using Benzene.Abstractions.DI;
+﻿using System.Threading;
+using System.Threading.Tasks;
+using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Middleware;
 
 namespace Benzene.Core.Middleware;
@@ -25,6 +27,21 @@ public class EntryPointMiddlewareApplication<TEvent>(
     {
         return middlewareApplication.HandleAsync(@event, serviceResolverFactory);
     }
+
+    /// <summary>
+    /// Sends an event to the middleware application for processing, forwarding
+    /// <paramref name="cancellationToken"/> so it is seeded into the pipeline's per-event scope.
+    /// </summary>
+    /// <param name="event">The event to process.</param>
+    /// <param name="cancellationToken">
+    /// The host's cancellation token for this event, or <see cref="CancellationToken.None"/> if the
+    /// host has no cancellation signal.
+    /// </param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    public Task SendAsync(TEvent @event, CancellationToken cancellationToken)
+    {
+        return middlewareApplication.HandleAsync(@event, serviceResolverFactory, cancellationToken);
+    }
 }
 
 /// <summary>
@@ -49,5 +66,20 @@ public class EntryPointMiddlewareApplication<TEvent, TResult>(
     public Task<TResult> SendAsync(TEvent @event)
     {
         return middlewareApplication.HandleAsync(@event, serviceResolverFactory);
+    }
+
+    /// <summary>
+    /// Sends an event to the middleware application for processing and returns a result, forwarding
+    /// <paramref name="cancellationToken"/> so it is seeded into the pipeline's per-event scope.
+    /// </summary>
+    /// <param name="event">The event to process.</param>
+    /// <param name="cancellationToken">
+    /// The host's cancellation token for this event, or <see cref="CancellationToken.None"/> if the
+    /// host has no cancellation signal.
+    /// </param>
+    /// <returns>A task that represents the asynchronous operation, containing the processing result.</returns>
+    public Task<TResult> SendAsync(TEvent @event, CancellationToken cancellationToken)
+    {
+        return middlewareApplication.HandleAsync(@event, serviceResolverFactory, cancellationToken);
     }
 }

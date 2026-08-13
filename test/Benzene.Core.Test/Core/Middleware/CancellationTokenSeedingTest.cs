@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Benzene.Abstractions.DI;
@@ -103,5 +105,165 @@ public class CancellationTokenSeedingTest
 
         // No CancellationTokenAccessor is registered; seeding must be a safe no-op.
         resolver.SeedCancellationToken(cts.Token);
+    }
+
+    // --- Phase 1: token overloads on IEntryPointMiddlewareApplication / IMiddlewareApplication /
+    // MiddlewareMultiApplication -------------------------------------------------------------
+
+    private sealed class CountingMiddlewareApplication : IMiddlewareApplication<string>
+    {
+        public int NoTokenCalls { get; private set; }
+        public CancellationToken? LastToken { get; private set; }
+
+        public Task HandleAsync(string @event, IServiceResolverFactory serviceResolverFactory)
+        {
+            NoTokenCalls++;
+            LastToken = null;
+            return Task.CompletedTask;
+        }
+    }
+
+    /// <summary>
+    /// A legacy-style implementor that only ever wrote the original two-argument
+    /// <see cref="IMiddlewareApplication{TEvent}.HandleAsync(TEvent,IServiceResolverFactory)"/>
+    /// method (as every implementor did before this token overload existed) and never overrides the
+    /// new default interface method. It must still compile against the interface and behave exactly
+    /// as before when driven through the token overload, proving the DIM is a safe, non-breaking
+    /// addition for existing (including third-party) implementors.
+    /// </summary>
+    private sealed class LegacyEntryPointApplication : IEntryPointMiddlewareApplication<string>
+    {
+        public int Calls { get; private set; }
+
+        public Task SendAsync(string @event)
+        {
+            Calls++;
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class LegacyEntryPointApplicationWithResult : IEntryPointMiddlewareApplication<string, string>
+    {
+        public int Calls { get; private set; }
+
+        public Task<string> SendAsync(string @event)
+        {
+            Calls++;
+            return Task.FromResult(@event);
+        }
+    }
+
+    [Fact]
+    public async Task IMiddlewareApplication_HandleAsync_DimDefault_DelegatesToTokenlessOverload()
+    {
+        IMiddlewareApplication<string> application = new CountingMiddlewareApplication();
+
+        await application.HandleAsync("event", CreateFactory(), CancellationToken.None);
+
+        Assert.Equal(1, ((CountingMiddlewareApplication)application).NoTokenCalls);
+    }
+
+    [Fact]
+    public async Task IEntryPointMiddlewareApplication_SendAsync_DimDefault_DelegatesToTokenlessOverload_AndCompiles()
+    {
+        // The whole point of a default interface method: a legacy implementor that never wrote an
+        // override still compiles against the interface and still works when called through the new
+        // token-taking member.
+        IEntryPointMiddlewareApplication<string> application = new LegacyEntryPointApplication();
+
+        await application.SendAsync("event", CancellationToken.None);
+
+        Assert.Equal(1, ((LegacyEntryPointApplication)application).Calls);
+    }
+
+    [Fact]
+    public async Task IEntryPointMiddlewareApplication_WithResult_SendAsync_DimDefault_DelegatesToTokenlessOverload_AndCompiles()
+    {
+        IEntryPointMiddlewareApplication<string, string> application = new LegacyEntryPointApplicationWithResult();
+
+        var result = await application.SendAsync("event", CancellationToken.None);
+
+        Assert.Equal("event", result);
+        Assert.Equal(1, ((LegacyEntryPointApplicationWithResult)application).Calls);
+    }
+
+    [Fact]
+    public async Task EntryPointMiddlewareApplication_SendAsync_WithToken_SeedsTheAccessorForThePipeline()
+    {
+        using var cts = new CancellationTokenSource();
+        var pipeline = new CapturingPipeline<string>();
+        var middlewareApplication = new MiddlewareApplication<string, string>(pipeline, e => e);
+        IEntryPointMiddlewareApplication<string> entryPoint =
+            new EntryPointMiddlewareApplication<string>(middlewareApplication, CreateFactory());
+
+        await entryPoint.SendAsync("event", cts.Token);
+
+        Assert.Equal(cts.Token, pipeline.Observed);
+    }
+
+    [Fact]
+    public async Task EntryPointMiddlewareApplication_WithResult_SendAsync_WithToken_SeedsTheAccessorForThePipeline()
+    {
+        using var cts = new CancellationTokenSource();
+        var pipeline = new CapturingPipeline<string>();
+        var middlewareApplication = new MiddlewareApplication<string, string, string>(pipeline, e => e, c => c);
+        IEntryPointMiddlewareApplication<string, string> entryPoint =
+            new EntryPointMiddlewareApplication<string, string>(middlewareApplication, CreateFactory());
+
+        await entryPoint.SendAsync("event", cts.Token);
+
+        Assert.Equal(cts.Token, pipeline.Observed);
+    }
+
+    private sealed class RecordingMultiPipeline : IMiddlewarePipeline<string>
+    {
+        private readonly ConcurrentBag<CancellationToken> _observed = [];
+
+        public IReadOnlyCollection<CancellationToken> Observed => _observed;
+
+        public Task HandleAsync(string context, IServiceResolver serviceResolver)
+        {
+            _observed.Add(serviceResolver.GetService<ICancellationTokenAccessor>().CancellationToken);
+            return Task.CompletedTask;
+        }
+    }
+
+    [Fact]
+    public async Task MiddlewareMultiApplication_WithToken_SeedsEveryRecordsScope()
+    {
+        using var cts = new CancellationTokenSource();
+        var pipeline = new RecordingMultiPipeline();
+        var application = new MiddlewareMultiApplication<string[], string>(pipeline, e => e);
+
+        await application.HandleAsync(["a", "b", "c"], CreateFactory(), cts.Token);
+
+        Assert.Equal(3, pipeline.Observed.Count);
+        Assert.All(pipeline.Observed, token => Assert.Equal(cts.Token, token));
+    }
+
+    [Fact]
+    public async Task MiddlewareMultiApplication_WithoutToken_LeavesEveryRecordsScopeAtNone()
+    {
+        var pipeline = new RecordingMultiPipeline();
+        var application = new MiddlewareMultiApplication<string[], string>(pipeline, e => e);
+
+        await application.HandleAsync(["a", "b"], CreateFactory());
+
+        Assert.Equal(2, pipeline.Observed.Count);
+        Assert.All(pipeline.Observed, token => Assert.Equal(CancellationToken.None, token));
+    }
+
+    [Fact]
+    public async Task MiddlewareMultiApplication_WithResult_WithToken_SeedsEveryRecordsScope()
+    {
+        using var cts = new CancellationTokenSource();
+        var pipeline = new RecordingMultiPipeline();
+        var application = new MiddlewareMultiApplication<string[], string, string>(pipeline, e => e, c => c);
+
+        var results = await application.HandleAsync(["a", "b", "c"], CreateFactory(), cts.Token);
+
+        Assert.Equal(3, results.Length);
+        Assert.Equal(3, pipeline.Observed.Count);
+        Assert.All(pipeline.Observed, token => Assert.Equal(cts.Token, token));
     }
 }
