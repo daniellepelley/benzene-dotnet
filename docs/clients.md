@@ -262,16 +262,20 @@ public class UserServiceClient : IUserServiceClient
         return _sender.SendAsync<CreateUserMessage, Guid?>("user:create", message, headers);
     }
 
-    // ...HealthCheckAsync() the same way, against the "healthcheck" topic
+    // ...one method pair per DOMAIN topic. Benzene's reserved benzene:* endpoints are never
+    // generated into a client - see docs/client-sdks.md.
 }
 
+[OutboundRoutingContract]
 public static class UserServiceClientRouting
 {
-    public static readonly string[] RequiredTopics = { "user:create", "healthcheck" };
+    public static readonly string[] RequiredTopics = { "user:create" };
 }
 ```
 
-The generated *interface* (`IUserServiceClient`) is unchanged from what you're used to — only the implementation's internals changed. Register `UserServiceClient` for DI as you already do, wire its topics via `AddOutboundRouting(...)`, and optionally call `ValidateOutboundRouting()` (above) using the generated `UserServiceClientRouting.RequiredTopics`.
+The generated *interface* (`IUserServiceClient`) is unchanged from what you're used to — only the implementation's internals changed. Wire its topics via `AddOutboundRouting(...)`, and optionally call `ValidateOutboundRouting()` (above) using the generated `UserServiceClientRouting.RequiredTopics`.
+
+You don't have to write the DI registration either: the generator emits an `AddUserServiceClient(this IBenzeneServiceContainer)` extension beside the client, registering it **scoped** to match `IBenzeneMessageSender`'s own lifetime — see [Client SDKs — registering the client with DI](client-sdks.md#registering-the-client-with-di).
 
 ## Using a transport client directly
 

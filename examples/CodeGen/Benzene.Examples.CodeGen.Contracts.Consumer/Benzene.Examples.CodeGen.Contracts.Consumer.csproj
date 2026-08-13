@@ -35,12 +35,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- What the generated topic-client code itself needs to compile - see
-         src/Benzene.CodeGen.Build/CLAUDE.md for exactly which packages and why. -->
+    <!-- What the generated topic-client code itself needs to compile, and nothing more - this list is
+         the live proof of that claim, since the generated files are compiled straight into this
+         project. Benzene.Clients.HealthChecks/Benzene.HealthChecks.Core were here for the health check
+         codegen no longer emits, and Benzene.Abstractions covers IBenzeneResult *and* the
+         IBenzeneServiceContainer the generated DI registration extends - so that registration added no
+         new dependency. -->
     <ProjectReference Include="..\..\..\src\Benzene.Abstractions\Benzene.Abstractions.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Clients\Benzene.Clients.csproj" />
-    <ProjectReference Include="..\..\..\src\Benzene.Clients.HealthChecks\Benzene.Clients.HealthChecks.csproj" />
-    <ProjectReference Include="..\..\..\src\Benzene.HealthChecks.Core\Benzene.HealthChecks.Core.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Results\Benzene.Results.csproj" />
   </ItemGroup>
 

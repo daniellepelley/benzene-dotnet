@@ -636,28 +636,71 @@ find out from `CS0234`/`CS0246` after the first generation. Either have `Benzene
 those as package dependencies (so a single `PackageReference` is genuinely sufficient), or have
 `benzene build` report the required package set. The former is what the one-liner promises.
 
-### 7c. Generate the DI registration
+### 7c. Generate the DI registration *(RESOLVED)*
 
-Explicitly scoped out of Phase 3b; adoption confirms it is the next gap. Every consumer hand-writes
-`services.AddScoped<IPaymentsCaptureServiceClient, PaymentsCaptureServiceClient>()` and must know to use
-**`Scoped`** — `AddOutboundRouting` registers `IBenzeneMessageSender` scoped, so a singleton client is a
-captive dependency. A generated `AddPaymentsClients(this IServiceCollection)` removes both the
-boilerplate and the lifetime footgun. (Phase 3b's open question "which lifetime?" now has an answer:
-match `IBenzeneMessageSender`.)
+**Resolved 2026-08-13:** both client generators now emit a registration extension beside each client.
 
-### 7d. `decimal` does not survive the contract round trip
+**Ruling taken — register against `IBenzeneServiceContainer`, not `IServiceCollection`.** A user may
+be on Autofac or another container; if Benzene is the thing handling DI, an extension on Microsoft's
+`IServiceCollection` would be useless to them. Benzene's own container abstraction is the one seam
+every host has, whatever container sits underneath, and `Benzene.Abstractions` is already referenced
+by generated code (`IBenzeneResult`), so this added **no new package dependency** to the output.
+
+What ships:
+
+- `client` mode (`MessageClientSdkBuilder`): a `{Service}ServiceClientRegistration.cs` with
+  `Add{Service}ServiceClient(this IBenzeneServiceContainer)`.
+- `topic-client` mode (`AtomicClientSdkBuilder`): **both** shapes — each per-topic client folder
+  carries its own `Add{Client}ServiceClient()` (a self-contained atomic client stays droppable-in on
+  its own), plus one root `{Service}ClientsRegistration.cs` whose `Add{Service}Clients()` calls each
+  of them, for a consumer taking several topics off one service. The aggregate is named from
+  `--service-name` (now passed through by `CodeBuilderFactory` for this mode) and is skipped when
+  there is no service name, or no clients.
+- Lifetime is **`AddScoped`**, with the reason emitted as a comment in the generated file:
+  `AddOutboundRouting` registers `IBenzeneMessageSender` scoped, so a singleton client would be a
+  captive dependency. (Phase 3b's open question "which lifetime?" is answered: match
+  `IBenzeneMessageSender`.)
+- `examples/AwsMesh/Orders` now dogfoods it — `services.UsingBenzene(x => x.AddPaymentsClients())`
+  replaces the hand-written `AddScoped<IPaymentsCaptureServiceClient, …>()`.
+
+### 7d. `decimal` does not survive the contract round trip *(PARKED — known limitation)*
 
 payments-api's `CapturePayment.Amount` is `decimal`; the spec records `"type": "number"` with no
 `format`, and `OpenApiSchemaCSharpTypeBuilder` maps that to `double`, so the generated DTO is `double`
-and the call site casts. For money that is wrong. Emit `format` on the producer side and honour it in
-the type builder.
+and the call site casts. For money that is a lossy representation.
 
-### 7e. Nothing detects contract drift
+**Ruling taken 2026-08-13 — parked, not being fixed now.** *"Keep it to whatever is in the schema
+definition, because that's what we're governed by."* The schema is the governing contract: codegen
+maps what the schema says, and the schema says `number`. Some data types are simply known not to
+travel well in JSON — a well-known problem in finance, not one Benzene invented and not one it can
+solve unilaterally on the consumer side by second-guessing a contract it was handed. Not worth
+fighting now.
+
+**Recorded as a known limitation:** a `decimal` on a producer round-trips to `double` on a generated
+consumer client, and consumers of money-carrying contracts should be aware of it.
+
+**Its own future issue,** if and when it is picked up: emit `format` on the producer side (so the
+schema carries the precision intent rather than losing it), *then* honour that `format` in
+`OpenApiSchemaCSharpTypeBuilder`. Both halves, in that order — honouring a `format` no producer emits
+would change nothing, and the schema stays the thing that governs.
+
+### 7e. Nothing detects contract drift *(PARKED — future requirement)*
 
 `Orders/contracts/payments.spec.json` is a committed copy. If payments-api changes its contract nothing
 tells orders-api — the copy silently goes stale, which is the same failure mode the hand-written mirror
-DTO had. `benzene diff` (Phase 2) is exactly the tool; wiring it into CI against each producer's
-freshly-built spec would close the loop.
+DTO had.
+
+**Ruling taken 2026-08-13 — good idea, parked. Not being tackled now**; it should be built later as a
+proper feature rather than bolted on here.
+
+**Note for whoever builds it: the mesh already has this capability.** The mesh aggregator already
+diffs a service's contract run over run (`MeshTopicEntry.Changes[]`/`RemovedTopics`, see Phase 7c's
+`changelog.json` item) and the mesh UI already renders a drift badge; the runtime consumer-side check
+(`Benzene.Clients.HealthChecks`' `AddServiceCheck` + `ClientHealthCheckProcessor`) compares a
+consumer's expected hash against a provider's live one. A future implementation should **build on
+that existing mechanism** — the mesh's diff and the published contract hash — rather than inventing a
+parallel one. `benzene diff` (Phase 2) wired into CI against each producer's freshly-built spec is the
+build-time half of the same idea.
 
 ---
 

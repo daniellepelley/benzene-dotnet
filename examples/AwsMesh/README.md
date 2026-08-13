@@ -501,7 +501,7 @@ regressions are still caught before a release.
 Adopting the generated client turned up four things worth fixing in the tooling, recorded as
 requirements in
 [`work/spec-mesh-tooling-implementation-plan.md`](../../work/spec-mesh-tooling-implementation-plan.md).
-The first two are now fixed; the other two are still open.
+The first three are now fixed; the fourth is a deliberately parked known limitation.
 
 1. ~~**`benzene:healthcheck` was required unconditionally.**~~ **Fixed.** Every generated client used
    to list it in `RequiredTopics`, so the outbound-routing start-up check (`Enforce` by default) failed
@@ -514,11 +514,15 @@ The first two are now fixed; the other two are still open.
    `ClientHealthCheckProcessor`), pulled in by the emitted health check; with that gone the generated
    code needs nothing beyond what a consumer already references, and this project's
    `ProjectReference` to it has been removed.
-3. **No DI registration is generated**, so `services.AddScoped<IPaymentsCaptureServiceClient, …>()` is
-   hand-written — and has to be `Scoped` to match `IBenzeneMessageSender`'s lifetime.
+3. ~~**No DI registration is generated.**~~ **Fixed.** The generator now emits one beside the client:
+   `AddPaymentsClients()` (and a per-topic `AddPaymentsCaptureServiceClient()`), an extension on
+   `IBenzeneServiceContainer` — Benzene's own container abstraction, so it works whatever container is
+   underneath rather than assuming Microsoft's `IServiceCollection` — registering the client `Scoped` to
+   match `IBenzeneMessageSender`'s lifetime. `Startup` now calls it instead of hand-registering.
 4. **`decimal` does not survive the round trip.** payments-api's `CapturePayment.Amount` is `decimal`;
    JSON Schema records it as `"number"` and the generator emits `double`, so the call site casts. Fine
-   for this demo, wrong for money.
+   for this demo, wrong for money. **Parked** as a known limitation: the schema is the governing
+   contract, and some types are known not to travel well in JSON — see finding 7d in the plan.
 
-Neither of the remaining two blocks the build — the client is generated and compiled on every
-`dotnet build`.
+Neither the remaining limitation nor anything above blocks the build — the client is generated and
+compiled on every `dotnet build`.

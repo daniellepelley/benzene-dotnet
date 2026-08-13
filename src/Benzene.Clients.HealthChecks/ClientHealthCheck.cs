@@ -5,16 +5,17 @@ using Benzene.HealthChecks.Core;
 namespace Benzene.Clients.HealthChecks;
 
 /// <summary>
-/// A consumer-side <see cref="IHealthCheck"/> that probes a single downstream provider via its
-/// generated client (<see cref="IHasHealthCheck"/>) and reports two things about that provider:
-/// whether it is reachable, and whether its message contract has drifted from the one this client was
-/// generated against. The provider's response is already drift-annotated by the generated client's
-/// <see cref="IHasHealthCheck.HealthCheckAsync"/> (which runs <see cref="ClientHealthCheckProcessor"/>);
-/// this adapter folds that aggregated response down into one check result.
+/// A consumer-side <see cref="IHealthCheck"/> that probes a single downstream provider through an
+/// <see cref="IHasHealthCheck"/> - the library's own <see cref="ServiceHealthCheckClient"/>, or a
+/// hand-written one - and reports two things about that provider: whether it is reachable, and whether
+/// its message contract has drifted from the one the consumer expects. The provider's response is
+/// already drift-annotated by <see cref="IHasHealthCheck.HealthCheckAsync"/> (which runs
+/// <see cref="ClientHealthCheckProcessor"/>); this adapter folds that aggregated response down into one
+/// check result.
 /// </summary>
 /// <remarks>
 /// Register this on the <em>contracts</em> diagnostic topic (<c>UseContractsCheck</c> +
-/// <see cref="ContractHealthCheckExtensions.AddContractCheck{TClient}"/>), <strong>not</strong> a
+/// <see cref="ContractHealthCheckExtensions.AddServiceCheck"/>), <strong>not</strong> a
 /// liveness or readiness probe. It calls a downstream service, so a probe that included it would let
 /// one struggling dependency restart or de-route otherwise-healthy pods - the anti-pattern the
 /// contracts/probe separation exists to prevent (see <c>docs/kubernetes-health-checks.md</c>). Its
@@ -30,7 +31,7 @@ public class ClientHealthCheck : IHealthCheck
 
     /// <summary>Initializes a new instance of the <see cref="ClientHealthCheck"/> class.</summary>
     /// <param name="serviceName">The downstream service's name, used as this check's <see cref="Type"/> and its dependency name.</param>
-    /// <param name="client">The generated client for the downstream service, exposing its baked-in contract hash and a health call.</param>
+    /// <param name="client">The health-callable client for the downstream service, exposing the expected contract hash and a health call.</param>
     public ClientHealthCheck(string serviceName, IHasHealthCheck client)
     {
         _serviceName = serviceName;

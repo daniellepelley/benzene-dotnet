@@ -29,16 +29,38 @@ app.UseHealthCheck("get", "healthcheck", health => health
     .AddHealthCheck("live", _ => true));
 ```
 
-**Consumer** — write a small `IHasHealthCheck` client whose `HealthCheckAsync()` sends
-`benzene:healthcheck` to the provider and runs the answer through
-`Benzene.Clients.HealthChecks.ClientHealthCheckProcessor` against the generated client's `HashCode`;
-a mismatch means the provider's contract has drifted from what the client was generated against. Both
-ends hash with the same `CodeGenHelpers.GenerateHash`, so the hashes are directly comparable. (This is
-hand-written on purpose: codegen emits domain topics only, never Benzene's reserved `benzene:*`
-endpoints — see [Client SDKs](../client-sdks.md#generated-clients-cover-domain-topics-only) — and the
-route to probe a downstream's health is a deliberate choice, not something every client should
-require. `examples/Mesh/Benzene.Examples.Mesh.OrdersService/Clients/PaymentsContractClient.cs` is a
-worked example.)
+**Consumer** — register the library's downstream check and hand it the generated client's `HashCode`
+(`Benzene.Clients.HealthChecks`):
+
+```csharp
+using Benzene.Clients.HealthChecks;
+using Benzene.HealthChecks;
+
+app.UseContractsCheck(x => x
+    .AddServiceCheck("Payments", new PaymentsServiceClient(sender).HashCode));
+```
+
+`AddServiceCheck` builds a `ServiceHealthCheckClient`: it sends `benzene:healthcheck`
+(`BenzeneTopic.HealthCheck`) to the provider over `IBenzeneMessageSender` and runs the answer through
+`ClientHealthCheckProcessor` against the hash you supplied. A mismatch means the provider's contract
+has drifted from what your client was generated against. Both ends hash with the same
+`CodeGenHelpers.GenerateHash`, so the hashes are directly comparable. Reachable + matching is `Ok`,
+reachable + drifted is `Warning` (degraded, not fatal), unreachable is `Failed`.
+
+Two things to know:
+
+- **The hash is optional.** `AddServiceCheck("Payments")` with no hash is a pure reachability check —
+  it reports no drift verdict at all rather than a false one.
+- **You must register an outbound route for `benzene:healthcheck`**, pointed at the provider you want
+  to probe, over a transport that can actually answer (a fire-and-forget queue cannot). That opt-in is
+  the point: a generated client covers domain topics only and never demands this route — see
+  [Client SDKs](../client-sdks.md#generated-clients-cover-domain-topics-only).
+
+Nothing needs generating or hand-writing for this: the health-check payload is standard and known up
+front, unlike the domain payloads that generated clients exist for. Hand-writing an `IHasHealthCheck`
+and registering it with `AddContractCheck<TClient>(...)` is still supported for the unusual case where
+the standard call isn't what you want — `examples/Mesh/Benzene.Examples.Mesh.OrdersService/Clients/PaymentsContractClient.cs`
+does it to fake the call with canned data in a demo.
 
 This is reactive — it tells you drift has already happened. For a pre-merge stop, use mechanism 2.
 
@@ -46,9 +68,7 @@ This is reactive — it tells you drift has already happened. For a pre-merge st
 > service and reports contract drift, so it belongs on the dedicated, probe-less **`contracts`**
 > diagnostic topic the mesh / alerting consume — **not** in a liveness or readiness probe. Coupling
 > it to a probe lets a struggling dependency (or a compatible-but-changed contract) restart or
-> de-route pods that are themselves healthy. Register it with `UseContractsCheck` +
-> `AddContractCheck<IOrderServiceClient>("OrderService")` (`Benzene.Clients.HealthChecks`) rather than
-> calling `HealthCheckAsync()` from a probe path. See
+> de-route pods that are themselves healthy. That's what `UseContractsCheck` above is for. See
 > [Kubernetes Health Checks — client/contract-drift checks belong in neither probe](../kubernetes-health-checks.md#client--contract-drift-checks-belong-in-neither-probe).
 
 ## Mechanism 2 — CI compatibility gate

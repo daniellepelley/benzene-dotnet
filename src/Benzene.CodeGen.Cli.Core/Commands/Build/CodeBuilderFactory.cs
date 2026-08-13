@@ -47,6 +47,9 @@ public class CodeBuilderFactory
             case "topic-client":
                 return new AtomicClientSdkBuilder(new ClientSdkOptions
                 {
+                    // ServiceName names no client here (each is named from its own topic); it only
+                    // names the aggregate Add{Service}Clients() DI registration extension.
+                    ServiceName = serviceName,
                     Namespace = explicitNamespace ?? DerivedNamespace("Client"),
                     Topics = topics,
                 });

@@ -1,4 +1,5 @@
 using Benzene.Abstractions.Hosting;
+using Benzene.Examples.AwsMesh.Orders.Clients;
 using Benzene.Examples.AwsMesh.Orders.Clients.PaymentsCapture;
 using Benzene.Examples.AwsMesh.Orders.Handlers;
 using Benzene.Examples.AwsMesh.Orders.HealthChecks;
@@ -34,11 +35,13 @@ public class Startup : BenzeneStartUp
             // out to every subscriber (a domain event, not a command).
             OutboundSend.Sns("order:placed", typeof(OutboundOrderPlaced), "ORDER_PLACED_TOPIC_ARN"));
 
-        // The generated client is a plain class over IBenzeneMessageSender, so it needs registering by
-        // hand — the generator does not (yet) emit a DI extension. SCOPED to match IBenzeneMessageSender's
-        // own lifetime (AddOutboundRouting registers it scoped); a singleton here would capture a scoped
-        // dependency. See work/spec-mesh-tooling-implementation-plan.md's dogfooding findings.
-        services.AddScoped<IPaymentsCaptureServiceClient, PaymentsCaptureServiceClient>();
+        // The GENERATED DI registration, not a hand-written one: `benzene build -output topic-client`
+        // now emits AddPaymentsClients() (plus a per-topic AddPaymentsCaptureServiceClient()) beside the
+        // client itself, registering it SCOPED — the lifetime IBenzeneMessageSender is registered with,
+        // so the client can never become a captive dependency. It extends IBenzeneServiceContainer,
+        // Benzene's own container abstraction, so it works whatever container is underneath rather than
+        // assuming Microsoft's. See work/spec-mesh-tooling-implementation-plan.md's finding 7c.
+        services.UsingBenzene(x => x.AddPaymentsClients());
     }
 
     public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration)

@@ -1,0 +1,19 @@
+using System.Diagnostics.CodeAnalysis;
+using Benzene.Abstractions.DI;
+using Benzene.Service.Clients.UserGet;
+using Benzene.Service.Clients.UserCreate;
+
+namespace Benzene.Service.Clients
+{
+    [ExcludeFromCodeCoverage]
+    public static class UserClientsRegistration
+    {
+        /// <summary>Registers every generated User topic client.</summary>
+        public static IBenzeneServiceContainer AddUserClients(this IBenzeneServiceContainer container)
+        {
+            container.AddUserGetServiceClient();
+            container.AddUserCreateServiceClient();
+            return container;
+        }
+    }
+}

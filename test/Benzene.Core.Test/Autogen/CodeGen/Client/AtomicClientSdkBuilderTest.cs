@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Collections.Generic;
 using System.Linq;
 using Benzene.CodeGen.Client;
@@ -179,6 +180,86 @@ public class AtomicClientSdkBuilderTest
         Assert.Contains("RequiredTopics = { \"user:get\" }", getClient);
         Assert.DoesNotContain("benzene:", getClient);
         Assert.DoesNotContain("HealthCheck", getClient);
+    }
+
+    // The generated DI registration (dogfooding finding 7c). topic-client mode emits BOTH halves: a
+    // per-client extension inside each self-contained client folder, and one aggregate at the root.
+
+    private const string ServiceName = "User";
+
+    private static readonly Dictionary<string, (Type, Type, Type)> TwoTopics = new()
+    {
+        { "user:get", (typeof(GetUserMessage), typeof(GetUserMessage), typeof(UserDto)) },
+        { "user:create", (typeof(CreateUserMessage), typeof(CreateUserMessage), typeof(string)) },
+    };
+
+    private static IDictionary<string, string> BuildNamed(IDictionary<string, (Type, Type, Type)> topics) =>
+        new AtomicClientSdkBuilder(new ClientSdkOptions { ServiceName = ServiceName, Namespace = BaseNameSpace })
+            .Build(topics.ToEventServiceDocument());
+
+    private static string LoadExpected(string fileName) =>
+        File.ReadAllText($"{Directory.GetCurrentDirectory()}/Autogen/CodeGen/Client/Examples/{fileName}.txt");
+
+    [Fact]
+    public void EachClientFolder_CarriesItsOwnScopedRegistration_MatchingTheGoldenFile()
+    {
+        var expected = LoadExpected("LambdaService_UserGet_Registration");
+
+        var result = Build(TwoTopics);
+
+        // Self-contained: a consumer that drops in one folder for one topic gets that topic's
+        // registration with it, no root file required.
+        Assert.Equal(expected, result["UserGet/UserGetServiceClientRegistration.cs"], ignoreLineEndingDifferences: true);
+        Assert.Contains("UserCreate/UserCreateServiceClientRegistration.cs", result.Keys);
+    }
+
+    [Fact]
+    public void AggregateRegistration_RegistersEveryTopicClient_MatchingTheGoldenFile()
+    {
+        var expected = LoadExpected("LambdaService_User_ClientsRegistration");
+
+        var result = BuildNamed(TwoTopics);
+
+        Assert.Equal(expected, result["UserClientsRegistration.cs"], ignoreLineEndingDifferences: true);
+    }
+
+    [Fact]
+    public void AggregateRegistration_DelegatesToEachClientsOwnExtension_OnBenzenesContainer()
+    {
+        var aggregate = BuildNamed(TwoTopics)["UserClientsRegistration.cs"];
+
+        Assert.Contains("public static IBenzeneServiceContainer AddUserClients(this IBenzeneServiceContainer container)", aggregate);
+        Assert.Contains("container.AddUserGetServiceClient();", aggregate);
+        Assert.Contains("container.AddUserCreateServiceClient();", aggregate);
+        // It can only call them if it can see them - one using per per-topic client namespace.
+        Assert.Contains($"using {BaseNameSpace}.UserGet;", aggregate);
+        Assert.Contains($"using {BaseNameSpace}.UserCreate;", aggregate);
+        Assert.DoesNotContain("IServiceCollection", aggregate);
+    }
+
+    [Fact]
+    public void AggregateRegistration_IsSkipped_WhenNoServiceNameToNameItAfter()
+    {
+        // ServiceName names no atomic client (each is named from its topic), so without one there is
+        // nothing sensible to call the aggregate - the per-client extensions still ship.
+        var result = Build(TwoTopics);
+
+        Assert.DoesNotContain(result.Keys, name => name.EndsWith("ClientsRegistration.cs"));
+        Assert.Contains("UserGet/UserGetServiceClientRegistration.cs", result.Keys);
+    }
+
+    [Fact]
+    public void AggregateRegistration_IsSkipped_WhenNoClientsAreGenerated()
+    {
+        var document = new Dictionary<string, (Type, Type, Type)>
+        {
+            { "benzene:mesh", (typeof(GetUserMessage), typeof(GetUserMessage), typeof(UserDto)) },
+        }.ToEventServiceDocument();
+
+        var result = new AtomicClientSdkBuilder(new ClientSdkOptions { ServiceName = ServiceName, Namespace = BaseNameSpace })
+            .Build(document);
+
+        Assert.Empty(result);
     }
 
     private static string HashLine(string clientSource) =>

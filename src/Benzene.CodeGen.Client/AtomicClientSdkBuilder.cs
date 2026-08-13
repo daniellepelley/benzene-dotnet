@@ -1,4 +1,5 @@
 using Benzene.CodeGen.Core;
+using Benzene.CodeGen.Core.Writers;
 using Benzene.Schema.OpenApi.EventService;
 using Microsoft.OpenApi.Models;
 
@@ -42,8 +43,9 @@ public class AtomicClientSdkBuilder : ICodeBuilder<EventServiceDocument>
     /// <summary>
     /// Initializes an atomic client builder from <paramref name="options"/>.
     /// <see cref="ClientSdkOptions.Namespace"/> is the root each per-topic client lands under
-    /// (<c>{Namespace}.{ClientName}</c>); <see cref="ClientSdkOptions.ServiceName"/> is unused, since
-    /// each client is named from its own topic.
+    /// (<c>{Namespace}.{ClientName}</c>); <see cref="ClientSdkOptions.ServiceName"/> does not name any
+    /// client (each is named from its own topic) - it is used only to name the aggregate DI
+    /// registration extension, which is skipped when no service name is given.
     /// </summary>
     public AtomicClientSdkBuilder(ClientSdkOptions options)
         : this(options, new TopicMethodName())
@@ -60,15 +62,68 @@ public class AtomicClientSdkBuilder : ICodeBuilder<EventServiceDocument>
     {
         var scopedDocument = TopicScope.Apply(eventServiceDocument, _options);
 
-        return scopedDocument.Requests
-            .SelectMany(request => BuildForTopic(scopedDocument, request))
-            .ToArray();
+        var files = new List<ICodeFile>();
+        var clientNames = new List<string>();
+
+        foreach (var request in scopedDocument.Requests)
+        {
+            var clientName = _clientNameFormatter.Create(request.Topic, request.Request);
+            clientNames.Add(clientName);
+            files.AddRange(BuildForTopic(scopedDocument, request, clientName));
+        }
+
+        // Each atomic client already carries its own Add{Client}ServiceClient() extension (emitted by
+        // the inner MessageClientSdkBuilder, inside that client's own folder/namespace), so a consumer
+        // that drops in one folder for one topic still gets its registration. This adds the other half:
+        // one Add{Service}Clients() at the root that calls every per-topic extension, so a consumer
+        // taking several topics off the same service registers them in one line instead of N. It needs
+        // a service name to be called anything sensible - without one there is nothing to aggregate
+        // under, so it is simply not emitted (and never when there are no clients at all).
+        if (clientNames.Count > 0 && !string.IsNullOrWhiteSpace(_options.ServiceName))
+        {
+            files.Add(new CodeFile($"{_options.ServiceName}ClientsRegistration.cs", BuildAggregateRegistration(clientNames)));
+        }
+
+        return files.ToArray();
     }
 
-    private ICodeFile[] BuildForTopic(EventServiceDocument document, RequestResponse request)
+    // One extension registering every per-topic client of this service, delegating to each client's
+    // own generated extension rather than repeating the interface/implementation/lifetime triple.
+    private string[] BuildAggregateRegistration(IReadOnlyCollection<string> clientNames)
     {
-        var clientName = _clientNameFormatter.Create(request.Topic, request.Request);
+        var serviceName = _options.ServiceName;
+        var lineWriter = new LineWriter();
 
+        lineWriter.WriteLine("using System.Diagnostics.CodeAnalysis;");
+        lineWriter.WriteLine("using Benzene.Abstractions.DI;");
+        foreach (var clientName in clientNames)
+        {
+            lineWriter.WriteLine($"using {_options.Namespace}.{clientName};");
+        }
+        lineWriter.WriteLine("");
+
+        lineWriter.WriteLine($"namespace {_options.Namespace}");
+        lineWriter.WriteLine("{");
+        lineWriter.WriteLine("[ExcludeFromCodeCoverage]", 1);
+        lineWriter.WriteLine($"public static class {serviceName}ClientsRegistration", 1);
+        lineWriter.WriteLine("{", 1);
+        lineWriter.WriteLine($"/// <summary>Registers every generated {serviceName} topic client.</summary>", 2);
+        lineWriter.WriteLine($"public static IBenzeneServiceContainer Add{serviceName}Clients(this IBenzeneServiceContainer container)", 2);
+        lineWriter.WriteLine("{", 2);
+        foreach (var clientName in clientNames)
+        {
+            lineWriter.WriteLine($"container.Add{clientName}ServiceClient();", 3);
+        }
+        lineWriter.WriteLine("return container;", 3);
+        lineWriter.WriteLine("}", 2);
+        lineWriter.WriteLine("}", 1);
+        lineWriter.WriteLine("}");
+
+        return lineWriter.GetLines();
+    }
+
+    private ICodeFile[] BuildForTopic(EventServiceDocument document, RequestResponse request, string clientName)
+    {
         var filtered = new EventServiceDocument(
             document.Info,
             document.Tags,

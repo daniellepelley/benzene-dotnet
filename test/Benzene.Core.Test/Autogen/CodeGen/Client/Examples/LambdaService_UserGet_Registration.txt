@@ -1,0 +1,17 @@
+using System.Diagnostics.CodeAnalysis;
+using Benzene.Abstractions.DI;
+
+namespace Benzene.Service.Clients.UserGet
+{
+    [ExcludeFromCodeCoverage]
+    public static class UserGetServiceClientRegistration
+    {
+        /// <summary>Registers UserGetServiceClient as IUserGetServiceClient.</summary>
+        public static IBenzeneServiceContainer AddUserGetServiceClient(this IBenzeneServiceContainer container)
+        {
+            // Scoped, not singleton: AddOutboundRouting registers IBenzeneMessageSender
+            // scoped, so a singleton client would be a captive dependency.
+            return container.AddScoped<IUserGetServiceClient, UserGetServiceClient>();
+        }
+    }
+}

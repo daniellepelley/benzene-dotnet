@@ -66,6 +66,7 @@ public class MessageClientSdkBuilder : ICodeBuilder<EventServiceDocument>
 
         output.Add(new CodeFile($"{_serviceName}ServiceClient.cs", classString));
         output.Add(new CodeFile($"I{_serviceName}ServiceClient.cs", interfaceString));
+        output.Add(new CodeFile($"{_serviceName}ServiceClientRegistration.cs", BuildRegistration()));
 
         foreach (var codeFile in _typeBuilder.BuildCodeFiles(scopedDocument.Components.Schemas))
         {
@@ -133,6 +134,55 @@ public class MessageClientSdkBuilder : ICodeBuilder<EventServiceDocument>
         lineWriter.WriteLine("{", 1);
         lineWriter.WriteLine($"public static readonly string[] RequiredTopics = {{ {requiredTopics} }};", 2);
         lineWriter.WriteLine("}", 1);
+        return lineWriter.GetLines();
+    }
+
+    /// <summary>
+    /// Builds the client's DI registration extension - one <c>Add{Service}ServiceClient()</c> over
+    /// <see cref="Benzene.Abstractions.DI.IBenzeneServiceContainer"/>, so a consumer stops hand-writing
+    /// the registration (and stops having to know the right lifetime).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why <c>IBenzeneServiceContainer</c> and not <c>IServiceCollection</c>:</b> Benzene's own
+    /// container abstraction is the one thing every host has, whatever container is underneath -
+    /// Autofac, Microsoft.Extensions.DependencyInjection, or anything else. Generating against
+    /// Microsoft's <c>IServiceCollection</c> would be useless to a consumer on Autofac while Benzene is
+    /// the thing doing the DI. <c>Benzene.Abstractions</c> is already referenced by the generated
+    /// client (<c>IBenzeneResult</c>), so this adds no new dependency to the generated output.
+    /// </para>
+    /// <para>
+    /// It goes in its own file rather than beside the client class so the generated client stays free
+    /// of DI usings, exactly as the routing contract stays free of them.
+    /// </para>
+    /// </remarks>
+    public string[] BuildRegistration()
+    {
+        var lineWriter = new LineWriter();
+
+        lineWriter.WriteLine("using System.Diagnostics.CodeAnalysis;");
+        lineWriter.WriteLine("using Benzene.Abstractions.DI;");
+        lineWriter.WriteLine("");
+
+        lineWriter.WriteLine($"namespace {_options.Namespace}");
+        lineWriter.WriteLine("{");
+        lineWriter.WriteLine("[ExcludeFromCodeCoverage]", 1);
+        lineWriter.WriteLine($"public static class {_serviceName}ServiceClientRegistration", 1);
+        lineWriter.WriteLine("{", 1);
+        lineWriter.WriteLine($"/// <summary>Registers {_serviceName}ServiceClient as I{_serviceName}ServiceClient.</summary>", 2);
+        lineWriter.WriteLine($"public static IBenzeneServiceContainer Add{_serviceName}ServiceClient(this IBenzeneServiceContainer container)", 2);
+        lineWriter.WriteLine("{", 2);
+        // The lifetime is the whole reason this is generated rather than left to the consumer:
+        // AddOutboundRouting registers IBenzeneMessageSender SCOPED, so a singleton client would
+        // capture a scoped dependency. The comment ships in the generated file so the reasoning is
+        // visible where the registration is read.
+        lineWriter.WriteLine("// Scoped, not singleton: AddOutboundRouting registers IBenzeneMessageSender", 3);
+        lineWriter.WriteLine("// scoped, so a singleton client would be a captive dependency.", 3);
+        lineWriter.WriteLine($"return container.AddScoped<I{_serviceName}ServiceClient, {_serviceName}ServiceClient>();", 3);
+        lineWriter.WriteLine("}", 2);
+        lineWriter.WriteLine("}", 1);
+        lineWriter.WriteLine("}");
+
         return lineWriter.GetLines();
     }
 

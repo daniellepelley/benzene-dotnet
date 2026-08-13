@@ -127,6 +127,33 @@ public class CodeBuilderFactoryTest
     }
 
     [Fact]
+    public void ClientMode_EmitsTheDiRegistrationExtension()
+    {
+        var payload = new BuildPayload { Output = "client", ServiceName = "Orders", Namespace = "Acme.Orders.Clients" };
+
+        var builder = new CodeBuilderFactory().Create(payload);
+        var files = builder.BuildCodeFiles(OrdersDocument()).ToFilesDictionary();
+
+        Assert.Contains("AddScoped<IOrdersServiceClient, OrdersServiceClient>()", files["OrdersServiceClientRegistration.cs"]);
+    }
+
+    [Fact]
+    public void TopicClientMode_EmitsPerClientRegistrations_AndAnAggregateNamedFromServiceName()
+    {
+        // --service-name names no atomic client (each is named from its own topic) but it does name
+        // the aggregate registration, so the CLI passes it through for exactly that.
+        var payload = new BuildPayload { Output = "topic-client", ServiceName = "Orders", Namespace = "Acme.Orders.Clients" };
+
+        var builder = new CodeBuilderFactory().Create(payload);
+        var files = builder.BuildCodeFiles(OrdersDocument()).ToFilesDictionary();
+
+        Assert.Contains("AddScoped<IOrderCreateServiceClient, OrderCreateServiceClient>()",
+            files["OrderCreate/OrderCreateServiceClientRegistration.cs"]);
+        Assert.Contains("AddOrderCreateServiceClient();", files["OrdersClientsRegistration.cs"]);
+        Assert.Contains("AddOrderCancelServiceClient();", files["OrdersClientsRegistration.cs"]);
+    }
+
+    [Fact]
     public void NoNamespaceOrTopics_KeepsOriginalDerivationAndAllTopics()
     {
         var payload = new BuildPayload { Output = "client", ServiceName = "Orders" };

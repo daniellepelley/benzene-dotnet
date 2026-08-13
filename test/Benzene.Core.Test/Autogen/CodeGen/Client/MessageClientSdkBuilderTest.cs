@@ -256,5 +256,73 @@ public class MessageClientSdkBuilderTest
         // The contract hash stays - it is informative and consumers read it off the client.
         Assert.Contains("public string HashCode =>", classSource);
     }
+
+    // The generated DI registration. See work/spec-mesh-tooling-implementation-plan.md's dogfooding
+    // finding 7c: every consumer used to hand-write the registration and had to know to use Scoped.
+
+    [Fact]
+    public void EmitsDiRegistrationExtension_MatchingTheGoldenFile()
+    {
+        var expected = LoadExpected("LambdaService_UserFull_Registration");
+
+        var result = new MessageClientSdkBuilder(UserServiceName, BaseNameSpace).Build(TwoTopics.ToEventServiceDocument());
+
+        Assert.Equal(expected, result["UserServiceClientRegistration.cs"], ignoreLineEndingDifferences: true);
+    }
+
+    [Fact]
+    public void DiRegistration_TargetsBenzenesOwnContainer_NotIServiceCollection()
+    {
+        // The ruling: register against IBenzeneServiceContainer. A consumer may be on Autofac or any
+        // other container - if Benzene is doing the DI, an IServiceCollection extension is useless to
+        // them.
+        var result = new MessageClientSdkBuilder(UserServiceName, BaseNameSpace).Build(TwoTopics.ToEventServiceDocument());
+        var registration = result["UserServiceClientRegistration.cs"];
+
+        Assert.Contains("using Benzene.Abstractions.DI;", registration);
+        Assert.Contains("this IBenzeneServiceContainer container", registration);
+        Assert.DoesNotContain("IServiceCollection", registration);
+        Assert.DoesNotContain("Microsoft", registration);
+    }
+
+    [Fact]
+    public void DiRegistration_IsScoped_AndSaysWhy()
+    {
+        // Scoped is required, not a preference: AddOutboundRouting registers IBenzeneMessageSender
+        // scoped, so a singleton client would capture it. The generated file carries the reason.
+        var result = new MessageClientSdkBuilder(UserServiceName, BaseNameSpace).Build(TwoTopics.ToEventServiceDocument());
+        var registration = result["UserServiceClientRegistration.cs"];
+
+        Assert.Contains("AddScoped<IUserServiceClient, UserServiceClient>()", registration);
+        Assert.DoesNotContain("AddSingleton", registration);
+        Assert.DoesNotContain("AddTransient", registration);
+        Assert.Contains("captive dependency", registration);
+    }
+
+    [Fact]
+    public void DiRegistration_LandsInTheSameNamespaceAsTheClient()
+    {
+        var options = new ClientSdkOptions { ServiceName = UserServiceName, Namespace = "Acme.Orders.Clients" };
+
+        var result = new MessageClientSdkBuilder(options).Build(TwoTopics.ToEventServiceDocument());
+        var registration = result["UserServiceClientRegistration.cs"];
+
+        Assert.Contains("namespace Acme.Orders.Clients", registration.ToLines());
+        Assert.Contains("public static IBenzeneServiceContainer AddUserServiceClient", registration);
+    }
+
+    [Fact]
+    public void DiRegistration_AddsNoNewPackageDependency_OnlyBenzeneAbstractions()
+    {
+        // Benzene.Abstractions is already referenced by the generated client (IBenzeneResult), so the
+        // registration must not reach for anything the generated output doesn't already need.
+        var result = new MessageClientSdkBuilder(UserServiceName, BaseNameSpace).Build(TwoTopics.ToEventServiceDocument());
+
+        var usings = result["UserServiceClientRegistration.cs"].ToLines()
+            .Where(line => line.StartsWith("using "))
+            .ToArray();
+
+        Assert.Equal(new[] { "using System.Diagnostics.CodeAnalysis;", "using Benzene.Abstractions.DI;" }, usings);
+    }
 }
 

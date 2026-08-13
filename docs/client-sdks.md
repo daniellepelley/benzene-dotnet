@@ -94,6 +94,55 @@ if (BenzeneResult.IsSuccess(result))
 }
 ```
 
+## Registering the client with DI
+
+You don't have to write the registration — the generator emits it. Alongside each client comes a
+`{Service}ServiceClientRegistration.cs` with one extension method:
+
+```csharp
+// generated
+public static class HelloWorldServiceClientRegistration
+{
+    public static IBenzeneServiceContainer AddHelloWorldServiceClient(this IBenzeneServiceContainer container)
+    {
+        // Scoped, not singleton: AddOutboundRouting registers IBenzeneMessageSender
+        // scoped, so a singleton client would be a captive dependency.
+        return container.AddScoped<IHelloWorldServiceClient, HelloWorldServiceClient>();
+    }
+}
+```
+
+Two deliberate choices in there:
+
+- **It extends `IBenzeneServiceContainer`, not `IServiceCollection`.** That is Benzene's own
+  container abstraction, so the registration works whatever container is underneath — Autofac,
+  `Microsoft.Extensions.DependencyInjection`, anything else. If Benzene is doing the DI, an extension
+  on Microsoft's `IServiceCollection` would be useless to a consumer on Autofac. It also means the
+  generated code needs no package it didn't already need: `Benzene.Abstractions` is already there for
+  `IBenzeneResult`.
+- **The lifetime is `Scoped`, and that's not a preference.** `AddOutboundRouting` registers
+  `IBenzeneMessageSender` scoped, so a singleton client would capture a scoped dependency. Getting
+  that wrong by hand is exactly the footgun this removes.
+
+Call it wherever you configure the container — under `UsingBenzene` when hosting on
+`Microsoft.Extensions.DependencyInjection`:
+
+```csharp
+services.UsingBenzene(x => x.AddHelloWorldServiceClient());
+```
+
+In `topic-client` mode you get **both** shapes: each per-topic client folder carries its own
+`Add{Topic}ServiceClient()` (so dropping in a single client folder for a single topic brings its
+registration with it, which is the whole point of a self-contained atomic client), plus one
+`{Service}ClientsRegistration.cs` at the root whose `Add{Service}Clients()` calls every per-topic
+extension — a single line for a consumer that takes several topics off the same service. The
+aggregate is named from `--service-name`; without one, only the per-client extensions are emitted.
+
+```csharp
+services.UsingBenzene(x => x.AddPaymentsClients());          // all of them
+services.UsingBenzene(x => x.AddPaymentsCaptureServiceClient()); // or just the one topic
+```
+
 ## Generating message handler stubs
 
 The same package includes `MessageHandlerBuilder`, which generates handler *stubs* from a service
@@ -174,11 +223,25 @@ emitted a `HealthCheckAsync()`, and listed `benzene:healthcheck` in `RequiredTop
 That last part broke adoption outright: `AddOutboundRouting` registers the outbound-routing start-up
 check, which enforces by default, so **any** service that adopted **any** generated client failed to
 start until it invented an outbound route for a topic it never meant to call. The health check is now
-simply not generated. The consumer-side contract-drift check still exists as a first-class feature —
-see [Contract testing](cookbooks/contract-testing.md#mechanism-1--runtime-contract-drift-check) — it
-is just written by hand, over a client's `HashCode`, for the specific downstream you actually want to
-probe; `Benzene.Clients.HealthChecks`' `AddContractCheck<TClient>()` works with any `IHasHealthCheck`
-client.
+simply not generated, and a generated client does **not** implement `IHasHealthCheck`.
+
+Nothing is lost by that, because a downstream health call needs no generated code in the first place:
+its payload is standard and known up front (fixed by the libraries), unlike domain payloads, which
+differ per service and are the reason domain clients are generated at all. Calling a downstream's
+health check is a *health-check* concern — like pinging a database or a queue — so it lives in
+`Benzene.Clients.HealthChecks` as `AddServiceCheck(...)`, built on the library's own
+`ServiceHealthCheckClient`. Pass the generated client's `HashCode` when you also want contract-drift
+reporting:
+
+```csharp
+app.UseContractsCheck(x => x
+    .AddServiceCheck("Payments", new PaymentsServiceClient(sender).HashCode));
+```
+
+That check sends `benzene:healthcheck`, so the consumer registers an outbound route for it — now an
+explicit opt-in per dependency rather than something forced on every consumer of a generated client.
+See [Contract testing](cookbooks/contract-testing.md#mechanism-1--runtime-contract-drift-check) and
+[Kubernetes health checks](kubernetes-health-checks.md#client--contract-drift-checks-belong-in-neither-probe).
 
 ```bash
 # Only these two topics: one client, methods/interface/RequiredTopics scoped to exactly them.

@@ -54,11 +54,11 @@ the `healthcheck` endpoint — not the other way around.
 
 ### Client / contract-drift checks belong in *neither* probe
 
-A contract-drift client's `HealthCheckAsync()` (the consumer side of the
-[runtime contract-drift check](cookbooks/contract-testing.md#mechanism-1--runtime-contract-drift-check):
-an `IHasHealthCheck` client you write over a generated client's `HashCode`)
-is **not** an ordinary external-dependency check, and it does not belong in a liveness *or* a
-readiness probe. It calls a *downstream provider's* health endpoint and compares contract hashes, so
+The downstream service check (`AddServiceCheck` — the consumer side of the
+[runtime contract-drift check](cookbooks/contract-testing.md#mechanism-1--runtime-contract-drift-check),
+which sends `benzene:healthcheck` to a provider and optionally compares its contract hash against a
+generated client's `HashCode`) is **not** an ordinary external-dependency check, and it does not
+belong in a liveness *or* a readiness probe. It calls a *downstream provider's* health endpoint and compares contract hashes, so
 it fails the two tests above harder than a database check does:
 
 - **It is transitive.** The thing it checks — another service's health endpoint — may itself
@@ -72,19 +72,27 @@ it fails the two tests above harder than a database check does:
   contract revision behind can still serve traffic perfectly — restarting it or pulling it from
   rotation over that annotation is never the right response.
 
-So keep `HealthCheckAsync()` off `/livez` and `/readyz`. `Benzene.HealthChecks` provides a dedicated
+So keep the downstream check off `/livez` and `/readyz`. `Benzene.HealthChecks` provides a dedicated
 **`contracts`** diagnostic topic for exactly this — a probe-less surface Kubernetes never points at,
-which the **mesh / your alerting** consume instead. Register your contract checks with
-`UseContractsCheck` + `AddContractCheck` (from `Benzene.Clients.HealthChecks`):
+which the **mesh / your alerting** consume instead. Register your downstream checks with
+`UseContractsCheck` + `AddServiceCheck` (from `Benzene.Clients.HealthChecks`):
 
 ```csharp
 using Benzene.HealthChecks;
 using Benzene.Clients.HealthChecks;
 
 app.UseContractsCheck(x => x
-    .AddContractCheck<IOrderServiceClient>("OrderService")   // any IHasHealthCheck client, from DI
-    .AddContractCheck<IPaymentServiceClient>("PaymentService"));
+    // Library-provided: sends benzene:healthcheck over IBenzeneMessageSender (resolved from the
+    // container), so nothing is generated or hand-written for it. The hash is optional - supply a
+    // generated client's HashCode for drift reporting, omit it for reachability only.
+    .AddServiceCheck("OrderService", new OrderServiceClient(sender).HashCode)
+    .AddServiceCheck("PaymentService"));
 ```
+
+Because the check sends `benzene:healthcheck`, the consumer must register an **outbound route** for
+that topic aimed at the provider — an explicit opt-in per dependency, over a transport that can
+actually answer. (`AddContractCheck<TClient>(...)` remains for a hand-written `IHasHealthCheck` client,
+for the unusual case where the standard call isn't what you want.)
 
 `UseContractsCheck` answers only the `contracts` topic (`Constants.DefaultContractsTopic`) — like
 `UseLivenessCheck`/`UseReadinessCheck` it does **not** also match the generic `healthcheck` topic, and
@@ -94,8 +102,9 @@ not flip `IsHealthy`), and only an unreachable provider is `Failed` — so contr
 mesh drift badge (see [Mesh UI](mesh-ui.md)) or an alert, never a restart. The one
 narrow exception is a *hard synchronous* dependency you genuinely cannot serve any traffic without —
 a targeted **reachability-only** check against that one provider may go in **readiness** (never
-liveness), but even then exclude the contract-drift portion, which is never a reason to stop serving
-traffic. See `work/client-health-checks-design.md` for the full rationale.
+liveness); that is `AddServiceCheck("ThatProvider")` with **no** hash, so the contract-drift portion
+is excluded, drift never being a reason to stop serving traffic. See
+`work/client-health-checks-design.md` for the full rationale.
 
 ## Topic-based wiring (every transport): `UseLivenessCheck` / `UseReadinessCheck`
 
