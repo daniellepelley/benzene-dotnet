@@ -591,9 +591,17 @@ hand-write an `OutboundPaymentCapture` DTO mirroring payments-api's `CapturePaym
 `_sender.SendAsync<…>("payments:capture", …)` with the topic id typed out by hand. It now generates a
 per-topic client from payments-api's committed contract, using the **published** `benzene` CLI and
 `Benzene.CodeGen.Build` from NuGet (`0.0.2-alpha.6`), not from source. Build-time generation works;
-these are the things adoption surfaced, in priority order.
+these are the things adoption surfaced, in priority order. *(The CLI half is temporarily back on the
+from-source form: `0.0.2-alpha.6` predates the 7a fix and would silently regenerate the very defect
+7a records. Restore `<BenzeneCliCommand>dotnet tool run benzene</BenzeneCliCommand>` in the Orders
+csproj once a CLI carrying the fix is published and pinned.)*
 
-### 7a. `benzene:healthcheck` should not be an unconditional requirement *(blocking — worked around)*
+### 7a. `benzene:healthcheck` should not be an unconditional requirement *(RESOLVED)*
+
+**Resolved 2026-08-13:** generated clients no longer emit a health check at all — `benzene:*` reserved
+endpoints are excluded from generation like any other reserved topic, so nothing appears in
+`RequiredTopics` that the consumer did not ask for, and the example's `OutboundSend.HealthCheck(...)`
+workaround is gone.
 
 `MessageClientSdkBuilder` always emits `HealthCheckAsync()` and always puts `benzene:healthcheck` in
 the client's `RequiredTopics`. `AddOutboundRouting` now auto-registers `OutboundRoutingStartUpCheck`,
@@ -611,9 +619,16 @@ it over the same transport while excluding it from the spec's `events` (`Outboun
 so the mesh graph doesn't gain a fake orders → payments health edge). Real fix: make the health check
 opt-in (a `-health-check` flag / `ClientSdkOptions.IncludeHealthCheck`, default off), or keep emitting
 the method but leave `benzene:healthcheck` out of `RequiredTopics` — it is framework plumbing, not part
-of the consumer's declared contract surface.
+of the consumer's declared contract surface. *Ruling taken: neither half is generated. Benzene's
+reserved endpoints are deliberately separate from domain endpoints, and generated clients are for
+domain concerns only. Whether to offer an opt-in flag later is a separate, still-open product
+question.*
 
-### 7b. Generated code should declare the packages it needs
+### 7b. Generated code should declare the packages it needs *(RESOLVED)*
+
+**Resolved 2026-08-13:** dropping the emitted health check removed the only dependency a consumer did
+not already have — the output now needs just `Benzene.Clients`/`Benzene.Abstractions`, which any
+consumer of `IBenzeneMessageSender` references anyway.
 
 The output references `IHasHealthCheck`/`ClientHealthCheckProcessor` from `Benzene.Clients.HealthChecks`
 and `IBenzeneMessageSender` from `Benzene.Clients`, but nothing tells the consuming project that — you

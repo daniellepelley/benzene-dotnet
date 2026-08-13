@@ -14,16 +14,16 @@
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
-  <PropertyGroup>
-    <!-- Dogfoods the PUBLISHED `benzene` CLI (NuGet, pinned in .config/dotnet-tools.json) rather than
-         the from-source `dotnet run` form examples/Directory.Build.props defaults to. This project is
-         deliberately the one example exercising the real consumer experience end to end: a
-         PackageReference to Benzene.CodeGen.Build below plus the packaged tool here. The other codegen
-         example (examples/CodeGen/…Contracts.Consumer) keeps the from-source form so a working-tree
-         regression is still caught before release - between them both paths stay covered.
-         Needs `dotnet tool restore` once after clone; the examples-build CI job does it. -->
-    <BenzeneCliCommand>dotnet tool run benzene</BenzeneCliCommand>
-  </PropertyGroup>
+  <!-- This project used to dogfood the PUBLISHED `benzene` CLI (NuGet, pinned in
+       .config/dotnet-tools.json) via <BenzeneCliCommand>dotnet tool run benzene</BenzeneCliCommand>,
+       rather than the from-source `dotnet run` form examples/Directory.Build.props defaults to - the
+       one example exercising the real consumer experience end to end. It is temporarily back on the
+       from-source form: the last published CLI (0.0.2-alpha.6) still generates a client that
+       implements IHasHealthCheck and lists benzene:healthcheck in its RequiredTopics, which is
+       precisely the defect this example exists to prove is gone (that entry made the outbound-routing
+       start-up check fail the host). Restore the two lines above once a CLI version carrying the fix
+       is published and pinned - the packaged-tool path is worth covering. Until then the published
+       tool would silently reinstate the bug here. -->
 
   <ItemGroup>
     <PackageReference Include="Amazon.Lambda.RuntimeSupport" Version="1.10.0" />
@@ -61,10 +61,6 @@
     <ProjectReference Include="..\..\..\src\Benzene.CloudService\Benzene.CloudService.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Schema.OpenApi\Benzene.Schema.OpenApi.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.HealthChecks\Benzene.HealthChecks.csproj" />
-    <!-- Required by the GENERATED client, not by any hand-written code here: its HealthCheckAsync()
-         uses IHasHealthCheck/ClientHealthCheckProcessor. The generator does not declare the package set
-         its output needs, so this is discovered as a compile error - see the README's findings. -->
-    <ProjectReference Include="..\..\..\src\Benzene.Clients.HealthChecks\Benzene.Clients.HealthChecks.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Spec.Ui\Benzene.Spec.Ui.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Microsoft.Dependencies\Benzene.Microsoft.Dependencies.csproj" />
   </ItemGroup>

@@ -84,9 +84,6 @@ public class MessageClientSdkBuilder : ICodeBuilder<EventServiceDocument>
         lineWriter.WriteLine("using System.Threading.Tasks;");
         lineWriter.WriteLine("using Benzene.Abstractions.Results;");
         lineWriter.WriteLine("using Benzene.Clients;");
-        lineWriter.WriteLine("using Benzene.Clients.HealthChecks;");
-        lineWriter.WriteLine("using Benzene.HealthChecks.Core;");
-        lineWriter.WriteLine("using Benzene.Results;");
         lineWriter.WriteLine("using System.Diagnostics.CodeAnalysis;");
         lineWriter.WriteLine("");
 
@@ -111,8 +108,6 @@ public class MessageClientSdkBuilder : ICodeBuilder<EventServiceDocument>
             lineWriter.WriteLines(AddMethod(definition.Topic, definition.Request, definition.Response));
         }
 
-        lineWriter.WriteLines(AddHealthCheckMethod());
-
         lineWriter.WriteLine("}", 1);
 
         lineWriter.WriteLines(AddRoutingClass(eventServiceDocument));
@@ -125,9 +120,11 @@ public class MessageClientSdkBuilder : ICodeBuilder<EventServiceDocument>
     private string[] AddRoutingClass(EventServiceDocument eventServiceDocument)
     {
         // Reflected over by Benzene.Clients' ValidateOutboundRouting() at startup - see
-        // work/benzene-clients-redesign-plan.md §2.5.
-        var topics = eventServiceDocument.Requests.Select(x => x.Topic).Append(Benzene.Abstractions.BenzeneTopic.HealthCheck);
-        var requiredTopics = string.Join(", ", topics.Select(topic => $@"""{topic}"""));
+        // work/benzene-clients-redesign-plan.md §2.5. Exactly the topics this client has methods for:
+        // Benzene's own reserved endpoints (benzene:*) are framework plumbing, not a client's domain
+        // surface, and are excluded by TopicScope like any other reserved topic - naming one here
+        // would demand an outbound route the consumer never asked for and fail its start-up checks.
+        var requiredTopics = string.Join(", ", eventServiceDocument.Requests.Select(x => $@"""{x.Topic}"""));
 
         var lineWriter = new LineWriter();
         lineWriter.WriteLine();
@@ -144,40 +141,6 @@ public class MessageClientSdkBuilder : ICodeBuilder<EventServiceDocument>
         var hashCode = CodeGenHelpers.GenerateHash(eventServiceDocument);
         lineWriter.WriteLine($@"public string HashCode => ""{hashCode}"";", 2);
         lineWriter.WriteLine();
-    }
-
-    private string[] AddHealthCheckMethod()
-    {
-        var lineWriter = new LineWriter();
-        lineWriter.WriteLine(
-            $"public async Task<IBenzeneResult<HealthCheckResponse>> HealthCheckAsync()", 2);
-        lineWriter.WriteLine("{", 2);
-        // Benzene.Abstractions.Results.Void, not a nonexistent "NullPayload" - the request payload for
-        // the no-body benzene:healthcheck topic. Every server-side handler for it (Benzene.HealthChecks'
-        // middleware) reads the topic, not the body, so any serializable empty type would work on the
-        // wire; Void is the one this codebase already established for exactly this "no meaningful
-        // request" case (see e.g. AtomicClientSdkBuilder's own generated Void.cs DTO for a Void-request
-        // topic). Fully qualified rather than relying on the "using Benzene.Abstractions.Results;" above:
-        // a topic-scoped client (AtomicClientSdkBuilder) whose own request/response schema happens to
-        // include a component literally named "Void" emits its OWN same-namespace Void DTO (see
-        // OpenApiSchemaCSharpTypeBuilder), and a bare "Void" here would then bind to THAT type instead -
-        // fine when the shapes happen to match, but the two are unrelated types; when no such local type
-        // exists, a bare "Void" is instead ambiguous with System.Void (CS0104, displayed as "void") once
-        // this using and any other Void-bearing using are both in scope. Full qualification is correct in
-        // every case: same-namespace, ambiguous, and unambiguous alike.
-        lineWriter.WriteLine(
-            $@"var benzeneResult = await _sender.SendAsync<Benzene.Abstractions.Results.Void, HealthCheckResponse>(""benzene:healthcheck"", new Benzene.Abstractions.Results.Void());",
-            3);
-        lineWriter.WriteLine("if (benzeneResult.Payload == null)", 3);
-        lineWriter.WriteLine("{", 3);
-        lineWriter.WriteLine("return benzeneResult;", 4);
-        lineWriter.WriteLine("}", 3);
-        lineWriter.WriteLine(
-            "var annotated = ClientHealthCheckProcessor.Process(benzeneResult.Payload, HashCode) as HealthCheckResponse;",
-            3);
-        lineWriter.WriteLine("return BenzeneResult.Set(benzeneResult.Status, annotated, benzeneResult.IsSuccessful);", 3);
-        lineWriter.WriteLine("}", 2);
-        return lineWriter.GetLines();
     }
 
     private string[] AddMethod(string topic, OpenApiSchema requestType, OpenApiSchema responseType)
@@ -214,14 +177,13 @@ public class MessageClientSdkBuilder : ICodeBuilder<EventServiceDocument>
         lineWriter.WriteLine("using System.Threading.Tasks;");
         lineWriter.WriteLine("using Benzene.Abstractions.Results;");
         lineWriter.WriteLine("using Benzene.Clients;");
-        lineWriter.WriteLine("using Benzene.Clients.HealthChecks;");
         lineWriter.WriteLine("using Benzene.Results;");
 
         lineWriter.WriteLine("");
 
         lineWriter.WriteLine($"namespace {_options.Namespace}");
         lineWriter.WriteLine("{");
-        lineWriter.WriteLine($"public interface I{_serviceName}ServiceClient : IHasHealthCheck", 1);
+        lineWriter.WriteLine($"public interface I{_serviceName}ServiceClient", 1);
         lineWriter.WriteLine("{", 1);
 
         foreach (var definition in eventServiceDocument.Requests)

@@ -46,11 +46,17 @@ public class AtomicClientSdkBuilderTest
 
         var getClient = result["UserGet/UserGetServiceClient.cs"];
 
-        // The user:get atomic client sends only user:get and validates only that topic (+ healthcheck)
-        // at startup — it never references user:create.
+        // The user:get atomic client sends only user:get and validates only that topic at startup —
+        // it never references user:create, and never a benzene reserved endpoint either.
         Assert.Contains("\"user:get\"", getClient);
         Assert.DoesNotContain("user:create", getClient);
-        Assert.Contains("RequiredTopics = { \"user:get\", \"benzene:healthcheck\" }", getClient);
+        Assert.Contains("RequiredTopics = { \"user:get\" }", getClient);
+
+        // Exactly one topic method — its two overloads (with and without headers) — and nothing else:
+        // no health check tagging along beside it.
+        var methods = getClient.Split('\n').Where(line => line.Contains("public Task<") || line.Contains("public async Task<")).ToArray();
+        Assert.Equal(2, methods.Length);
+        Assert.All(methods, method => Assert.Contains("GetUserAsync", method));
     }
 
     [Fact]
@@ -154,23 +160,25 @@ public class AtomicClientSdkBuilderTest
     }
 
     [Fact]
-    public void HealthcheckTopic_NeverGetsItsOwnAtomicClient()
+    public void HealthcheckTopic_GetsNoClientOfItsOwn_AndNoClientCarriesAHealthCheck()
     {
-        // Every atomic client already carries its own always-emitted HealthCheckAsync() and
-        // RequiredTopics entry (see EachClient_ScopesMethodAndRequiredTopics_ToItsOwnTopic above), so
-        // a document that happens to also declare an explicit benzene:healthcheck request/response
-        // must not spawn a redundant dedicated health-check client alongside them.
+        // benzene:healthcheck is an ordinary reserved endpoint: excluded by default like every other
+        // benzene:* topic, so a document that declares it spawns no health-check client — and the
+        // domain client it sits alongside carries neither a health check nor a benzene RequiredTopics
+        // entry, which is what used to fail a consumer's outbound-routing start-up check.
         var document = new Dictionary<string, (Type, Type, Type)>
         {
             { "user:get", (typeof(GetUserMessage), typeof(GetUserMessage), typeof(UserDto)) },
             { "benzene:healthcheck", (typeof(GetUserMessage), typeof(GetUserMessage), typeof(UserDto)) },
         }.ToEventServiceDocument();
 
-        var result = new AtomicClientSdkBuilder(new ClientSdkOptions { Namespace = BaseNameSpace, IncludeReservedTopics = true })
-            .Build(document);
+        var result = new AtomicClientSdkBuilder(new ClientSdkOptions { Namespace = BaseNameSpace }).Build(document);
 
         Assert.DoesNotContain(result.Keys, name => name.Contains("Healthcheck", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains("RequiredTopics = { \"user:get\", \"benzene:healthcheck\" }", result["UserGet/UserGetServiceClient.cs"]);
+        var getClient = result["UserGet/UserGetServiceClient.cs"];
+        Assert.Contains("RequiredTopics = { \"user:get\" }", getClient);
+        Assert.DoesNotContain("benzene:", getClient);
+        Assert.DoesNotContain("HealthCheck", getClient);
     }
 
     private static string HashLine(string clientSource) =>

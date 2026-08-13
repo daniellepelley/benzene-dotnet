@@ -57,8 +57,8 @@ foreach (var file in codeFiles)   // each ICodeFile has a Name and Lines
 ```
 
 This produces `HelloWorldServiceClient.cs` containing a `HelloWorldServiceClient` with a
-`HelloWorldAsync(HelloWorldMessage message)` method (plus a `HealthCheckAsync()` and header-aware
-overloads).
+`HelloWorldAsync(HelloWorldMessage message)` method (plus a header-aware overload) and a `HashCode`
+property carrying the hash of the contract it was generated against.
 
 ## Using the generated client
 
@@ -120,7 +120,7 @@ benzene build -file Orders.spec.json -output message-handlers -namespace MyServi
 | | **`client`** (`MessageClientSdkBuilder`) | **`topic-client`** (`AtomicClientSdkBuilder`) |
 |---|---|---|
 | Shape | One `{Service}ServiceClient` class with one method per topic | One small, self-contained client class *per topic*, each in its own folder |
-| `RequiredTopics` / contract hash | Covers every topic the client was generated for | Scoped to just that one topic (+ health check) |
+| `RequiredTopics` / contract hash | Covers every topic the client was generated for | Scoped to just that one topic |
 | Best for | A consumer that calls most/all of a service's topics — one client, one thing to inject | A consumer that calls one or a handful of topics out of a larger service |
 
 The coupling difference is the point of `topic-client`: `ValidateOutboundRouting()`'s startup check
@@ -153,15 +153,32 @@ programmatically, `ClientSdkOptions.Topics`) that limits generation to exactly t
 minimal-coupling-surface option for a consumer that only calls a handful of a service's topics.
 Naming a topic scopes it consistently everywhere: in `client` mode, only the named topics get
 methods on the class and interface, and only they appear in `RequiredTopics`; in `topic-client`
-mode, only the named topics get their own per-topic client at all. `benzene:healthcheck` never needs
-naming — the client's `HealthCheckAsync()` method and its `RequiredTopics` entry are always emitted.
+mode, only the named topics get their own per-topic client at all.
 A topic named in `--topics` that the document doesn't have fails the build (a non-zero exit naming
 the document's actual topics), rather than silently generating a client that's missing what you
 asked for.
 
-Reserved Benzene utility topics (`benzene:spec`, `benzene:mesh`, …) are excluded by default in both
-modes, so a generated client only covers a service's domain surface unless you opt in
-(`ClientSdkOptions.IncludeReservedTopics = true`; there is no CLI flag for this yet).
+### Generated clients cover domain topics only
+
+Benzene's reserved endpoints (`benzene:spec`, `benzene:mesh`, `benzene:healthcheck`, …) are
+deliberately kept separate from a service's domain surface: they are framework plumbing, answered by
+framework middleware, and a consumer calls them — if at all — through the mesh or its monitoring, not
+through a typed domain client. So **no `benzene:*` topic is ever generated into a client**: no
+method, no interface member, and above all no `RequiredTopics` entry. They are excluded by default in
+both modes, and you can opt a non-health reserved topic back in programmatically
+(`ClientSdkOptions.IncludeReservedTopics = true`, or by naming it in `Topics`; there is no CLI flag
+for this yet).
+
+`benzene:healthcheck` used to be the exception — every generated client implemented `IHasHealthCheck`,
+emitted a `HealthCheckAsync()`, and listed `benzene:healthcheck` in `RequiredTopics` unconditionally.
+That last part broke adoption outright: `AddOutboundRouting` registers the outbound-routing start-up
+check, which enforces by default, so **any** service that adopted **any** generated client failed to
+start until it invented an outbound route for a topic it never meant to call. The health check is now
+simply not generated. The consumer-side contract-drift check still exists as a first-class feature —
+see [Contract testing](cookbooks/contract-testing.md#mechanism-1--runtime-contract-drift-check) — it
+is just written by hand, over a client's `HashCode`, for the specific downstream you actually want to
+probe; `Benzene.Clients.HealthChecks`' `AddContractCheck<TClient>()` works with any `IHasHealthCheck`
+client.
 
 ```bash
 # Only these two topics: one client, methods/interface/RequiredTopics scoped to exactly them.

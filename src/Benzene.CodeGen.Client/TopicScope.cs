@@ -17,14 +17,13 @@ internal static class TopicScope
     /// Projects <paramref name="document"/>'s <see cref="EventServiceDocument.Requests"/> down to
     /// the topics in scope per <paramref name="options"/>, returning a new document with everything
     /// else (info, tags, events, components, message endpoint, transports) unchanged.
-    /// <c>benzene:healthcheck</c> is always excluded from the projected <c>Requests</c>, regardless
-    /// of <see cref="ClientSdkOptions.Topics"/> or <see cref="ClientSdkOptions.IncludeReservedTopics"/>:
-    /// <see cref="MessageClientSdkBuilder"/> already emits its <c>HealthCheckAsync()</c> method and
-    /// its <c>RequiredTopics</c> entry unconditionally, outside the per-request loops entirely, so a
-    /// caller never needs to (and never can usefully) name it in an include-list - keeping a matching
-    /// entry here would just duplicate that <c>RequiredTopics</c> entry and, in topic-client mode,
-    /// spawn a redundant dedicated health-check client on top of every other client's own
-    /// already-emitted health check.
+    /// <c>benzene:healthcheck</c> has no special case here: like every other <c>benzene:*</c> reserved
+    /// endpoint it is excluded by default and admitted only by the ordinary rules
+    /// (<see cref="ClientSdkOptions.IncludeReservedTopics"/>, or naming it in
+    /// <see cref="ClientSdkOptions.Topics"/>). Generated clients are for a service's <i>domain</i>
+    /// surface; Benzene's reserved endpoints are framework plumbing, deliberately kept separate, and
+    /// emitting one into a client's <c>RequiredTopics</c> forced every consumer to register an
+    /// outbound route it never asked for or fail the outbound-routing start-up check.
     /// </summary>
     /// <exception cref="ArgumentException">
     /// <see cref="ClientSdkOptions.Topics"/> names a topic the document does not have.
@@ -48,16 +47,9 @@ internal static class TopicScope
         var included = requestedTopics != null ? new HashSet<string>(requestedTopics, StringComparer.Ordinal) : null;
 
         bool InScope(RequestResponse request)
-        {
-            if (request.Topic == Benzene.Abstractions.BenzeneTopic.HealthCheck)
-            {
-                return false;
-            }
-
-            return included != null
+            => included != null
                 ? included.Contains(request.Topic)
                 : options.IncludeReservedTopics || !request.Reserved;
-        }
 
         var filteredRequests = document.Requests.Where(InScope).ToArray();
 

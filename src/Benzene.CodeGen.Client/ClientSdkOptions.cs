@@ -27,18 +27,17 @@ public class ClientSdkOptions
     public required string Namespace { get; set; }
 
     /// <summary>
-    /// The topic include-list: only these topics (plus the always-exempt
-    /// <c>benzene:healthcheck</c>) are in scope. Null or empty means "every topic", subject to
-    /// <see cref="IncludeReservedTopics"/>. A topic named here that the document does not have
-    /// fails loud rather than silently generating nothing for it.
+    /// The topic include-list: only these topics are in scope. Null or empty means "every topic",
+    /// subject to <see cref="IncludeReservedTopics"/>. A topic named here that the document does not
+    /// have fails loud rather than silently generating nothing for it.
     /// </summary>
     public IReadOnlyCollection<string>? Topics { get; set; }
 
     /// <summary>
-    /// When false (the default) and <see cref="Topics"/> is not set, reserved Benzene utility
-    /// topics (<c>benzene:spec</c>, <c>benzene:mesh</c>, ... - see
-    /// <see cref="Benzene.Schema.OpenApi.ReservedTopics"/>) other than the always-exempt healthcheck
-    /// topic are excluded, so a generated client only covers a service's domain surface by default.
+    /// When false (the default) and <see cref="Topics"/> is not set, every reserved Benzene utility
+    /// topic (<c>benzene:spec</c>, <c>benzene:mesh</c>, <c>benzene:healthcheck</c>, ... - see
+    /// <see cref="Benzene.Schema.OpenApi.ReservedTopics"/>) is excluded, so a generated client only
+    /// covers a service's domain surface by default.
     /// Ignored when <see cref="Topics"/> explicitly names a topic: an explicit ask always wins over
     /// this default.
     /// </summary>

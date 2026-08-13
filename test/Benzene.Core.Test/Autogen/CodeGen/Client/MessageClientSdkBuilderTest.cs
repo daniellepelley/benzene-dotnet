@@ -163,7 +163,7 @@ public class MessageClientSdkBuilderTest
         Assert.DoesNotContain("CreateUserAsync", classSource);
         Assert.Contains("GetUserAsync", interfaceSource);
         Assert.DoesNotContain("CreateUserAsync", interfaceSource);
-        Assert.Contains(@"RequiredTopics = { ""user:get"", ""benzene:healthcheck"" }", classSource);
+        Assert.Contains(@"RequiredTopics = { ""user:get"" }", classSource);
     }
 
     [Fact]
@@ -226,12 +226,12 @@ public class MessageClientSdkBuilderTest
     }
 
     [Fact]
-    public void HealthcheckTopic_NeverNeedsNaming_AndNeverDuplicatesInRequiredTopics()
+    public void BenzeneReservedEndpoints_AreNeverGenerated_NorIsAHealthCheck()
     {
-        // Even when the document itself carries an explicit request/response entry for
-        // benzene:healthcheck, it must stay out of the ordinary Requests-driven projection:
-        // HealthCheckAsync() and its RequiredTopics entry are already emitted unconditionally, so a
-        // surviving Requests entry would duplicate "benzene:healthcheck" in RequiredTopics.
+        // Benzene's reserved endpoints are framework plumbing, deliberately separate from a service's
+        // domain surface; a generated client covers the domain only. benzene:healthcheck is no
+        // exception - it gets no method, no IHasHealthCheck, and above all no RequiredTopics entry,
+        // which used to demand an outbound route every consumer had to invent or fail start-up.
         var dictionary = new Dictionary<string, (Type, Type, Type)>
         {
             { "user:get", (typeof(GetUserMessage), typeof(GetUserMessage), typeof(UserDto)) },
@@ -242,13 +242,19 @@ public class MessageClientSdkBuilderTest
         {
             ServiceName = UserServiceName,
             Namespace = BaseNameSpace,
-            Topics = new[] { "user:get" }, // benzene:healthcheck deliberately not named
         };
 
         var result = new MessageClientSdkBuilder(options).Build(dictionary.ToEventServiceDocument());
-        var requiredTopicsLine = result["UserServiceClient.cs"].ToLines().Single(l => l.Contains("RequiredTopics ="));
+        var classSource = result["UserServiceClient.cs"];
+        var interfaceSource = result["IUserServiceClient.cs"];
 
-        Assert.Equal(1, requiredTopicsLine.Split("benzene:healthcheck").Length - 1);
+        Assert.DoesNotContain("benzene:", classSource);
+        Assert.DoesNotContain("HealthCheck", classSource);
+        Assert.DoesNotContain("IHasHealthCheck", interfaceSource);
+        Assert.DoesNotContain("HealthCheck", interfaceSource);
+        Assert.Contains(@"RequiredTopics = { ""user:get"" }", classSource);
+        // The contract hash stays - it is informative and consumers read it off the client.
+        Assert.Contains("public string HashCode =>", classSource);
     }
 }
 

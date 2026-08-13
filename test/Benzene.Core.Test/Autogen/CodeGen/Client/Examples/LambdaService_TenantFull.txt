@@ -3,9 +3,6 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Benzene.Abstractions.Results;
 using Benzene.Clients;
-using Benzene.Clients.HealthChecks;
-using Benzene.HealthChecks.Core;
-using Benzene.Results;
 using System.Diagnostics.CodeAnalysis;
 
 namespace Benzene.Service.Clients.Tenant
@@ -42,21 +39,11 @@ namespace Benzene.Service.Clients.Tenant
             return _sender.SendAsync<CreateTenantMessage, TenantDto>("tenant:create", message, headers);
         }
 
-        public async Task<IBenzeneResult<HealthCheckResponse>> HealthCheckAsync()
-        {
-            var benzeneResult = await _sender.SendAsync<Benzene.Abstractions.Results.Void, HealthCheckResponse>("benzene:healthcheck", new Benzene.Abstractions.Results.Void());
-            if (benzeneResult.Payload == null)
-            {
-                return benzeneResult;
-            }
-            var annotated = ClientHealthCheckProcessor.Process(benzeneResult.Payload, HashCode) as HealthCheckResponse;
-            return BenzeneResult.Set(benzeneResult.Status, annotated, benzeneResult.IsSuccessful);
-        }
     }
 
     [OutboundRoutingContract]
     public static class TenantServiceClientRouting
     {
-        public static readonly string[] RequiredTopics = { "tenant:get", "tenant:create", "benzene:healthcheck" };
+        public static readonly string[] RequiredTopics = { "tenant:get", "tenant:create" };
     }
 }

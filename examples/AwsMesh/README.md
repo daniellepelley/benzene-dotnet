@@ -500,19 +500,25 @@ regressions are still caught before a release.
 
 Adopting the generated client turned up four things worth fixing in the tooling, recorded as
 requirements in
-[`work/spec-mesh-tooling-implementation-plan.md`](../../work/spec-mesh-tooling-implementation-plan.md):
+[`work/spec-mesh-tooling-implementation-plan.md`](../../work/spec-mesh-tooling-implementation-plan.md).
+The first two are now fixed; the other two are still open.
 
-1. **`benzene:healthcheck` is required unconditionally.** Every generated client lists it in
-   `RequiredTopics`, and the outbound-routing start-up check (`Enforce` by default) then fails the
-   host unless the consumer registers a route for it — even when, as here, the downstream hop is
-   fire-and-forget SQS that could never answer a health probe. Worked around with
-   `OutboundSend.HealthCheck(...)`, which routes it without drawing a bogus topology edge.
-2. **The generated code's dependencies aren't declared.** It needs `Benzene.Clients.HealthChecks`
-   (`IHasHealthCheck`/`ClientHealthCheckProcessor`); you discover that from a compile error.
+1. ~~**`benzene:healthcheck` was required unconditionally.**~~ **Fixed.** Every generated client used
+   to list it in `RequiredTopics`, so the outbound-routing start-up check (`Enforce` by default) failed
+   the host of *any* service adopting *any* generated client until it registered a route for a topic it
+   never meant to call — here, over fire-and-forget SQS that could never answer a health probe anyway.
+   Generated clients no longer include Benzene's reserved `benzene:*` endpoints at all: they cover
+   domain topics only. The `OutboundSend.HealthCheck(...)` workaround is gone.
+2. ~~**The generated code's dependencies weren't declared.**~~ **Fixed by the same change.** The only
+   undeclared dependency was `Benzene.Clients.HealthChecks` (`IHasHealthCheck`/
+   `ClientHealthCheckProcessor`), pulled in by the emitted health check; with that gone the generated
+   code needs nothing beyond what a consumer already references, and this project's
+   `ProjectReference` to it has been removed.
 3. **No DI registration is generated**, so `services.AddScoped<IPaymentsCaptureServiceClient, …>()` is
    hand-written — and has to be `Scoped` to match `IBenzeneMessageSender`'s lifetime.
 4. **`decimal` does not survive the round trip.** payments-api's `CapturePayment.Amount` is `decimal`;
    JSON Schema records it as `"number"` and the generator emits `double`, so the call site casts. Fine
    for this demo, wrong for money.
 
-None of these block the build — the client is generated and compiled on every `dotnet build`.
+Neither of the remaining two blocks the build — the client is generated and compiled on every
+`dotnet build`.

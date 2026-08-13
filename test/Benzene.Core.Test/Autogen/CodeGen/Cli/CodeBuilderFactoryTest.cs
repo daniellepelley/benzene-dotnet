@@ -86,7 +86,7 @@ public class CodeBuilderFactoryTest
         Assert.DoesNotContain("CancelOrderAsync", files["OrdersServiceClient.cs"]);
         Assert.Contains("CreateOrderAsync", files["IOrdersServiceClient.cs"]);
         Assert.DoesNotContain("CancelOrderAsync", files["IOrdersServiceClient.cs"]);
-        Assert.Contains(@"RequiredTopics = { ""order:create"", ""benzene:healthcheck"" }", files["OrdersServiceClient.cs"]);
+        Assert.Contains(@"RequiredTopics = { ""order:create"" }", files["OrdersServiceClient.cs"]);
     }
 
     [Fact]
@@ -99,7 +99,7 @@ public class CodeBuilderFactoryTest
 
         Assert.Contains("OrderCreate/OrderCreateServiceClient.cs", files.Keys);
         Assert.DoesNotContain("OrderCancel/OrderCancelServiceClient.cs", files.Keys);
-        Assert.Contains(@"RequiredTopics = { ""order:create"", ""benzene:healthcheck"" }", files["OrderCreate/OrderCreateServiceClient.cs"]);
+        Assert.Contains(@"RequiredTopics = { ""order:create"" }", files["OrderCreate/OrderCreateServiceClient.cs"]);
     }
 
     [Fact]

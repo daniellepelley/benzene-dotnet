@@ -3,12 +3,11 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Benzene.Abstractions.Results;
 using Benzene.Clients;
-using Benzene.Clients.HealthChecks;
 using Benzene.Results;
 
 namespace Benzene.Service.Clients.Tenant
 {
-    public interface ITenantServiceClient : IHasHealthCheck
+    public interface ITenantServiceClient
     {
         Task<IBenzeneResult<TenantDto>> GetTenantAsync(GetTenantMessage message);
         Task<IBenzeneResult<TenantDto>> GetTenantAsync(GetTenantMessage message, IDictionary<string, string> headers);

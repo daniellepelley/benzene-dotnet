@@ -15,8 +15,9 @@ not from a production incident.
 ## Mechanism 1 — runtime contract-drift check
 
 Every generated client bakes in a hash of the contract it was built against
-(`{Service}ServiceClient.HashCode`) and can call the provider's health check to compare it against
-the provider's *current* contract hash. The provider publishes that hash from a schema health check.
+(`{Service}ServiceClient.HashCode`), which can be compared against the provider's *current* contract
+hash by calling the provider's health check. The provider publishes that hash from a schema health
+check.
 
 **Provider** — register the schema health check (`Benzene.HealthChecks.Schema`):
 
@@ -28,10 +29,16 @@ app.UseHealthCheck("get", "healthcheck", health => health
     .AddHealthCheck("live", _ => true));
 ```
 
-**Consumer** — the generated client's `HealthCheckAsync()` fetches the provider's health check and
-compares hashes (`Benzene.Clients.HealthChecks.ClientHealthCheckProcessor`); a mismatch means the
-provider's contract has drifted from what the client was generated against. Both ends hash with the
-same `CodeGenHelpers.GenerateHash`, so the hashes are directly comparable.
+**Consumer** — write a small `IHasHealthCheck` client whose `HealthCheckAsync()` sends
+`benzene:healthcheck` to the provider and runs the answer through
+`Benzene.Clients.HealthChecks.ClientHealthCheckProcessor` against the generated client's `HashCode`;
+a mismatch means the provider's contract has drifted from what the client was generated against. Both
+ends hash with the same `CodeGenHelpers.GenerateHash`, so the hashes are directly comparable. (This is
+hand-written on purpose: codegen emits domain topics only, never Benzene's reserved `benzene:*`
+endpoints — see [Client SDKs](../client-sdks.md#generated-clients-cover-domain-topics-only) — and the
+route to probe a downstream's health is a deliberate choice, not something every client should
+require. `examples/Mesh/Benzene.Examples.Mesh.OrdersService/Clients/PaymentsContractClient.cs` is a
+worked example.)
 
 This is reactive — it tells you drift has already happened. For a pre-merge stop, use mechanism 2.
 

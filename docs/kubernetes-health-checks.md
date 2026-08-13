@@ -54,8 +54,9 @@ the `healthcheck` endpoint — not the other way around.
 
 ### Client / contract-drift checks belong in *neither* probe
 
-A generated CodeGen client's `HealthCheckAsync()` (the consumer side of the
-[runtime contract-drift check](cookbooks/contract-testing.md#mechanism-1--runtime-contract-drift-check))
+A contract-drift client's `HealthCheckAsync()` (the consumer side of the
+[runtime contract-drift check](cookbooks/contract-testing.md#mechanism-1--runtime-contract-drift-check):
+an `IHasHealthCheck` client you write over a generated client's `HashCode`)
 is **not** an ordinary external-dependency check, and it does not belong in a liveness *or* a
 readiness probe. It calls a *downstream provider's* health endpoint and compares contract hashes, so
 it fails the two tests above harder than a database check does:
@@ -73,15 +74,15 @@ it fails the two tests above harder than a database check does:
 
 So keep `HealthCheckAsync()` off `/livez` and `/readyz`. `Benzene.HealthChecks` provides a dedicated
 **`contracts`** diagnostic topic for exactly this — a probe-less surface Kubernetes never points at,
-which the **mesh / your alerting** consume instead. Register your generated clients' contract checks
-with `UseContractsCheck` + `AddContractCheck` (from `Benzene.Clients.HealthChecks`):
+which the **mesh / your alerting** consume instead. Register your contract checks with
+`UseContractsCheck` + `AddContractCheck` (from `Benzene.Clients.HealthChecks`):
 
 ```csharp
 using Benzene.HealthChecks;
 using Benzene.Clients.HealthChecks;
 
 app.UseContractsCheck(x => x
-    .AddContractCheck<IOrderServiceClient>("OrderService")   // resolves the generated client from DI
+    .AddContractCheck<IOrderServiceClient>("OrderService")   // any IHasHealthCheck client, from DI
     .AddContractCheck<IPaymentServiceClient>("PaymentService"));
 ```
 
