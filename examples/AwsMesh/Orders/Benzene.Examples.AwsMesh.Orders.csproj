@@ -14,9 +14,38 @@
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <!-- Dogfoods the PUBLISHED `benzene` CLI (NuGet, pinned in .config/dotnet-tools.json) rather than
+         the from-source `dotnet run` form examples/Directory.Build.props defaults to. This project is
+         deliberately the one example exercising the real consumer experience end to end: a
+         PackageReference to Benzene.CodeGen.Build below plus the packaged tool here. The other codegen
+         example (examples/CodeGen/…Contracts.Consumer) keeps the from-source form so a working-tree
+         regression is still caught before release - between them both paths stay covered.
+         Needs `dotnet tool restore` once after clone; the examples-build CI job does it. -->
+    <BenzeneCliCommand>dotnet tool run benzene</BenzeneCliCommand>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Amazon.Lambda.RuntimeSupport" Version="1.10.0" />
     <PackageReference Include="Amazon.Lambda.Core" Version="2.2.0" />
+    <!-- Targets-only package (auto-imports its build\*.targets): generates the payments client below
+         before CoreCompile. PrivateAssets - build-time only, must not flow to referencing projects. -->
+    <PackageReference Include="Benzene.CodeGen.Build" Version="0.0.2-alpha.6" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- orders-api consumes exactly ONE topic of payments-api, so it generates a client for that topic
+         and nothing else - the coupling surface is the one call it actually makes. Replaces the
+         hand-written OutboundPaymentCapture mirror DTO that used to duplicate payments-api's request
+         shape and topic id by hand, with no way to notice when the two drifted.
+         contracts/payments.spec.json is payments-api's own contract, committed here the way a consumer
+         team commits a copy of a producer's (payments-api emits it on every build - see
+         docs/contract-artifacts.md). -->
+    <BenzeneServiceContract Include="contracts\payments.spec.json"
+                             Mode="topic-client"
+                             ServiceName="Payments"
+                             Namespace="Benzene.Examples.AwsMesh.Orders.Clients"
+                             Topics="payments:capture" />
   </ItemGroup>
 
   <ItemGroup>
@@ -32,6 +61,10 @@
     <ProjectReference Include="..\..\..\src\Benzene.CloudService\Benzene.CloudService.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Schema.OpenApi\Benzene.Schema.OpenApi.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.HealthChecks\Benzene.HealthChecks.csproj" />
+    <!-- Required by the GENERATED client, not by any hand-written code here: its HealthCheckAsync()
+         uses IHasHealthCheck/ClientHealthCheckProcessor. The generator does not declare the package set
+         its output needs, so this is discovered as a compile error - see the README's findings. -->
+    <ProjectReference Include="..\..\..\src\Benzene.Clients.HealthChecks\Benzene.Clients.HealthChecks.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Spec.Ui\Benzene.Spec.Ui.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Microsoft.Dependencies\Benzene.Microsoft.Dependencies.csproj" />
   </ItemGroup>

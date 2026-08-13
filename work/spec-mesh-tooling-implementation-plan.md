@@ -584,6 +584,68 @@ prerequisite (different files) but should land first per this repo's one-slice-a
 
 ---
 
+## 2026-08-13 — dogfooding findings: orders-api on a generated payments client
+
+The first real consumer of the generated-client tooling is `examples/AwsMesh/Orders`, which used to
+hand-write an `OutboundPaymentCapture` DTO mirroring payments-api's `CapturePayment` and call
+`_sender.SendAsync<…>("payments:capture", …)` with the topic id typed out by hand. It now generates a
+per-topic client from payments-api's committed contract, using the **published** `benzene` CLI and
+`Benzene.CodeGen.Build` from NuGet (`0.0.2-alpha.6`), not from source. Build-time generation works;
+these are the things adoption surfaced, in priority order.
+
+### 7a. `benzene:healthcheck` should not be an unconditional requirement *(blocking — worked around)*
+
+`MessageClientSdkBuilder` always emits `HealthCheckAsync()` and always puts `benzene:healthcheck` in
+the client's `RequiredTopics`. `AddOutboundRouting` now auto-registers `OutboundRoutingStartUpCheck`,
+and start-up checks default to `Enforce` — so **the moment a service adopts any generated client the
+host refuses to start**, until it registers an outbound route for `benzene:healthcheck`:
+
+```
+outbound-routing: The following topics are required by a generated client but have no
+registered outbound route: benzene:healthcheck. Register each via OutboundRoutingBuilder.Route.
+```
+
+That is a hard failure for a topic the consumer often cannot meaningfully call: orders → payments is
+fire-and-forget SQS, which could never answer a health probe. Worked around in the example by routing
+it over the same transport while excluding it from the spec's `events` (`OutboundSend.HealthCheck(...)`,
+so the mesh graph doesn't gain a fake orders → payments health edge). Real fix: make the health check
+opt-in (a `-health-check` flag / `ClientSdkOptions.IncludeHealthCheck`, default off), or keep emitting
+the method but leave `benzene:healthcheck` out of `RequiredTopics` — it is framework plumbing, not part
+of the consumer's declared contract surface.
+
+### 7b. Generated code should declare the packages it needs
+
+The output references `IHasHealthCheck`/`ClientHealthCheckProcessor` from `Benzene.Clients.HealthChecks`
+and `IBenzeneMessageSender` from `Benzene.Clients`, but nothing tells the consuming project that — you
+find out from `CS0234`/`CS0246` after the first generation. Either have `Benzene.CodeGen.Build` carry
+those as package dependencies (so a single `PackageReference` is genuinely sufficient), or have
+`benzene build` report the required package set. The former is what the one-liner promises.
+
+### 7c. Generate the DI registration
+
+Explicitly scoped out of Phase 3b; adoption confirms it is the next gap. Every consumer hand-writes
+`services.AddScoped<IPaymentsCaptureServiceClient, PaymentsCaptureServiceClient>()` and must know to use
+**`Scoped`** — `AddOutboundRouting` registers `IBenzeneMessageSender` scoped, so a singleton client is a
+captive dependency. A generated `AddPaymentsClients(this IServiceCollection)` removes both the
+boilerplate and the lifetime footgun. (Phase 3b's open question "which lifetime?" now has an answer:
+match `IBenzeneMessageSender`.)
+
+### 7d. `decimal` does not survive the contract round trip
+
+payments-api's `CapturePayment.Amount` is `decimal`; the spec records `"type": "number"` with no
+`format`, and `OpenApiSchemaCSharpTypeBuilder` maps that to `double`, so the generated DTO is `double`
+and the call site casts. For money that is wrong. Emit `format` on the producer side and honour it in
+the type builder.
+
+### 7e. Nothing detects contract drift
+
+`Orders/contracts/payments.spec.json` is a committed copy. If payments-api changes its contract nothing
+tells orders-api — the copy silently goes stale, which is the same failure mode the hand-written mirror
+DTO had. `benzene diff` (Phase 2) is exactly the tool; wiring it into CI against each producer's
+freshly-built spec would close the loop.
+
+---
+
 ## Phase 7 — Mesh data foundations
 
 Three independent sub-items; each can be its own task. **Effort:** S each.

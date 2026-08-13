@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "isRoot": true,
+  "tools": {
+    "benzene.codegen.cli": {
+      "version": "0.0.2-alpha.6",
+      "commands": [
+        "benzene"
+      ],
+      "rollForward": false
+    }
+  }
+}

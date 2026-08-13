@@ -2,6 +2,8 @@ using Benzene.Abstractions.MessageHandlers;
 using Benzene.Abstractions.Results;
 using Benzene.Clients;
 using Benzene.Core.MessageHandlers;
+// Generated at build time from contracts/payments.spec.json — see the csproj's <BenzeneServiceContract>.
+using Benzene.Examples.AwsMesh.Orders.Clients.PaymentsCapture;
 using Benzene.Examples.AwsMesh.Orders.Model;
 using Benzene.Http;
 using Benzene.Results;
@@ -35,11 +37,16 @@ public class GetOrdersMessageHandler : IMessageHandler<Void, OrderDto[]>
 public class CreateOrderMessageHandler : IMessageHandler<CreateOrder, OrderDto>
 {
     private readonly IBenzeneMessageSender _sender;
+    private readonly IPaymentsCaptureServiceClient _payments;
     private readonly ILogger<CreateOrderMessageHandler> _logger;
 
-    public CreateOrderMessageHandler(IBenzeneMessageSender sender, ILogger<CreateOrderMessageHandler> logger)
+    public CreateOrderMessageHandler(
+        IBenzeneMessageSender sender,
+        IPaymentsCaptureServiceClient payments,
+        ILogger<CreateOrderMessageHandler> logger)
     {
         _sender = sender;
+        _payments = payments;
         _logger = logger;
     }
 
@@ -61,13 +68,22 @@ public class CreateOrderMessageHandler : IMessageHandler<CreateOrder, OrderDto>
         return BenzeneResult.Created(order);
     }
 
-    // Point-to-point command over SQS: exactly one consumer (payments-api) must capture this.
+    // Point-to-point command over SQS: exactly one consumer (payments-api) must capture this. The topic
+    // id and the request shape are not written here at all — they come from the GENERATED client
+    // (payments-api's own contract, see the csproj's <BenzeneServiceContract>), so this call site cannot
+    // drift from what payments-api actually serves the way the old hand-written mirror DTO could.
     private async Task SendPaymentsCaptureAsync(OrderDto order, decimal amount)
     {
         try
         {
-            await _sender.SendAsync<OutboundPaymentCapture, Void>("payments:capture",
-                new OutboundPaymentCapture { OrderId = order.Id, Amount = amount, Currency = "GBP" });
+            await _payments.CapturePaymentsAsync(new CapturePayment
+            {
+                OrderId = order.Id,
+                // (double) because the contract's JSON Schema says "number" and the generator maps that
+                // to double — payments-api's own CapturePayment.Amount is decimal. See the README note.
+                Amount = (double)amount,
+                Currency = "GBP",
+            });
             _logger.LogInformation("order {orderId} created; sent payments:capture", order.Id);
         }
         catch (Exception ex)

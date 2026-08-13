@@ -465,7 +465,54 @@ The most likely things to tweak on the first run (all localized):
 ## Build locally
 
 ```bash
+dotnet tool restore   # orders-api generates its payments client with the published `benzene` CLI
 for p in Orders Payments Shipping Inventory Notifications Analytics Mesh; do
   dotnet build "examples/AwsMesh/$p/Benzene.Examples.AwsMesh.$p.csproj"
 done
 ```
+
+## orders → payments uses a *generated* client
+
+payments-api emits its own contract on every build (`Benzene.Descriptor` — see
+[docs/contract-artifacts.md](../../docs/contract-artifacts.md)). orders-api commits a copy of it at
+`Orders/contracts/payments.spec.json` — the way a consumer team commits a copy of a producer's
+contract — and its csproj turns that into a typed client at build time:
+
+```xml
+<PackageReference Include="Benzene.CodeGen.Build" Version="0.0.2-alpha.6" PrivateAssets="all" />
+<BenzeneServiceContract Include="contracts\payments.spec.json" Mode="topic-client"
+                        ServiceName="Payments" Topics="payments:capture"
+                        Namespace="Benzene.Examples.AwsMesh.Orders.Clients" />
+```
+
+`CreateOrderMessageHandler` then calls `_payments.CapturePaymentsAsync(new CapturePayment { … })`
+instead of `_sender.SendAsync<OutboundPaymentCapture, Void>("payments:capture", …)`. The topic id and
+the request shape now come from payments-api's contract, and the hand-written `OutboundPaymentCapture`
+mirror DTO is gone. `Topics="payments:capture"` scopes the client to the one topic orders-api actually
+calls, so none of payments-api's other surface is coupled in.
+
+This example deliberately uses the **published** CLI from NuGet (pinned in
+`.config/dotnet-tools.json`) rather than building it from source, so it exercises what a real consumer
+gets. `examples/CodeGen/…Contracts.Consumer` runs the same targets from source, so working-tree
+regressions are still caught before a release.
+
+### Rough edges this surfaced
+
+Adopting the generated client turned up four things worth fixing in the tooling, recorded as
+requirements in
+[`work/spec-mesh-tooling-implementation-plan.md`](../../work/spec-mesh-tooling-implementation-plan.md):
+
+1. **`benzene:healthcheck` is required unconditionally.** Every generated client lists it in
+   `RequiredTopics`, and the outbound-routing start-up check (`Enforce` by default) then fails the
+   host unless the consumer registers a route for it — even when, as here, the downstream hop is
+   fire-and-forget SQS that could never answer a health probe. Worked around with
+   `OutboundSend.HealthCheck(...)`, which routes it without drawing a bogus topology edge.
+2. **The generated code's dependencies aren't declared.** It needs `Benzene.Clients.HealthChecks`
+   (`IHasHealthCheck`/`ClientHealthCheckProcessor`); you discover that from a compile error.
+3. **No DI registration is generated**, so `services.AddScoped<IPaymentsCaptureServiceClient, …>()` is
+   hand-written — and has to be `Scoped` to match `IBenzeneMessageSender`'s lifetime.
+4. **`decimal` does not survive the round trip.** payments-api's `CapturePayment.Amount` is `decimal`;
+   JSON Schema records it as `"number"` and the generator emits `double`, so the call site casts. Fine
+   for this demo, wrong for money.
+
+None of these block the build — the client is generated and compiled on every `dotnet build`.

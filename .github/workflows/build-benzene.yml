@@ -80,6 +80,11 @@ jobs:
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: 10.0.x
+    # examples/AwsMesh/Orders generates its payments client at build time with the PUBLISHED `benzene`
+    # CLI, pinned as a local tool in .config/dotnet-tools.json - restore it before building. (The other
+    # codegen example runs the CLI from source and needs nothing here.)
+    - name: Restore local tools
+      run: dotnet tool restore
     # Benzene.Examples.sln covers every example (AWS, Asp, Azure Functions + Worker, Grpc, Kafka,
     # Saga, Mesh, CodeGen, and the out-of-1.0-scope Google/Cloudflare, which still must compile).
     - name: Build all examples

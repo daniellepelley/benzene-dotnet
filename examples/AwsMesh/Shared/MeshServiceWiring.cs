@@ -98,7 +98,10 @@ public static class MeshServiceWiring
                 // Declare each send in the spec's events → the mesh's structural topology edge. This is
                 // transport-agnostic on purpose: an SQS command, an SNS event and an EventBridge event all
                 // surface the same way, so the mesh topology shows every edge regardless of how it's carried.
+                // DeclareAsEvent=false sends are routed but not drawn — plumbing (a generated client's
+                // mandatory benzene:healthcheck route) rather than a business edge. See OutboundSend.
                 x.AddResponseEventDeclarations(outboundSends
+                    .Where(s => s.DeclareAsEvent)
                     .Select(s => (IMessageDefinition)new ResponseEventDefinition(s.Topic, s.MessageType))
                     .ToArray());
 

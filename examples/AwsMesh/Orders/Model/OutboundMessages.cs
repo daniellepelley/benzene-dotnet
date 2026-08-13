@@ -1,16 +1,12 @@
 namespace Benzene.Examples.AwsMesh.Orders.Model;
 
-/// <summary>
-/// The capture-payment request orders-api sends downstream to payments-api (topic
-/// <c>payments:capture</c>) after an order is placed. Declaring it (see Startup) puts it in the
-/// service's spec <c>events</c>, which the mesh turns into the structural edge orders → payments.
-/// </summary>
-public class OutboundPaymentCapture
-{
-    public string OrderId { get; set; } = "";
-    public decimal Amount { get; set; }
-    public string Currency { get; set; } = "GBP";
-}
+// The capture-payment request orders-api sends to payments-api (topic payments:capture) used to be
+// hand-written here as OutboundPaymentCapture — a copy of payments-api's own CapturePayment shape,
+// kept in step by eye. It is now GENERATED from payments-api's published contract
+// (contracts/payments.spec.json → Clients.PaymentsCapture.CapturePayment; see the <BenzeneServiceContract>
+// item in the csproj), so the request shape AND the topic id come from the producer's contract rather
+// than being duplicated here. Startup still declares the send, which is what puts the orders → payments
+// edge in the spec's events and so on the mesh topology.
 
 /// <summary>
 /// The <c>order:placed</c> event orders-api publishes to SNS once an order is placed. SNS fans it out
