@@ -25,23 +25,29 @@ public static class Extensions
     /// </summary>
     /// <param name="app">The outbound route's pipeline builder.</param>
     /// <param name="configure">
-    /// Configures this route's own <see cref="OutboxOptions"/> - only <see cref="OutboxOptions.WriteMode"/>
-    /// and <see cref="OutboxOptions.StampIdempotencyKey"/> are consulted here (see the class remarks
-    /// on <see cref="OutboxOptions"/> for why this is independent of <see cref="AddOutbox"/>'s options).
+    /// Optionally overrides this route's <see cref="OutboxOptions"/> - only
+    /// <see cref="OutboxOptions.WriteMode"/> and <see cref="OutboxOptions.StampIdempotencyKey"/> are
+    /// consulted here. Starts from a clone of the shared instance <see cref="AddOutbox"/> registered
+    /// (see the class remarks on <see cref="OutboxOptions"/>), so omitting <paramref name="configure"/>
+    /// inherits whatever <see cref="AddOutbox"/> configured, and supplying it overrides just this
+    /// route without affecting any other.
     /// </param>
     public static IMiddlewarePipelineBuilder<OutboundContext> UseOutbox(
         this IMiddlewarePipelineBuilder<OutboundContext> app,
         Action<OutboxOptions>? configure = null)
     {
-        var options = new OutboxOptions();
-        configure?.Invoke(options);
+        return app.Use(resolver =>
+        {
+            var options = resolver.GetService<OutboxOptions>().Clone();
+            configure?.Invoke(options);
 
-        return app.Use(resolver => new OutboxMiddleware(
-            resolver.GetService<IOutboxStore>(),
-            resolver.GetService<IOutboxStage>(),
-            resolver.GetService<OutboxDispatchScope>(),
-            resolver.GetService<ISerializer>(),
-            options));
+            return new OutboxMiddleware(
+                resolver.GetService<IOutboxStore>(),
+                resolver.GetService<IOutboxStage>(),
+                resolver.GetService<OutboxDispatchScope>(),
+                resolver.GetService<ISerializer>(),
+                options);
+        });
     }
 
     /// <summary>

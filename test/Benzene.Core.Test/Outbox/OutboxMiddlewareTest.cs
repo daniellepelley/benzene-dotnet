@@ -210,4 +210,49 @@ public class OutboxMiddlewareTest
         var staged = Assert.Single(stage.DrainStaged());
         Assert.Equal("test:topic", staged.Topic);
     }
+
+    [Fact]
+    public async Task Capture_BareUseOutbox_InheritsWriteModeFromAddOutbox()
+    {
+        // A route that never passes its own configure delegate must still honor the process-wide
+        // default AddOutbox(configure) set - this is the exact wiring work/outbox-plan.md's Phase 3
+        // relies on ("AddOutbox(WriteMode=Transactional) ... UseOutbox()" with no per-route override).
+        var (services, container) = NewContainer();
+        container.AddOutbox(o => o.WriteMode = OutboxWriteMode.Transactional);
+        container.AddInMemoryOutboxStore();
+        container.AddOutboundRouting(routing => routing
+            .Route("test:topic", pipeline => pipeline.UseOutbox()));
+
+        var resolver = new MicrosoftServiceResolverAdapter(services.BuildServiceProvider());
+        var sender = resolver.GetService<IBenzeneMessageSender>();
+        await sender.SendAsync<string, Void>("test:topic", "payload");
+
+        var store = resolver.GetService<IOutboxStore>();
+        Assert.Empty(await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1)));
+
+        var stage = resolver.GetService<BufferedOutboxStage>();
+        var staged = Assert.Single(stage.DrainStaged());
+        Assert.Equal("test:topic", staged.Topic);
+    }
+
+    [Fact]
+    public async Task Capture_PerRouteOverride_DoesNotBleedIntoOtherRoutesSharedOptions()
+    {
+        // UseOutbox(configure) must mutate a clone, never the shared AddOutbox(...) singleton -
+        // otherwise one route's override would leak into every other route sharing the container.
+        var (services, container) = NewContainer();
+        container.AddOutbox(); // process-wide default stays Immediate
+        container.AddInMemoryOutboxStore();
+        container.AddOutboundRouting(routing => routing
+            .Route("transactional:topic", pipeline => pipeline.UseOutbox(o => o.WriteMode = OutboxWriteMode.Transactional))
+            .Route("immediate:topic", pipeline => pipeline.UseOutbox()));
+
+        var resolver = new MicrosoftServiceResolverAdapter(services.BuildServiceProvider());
+        var sender = resolver.GetService<IBenzeneMessageSender>();
+        await sender.SendAsync<string, Void>("immediate:topic", "payload");
+
+        var store = resolver.GetService<IOutboxStore>();
+        var due = Assert.Single(await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1)));
+        Assert.Equal("immediate:topic", due.Topic);
+    }
 }

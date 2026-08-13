@@ -2,20 +2,19 @@ namespace Benzene.Outbox;
 
 /// <summary>
 /// Configuration for the outbox: both the per-route capture behavior (<see cref="WriteMode"/>,
-/// <see cref="StampIdempotencyKey"/>, set via <c>UseOutbox(configure)</c>) and the process-wide
-/// dispatch engine behavior (everything else, set via <c>AddOutbox(configure)</c>).
+/// <see cref="StampIdempotencyKey"/>, set via <c>AddOutbox(configure)</c> and optionally overridden
+/// per route via <c>UseOutbox(configure)</c>) and the process-wide dispatch engine behavior
+/// (everything else, set via <c>AddOutbox(configure)</c> only).
 /// </summary>
 /// <remarks>
-/// <see cref="Extensions.UseOutbox"/> and <see cref="Extensions.AddOutbox"/> each build their own,
-/// independent <see cref="OutboxOptions"/> instance - mirroring how <c>Benzene.Idempotency</c>'s
-/// <c>UseIdempotency</c> builds its own <c>IdempotencyOptions</c> per route, unrelated to any other
-/// route's. A route that wants <see cref="OutboxWriteMode.Transactional"/> must say so at its own
-/// <c>UseOutbox(o => o.WriteMode = OutboxWriteMode.Transactional)</c> call even if every other route
-/// uses the default - the fields set via <c>AddOutbox</c> (<see cref="MaxAttempts"/>,
-/// <see cref="BackoffBase"/>, <see cref="BackoffCap"/>, <see cref="RetentionPeriod"/>,
-/// <see cref="BatchSize"/>, <see cref="ClaimLease"/>, <see cref="PollInterval"/>) configure the one
-/// shared <see cref="IOutboxDispatcher"/>/<see cref="OutboxDispatcherWorker"/> instead, and are
-/// naturally process-wide rather than per-route.
+/// <see cref="Extensions.AddOutbox"/> registers the one shared <see cref="OutboxOptions"/> instance
+/// that both the dispatch engine and every route's default capture behavior read - so
+/// <c>AddOutbox(o => o.WriteMode = OutboxWriteMode.Transactional)</c> alone makes every subsequent
+/// bare <c>UseOutbox()</c> call capture transactionally, with no need to repeat the setting per
+/// route. <see cref="Extensions.UseOutbox"/> starts from a **clone** of that shared instance (never
+/// the shared instance itself, so one route's override can never bleed into another's) and applies
+/// its own <c>configure</c> delegate on top - so a route that wants to diverge from the process-wide
+/// default still can, via its own <c>UseOutbox(o => o.WriteMode = ...)</c> call.
 /// </remarks>
 public class OutboxOptions
 {
@@ -80,4 +79,19 @@ public class OutboxOptions
     /// <c>UseOutbox</c>).
     /// </summary>
     public OutboxWriteMode WriteMode { get; set; } = OutboxWriteMode.Immediate;
+
+    /// <summary>Returns a shallow copy - used by <c>UseOutbox</c> to derive a per-route options
+    /// instance from the shared one <c>AddOutbox</c> registered, without ever mutating it.</summary>
+    internal OutboxOptions Clone() => new()
+    {
+        MaxAttempts = MaxAttempts,
+        BackoffBase = BackoffBase,
+        BackoffCap = BackoffCap,
+        RetentionPeriod = RetentionPeriod,
+        BatchSize = BatchSize,
+        ClaimLease = ClaimLease,
+        PollInterval = PollInterval,
+        StampIdempotencyKey = StampIdempotencyKey,
+        WriteMode = WriteMode,
+    };
 }

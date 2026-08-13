@@ -78,13 +78,14 @@ Neither write mode is exactly-once. Read this before picking one.
   topic, serialized payload + its assembly-qualified type, the post-stamping header snapshot,
   attempt/retry bookkeeping, and lifecycle status.
 - `OutboxStatus` - `Pending` / `Dispatched` / `Parked`.
-- `OutboxOptions` - **one class serving two independent configuration surfaces** (see its own
-  xmldoc remarks): `UseOutbox(configure)` builds its own instance and only reads `WriteMode`/
-  `StampIdempotencyKey` from it; `AddOutbox(configure)` builds a *separate* instance, registered
-  singleton, that the dispatch engine reads for everything else (`MaxAttempts`, `BackoffBase`,
-  `BackoffCap`, `RetentionPeriod`, `BatchSize`, `ClaimLease`, `PollInterval`). A route that wants
-  `Transactional` mode must say so at its own `UseOutbox(...)` call even if `AddOutbox(...)` set
-  something else - they don't share state.
+- `OutboxOptions` - **one shared instance, with per-route override** (see its own xmldoc remarks):
+  `AddOutbox(configure)` registers the one singleton both the dispatch engine (`MaxAttempts`,
+  `BackoffBase`, `BackoffCap`, `RetentionPeriod`, `BatchSize`, `ClaimLease`, `PollInterval`) and
+  every route's default capture behavior (`WriteMode`, `StampIdempotencyKey`) read - so
+  `AddOutbox(o => o.WriteMode = Transactional)` alone makes every bare `UseOutbox()` call capture
+  transactionally. `UseOutbox(configure)` clones that shared instance and applies its own delegate
+  on top, so a specific route can still diverge without mutating the shared singleton or affecting
+  any other route.
 - `IOutboxStore` - the pluggable persistence contract: `AddAsync`, `ClaimDueAsync`/`ClaimAsync`
   (**must be atomic/conditional per envelope** - the same hard requirement
   `IIdempotencyStore.TryClaimAsync` places on its implementations), `MarkDispatchedAsync`,
