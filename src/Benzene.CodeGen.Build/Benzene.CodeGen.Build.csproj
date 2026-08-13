@@ -23,6 +23,13 @@
     <!-- NU5128: "no lib/ref assemblies" - expected and correct for a targets-only pack, which ships
          no compiled assembly of its own. -->
     <NoWarn>$(NoWarn);NU5128</NoWarn>
+    <!-- src/Directory.Build.props turns on IncludeSymbols/SymbolPackageFormat=snupkg for every
+         packable project under src/, but IncludeBuildOutput=false above means no .dll/.pdb ever
+         reaches ANY package this project produces - so the symbols-package pass finds nothing to
+         put in a .snupkg and NuGet refuses to create an empty one (NU5017), failing `dotnet pack`
+         for the whole solution. There's no compiled assembly here to symbolicate, so there's
+         nothing a .snupkg could usefully carry - disable it for this project specifically. -->
+    <IncludeSymbols>false</IncludeSymbols>
   </PropertyGroup>
 
   <ItemGroup>
