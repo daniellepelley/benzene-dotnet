@@ -149,6 +149,11 @@ public class AtomicClientSdkBuilder : ICodeBuilder<EventServiceDocument>
             Namespace = $"{_options.Namespace}.{clientName}",
             Topics = new[] { request.Topic },
             IncludeReservedTopics = true,
+            // This is contract-document.md §5.3's topic-scoped shape: its contract hash (§6.2) does
+            // not strip a reserved entry entirely (only its flag, already reflected by `filtered`
+            // above being narrowed to this one request) - an atomic client explicitly built for one
+            // reserved topic hashes that topic's contract, not an empty one.
+            IsTopicScopedForHash = true,
         };
 
         return new MessageClientSdkBuilder(innerOptions)
@@ -161,40 +166,6 @@ public class AtomicClientSdkBuilder : ICodeBuilder<EventServiceDocument>
     // atomic client emits (and hashes) just that topic's DTOs rather than the whole service catalogue.
     private static IDictionary<string, OpenApiSchema> ReachableSchemas(EventServiceDocument document, RequestResponse request)
     {
-        var catalogue = document.Components.Schemas;
-        var reached = new HashSet<string>();
-
-        void Walk(OpenApiSchema? schema)
-        {
-            if (schema == null)
-            {
-                return;
-            }
-
-            var referenceId = schema.Reference?.Id;
-            // reached.Add short-circuits already-visited components, so reference cycles terminate.
-            if (referenceId != null && catalogue.ContainsKey(referenceId) && reached.Add(referenceId))
-            {
-                Walk(catalogue[referenceId]);
-            }
-
-            Walk(schema.Items);
-            Walk(schema.AdditionalProperties);
-            foreach (var property in schema.Properties.Values)
-            {
-                Walk(property);
-            }
-            foreach (var composed in schema.AllOf.Concat(schema.AnyOf).Concat(schema.OneOf))
-            {
-                Walk(composed);
-            }
-        }
-
-        Walk(request.Request);
-        Walk(request.Response);
-
-        return catalogue
-            .Where(entry => reached.Contains(entry.Key))
-            .ToDictionary(entry => entry.Key, entry => entry.Value);
+        return SchemaClosure.Reachable(document.Components.Schemas, request.Request, request.Response);
     }
 }

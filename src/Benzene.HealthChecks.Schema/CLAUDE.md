@@ -12,15 +12,24 @@ from what their generated client was built against. This revives the (long-comme
 provider: SchemaHealthCheck  ──"schema" health check {hashCode}──▶  consumer: ClientHealthCheckProcessor
             (this package)                                            (Benzene.Clients.HealthChecks)
                  ▲                                                              ▲
-   CodeGenHelpers.GenerateHash(live handlers)          {Service}ServiceClient.HashCode (baked at codegen)
+   ContractHash.Compute(live handlers)                 {Service}ServiceClient.HashCode (baked at codegen)
                  └──────────────── same hash function ─────────────────────────┘
 ```
 - **`SchemaHealthCheck`** resolves `IMessageHandlerDefinitionLookUp`, calls
-  `CodeGenHelpers.GenerateHash(GetAllHandlers())` (`Benzene.CodeGen.Core`), and returns a health
+  `ContractHash.Compute(GetAllHandlers())` (`Benzene.CodeGen.Core`), and returns a health
   result of `Type = "schema"` with the hash under `Data["hashCode"]`.
-- **Crucially**, it uses the *same* `CodeGenHelpers.GenerateHash` that `Benzene.CodeGen.Client` bakes
-  into a generated `{Service}ServiceClient.HashCode`. So the live provider hash and the consumer's
-  baked-in hash are directly comparable - equal means no drift, different means the contract changed.
+- **Crucially**, it uses the *same* `ContractHash` (the spec-pinned `contractHash`,
+  `contract-document.md` §6 in the cross-language Benzene repo) that `Benzene.CodeGen.Client` bakes
+  into a generated `{Service}ServiceClient.HashCode`. It hashes **every** registered handler
+  (reserved `benzene:*` topics included) rather than pre-filtering them, because `ContractHash`
+  itself applies §5.1's domain-projection rule (reserved entries excluded from a whole-service hash)
+  - the same rule `MessageClientSdkBuilder`'s `TopicScope` applies before a default client is even
+  generated. Pre-filtering here would double-apply the rule and risk drifting from it; passing every
+  handler through and letting `ContractHash` project is what keeps the two sides honest. So the live
+  provider hash and the consumer's baked-in hash are directly comparable - equal means no drift,
+  different means the contract changed. (Before this alignment, the provider hashed every handler
+  under the *old*, non-projecting algorithm while a default client's hash was already domain-scoped
+  before hashing - the two could never match; see `work/cross-language-clients-plan.md` Phase 2.)
 - The wire contract (the `Type` and `Data` key strings) lives in
   `Benzene.HealthChecks.Core.SchemaHealthCheckConstants`, referenced by both this package and the
   consumer-side processor so they can't drift on a literal.
@@ -36,8 +45,11 @@ provider: SchemaHealthCheck  ──"schema" health check {hashCode}──▶  co
 
 ## Dependencies on other Benzene packages
 - **Benzene.Abstractions** - `IMessageHandlerDefinitionLookUp`, DI `IServiceResolver`.
-- **Benzene.CodeGen.Core** - `CodeGenHelpers.GenerateHash` (the canonical contract hash; lightweight,
-  only pulls in `Benzene.Schema.OpenApi`, no Roslyn).
+- **Benzene.CodeGen.Core** - `ContractHash.Compute` (the canonical, spec-pinned contract hash;
+  lightweight, only pulls in `Benzene.Schema.OpenApi` + `System.Text.Json`, no Roslyn). Not
+  `CodeGenHelpers.GenerateHash` - that older HMAC-SHA256-over-Microsoft.OpenApi-JSON algorithm is
+  unchanged but no longer used here; it lives on only because `Benzene.Mesh.Contracts.MeshHashing`
+  deliberately mirrors it for a different, .NET-internal hash (mesh.md §9).
 - **Benzene.HealthChecks.Core** - `IHealthCheck`, `HealthCheckResult`, `SchemaHealthCheckConstants`.
 
 ## Conventions / notes
@@ -46,9 +58,10 @@ provider: SchemaHealthCheck  ──"schema" health check {hashCode}──▶  co
   robust whether the value arrives as a string, a System.Text.Json `JsonElement`, or a Newtonsoft
   `JToken`. (The old consumer processor used `dynamic Data["data"].hashCode`, which only worked under
   Newtonsoft - hardened as part of this change.)
-- Runtime hashing goes through the same `EventServiceDocument` normalization CodeGen uses (strips
-  generated examples + the endpoint advert), so a service upgrade doesn't trip a false mismatch - see
-  `CodeGenHelpers.GenerateHash`'s doc comment.
+- Runtime hashing goes through the same `EventServiceDocument` normalization `ContractHash` uses
+  (strips generated examples, `messageEndpoint`, `transports`, and - for this whole-service call -
+  every reserved entry entirely), so a service upgrade doesn't trip a false mismatch - see
+  `ContractHash`'s doc comment (`Benzene.CodeGen.Core`).
 - Test coverage: `test/Benzene.Core.Test/HealthChecks/SchemaHealthCheckTest.cs` (canonical-hash +
   end-to-end match/drift) and `test/Benzene.Core.Test/Clients/ClientHealthCheckProcessorTest.cs`
   (processor robustness incl. the JsonElement wire-round-trip case).

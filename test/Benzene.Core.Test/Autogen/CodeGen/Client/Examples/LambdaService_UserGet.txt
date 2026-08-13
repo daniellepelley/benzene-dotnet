@@ -17,7 +17,7 @@ namespace Benzene.Service.Clients.User
             _sender = sender;
         }
 
-        public string HashCode => "2b8ce408c286c3e00fd2145dc81c3c71751896baf49b0c3f3d07fffeaf07ae07";
+        public string HashCode => "sha256:5d57b36d990db2a070e2c204bb9a09a6621ed2e70ec5c393ce84f3551bfdf143";
 
         public Task<IBenzeneResult<UserDtoMessageWrapper>> GetUserAsync(GetUserMessage message)
         {

@@ -37,9 +37,9 @@ public class SchemaHealthCheckTest
         var result = await new SchemaHealthCheck(Lookup(handlers).Object).ExecuteAsync();
 
         Assert.Equal(SchemaHealthCheckConstants.Type, result.Type);
-        // The provider publishes exactly the hash CodeGen bakes into a generated client, so the two
-        // are directly comparable.
-        Assert.Equal(CodeGenHelpers.GenerateHash(handlers),
+        // The provider publishes exactly the spec-pinned contractHash (contract-document.md §6)
+        // CodeGen bakes into a generated client, so the two are directly comparable.
+        Assert.Equal(ContractHash.Compute(handlers),
             result.Data[SchemaHealthCheckConstants.HashCodeKey]?.ToString());
     }
 
@@ -47,8 +47,8 @@ public class SchemaHealthCheckTest
     public async Task EndToEnd_ProviderHashMatchesClientBakedHash_ReportsMatch()
     {
         var handlers = Handlers();
-        // A consumer's generated client bakes in CodeGenHelpers.GenerateHash(...) at generation time.
-        var clientBakedHash = CodeGenHelpers.GenerateHash(handlers);
+        // A consumer's generated client bakes in ContractHash.Compute(...) at generation time.
+        var clientBakedHash = ContractHash.Compute(handlers);
 
         var schemaResult = (HealthCheckResult)await new SchemaHealthCheck(Lookup(handlers).Object).ExecuteAsync();
         var providerResponse = new HealthCheckResponse(true,
@@ -65,7 +65,7 @@ public class SchemaHealthCheckTest
     public async Task EndToEnd_ProviderContractChanged_ReportsDrift()
     {
         // The client was generated against the original contract...
-        var clientBakedHash = CodeGenHelpers.GenerateHash(Handlers());
+        var clientBakedHash = ContractHash.Compute(Handlers());
 
         // ...but the provider now exposes a different contract (an extra handler).
         var changedHandlers = new IMessageHandlerDefinition[]

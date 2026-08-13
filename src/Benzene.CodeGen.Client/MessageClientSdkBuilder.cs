@@ -188,7 +188,10 @@ public class MessageClientSdkBuilder : ICodeBuilder<EventServiceDocument>
 
     private void AddHashCode(EventServiceDocument eventServiceDocument, LineWriter lineWriter)
     {
-        var hashCode = CodeGenHelpers.GenerateHash(eventServiceDocument);
+        // The spec-pinned contractHash (contract-document.md §6) - see ContractHash for why this is
+        // a distinct algorithm from CodeGenHelpers.GenerateHash. _options.IsTopicScopedForHash is set
+        // only by AtomicClientSdkBuilder's inner options, for its single-topic (§5.3) document.
+        var hashCode = ContractHash.Compute(eventServiceDocument, _options.IsTopicScopedForHash);
         lineWriter.WriteLine($@"public string HashCode => ""{hashCode}"";", 2);
         lineWriter.WriteLine();
     }

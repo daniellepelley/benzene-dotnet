@@ -1,3 +1,4 @@
+using Benzene.Schema.OpenApi;
 using Benzene.Schema.OpenApi.EventService;
 
 namespace Benzene.CodeGen.Client;
@@ -46,10 +47,16 @@ internal static class TopicScope
 
         var included = requestedTopics != null ? new HashSet<string>(requestedTopics, StringComparer.Ordinal) : null;
 
+        // contract-document.md §5.1: a request is reserved when EITHER its `reserved` flag is true OR
+        // its topic starts with `benzene:` - the OR matters because a document from an older producer
+        // build (or one deserialized from a committed .spec.json rather than built fresh from
+        // handlers) may carry a reserved topic with no `reserved` flag at all.
+        bool IsReserved(RequestResponse request) => request.Reserved || ReservedTopics.IsReserved(request.Topic);
+
         bool InScope(RequestResponse request)
             => included != null
                 ? included.Contains(request.Topic)
-                : options.IncludeReservedTopics || !request.Reserved;
+                : options.IncludeReservedTopics || !IsReserved(request);
 
         var filteredRequests = document.Requests.Where(InScope).ToArray();
 

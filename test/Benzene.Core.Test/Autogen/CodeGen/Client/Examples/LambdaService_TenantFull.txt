@@ -17,7 +17,7 @@ namespace Benzene.Service.Clients.Tenant
             _sender = sender;
         }
 
-        public string HashCode => "f7666334812315507767d314287501a0eb240dd2ebb58e6dc3731c9906eca6dd";
+        public string HashCode => "sha256:9af056e1799a11339f5ea59d8312a2ef6f1f4e5a278181a0d10fc14d0b622cc7";
 
         public Task<IBenzeneResult<TenantDto>> GetTenantAsync(GetTenantMessage message)
         {

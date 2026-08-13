@@ -58,6 +58,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   around them was removed.
 
 ### Changed
+- **Generated client contract hash (`{Service}ServiceClient.HashCode`) and the provider-side
+  `SchemaHealthCheck` hash now use the spec-pinned, portable `contractHash` algorithm** (Phase 2 of
+  `work/cross-language-clients-plan.md`; spec: `contract-document.md` §6 in the cross-language
+  Benzene repo): `"sha256:" + lowercase-hex(sha256(canonicalJSON(normalize(document))))`, with
+  `canonicalJSON` being RFC 8785 (JCS) - new code in `Benzene.CodeGen.Core.ContractHash` and
+  `Benzene.CodeGen.Core.JsonCanonicalizer` (a hand-rolled RFC 8785 canonicalizer; no off-the-shelf
+  .NET implementation exists). This replaces the old `CodeGenHelpers.GenerateHash(EventServiceDocument)`
+  call site in `MessageClientSdkBuilder`/`SchemaHealthCheck` - `CodeGenHelpers.GenerateHash` itself is
+  **unchanged** and still used by `Benzene.Mesh.Contracts.MeshHashing`'s sibling, deliberately
+  .NET-internal `descriptorHash`/mesh-drift hash (mesh.md §9), which this does not touch.
+  - **Value change, once, for every service.** The old hash (HMAC-SHA256 over the Microsoft.OpenApi
+    serializer's own JSON output) was not portable to other languages; every hash value baked into a
+    generated client, and every hash a running service publishes, changes the first time each is
+    rebuilt against this version. Regenerate clients and redeploy the services they target together
+    to avoid a one-time contract-drift *warning* (not a failure - see
+    [`docs/client-sdks.md`](docs/client-sdks.md#the-contract-hash-algorithm)) in a mixed-version
+    fleet.
+  - **Fixes a latent bug**: since `d280caa` (generated clients cover domain topics only), a
+    default-generated client's hash was computed over its already domain-scoped document while
+    `SchemaHealthCheck` hashed *every* registered handler including reserved `benzene:*` topics - the
+    two could never match. Both sides now apply the same domain projection (a whole-service contract
+    hash excludes reserved entries entirely; a topic-scoped, per-topic client's hash does not, per
+    `contract-document.md` §6.2), so a consumer's baked-in hash and a live service's published hash
+    are directly comparable again.
+  - **Fixes a related gap in `TopicScope`** (`Benzene.CodeGen.Client`, internal): reserved-topic
+    detection now applies contract-document.md §5.1's full rule - the `reserved` flag **or** the
+    `benzene:` topic prefix - rather than the flag alone, so a document missing the flag (e.g. from
+    an older producer, or hand-authored) is still scoped correctly by default.
 - **BREAKING:** `IBenzeneResult.Errors` (`Benzene.Abstractions.Results`) changes from `string[]` to
   `IReadOnlyList<BenzeneError>` - Phase 2 of `work/problem-details-plan.md`, implementing the
   already-approved `work/benzene-result-errors-ruling.md` (ruled 2026-07-25) as written. **New type

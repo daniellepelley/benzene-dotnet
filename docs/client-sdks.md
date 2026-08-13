@@ -60,6 +60,25 @@ This produces `HelloWorldServiceClient.cs` containing a `HelloWorldServiceClient
 `HelloWorldAsync(HelloWorldMessage message)` method (plus a header-aware overload) and a `HashCode`
 property carrying the hash of the contract it was generated against.
 
+### The contract hash algorithm
+
+`HashCode` is the language-neutral `contractHash` pinned by the cross-language Benzene spec
+([`contract-document.md` §6](https://github.com/daniellepelley/Benzene/blob/main/docs/specification/contract-document.md)):
+`"sha256:" + lowercase-hex(sha256(canonicalJSON(normalize(document))))`, with `canonicalJSON` being
+RFC 8785 (JCS). It's computed by `Benzene.CodeGen.Core.ContractHash` and, on the provider side, by
+`Benzene.HealthChecks.Schema.SchemaHealthCheck` — both apply the same domain projection (reserved
+`benzene:*` topics excluded, §5.1), so a consumer's generated `HashCode` and a live service's
+published hash are directly comparable for the same service. This is a change from the hash values
+Benzene generated before this document was written (a non-portable, .NET-serializer-specific
+HMAC-SHA256 hash) — see the migration note below.
+
+**Migrating:** hash *values* changed once, for every service, when a Benzene version adopting this
+algorithm shipped. Regenerating a client and redeploying the service it targets together produces
+matching hashes as before; in a fleet where clients and services upgrade independently, a client
+generated against the old algorithm shows one contract-drift *warning* (not a failure — see
+[Contract testing](cookbooks/contract-testing.md#mechanism-1--runtime-contract-drift-check)) against
+an upgraded service, until it is regenerated. No other generated-client behavior changed.
+
 ## Using the generated client
 
 The generated client takes an `IBenzeneMessageSender` (from `Benzene.Clients`) in its constructor

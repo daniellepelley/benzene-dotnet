@@ -42,4 +42,17 @@ public class ClientSdkOptions
     /// this default.
     /// </summary>
     public bool IncludeReservedTopics { get; set; }
+
+    /// <summary>
+    /// Selects which of <c>contract-document.md</c> §6.2's two <c>normalize()</c> behaviours
+    /// <see cref="MessageClientSdkBuilder"/>'s embedded contract hash uses for reserved
+    /// <see cref="Benzene.Schema.OpenApi.EventService.RequestResponse"/> entries: <c>false</c> (the
+    /// default) strips them entirely, matching the domain-only whole-service/service-level
+    /// projection; <c>true</c> - set only by <see cref="AtomicClientSdkBuilder"/> on the single-topic
+    /// document it builds internally, §5.3's topic-scoped shape - does not, so a topic explicitly
+    /// named in an atomic client's include-list survives the hash even if it is reserved. Internal:
+    /// this is a hash-normalization detail of how the two builders divide the work, not something a
+    /// caller configuring either builder chooses directly.
+    /// </summary>
+    internal bool IsTopicScopedForHash { get; set; }
 }

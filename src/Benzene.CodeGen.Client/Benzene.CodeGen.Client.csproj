@@ -13,4 +13,11 @@
     <ProjectReference Include="..\Benzene.CodeGen.Core\Benzene.CodeGen.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- TopicScope and SchemaClosure are internal (see their own doc comments); the conformance
+         runner exercises them directly against the language-neutral fixtures rather than through
+         Benzene.Test's golden-file/behavioural tests. -->
+    <InternalsVisibleTo Include="Benzene.Conformance.Test" />
+  </ItemGroup>
+
 </Project>
