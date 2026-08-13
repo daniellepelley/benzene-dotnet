@@ -193,9 +193,42 @@ command-line use — see the two shapes above, plus `--file`/`--url`/`--mesh` fo
 from (Phase 1's build artifact, a running service's spec endpoint, or a mesh manifest, all offline
 of any deployed AWS Lambda).
 
+## One-line MSBuild integration
+
+Everything above assumes you run `benzene build` yourself, by hand, whenever a contract changes.
+`Benzene.CodeGen.Build` removes that step: commit the producer's `.spec.json` file into your repo
+(the same way you'd commit a `.proto` file or an OpenAPI document — Phase 1's
+[`Benzene.Descriptor`](reference/packages.md#code-generation--tooling) emits one on every producer
+build, or run `benzene spec` and save its output), add one item, and the client regenerates and
+compiles automatically:
+
+```xml
+<ItemGroup>
+  <BenzeneServiceContract Include="contracts/orders.spec.json"
+                           Mode="topic-client"
+                           ServiceName="Orders"
+                           Namespace="Acme.Orders.Clients"
+                           Topics="order:create,order:cancel" />
+</ItemGroup>
+```
+
+`Mode` (default `topic-client`), `ServiceName` (default: the file's own stem) and the optional
+`Namespace`/`Topics` map 1:1 onto the `-output`/`-service-name`/`-namespace`/`-topics` flags shown
+above — this is the exact same `benzene build -file` flow, just run automatically before every
+`CoreCompile` instead of by hand. Regeneration is incremental (an unchanged contract is skipped on
+the next build, ordinary MSBuild `Inputs`/`Outputs`, nothing bespoke) and a broken contract **fails
+the build** with the CLI's own error message, rather than reporting a silent green build with a stale
+or missing client.
+
+See [`examples/CodeGen/Benzene.Examples.CodeGen.Contracts.Consumer`](../examples/CodeGen/Benzene.Examples.CodeGen.Contracts.Consumer)
+for a complete, building example, and `src/Benzene.CodeGen.Build/README.md` for the full attribute
+reference and how to point it at the CLI another way (a local tool manifest, or running it from
+source).
+
 ## Further Reading
 
 - [OpenAPI Specification](spec.md) - the `spec` endpoint the document comes from
 - [Package Reference](reference/packages.md#code-generation--tooling) - the code-generation packages
 - [Package Reference: outbound clients](reference/packages.md#outbound-messaging-clients) - transports the client sends over
 - [Message Handlers](message-handlers.md) - the contracts the SDK is generated from
+- [Contract Artifacts](contract-artifacts.md) - `Benzene.Descriptor`, the producer-side tool that emits the `.spec.json` file this section's `<BenzeneServiceContract>` item consumes

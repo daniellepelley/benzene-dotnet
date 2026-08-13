@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Benzene.CodeGen.Build — the MSBuild one-liner for client generation (implementation plan Phase 6,
+    work/spec-mesh-tooling-implementation-plan.md): drop a <BenzeneServiceContract> item pointing at a
+    committed spec JSON file and get a typed client, regenerated incrementally, compiled straight into
+    the consuming project. See build/Benzene.CodeGen.Build.targets for the mechanics and README.md for
+    the consumer-facing guide.
+
+    Targets-only package: no assembly of its own (IncludeBuildOutput=false, NU5128 suppressed - "no
+    lib/ref assemblies" is expected and correct here), just the .targets/.props packed into build\.
+    Shells out to the `benzene` CLI tool (Benzene.CodeGen.Cli, PackAsTool) the same way
+    Benzene.Descriptor's targets shell out to `benzene-descriptor` - see BenzeneCliCommand in the
+    targets file.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Benzene.CodeGen.Build</AssemblyName>
+    <RootNamespace>Benzene.CodeGen.Build</RootNamespace>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <Description>MSBuild one-liner client generation for Benzene: add a &lt;BenzeneServiceContract&gt; item pointing at a committed spec JSON file and get a typed client SDK regenerated incrementally and compiled straight into your project.</Description>
+    <PackageTags>benzene;codegen;msbuild;client-sdk;source-generation</PackageTags>
+    <!-- NU5128: "no lib/ref assemblies" - expected and correct for a targets-only pack, which ships
+         no compiled assembly of its own. -->
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Pack the MSBuild item/target definitions into the package. NuGet does not auto-import a tool
+         package's targets in every scenario a reach-in consumer might use (see README.md), so this is
+         also copy-or-explicitly-import material, same as Benzene.Descriptor's build\ folder. -->
+    <None Include="build\**" Pack="true" PackagePath="build\" />
+  </ItemGroup>
+
+</Project>

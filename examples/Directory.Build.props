@@ -25,6 +25,12 @@
          PATH dependency required. Anchored on $(MSBuildThisFileDirectory) rather than a per-project
          relative path so it stays correct no matter how deeply an opting-in example is nested. -->
     <BenzeneDescriptorCommand Condition="'$(BenzeneDescriptorCommand)' == ''">dotnet run --project "$(MSBuildThisFileDirectory)..\src\Benzene.Descriptor\Benzene.Descriptor.csproj" -c $(Configuration) --</BenzeneDescriptorCommand>
+
+    <!-- Same reasoning as BenzeneDescriptorCommand above, for any example that adds a
+         <BenzeneServiceContract> item (see src/Benzene.CodeGen.Build/build/Benzene.CodeGen.Build.targets):
+         the packaged `benzene` tool cannot be assumed to be on PATH when Benzene.Examples.sln builds
+         in its own separate CI job, so run it from source instead. -->
+    <BenzeneCliCommand Condition="'$(BenzeneCliCommand)' == ''">dotnet run --project "$(MSBuildThisFileDirectory)..\src\Benzene.CodeGen.Cli\Benzene.CodeGen.Cli.csproj" -c $(Configuration) --</BenzeneCliCommand>
   </PropertyGroup>
 
 </Project>

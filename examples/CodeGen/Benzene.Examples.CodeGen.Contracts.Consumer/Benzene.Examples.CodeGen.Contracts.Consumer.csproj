@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Proves Benzene.CodeGen.Build's MSBuild one-liner (implementation plan Phase 6/6b,
+    work/spec-mesh-tooling-implementation-plan.md) end to end: contracts/payments.spec.json is a
+    committed fixture - what a producer team ("payments-api") would have published, generated once
+    via Benzene.Descriptor against the real examples/AwsMesh/Payments service and committed here as a
+    static file, exactly the way a consumer team would commit a copy of a producer's contract into
+    their own repo. It is NOT wired to regenerate itself from a live service - see the
+    BenzeneServiceContract item below, which points at the committed file, not a URL or a running
+    lambda.
+
+    Unlike Benzene.Examples.CodeGen.Client (a unit-test-style demo calling MessageClientSdkBuilder
+    in-process), this project is MSBuild-driven: the <BenzeneServiceContract> item below causes
+    Benzene.CodeGen.Build's targets to shell out to the `benzene` CLI before every CoreCompile and
+    compile the result straight in - see Program.cs, which references the generated client type by
+    name so a broken/uncompilable generated client fails this solution's build for real, not just
+    "files got written to disk".
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>Benzene.Examples.CodeGen.Contracts.Consumer</AssemblyName>
+    <RootNamespace>Benzene.Examples.CodeGen.Contracts.Consumer</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <BenzeneServiceContract Include="contracts\payments.spec.json"
+                             Mode="topic-client"
+                             ServiceName="Payments"
+                             Namespace="Benzene.Examples.CodeGen.Contracts.Consumer.Generated"
+                             Topics="payments:capture,payments:get-all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- What the generated topic-client code itself needs to compile - see
+         src/Benzene.CodeGen.Build/CLAUDE.md for exactly which packages and why. -->
+    <ProjectReference Include="..\..\..\src\Benzene.Abstractions\Benzene.Abstractions.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Clients\Benzene.Clients.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Clients.HealthChecks\Benzene.Clients.HealthChecks.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.HealthChecks.Core\Benzene.HealthChecks.Core.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Results\Benzene.Results.csproj" />
+  </ItemGroup>
+
+  <!-- Benzene.CodeGen.Build is a dotnet tool's targets, not consumed via PackageReference in-tree
+       (this repo doesn't restore its own tools as packages), so it's imported directly from source -
+       same pattern examples/AwsMesh/Payments uses for Benzene.Descriptor.targets. BenzeneCliCommand
+       (which points this at running the benzene CLI from source, not PATH) is set once for every
+       example in examples/Directory.Build.props. -->
+  <Import Project="..\..\..\src\Benzene.CodeGen.Build\build\Benzene.CodeGen.Build.targets" />
+
+</Project>

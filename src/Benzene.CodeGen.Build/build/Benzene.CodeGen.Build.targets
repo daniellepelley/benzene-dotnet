@@ -1,0 +1,121 @@
+<Project>
+  <!--
+    Build integration for one-line client generation from a committed spec JSON file. See README.md
+    for the consumer-facing guide and work/spec-mesh-tooling-implementation-plan.md's Phase 6/6b for
+    the design.
+
+    Usage: add one item per contract this project consumes -
+
+        <ItemGroup>
+          <BenzeneServiceContract Include="contracts/orders.spec.json" Mode="topic-client"
+                                   ServiceName="Orders" Namespace="Contracts.Orders"
+                                   Topics="order:create,order:cancel" />
+        </ItemGroup>
+
+    Mode defaults to "topic-client" (a small self-contained client per topic - see
+    Benzene.CodeGen.Client.AtomicClientSdkBuilder); other valid values are "client",
+    "message-handlers" and "readme", kept in sync with Benzene.CodeGen.Cli.Core's
+    CodeBuilderFactory.ValidOutputs - an unrecognized value is the CLI's own error, surfaced through
+    Exec below, not caught here. ServiceName defaults to the file's own stem (e.g. "orders.spec.json"
+    -> "Orders"). Namespace/Topics are optional and passed through as -namespace/-topics exactly
+    when given.
+
+    Runs before CoreCompile, regenerating only the contracts whose spec file changed since the last
+    build (MSBuild's normal Inputs/Outputs incremental machinery, keyed off a per-contract stamp file
+    - see BenzeneGenerateClients below) and always re-adding whatever's currently on disk in the
+    generated-sources folder to Compile (BenzeneAddGeneratedClientSources below) - the second half
+    matters even when generation itself was skipped, since a skipped target runs none of its child
+    elements, generated .cs files from an earlier build would otherwise silently stop being compiled.
+
+    A failing generation fails the build (Exec has no ContinueOnError - the CLI's real exit codes,
+    see docs/cli.md, make that meaningful): a project whose contract can't be turned into a client
+    should not report a green build.
+
+    Assumes the `benzene` tool is on PATH (a global tool, or a local tool restored via a
+    .config/dotnet-tools.json manifest). Override BenzeneCliCommand to invoke it another way (e.g.
+    running it via "dotnet tool run", or - as this repo's own examples do, see
+    examples/Directory.Build.props - building and running it from source with a "dotnet run" form
+    when the packaged tool can't be assumed to be built/on PATH yet).
+  -->
+  <PropertyGroup>
+    <BenzeneCliCommand Condition="'$(BenzeneCliCommand)' == ''">benzene</BenzeneCliCommand>
+  </PropertyGroup>
+
+  <!-- Defaults applied only when the item doesn't already carry its own value - an explicit
+       Mode/ServiceName on the <BenzeneServiceContract Include=".../> always wins. ServiceName's
+       default (%(Filename), the well-known metadata for the Include path's file stem) is resolved
+       per item, not a single fixed string, because ItemDefinitionGroup metadata values are
+       themselves evaluated against each item they apply to. -->
+  <ItemDefinitionGroup>
+    <BenzeneServiceContract>
+      <Mode>topic-client</Mode>
+      <ServiceName>%(Filename)</ServiceName>
+    </BenzeneServiceContract>
+  </ItemDefinitionGroup>
+
+  <Target Name="BenzeneGenerateClients"
+          BeforeTargets="CoreCompile"
+          Condition="'@(BenzeneServiceContract)' != ''"
+          Inputs="@(BenzeneServiceContract)"
+          Outputs="@(BenzeneServiceContract -> '$(IntermediateOutputPath)benzene\%(ServiceName)\.generated.stamp')">
+    <!--
+      $(IntermediateOutputPath) is deliberately read here, inside the target, and again in every
+      %(...) transform below - never captured into a top-level property outside a target. A
+      top-level PropertyGroup in an imported .targets file evaluates before the SDK's own targets
+      (which set $(IntermediateOutputPath)) have run, so it would capture an empty value; a Target's
+      Inputs/Outputs and its own body both evaluate later, once every import - including the SDK's -
+      has already been processed, so both see it resolved correctly. Benzene.Descriptor.targets hit
+      this exact trap first for $(TargetDir); the same fix applies here.
+
+      The per-item extra arguments (_NamespaceArg/_TopicsArg) are computed as ITEM metadata via an
+      <ItemGroup> Update, not as $(Properties): a $(Property) conditionally set from %(metadata) is
+      NOT batch-scoped - MSBuild batches each metadata-referencing element independently, so a
+      PropertyGroup's own batching pass runs to completion (ending on whichever item's condition was
+      met last) before a later Exec's batching pass even starts, silently leaking one contract's
+      -namespace onto every other contract's command line. Per-item metadata, by contrast, is
+      correctly scoped to the item that carries it no matter which task reads it.
+    -->
+    <ItemGroup>
+      <BenzeneServiceContract>
+        <_OutputDir>$(IntermediateOutputPath)benzene\%(ServiceName)\</_OutputDir>
+        <_NamespaceArg Condition="'%(Namespace)' != ''">-namespace &quot;%(Namespace)&quot;</_NamespaceArg>
+        <_NamespaceArg Condition="'%(Namespace)' == ''"></_NamespaceArg>
+        <_TopicsArg Condition="'%(Topics)' != ''">-topics &quot;%(Topics)&quot;</_TopicsArg>
+        <_TopicsArg Condition="'%(Topics)' == ''"></_TopicsArg>
+      </BenzeneServiceContract>
+    </ItemGroup>
+
+    <!-- %(FullPath) (well-known metadata: the Include path resolved to an absolute path), not the
+         raw Include, so this keeps working regardless of Exec's working directory. BenzeneCliCommand
+         is NOT quoted as a single token: it must also support a multi-word invocation (building and
+         running the CLI from source with a "dotnet run" form when it isn't installed on PATH) -
+         quoting it as one token would make a shell look for a single literal executable named after
+         the whole phrase. The CLI itself creates -directory if it doesn't exist yet
+         (Benzene.CodeGen.Core.CodeFileWriter), so no separate MakeDir is needed before this. -->
+    <Exec Command="$(BenzeneCliCommand) build -file &quot;%(BenzeneServiceContract.FullPath)&quot; -output %(BenzeneServiceContract.Mode) -service-name &quot;%(BenzeneServiceContract.ServiceName)&quot; -directory &quot;%(BenzeneServiceContract._OutputDir)&quot; %(BenzeneServiceContract._NamespaceArg) %(BenzeneServiceContract._TopicsArg)" />
+
+    <!-- One stamp per contract, written only after its Exec above succeeds - this is what
+         Inputs/Outputs compares timestamps against to decide whether a later build can skip
+         regenerating this particular contract. AlwaysCreate: the file's content never matters, only
+         its existence/mtime; its containing directory already exists by now (the CLI just wrote
+         generated sources into it). -->
+    <Touch Files="$(IntermediateOutputPath)benzene\%(BenzeneServiceContract.ServiceName)\.generated.stamp" AlwaysCreate="true" />
+  </Target>
+
+  <!--
+    Split from BenzeneGenerateClients on purpose: that target is Inputs/Outputs-skippable, so on a
+    build where every contract is already up to date, none of ITS child elements run at all - if
+    "add the generated files to Compile" lived there too, a clean incremental build would silently
+    stop compiling sources a previous build already generated. This target has no Inputs/Outputs of
+    its own, so it runs on every build regardless, re-globbing whatever currently exists on disk
+    (freshly (re)generated this build, or left over from an earlier one - either way, correct).
+  -->
+  <Target Name="BenzeneAddGeneratedClientSources"
+          BeforeTargets="CoreCompile"
+          DependsOnTargets="BenzeneGenerateClients"
+          Condition="'@(BenzeneServiceContract)' != ''">
+    <ItemGroup>
+      <Compile Include="$(IntermediateOutputPath)benzene\**\*.cs" />
+    </ItemGroup>
+  </Target>
+</Project>
