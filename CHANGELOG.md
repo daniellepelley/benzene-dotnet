@@ -58,6 +58,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   around them was removed.
 
 ### Added
+- **`benzene profile-check` is now a real CI gate.** Added `--fail-on` (`not-satisfied` default,
+  `inconclusive`, or `none`) and `--format` (`text` default, or `json` — the full
+  `CloudServiceProbeReport` plus the probed `url`), mirroring `benzene diff`'s existing
+  `--fail-on`/`--format` shape. Previously the command printed its summary and always returned
+  normally regardless of the probe's verdicts, so it always exited 0 even when every requirement
+  came back `NotSatisfied` — unusable as a CI gate despite the CLI's own doc comment claiming
+  otherwise (`Program.cs`'s exit-code mechanism only reacts to a thrown exception). A missing
+  `--url` now also throws (`ArgumentException`) instead of silently exiting 0. **Not breaking**:
+  existing `benzene profile-check --url <url>` invocations keep their default text output and
+  now correctly fail CI on a non-conformant service — the intended behavior, not a regression.
 - **Two new compile-time diagnostics from `Benzene.CodeGen.SourceGenerators`** (referenced by
   `Benzene.Core.MessageHandlers`, so every handler-carrying project gets them for free, in Visual
   Studio, Rider, and `dotnet build`/CI alike — no separate analyzer install):

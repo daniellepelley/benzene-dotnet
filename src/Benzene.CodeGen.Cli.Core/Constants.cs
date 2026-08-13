@@ -35,6 +35,10 @@ public static class Constants
     public const string HealthPathDescription = "Overrides the health endpoint path probed for R3. Defaults to /benzene/health";
     public const string NoTraceParentProbe = "no-traceparent-probe";
     public const string NoTraceParentProbeDescription = "Skips the R8 bonus traceparent header sent with the R4/R6 probe requests";
+    public const string ProfileCheckFormatDefault = "text";
+    public const string ProfileCheckFormatDescription = "The profile-check report format, either 'text' (human-readable, one line per requirement) or 'json' (the serialized probe report)";
+    public const string ProfileCheckFailOnDefault = "not-satisfied";
+    public const string ProfileCheckFailOnDescription = "The verdict that fails the command: 'not-satisfied' (exits non-zero if any requirement was independently observed as unmet), 'inconclusive' (also fails on a requirement the probe couldn't determine), or 'none' (report only, always exit 0)";
     public const string Baseline = "baseline";
     public const string BaselineDescription = "Path to the baseline (previous) Benzene spec JSON file";
     public const string Current = "current";

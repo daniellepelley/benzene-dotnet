@@ -18,4 +18,10 @@ public class CloudServiceProfileCheckPayload
 
     [Arg(Name = Constants.NoTraceParentProbe, DefaultValue = "false", Description = Constants.NoTraceParentProbeDescription)]
     public string NoTraceParentProbe { get; set; }
+
+    [Arg(Name = Constants.Format, DefaultValue = Constants.ProfileCheckFormatDefault, Description = Constants.ProfileCheckFormatDescription)]
+    public string Format { get; set; }
+
+    [Arg(Name = Constants.FailOn, DefaultValue = Constants.ProfileCheckFailOnDefault, Description = Constants.ProfileCheckFailOnDescription)]
+    public string FailOn { get; set; }
 }
