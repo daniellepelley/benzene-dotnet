@@ -111,6 +111,10 @@ strategic clients-from-spec surface, per [`benzene-clients-vision.md`](benzene-c
   nature. At most, when a second port actually builds this, the porting guide gains one informative
   sentence ("a build-time-emitted descriptor MUST equal the wire descriptor for the same build,
   `instanceId` aside") — nothing goes in the spec now.
+  **Superseded 2026-08-13 by `cross-language-clients-plan.md` Phase 1**: the spec document is now
+  promoted, as `docs/specification/contract-document.md` in the Benzene spec repo, with a
+  language-neutral `contractHash` algorithm and conformance fixtures — see that plan for why
+  cross-language client generation reverses this deferral by necessity.
 
 ---
 
