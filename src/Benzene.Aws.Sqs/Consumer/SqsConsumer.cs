@@ -89,7 +89,7 @@ public class SqsConsumer : IBenzeneWorker
 
                 if (result.Messages.Any())
                 {
-                    var batchResult = await _sqsConsumerApplication.HandleAsync(result, _serviceResolverFactory);
+                    var batchResult = await _sqsConsumerApplication.HandleAsync(result, _serviceResolverFactory, cancellationToken);
 
                     // Under PerMessage (the default), delete only the messages that actually
                     // succeeded; a failed or unrouted message stays on the queue. Under WholeBatch, a

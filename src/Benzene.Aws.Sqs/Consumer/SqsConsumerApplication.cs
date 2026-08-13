@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Amazon.SQS.Model;
 using Benzene.Abstractions.DI;
 using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Abstractions.Middleware;
+using Benzene.Core;
 using Benzene.Core.MessageHandlers.Info;
 using Benzene.Core.Middleware;
 
@@ -47,7 +49,33 @@ public class SqsConsumerApplication : IMiddlewareApplication<ReceiveMessageRespo
     /// <see cref="SqsConsumerAckMode.WholeBatch"/>, a message's handler throwing propagates out of this
     /// call entirely - the returned result is only reached when every message ran without throwing.
     /// </returns>
-    public async Task<SqsConsumerBatchResult> HandleAsync(ReceiveMessageResponse @event, IServiceResolverFactory serviceResolverFactory)
+    public Task<SqsConsumerBatchResult> HandleAsync(ReceiveMessageResponse @event, IServiceResolverFactory serviceResolverFactory)
+        => HandleAsync(@event, serviceResolverFactory, CancellationToken.None);
+
+    /// <summary>
+    /// Handles a poll batch, running each message through the pipeline in its own service scope,
+    /// additionally seeding <b>each</b> per-message scope's ambient cancellation token so any
+    /// component resolved during that message's pipeline run can observe cancellation via
+    /// <see cref="ICancellationTokenAccessor"/>.
+    /// </summary>
+    /// <param name="event">The poll batch to process.</param>
+    /// <param name="serviceResolverFactory">The service resolver factory used to create a scope per message.</param>
+    /// <param name="cancellationToken">
+    /// The consumer's run/shutdown token for this poll, or <see cref="CancellationToken.None"/> if it
+    /// has no signal. The same token is seeded into every message's own scope - one invocation per
+    /// message even within a batch, so there is one token to seed per scope. A handler that observes
+    /// the token and throws <see cref="OperationCanceledException"/> once it has fired is caught below
+    /// like any other exception and reported as failed (not deleted), so the message is redelivered
+    /// instead of lost.
+    /// </param>
+    /// <returns>
+    /// A task that resolves to the batch's per-message outcome. Under <see cref="SqsConsumerAckMode.PerMessage"/>
+    /// (the default), a message's exception is contained (logged nowhere by this class - the message is
+    /// just reported as failed) and never propagates out of this call. Under
+    /// <see cref="SqsConsumerAckMode.WholeBatch"/>, a message's handler throwing propagates out of this
+    /// call entirely - the returned result is only reached when every message ran without throwing.
+    /// </returns>
+    public async Task<SqsConsumerBatchResult> HandleAsync(ReceiveMessageResponse @event, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
     {
         // Each message's task RETURNS its failed Message (or null) rather than appending to a shared
         // List: the continuations run concurrently under Task.WhenAll and List<T>.Add is not
@@ -63,6 +91,7 @@ public class SqsConsumerApplication : IMiddlewareApplication<ReceiveMessageRespo
                 {
                     using (var scope = serviceResolverFactory.CreateScope())
                     {
+                        scope.SeedCancellationToken(cancellationToken);
                         await _pipeline.HandleAsync(pair.Context, scope);
                     }
 
