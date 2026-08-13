@@ -63,8 +63,8 @@ namespace App { public class OrderDoc { } }
         var output = Generate(@"[assembly: Benzene.Azure.Function.ServiceBus.BenzeneServiceBusTrigger(Name = ""sb"", QueueName = ""orders"", Connection = ""ServiceBusConnection"")]");
 
         Assert.Contains(@"global::Microsoft.Azure.Functions.Worker.ServiceBusTrigger(""orders"", Connection = ""ServiceBusConnection"")", output);
-        Assert.Contains("global::Azure.Messaging.ServiceBus.ServiceBusReceivedMessage message", output);
-        Assert.Contains("HandleServiceBusMessages(_app, message)", output);
+        Assert.Contains("global::Azure.Messaging.ServiceBus.ServiceBusReceivedMessage message, global::System.Threading.CancellationToken cancellationToken", output);
+        Assert.Contains("HandleServiceBusMessages(_app, cancellationToken, message)", output);
     }
 
     [Fact]
@@ -81,8 +81,8 @@ namespace App { public class OrderDoc { } }
         var output = Generate(@"[assembly: Benzene.Azure.Function.EventHub.BenzeneEventHubTrigger(Name = ""eh"", EventHubName = ""telemetry"", ConsumerGroup = ""$Default"")]");
 
         Assert.Contains(@"global::Microsoft.Azure.Functions.Worker.EventHubTrigger(""telemetry"", Connection = ""EventHubConnection"", ConsumerGroup = ""$Default"")", output);
-        Assert.Contains("global::Azure.Messaging.EventHubs.EventData[] events", output);
-        Assert.Contains("HandleEventHub(_app, events)", output);
+        Assert.Contains("global::Azure.Messaging.EventHubs.EventData[] events, global::System.Threading.CancellationToken cancellationToken", output);
+        Assert.Contains("HandleEventHub(_app, cancellationToken, events)", output);
     }
 
     [Fact]
@@ -91,8 +91,8 @@ namespace App { public class OrderDoc { } }
         var output = Generate(@"[assembly: Benzene.Azure.Function.Kafka.BenzeneKafkaTrigger(Name = ""k"", BrokerList = ""BrokerList"", Topic = ""orders"", ConsumerGroup = ""svc"")]");
 
         Assert.Contains(@"global::Microsoft.Azure.Functions.Worker.KafkaTrigger(""BrokerList"", ""orders"", ConsumerGroup = ""svc"")", output);
-        Assert.Contains("global::Benzene.Azure.Function.Kafka.KafkaRecord[] events", output);
-        Assert.Contains("HandleKafkaEvents(_app, events)", output);
+        Assert.Contains("global::Benzene.Azure.Function.Kafka.KafkaRecord[] events, global::System.Threading.CancellationToken cancellationToken", output);
+        Assert.Contains("HandleKafkaEvents(_app, cancellationToken, events)", output);
     }
 
     [Fact]
@@ -101,8 +101,8 @@ namespace App { public class OrderDoc { } }
         var output = Generate(@"[assembly: Benzene.Azure.Function.QueueStorage.BenzeneQueueTrigger(Name = ""q"", QueueName = ""orders"")]");
 
         Assert.Contains(@"global::Microsoft.Azure.Functions.Worker.QueueTrigger(""orders"", Connection = ""AzureWebJobsStorage"")", output);
-        Assert.Contains("] string messageText", output);
-        Assert.Contains("HandleQueueMessage(_app, messageText)", output);
+        Assert.Contains("] string messageText, global::System.Threading.CancellationToken cancellationToken", output);
+        Assert.Contains("HandleQueueMessage(_app, messageText, cancellationToken)", output);
     }
 
     [Fact]
@@ -111,8 +111,8 @@ namespace App { public class OrderDoc { } }
         var output = Generate(@"[assembly: Benzene.Azure.Function.BlobStorage.BenzeneBlobTrigger(Name = ""b"", Path = ""incoming/{name}"")]");
 
         Assert.Contains(@"global::Microsoft.Azure.Functions.Worker.BlobTrigger(""incoming/{name}"", Connection = ""AzureWebJobsStorage"")", output);
-        Assert.Contains("] byte[] content, string name", output);
-        Assert.Contains("HandleBlob(_app, name, content)", output);
+        Assert.Contains("] byte[] content, string name, global::System.Threading.CancellationToken cancellationToken", output);
+        Assert.Contains("HandleBlob(_app, name, content, cancellationToken)", output);
     }
 
     [Fact]
@@ -120,8 +120,8 @@ namespace App { public class OrderDoc { } }
     {
         var output = Generate(@"[assembly: Benzene.Azure.Function.EventGrid.BenzeneEventGridTrigger(Name = ""eg"")]");
 
-        Assert.Contains("[global::Microsoft.Azure.Functions.Worker.EventGridTrigger] string eventJson", output);
-        Assert.Contains("HandleEventGridEvent(_app, eventJson)", output);
+        Assert.Contains("[global::Microsoft.Azure.Functions.Worker.EventGridTrigger] string eventJson, global::System.Threading.CancellationToken cancellationToken", output);
+        Assert.Contains("HandleEventGridEvent(_app, eventJson, cancellationToken)", output);
     }
 
     [Fact]
@@ -132,8 +132,8 @@ namespace App { public class OrderDoc { } }
         Assert.Contains("databaseName: \"shop\"", output);
         Assert.Contains("containerName: \"orders\"", output);
         Assert.Contains("CreateLeaseContainerIfNotExists = true", output);
-        Assert.Contains("global::System.Collections.Generic.IReadOnlyList<global::App.OrderDoc> documents", output);
-        Assert.Contains("HandleCosmosDbChanges<global::App.OrderDoc>(_app, documents)", output);
+        Assert.Contains("global::System.Collections.Generic.IReadOnlyList<global::App.OrderDoc> documents, global::System.Threading.CancellationToken cancellationToken", output);
+        Assert.Contains("HandleCosmosDbChanges<global::App.OrderDoc>(_app, documents, cancellationToken)", output);
     }
 
     [Fact]
@@ -150,8 +150,11 @@ namespace App { public class OrderDoc { } }
         var output = Generate(@"[assembly: Benzene.Azure.Function.Timer.BenzeneTimerTrigger(Name = ""t"", Schedule = ""0 */1 * * * *"", RunOnStartup = true)]");
 
         Assert.Contains(@"global::Microsoft.Azure.Functions.Worker.TimerTrigger(""0 */1 * * * *"", RunOnStartup = true)", output);
-        Assert.Contains("global::Microsoft.Azure.Functions.Worker.TimerInfo timer", output);
-        Assert.Contains("HandleTimer(_app)", output);
+        // The bound "timer" parameter is the Azure SDK's TimerInfo, not Benzene's own TimerTriggerInfo
+        // - there's no conversion, so (as before this change) it's bound but not forwarded to the
+        // dispatch call; only cancellationToken is newly threaded through.
+        Assert.Contains("global::Microsoft.Azure.Functions.Worker.TimerInfo timer, global::System.Threading.CancellationToken cancellationToken", output);
+        Assert.Contains("HandleTimer(_app, cancellationToken: cancellationToken)", output);
     }
 
     [Fact]

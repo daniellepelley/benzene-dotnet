@@ -1,3 +1,4 @@
+using System.Threading;
 using Benzene.Abstractions.DI;
 using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Abstractions.Middleware;
@@ -41,7 +42,21 @@ public class PubSubMiddlewareApplication : IMiddlewareApplication<MessagePublish
     /// </summary>
     /// <param name="event">The Pub/Sub CloudEvent payload.</param>
     /// <param name="serviceResolverFactory">The service resolver factory used to process the message.</param>
-    public async Task HandleAsync(MessagePublishedData @event, IServiceResolverFactory serviceResolverFactory)
+    public Task HandleAsync(MessagePublishedData @event, IServiceResolverFactory serviceResolverFactory)
+        => HandleAsync(@event, serviceResolverFactory, CancellationToken.None);
+
+    /// <summary>
+    /// Handles the Pub/Sub message delivered for this invocation, additionally seeding the
+    /// per-invocation scope's ambient cancellation token so any component resolved during the
+    /// pipeline can observe cancellation via <see cref="ICancellationTokenAccessor"/>.
+    /// </summary>
+    /// <param name="event">The Pub/Sub CloudEvent payload.</param>
+    /// <param name="serviceResolverFactory">The service resolver factory used to process the message.</param>
+    /// <param name="cancellationToken">
+    /// The Cloud Functions Framework's cancellation token for this invocation, or
+    /// <see cref="CancellationToken.None"/> if it has no signal.
+    /// </param>
+    public async Task HandleAsync(MessagePublishedData @event, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
     {
         var context = new PubSubContext(@event);
 
@@ -49,6 +64,7 @@ public class PubSubMiddlewareApplication : IMiddlewareApplication<MessagePublish
         {
             using (var scope = serviceResolverFactory.CreateScope())
             {
+                scope.SeedCancellationToken(cancellationToken);
                 await _pipeline.HandleAsync(context, scope);
             }
 

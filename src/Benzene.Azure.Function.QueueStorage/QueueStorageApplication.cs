@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Benzene.Abstractions.DI;
 using Benzene.Abstractions.MessageHandlers.Info;
@@ -52,7 +53,15 @@ public class QueueStorageBatchApplication : IMiddlewareApplication<QueueStorageM
         _options = options ?? new QueueStorageOptions();
     }
 
-    public async Task HandleAsync(QueueStorageMessage[] @event, IServiceResolverFactory serviceResolverFactory)
+    public Task HandleAsync(QueueStorageMessage[] @event, IServiceResolverFactory serviceResolverFactory)
+        => HandleAsync(@event, serviceResolverFactory, CancellationToken.None);
+
+    /// <summary>
+    /// Runs every message in the delivery through the pipeline, additionally seeding <b>each</b>
+    /// message's own scope with the ambient cancellation token so any component resolved during that
+    /// message's pipeline run can observe cancellation via <see cref="ICancellationTokenAccessor"/>.
+    /// </summary>
+    public async Task HandleAsync(QueueStorageMessage[] @event, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
     {
         var contexts = @event.Select(message => new QueueStorageContext(message));
         await BoundedFanOut.WhenAllAsync(contexts, async context =>
@@ -61,6 +70,7 @@ public class QueueStorageBatchApplication : IMiddlewareApplication<QueueStorageM
                 {
                     using (var scope = serviceResolverFactory.CreateScope())
                     {
+                        scope.SeedCancellationToken(cancellationToken);
                         await _pipeline.HandleAsync(context, scope);
                     }
 

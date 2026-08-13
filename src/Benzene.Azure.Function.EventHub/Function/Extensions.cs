@@ -1,3 +1,4 @@
+using System.Threading;
 using Azure.Messaging.EventHubs;
 using Benzene.Abstractions.Middleware;
 using Benzene.Azure.Function.Core;
@@ -53,4 +54,19 @@ public static class Extensions
         return source.HandleAsync(eventData);
     }
 
+    /// <summary>
+    /// Dispatches Event Hub event data to the Azure Function app's Event Hub entry point application,
+    /// forwarding <paramref name="cancellationToken"/> so any component resolved during the pipeline
+    /// can observe it via <c>ICancellationTokenAccessor</c>. A leading (rather than optional trailing)
+    /// parameter - a <c>params</c> array must be last, so the token can't default after it; bind the
+    /// isolated worker's <see cref="CancellationToken"/> trigger method parameter and pass it here.
+    /// </summary>
+    /// <param name="source">The built Azure Function app to dispatch to.</param>
+    /// <param name="cancellationToken">The isolated worker's cancellation token for this invocation.</param>
+    /// <param name="eventData">The Event Hub events to handle.</param>
+    /// <returns>A task that completes when the batch has been handled.</returns>
+    public static Task HandleEventHub(this IAzureFunctionApp source, CancellationToken cancellationToken, params EventData[] eventData)
+    {
+        return source.HandleAsync(eventData, cancellationToken: cancellationToken);
+    }
 }

@@ -1,3 +1,4 @@
+using System.Threading;
 using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Middleware;
 using Benzene.Core.Exceptions;
@@ -33,15 +34,20 @@ public class AzureFunctionApp : IAzureFunctionApp
     /// <typeparam name="TResponse">The response type.</typeparam>
     /// <param name="request">The request to handle.</param>
     /// <param name="name">The discriminator key to match, or <c>null</c> for the first type-only match.</param>
+    /// <param name="cancellationToken">
+    /// The isolated worker's cancellation token for this invocation, or <see cref="CancellationToken.None"/>
+    /// if the trigger doesn't request one. Forwarded to the matching entry point application's
+    /// token-taking <c>SendAsync</c> overload, seeding the per-invocation scope.
+    /// </param>
     /// <returns>A task that resolves to the response produced by the matching entry point application.</returns>
     /// <exception cref="BenzeneException">Thrown when no registered entry point application matches.</exception>
-    public Task<TResponse> HandleAsync<TRequest, TResponse>(TRequest request, string? name = null)
+    public Task<TResponse> HandleAsync<TRequest, TResponse>(TRequest request, string? name = null, CancellationToken cancellationToken = default)
     {
         foreach (var (key, app) in _apps)
         {
             if ((name == null || key == name) && app is EntryPointMiddlewareApplication<TRequest, TResponse> typed)
             {
-                return typed.SendAsync(request);
+                return typed.SendAsync(request, cancellationToken);
             }
         }
 
@@ -55,15 +61,20 @@ public class AzureFunctionApp : IAzureFunctionApp
     /// <typeparam name="TRequest">The request type.</typeparam>
     /// <param name="request">The request to handle.</param>
     /// <param name="name">The discriminator key to match, or <c>null</c> for the first type-only match.</param>
+    /// <param name="cancellationToken">
+    /// The isolated worker's cancellation token for this invocation, or <see cref="CancellationToken.None"/>
+    /// if the trigger doesn't request one. Forwarded to the matching entry point application's
+    /// token-taking <c>SendAsync</c> overload, seeding the per-invocation scope.
+    /// </param>
     /// <returns>A task that completes when the matching entry point application has finished handling the request.</returns>
     /// <exception cref="BenzeneException">Thrown when no registered entry point application matches.</exception>
-    public Task HandleAsync<TRequest>(TRequest request, string? name = null)
+    public Task HandleAsync<TRequest>(TRequest request, string? name = null, CancellationToken cancellationToken = default)
     {
         foreach (var (key, app) in _apps)
         {
             if ((name == null || key == name) && app is IEntryPointMiddlewareApplication<TRequest> typed)
             {
-                return typed.SendAsync(request);
+                return typed.SendAsync(request, cancellationToken);
             }
         }
 

@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Benzene.Abstractions.DI;
 using Benzene.Abstractions.MessageHandlers.Info;
@@ -50,7 +51,15 @@ public class EventGridBatchApplication : IMiddlewareApplication<EventGridTrigger
         _options = options ?? new EventGridOptions();
     }
 
-    public async Task HandleAsync(EventGridTriggerEvent[] @event, IServiceResolverFactory serviceResolverFactory)
+    public Task HandleAsync(EventGridTriggerEvent[] @event, IServiceResolverFactory serviceResolverFactory)
+        => HandleAsync(@event, serviceResolverFactory, CancellationToken.None);
+
+    /// <summary>
+    /// Runs every event in the delivery through the pipeline, additionally seeding <b>each</b> event's
+    /// own scope with the ambient cancellation token so any component resolved during that event's
+    /// pipeline run can observe cancellation via <see cref="ICancellationTokenAccessor"/>.
+    /// </summary>
+    public async Task HandleAsync(EventGridTriggerEvent[] @event, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
     {
         var contexts = @event.Select(gridEvent => new EventGridContext(gridEvent));
         await BoundedFanOut.WhenAllAsync(contexts, async context =>
@@ -59,6 +68,7 @@ public class EventGridBatchApplication : IMiddlewareApplication<EventGridTrigger
                 {
                     using (var scope = serviceResolverFactory.CreateScope())
                     {
+                        scope.SeedCancellationToken(cancellationToken);
                         await _pipeline.HandleAsync(context, scope);
                     }
 

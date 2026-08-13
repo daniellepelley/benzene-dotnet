@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Benzene.Abstractions.DI;
 using Benzene.Abstractions.MessageHandlers.Info;
@@ -52,7 +53,15 @@ public class KafkaBatchApplication : IMiddlewareApplication<KafkaRecord[]>
         _options = options ?? new KafkaOptions();
     }
 
-    public async Task HandleAsync(KafkaRecord[] @event, IServiceResolverFactory serviceResolverFactory)
+    public Task HandleAsync(KafkaRecord[] @event, IServiceResolverFactory serviceResolverFactory)
+        => HandleAsync(@event, serviceResolverFactory, CancellationToken.None);
+
+    /// <summary>
+    /// Runs every record in the batch through the pipeline, additionally seeding <b>each</b> record's
+    /// own scope with the ambient cancellation token so any component resolved during that record's
+    /// pipeline run can observe cancellation via <see cref="ICancellationTokenAccessor"/>.
+    /// </summary>
+    public async Task HandleAsync(KafkaRecord[] @event, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
     {
         // BoundedFanOut optionally caps how many records run at once (KafkaOptions.MaxDegreeOfParallelism);
         // unset leaves the fan-out unbounded, exactly as before.
@@ -63,6 +72,7 @@ public class KafkaBatchApplication : IMiddlewareApplication<KafkaRecord[]>
                 {
                     using (var scope = serviceResolverFactory.CreateScope())
                     {
+                        scope.SeedCancellationToken(cancellationToken);
                         await _pipeline.HandleAsync(context, scope);
                     }
 

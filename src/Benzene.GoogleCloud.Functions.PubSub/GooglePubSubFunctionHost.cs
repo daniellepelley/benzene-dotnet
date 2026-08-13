@@ -41,6 +41,11 @@ public class GooglePubSubFunctionHost<TStartUp> : ICloudEventFunction<MessagePub
     /// </summary>
     /// <param name="cloudEvent">The CloudEvent envelope. Unused - Pub/Sub-specific data already lives on <paramref name="data"/>.</param>
     /// <param name="data">The Pub/Sub message payload for this invocation.</param>
-    /// <param name="cancellationToken">Unused - the middleware pipeline does not accept a cancellation token today, matching every other Benzene transport adapter.</param>
-    public Task HandleAsync(CloudEvent cloudEvent, MessagePublishedData data, CancellationToken cancellationToken) => _app.SendAsync(data);
+    /// <param name="cancellationToken">
+    /// The Cloud Functions Framework's cancellation token for this invocation. Forwarded into the
+    /// per-invocation scope so any component that resolves <c>ICancellationTokenAccessor</c> can
+    /// observe it (see <c>work/cancellation-design.md</c>).
+    /// </param>
+    public Task HandleAsync(CloudEvent cloudEvent, MessagePublishedData data, CancellationToken cancellationToken) =>
+        _app.SendAsync(data, cancellationToken);
 }

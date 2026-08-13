@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Azure.Messaging.ServiceBus;
 using Benzene.Abstractions.DI;
@@ -63,7 +64,16 @@ public class ServiceBusBatchApplication : IMiddlewareApplication<ServiceBusRecei
     /// ServiceBusReceivedMessage[])</c>) for explicit ack mode to take effect.
     /// </summary>
     public Task HandleAsync(ServiceBusReceivedMessage[] @event, IServiceResolverFactory serviceResolverFactory)
-        => HandleAsync(@event, messageActions: null, serviceResolverFactory);
+        => HandleAsync(@event, serviceResolverFactory, CancellationToken.None);
+
+    /// <summary>
+    /// Handles a batch with no <see cref="ServiceBusMessageActions"/> available, additionally seeding
+    /// <b>each</b> message's own scope with the ambient cancellation token so any component resolved
+    /// during that message's pipeline run can observe cancellation via
+    /// <see cref="ICancellationTokenAccessor"/>.
+    /// </summary>
+    public Task HandleAsync(ServiceBusReceivedMessage[] @event, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
+        => HandleAsync(@event, messageActions: null, serviceResolverFactory, cancellationToken);
 
     /// <summary>
     /// Handles a batch together with the <see cref="ServiceBusMessageActions"/> needed to complete/abandon
@@ -71,9 +81,18 @@ public class ServiceBusBatchApplication : IMiddlewareApplication<ServiceBusRecei
     /// to actually complete/abandon messages.
     /// </summary>
     public Task HandleAsync(ServiceBusTriggerBatch @event, IServiceResolverFactory serviceResolverFactory)
-        => HandleAsync(@event.Messages, @event.MessageActions, serviceResolverFactory);
+        => HandleAsync(@event, serviceResolverFactory, CancellationToken.None);
 
-    private async Task HandleAsync(ServiceBusReceivedMessage[] messages, ServiceBusMessageActions? messageActions, IServiceResolverFactory serviceResolverFactory)
+    /// <summary>
+    /// Handles a batch together with <see cref="ServiceBusMessageActions"/>, additionally seeding
+    /// <b>each</b> message's own scope with the ambient cancellation token so any component resolved
+    /// during that message's pipeline run can observe cancellation via
+    /// <see cref="ICancellationTokenAccessor"/>.
+    /// </summary>
+    public Task HandleAsync(ServiceBusTriggerBatch @event, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
+        => HandleAsync(@event.Messages, @event.MessageActions, serviceResolverFactory, cancellationToken);
+
+    private async Task HandleAsync(ServiceBusReceivedMessage[] messages, ServiceBusMessageActions? messageActions, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
     {
         var explicitAck = messageActions != null && _options.AckMode == ServiceBusAckMode.Explicit;
 
@@ -89,6 +108,7 @@ public class ServiceBusBatchApplication : IMiddlewareApplication<ServiceBusRecei
                 {
                     using (var scope = serviceResolverFactory.CreateScope())
                     {
+                        scope.SeedCancellationToken(cancellationToken);
                         await _pipeline.HandleAsync(context, scope);
                     }
 

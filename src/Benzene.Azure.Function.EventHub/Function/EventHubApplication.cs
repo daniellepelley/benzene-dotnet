@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Azure.Messaging.EventHubs;
 using Benzene.Abstractions.DI;
@@ -71,7 +72,15 @@ public class EventHubBatchApplication : IMiddlewareApplication<EventData[]>
         _options = options ?? new EventHubOptions();
     }
 
-    public async Task HandleAsync(EventData[] @event, IServiceResolverFactory serviceResolverFactory)
+    public Task HandleAsync(EventData[] @event, IServiceResolverFactory serviceResolverFactory)
+        => HandleAsync(@event, serviceResolverFactory, CancellationToken.None);
+
+    /// <summary>
+    /// Runs every event in the triggered batch through the pipeline, additionally seeding <b>each</b>
+    /// event's own scope with the ambient cancellation token so any component resolved during that
+    /// event's pipeline run can observe cancellation via <see cref="ICancellationTokenAccessor"/>.
+    /// </summary>
+    public async Task HandleAsync(EventData[] @event, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
     {
         var contexts = @event.Select(EventHubContext.CreateInstance);
         await BoundedFanOut.WhenAllAsync(contexts, async context =>
@@ -80,6 +89,7 @@ public class EventHubBatchApplication : IMiddlewareApplication<EventData[]>
                 {
                     using (var scope = serviceResolverFactory.CreateScope())
                     {
+                        scope.SeedCancellationToken(cancellationToken);
                         await _pipeline.HandleAsync(context, scope);
                     }
 

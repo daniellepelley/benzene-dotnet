@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using Benzene.Azure.Function.Core;
 
@@ -18,9 +19,14 @@ public static class Extensions
     /// <typeparam name="TDocument">The document type the change feed batch was deserialized into.</typeparam>
     /// <param name="source">The built Azure Function app to dispatch to.</param>
     /// <param name="documents">The changed documents to handle.</param>
+    /// <param name="cancellationToken">
+    /// The isolated worker's cancellation token for this invocation, forwarded so any component
+    /// resolved during the pipeline can observe it via <c>ICancellationTokenAccessor</c>. Defaults to
+    /// <see cref="CancellationToken.None"/> if the trigger doesn't bind one.
+    /// </param>
     /// <returns>A task that completes when the batch has been handled.</returns>
-    public static Task HandleCosmosDbChanges<TDocument>(this IAzureFunctionApp source, IReadOnlyList<TDocument> documents)
+    public static Task HandleCosmosDbChanges<TDocument>(this IAzureFunctionApp source, IReadOnlyList<TDocument> documents, CancellationToken cancellationToken = default)
     {
-        return source.HandleAsync(documents);
+        return source.HandleAsync(documents, cancellationToken: cancellationToken);
     }
 }

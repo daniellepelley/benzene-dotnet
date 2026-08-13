@@ -33,9 +33,9 @@ namespace Benzene.Azure.Function.SourceGenerators
                 builder.Add(new TriggerInfo(
                     AttributeReading.ToIdentifier(name) + "ServiceBusFunction",
                     AttributeReading.Literal(name),
-                    $"[{binding}] global::Azure.Messaging.ServiceBus.ServiceBusReceivedMessage message",
+                    $"[{binding}] global::Azure.Messaging.ServiceBus.ServiceBusReceivedMessage message, global::System.Threading.CancellationToken cancellationToken",
                     "global::System.Threading.Tasks.Task",
-                    "global::Benzene.Azure.Function.ServiceBus.Extensions.HandleServiceBusMessages(_app, message)"));
+                    "global::Benzene.Azure.Function.ServiceBus.Extensions.HandleServiceBusMessages(_app, cancellationToken, message)"));
             }
 
             return builder.ToImmutable();
@@ -61,9 +61,9 @@ namespace Benzene.Azure.Function.SourceGenerators
                 builder.Add(new TriggerInfo(
                     AttributeReading.ToIdentifier(name) + "EventHubFunction",
                     AttributeReading.Literal(name),
-                    $"[{binding}] global::Azure.Messaging.EventHubs.EventData[] events",
+                    $"[{binding}] global::Azure.Messaging.EventHubs.EventData[] events, global::System.Threading.CancellationToken cancellationToken",
                     "global::System.Threading.Tasks.Task",
-                    "global::Benzene.Azure.Function.EventHub.Function.Extensions.HandleEventHub(_app, events)"));
+                    "global::Benzene.Azure.Function.EventHub.Function.Extensions.HandleEventHub(_app, cancellationToken, events)"));
             }
 
             return builder.ToImmutable();
@@ -89,9 +89,9 @@ namespace Benzene.Azure.Function.SourceGenerators
                 builder.Add(new TriggerInfo(
                     AttributeReading.ToIdentifier(name) + "KafkaFunction",
                     AttributeReading.Literal(name),
-                    $"[{binding}] global::Benzene.Azure.Function.Kafka.KafkaRecord[] events",
+                    $"[{binding}] global::Benzene.Azure.Function.Kafka.KafkaRecord[] events, global::System.Threading.CancellationToken cancellationToken",
                     "global::System.Threading.Tasks.Task",
-                    "global::Benzene.Azure.Function.Kafka.Extensions.HandleKafkaEvents(_app, events)"));
+                    "global::Benzene.Azure.Function.Kafka.Extensions.HandleKafkaEvents(_app, cancellationToken, events)"));
             }
 
             return builder.ToImmutable();
@@ -116,9 +116,9 @@ namespace Benzene.Azure.Function.SourceGenerators
                 builder.Add(new TriggerInfo(
                     AttributeReading.ToIdentifier(name) + "QueueFunction",
                     AttributeReading.Literal(name),
-                    $"[{binding}] string messageText",
+                    $"[{binding}] string messageText, global::System.Threading.CancellationToken cancellationToken",
                     "global::System.Threading.Tasks.Task",
-                    "global::Benzene.Azure.Function.QueueStorage.Extensions.HandleQueueMessage(_app, messageText)"));
+                    "global::Benzene.Azure.Function.QueueStorage.Extensions.HandleQueueMessage(_app, messageText, cancellationToken)"));
             }
 
             return builder.ToImmutable();
@@ -144,9 +144,9 @@ namespace Benzene.Azure.Function.SourceGenerators
                 builder.Add(new TriggerInfo(
                     AttributeReading.ToIdentifier(name) + "BlobFunction",
                     AttributeReading.Literal(name),
-                    $"[{binding}] byte[] content, string name",
+                    $"[{binding}] byte[] content, string name, global::System.Threading.CancellationToken cancellationToken",
                     "global::System.Threading.Tasks.Task",
-                    "global::Benzene.Azure.Function.BlobStorage.Extensions.HandleBlob(_app, name, content)"));
+                    "global::Benzene.Azure.Function.BlobStorage.Extensions.HandleBlob(_app, name, content, cancellationToken)"));
             }
 
             return builder.ToImmutable();
@@ -168,9 +168,9 @@ namespace Benzene.Azure.Function.SourceGenerators
                 builder.Add(new TriggerInfo(
                     AttributeReading.ToIdentifier(name) + "EventGridFunction",
                     AttributeReading.Literal(name),
-                    "[global::Microsoft.Azure.Functions.Worker.EventGridTrigger] string eventJson",
+                    "[global::Microsoft.Azure.Functions.Worker.EventGridTrigger] string eventJson, global::System.Threading.CancellationToken cancellationToken",
                     "global::System.Threading.Tasks.Task",
-                    "global::Benzene.Azure.Function.EventGrid.Extensions.HandleEventGridEvent(_app, eventJson)"));
+                    "global::Benzene.Azure.Function.EventGrid.Extensions.HandleEventGridEvent(_app, eventJson, cancellationToken)"));
             }
 
             return builder.ToImmutable();
@@ -213,9 +213,9 @@ namespace Benzene.Azure.Function.SourceGenerators
                 builder.Add(new TriggerInfo(
                     AttributeReading.ToIdentifier(name) + "CosmosDbFunction",
                     AttributeReading.Literal(name),
-                    $"[{binding}] global::System.Collections.Generic.IReadOnlyList<{documentType}> documents",
+                    $"[{binding}] global::System.Collections.Generic.IReadOnlyList<{documentType}> documents, global::System.Threading.CancellationToken cancellationToken",
                     "global::System.Threading.Tasks.Task",
-                    $"global::Benzene.Azure.Function.CosmosDb.Extensions.HandleCosmosDbChanges<{documentType}>(_app, documents)"));
+                    $"global::Benzene.Azure.Function.CosmosDb.Extensions.HandleCosmosDbChanges<{documentType}>(_app, documents, cancellationToken)"));
             }
 
             return builder.ToImmutable();
@@ -240,9 +240,12 @@ namespace Benzene.Azure.Function.SourceGenerators
                 builder.Add(new TriggerInfo(
                     AttributeReading.ToIdentifier(name) + "TimerFunction",
                     AttributeReading.Literal(name),
-                    $"[{binding}] global::Microsoft.Azure.Functions.Worker.TimerInfo timer",
+                    $"[{binding}] global::Microsoft.Azure.Functions.Worker.TimerInfo timer, global::System.Threading.CancellationToken cancellationToken",
                     "global::System.Threading.Tasks.Task",
-                    "global::Benzene.Azure.Function.Timer.Extensions.HandleTimer(_app)"));
+                    // The bound "timer" parameter is the Azure SDK's TimerInfo, not Benzene's own
+                    // TimerTriggerInfo - there's no conversion, so (as before this change) it's bound
+                    // but intentionally not forwarded; only cancellationToken is new here.
+                    "global::Benzene.Azure.Function.Timer.Extensions.HandleTimer(_app, cancellationToken: cancellationToken)"));
             }
 
             return builder.ToImmutable();

@@ -1,3 +1,4 @@
+using System.Threading;
 using Benzene.Abstractions.Middleware;
 using Benzene.Azure.Function.Core;
 using Benzene.Core.MessageHandlers.BenzeneMessage;
@@ -55,6 +56,23 @@ public static class Extensions
     }
 
     /// <summary>
+    /// Dispatches Queue Storage messages to the Azure Function app's Queue Storage entry point
+    /// application, forwarding <paramref name="cancellationToken"/> so any component resolved during
+    /// the pipeline can observe it via <c>ICancellationTokenAccessor</c>. A leading (rather than
+    /// optional trailing) parameter - a <c>params</c> array must be last, so the token can't default
+    /// after it; bind the isolated worker's <see cref="CancellationToken"/> trigger method parameter
+    /// and pass it here.
+    /// </summary>
+    /// <param name="source">The built Azure Function app to dispatch to.</param>
+    /// <param name="cancellationToken">The isolated worker's cancellation token for this invocation.</param>
+    /// <param name="messages">The Queue Storage messages to handle.</param>
+    /// <returns>A task that completes when the messages have been handled.</returns>
+    public static Task HandleQueueMessages(this IAzureFunctionApp source, CancellationToken cancellationToken, params QueueStorageMessage[] messages)
+    {
+        return source.HandleAsync(messages, cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
     /// Dispatches Queue Storage messages to the <paramref name="name"/>-keyed Queue Storage entry
     /// point - use when more than one <c>[QueueTrigger]</c> function is registered (each via
     /// <c>UseQueueStorage(..., name: "queue")</c>). The <c>[QueueTrigger("queue")]</c> method passes
@@ -70,16 +88,36 @@ public static class Extensions
     }
 
     /// <summary>
+    /// Dispatches Queue Storage messages to the <paramref name="name"/>-keyed entry point, forwarding
+    /// <paramref name="cancellationToken"/> so any component resolved during the pipeline can observe
+    /// it via <c>ICancellationTokenAccessor</c>.
+    /// </summary>
+    /// <param name="source">The built Azure Function app to dispatch to.</param>
+    /// <param name="name">The discriminator name matching the registered <c>UseQueueStorage(..., name)</c>.</param>
+    /// <param name="cancellationToken">The isolated worker's cancellation token for this invocation.</param>
+    /// <param name="messages">The Queue Storage messages to handle.</param>
+    /// <returns>A task that completes when the messages have been handled.</returns>
+    public static Task HandleQueueMessages(this IAzureFunctionApp source, string name, CancellationToken cancellationToken, params QueueStorageMessage[] messages)
+    {
+        return source.HandleAsync(messages, name, cancellationToken);
+    }
+
+    /// <summary>
     /// Dispatches a single Queue Storage message, bound as its message text - the common
     /// <c>[QueueTrigger] string</c> binding - to the Azure Function app's Queue Storage entry point
     /// application.
     /// </summary>
     /// <param name="source">The built Azure Function app to dispatch to.</param>
     /// <param name="messageText">The queue message's text.</param>
+    /// <param name="cancellationToken">
+    /// The isolated worker's cancellation token for this invocation, forwarded so any component
+    /// resolved during the pipeline can observe it via <c>ICancellationTokenAccessor</c>. Defaults to
+    /// <see cref="CancellationToken.None"/> if the trigger doesn't bind one.
+    /// </param>
     /// <returns>A task that completes when the message has been handled.</returns>
-    public static Task HandleQueueMessage(this IAzureFunctionApp source, string messageText)
+    public static Task HandleQueueMessage(this IAzureFunctionApp source, string messageText, CancellationToken cancellationToken = default)
     {
-        return source.HandleQueueMessages(new QueueStorageMessage(messageText));
+        return source.HandleQueueMessages(cancellationToken, new QueueStorageMessage(messageText));
     }
 
     /// <summary>
@@ -89,9 +127,14 @@ public static class Extensions
     /// <param name="source">The built Azure Function app to dispatch to.</param>
     /// <param name="name">The discriminator name matching the registered <c>UseQueueStorage(..., name)</c>.</param>
     /// <param name="messageText">The queue message's text.</param>
+    /// <param name="cancellationToken">
+    /// The isolated worker's cancellation token for this invocation, forwarded so any component
+    /// resolved during the pipeline can observe it via <c>ICancellationTokenAccessor</c>. Defaults to
+    /// <see cref="CancellationToken.None"/> if the trigger doesn't bind one.
+    /// </param>
     /// <returns>A task that completes when the message has been handled.</returns>
-    public static Task HandleQueueMessage(this IAzureFunctionApp source, string name, string messageText)
+    public static Task HandleQueueMessage(this IAzureFunctionApp source, string name, string messageText, CancellationToken cancellationToken = default)
     {
-        return source.HandleQueueMessages(name, new QueueStorageMessage(messageText));
+        return source.HandleQueueMessages(name, cancellationToken, new QueueStorageMessage(messageText));
     }
 }

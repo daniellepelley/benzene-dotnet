@@ -45,8 +45,13 @@ public static class BenzeneTestHostExtensions
     /// </summary>
     /// <param name="function">The Cloud Function to dispatch into (typically built by <see cref="BuildGooglePubSubFunctionHost{TStartUp}"/>).</param>
     /// <param name="data">The Pub/Sub message payload to send (typically built by <see cref="PubSubMessageBuilder"/>).</param>
+    /// <param name="cancellationToken">
+    /// The token to stand in for the Cloud Functions Framework's invocation token, forwarded through
+    /// to <see cref="GooglePubSubFunctionHost{TStartUp}.HandleAsync"/> so a test can assert a handler
+    /// observes it via <c>ICancellationTokenAccessor</c>. Defaults to <see cref="CancellationToken.None"/>.
+    /// </param>
     /// <returns>A task that completes once <paramref name="function"/> has finished handling the message.</returns>
-    public static Task SendPubSubAsync(this ICloudEventFunction<MessagePublishedData> function, MessagePublishedData data)
+    public static Task SendPubSubAsync(this ICloudEventFunction<MessagePublishedData> function, MessagePublishedData data, CancellationToken cancellationToken = default)
     {
         var cloudEvent = new CloudEvent
         {
@@ -54,7 +59,7 @@ public static class BenzeneTestHostExtensions
             Source = new Uri("https://benzene.test/pubsub-test-helper"),
             Id = Guid.NewGuid().ToString()
         };
-        return function.HandleAsync(cloudEvent, data, CancellationToken.None);
+        return function.HandleAsync(cloudEvent, data, cancellationToken);
     }
 
     private sealed class TestGooglePubSubFunction : ICloudEventFunction<MessagePublishedData>
@@ -66,6 +71,6 @@ public static class BenzeneTestHostExtensions
             _app = app;
         }
 
-        public Task HandleAsync(CloudEvent cloudEvent, MessagePublishedData data, CancellationToken cancellationToken) => _app.SendAsync(data);
+        public Task HandleAsync(CloudEvent cloudEvent, MessagePublishedData data, CancellationToken cancellationToken) => _app.SendAsync(data, cancellationToken);
     }
 }
