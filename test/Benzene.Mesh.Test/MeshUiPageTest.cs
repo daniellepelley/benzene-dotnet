@@ -10,8 +10,8 @@ public class MeshUiPageTest
     {
         var html = MeshUiPage.GetHtml();
 
-        Assert.Contains("<title>Benzene Mesh Explorer</title>", html);
-        Assert.Contains("id=\"benzene-mesh-data\"", html);
+        Assert.Contains("<title>Benzene Mesh</title>", html);
+        Assert.Contains("id=\"root\"", html);
         Assert.Contains("<html lang=\"en\">", html);
     }
 
