@@ -208,6 +208,18 @@ See [Health Checks](../health-checks.md).
 | `Benzene.Cache.Core` | Caching abstractions and a cache health check. |
 | `Benzene.Cache.Redis` | A Redis-backed cache implementation (`RedisConnectionFactory`). |
 
+## Reliability & consistency
+
+| Package | What it gives you |
+|---|---|
+| `Benzene.Idempotency` | De-duplicate at-least-once message redelivery via a pipeline middleware (`UseIdempotency()`) backed by a pluggable `IIdempotencyStore`; ships `InMemoryIdempotencyStore` (single-process). See [Idempotency](../cookbooks/idempotency.md). |
+| `Benzene.Idempotency.DynamoDb` | A distributed `IIdempotencyStore` backed by DynamoDB (`DynamoDbIdempotencyStore`, atomic conditional-write claim + TTL) for a multi-instance/Lambda deployment. |
+| `Benzene.EventSourcing` | A deliberately tiny, unopinionated event-sourcing core: an append-only, ordered `IEventStore` with optimistic concurrency; ships `InMemoryEventStore` (single-process). |
+| `Benzene.EventSourcing.DynamoDb` | A distributed `IEventStore` backed by DynamoDB (`DynamoDbEventStore`) for a fleet. |
+| `Benzene.Outbox` | The produce-side transactional outbox: `UseOutbox()` route middleware that captures a send durably (`Immediate` mode) or stages it for an atomic commit (`Transactional` mode), plus the host-agnostic dispatch engine and `InMemoryOutboxStore`. See [Transactional Outbox](../cookbooks/transactional-outbox.md). |
+| `Benzene.Outbox.DynamoDb` | The DynamoDB outbox store, plus the `IDynamoDbOutboxTransaction` unit of work that makes `Transactional` mode's atomic commit real (one `TransactWriteItems` for state + envelopes). |
+| `Benzene.Outbox.EntityFramework` | The EF Core outbox store, plus the `IOutboxStage` that commits state + envelope together via the application's own `SaveChangesAsync`. |
+
 ## Code generation & tooling
 
 Benzene can generate SDKs, infrastructure, and API specs from your message handlers and their

@@ -38,7 +38,7 @@ Cookbooks are step-by-step guides that show you how to solve specific problems w
 ### Data & Persistence
 - [Entity Framework Core Integration](entity-framework-integration.md) - Database access patterns
 - [Redis Caching](redis-caching.md) - Cache handler responses with Redis
-- [Transactional Outbox](transactional-outbox.md) - Publish a handler's event atomically with its DB write by swapping the `IResponseEventPublisher` behind `UseResponseEvents` for an outbox table + relay
+- [Transactional Outbox](transactional-outbox.md) - Make an outbound send durable, or atomic with a DB write, using the shipped `Benzene.Outbox` + `Benzene.Outbox.DynamoDb`/`Benzene.Outbox.EntityFramework` packages: `UseOutbox()` on the route, a store's unit of work, and a relay per host
 
 ### Configuration & Secrets
 - [Secrets & Multi-Cloud Configuration](secrets-configuration.md) - A provider-agnostic `ISecretStore` seam (env vars, mounted files, composed, cached), startup fail-fast validation, and copy-paste Key Vault / AWS Secrets Manager / SSM adapters

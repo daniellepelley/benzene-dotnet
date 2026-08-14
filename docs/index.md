@@ -87,6 +87,7 @@ Benzene is a hexagonal framework designed for services running in serverless env
 - **Cookbooks**
   - [Cookbook Index](cookbooks/README.md)
   - [Message Payload Versioning](cookbooks/message-versioning.md) — evolve a topic's payload without breaking existing producers: version-specific handlers, or one handler with transparent up/down-casting (multi-step version chains composed for you); built around the runnable [`examples/Versioning`](../examples/Versioning)
+  - [Transactional Outbox](cookbooks/transactional-outbox.md) — publish a route's sends durably, or atomically with a DB write, via `Benzene.Outbox` plus a store package (`Benzene.Outbox.DynamoDb`, `Benzene.Outbox.EntityFramework`); pairs with `Benzene.Idempotency` on the consuming side
   - [Logging to Application Insights](cookbooks/logging-application-insights.md)
   - [Authentication Patterns](cookbooks/auth-patterns.md) — OAuth2 bearer token (JWT) validation, Basic auth, and scope-based authorization for services with no security-terminating gateway in front of them
 

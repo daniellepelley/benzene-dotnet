@@ -174,11 +174,14 @@ served only over HTTP/gRPC. To gate CI, fail when the (filtered) list is non-emp
 
 The middleware publishes through the `IResponseEventPublisher` port; the default implementation
 sends via `IBenzeneMessageSender`. Replace the scoped registration to publish differently — a test
-fake, a custom fan-out, or an outbox relay:
+fake or a custom fan-out:
 
 ```csharp
-services.AddScoped<IResponseEventPublisher, MyOutboxPublisher>();
+services.AddScoped<IResponseEventPublisher, MyCustomPublisher>();
 ```
+
+You don't need a custom publisher to make the published event durable or atomic with a DB write —
+see the outbox note in Gotchas below.
 
 ## Gotchas
 
@@ -190,13 +193,15 @@ services.AddScoped<IResponseEventPublisher, MyOutboxPublisher>();
   mismatch; register a custom `IResponseEventPublisher` for such routes.
 - **No-response handlers (`IMessageHandler<TRequest>`) never publish** — they produce an
   `accepted` result with no payload, and a mapping never fires without a payload.
-- **This is not an outbox.** The publish happens after the handler's work, in the same
-  invocation; a crash between the two can drop the event (or, with `FailMessage`, re-run the
-  handler). If you need the event to commit atomically with the DB write, put an outbox behind
-  `IResponseEventPublisher` — see [Transactional Outbox](transactional-outbox.md).
+- **This is not durable or atomic by itself.** The default publisher sends inline, after the
+  handler's work, in the same invocation; a crash between the two can drop the event (or, with
+  `FailMessage`, re-run the handler). It inherits durability/atomicity for free the moment the
+  event topic's own outbound route adds `UseOutbox()` — no custom publisher needed. See
+  [Transactional Outbox](transactional-outbox.md#response-as-event-flows-get-this-for-free).
 
 ## Related
 
-- [Transactional Outbox](transactional-outbox.md) — publish the event atomically with the DB write.
+- [Transactional Outbox](transactional-outbox.md) — make the published event durable, or atomic
+  with a DB write, by adding `UseOutbox()` to its outbound route.
 - [SNS Fan-Out Pattern](sns-fan-out.md) — publishing the same event to many consumers.
 - [Idempotency](idempotency.md) — required for `FailMessage` redelivery semantics.

@@ -161,3 +161,7 @@ duplicate-short-circuits, throw/failed-result-releases, and the key-derivation c
 - `Benzene.Idempotency/CLAUDE.md` — package internals and the outcome-decision rules.
 - [Redis Caching](redis-caching.md) — the `Benzene.Cache.Redis` connection setup you can reuse for a
   Redis-backed store.
+- [Transactional Outbox](transactional-outbox.md) — the produce-side pair to this cookbook.
+  At-least-once delivery (from an outboxed route, or any redelivering transport) means the consumer
+  needs dedup; the outbox stamps an `idempotency-key` header by default so `UseIdempotency()`'s
+  default key strategy picks it up with zero extra configuration.
