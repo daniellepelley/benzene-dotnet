@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Benzene.ClaimCheck.Azure.Blob</AssemblyName>
+    <RootNamespace>Benzene.ClaimCheck.Azure.Blob</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Description>Azure Blob Storage claim-check store for Benzene.ClaimCheck: an IClaimCheckStore that offloads oversized message payloads to a BlobContainerClient, issuing azblob:// references. Adds AddBlobClaimCheckStore.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Azure.Storage.Blobs" Version="12.22.2" />
+    <PackageReference Include="Azure.Identity" Version="1.13.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Benzene.ClaimCheck\Benzene.ClaimCheck.csproj" />
+  </ItemGroup>
+
+</Project>
