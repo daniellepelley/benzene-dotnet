@@ -7,6 +7,8 @@ services:
     # 4.14.0 is the last version that starts without an auth token.
     image: localstack/localstack:4.14.0
     environment:
-      - SERVICES=sqs
+      # sqs,s3: s3 was added for the claim-check S3 store integration test (an oversized SQS payload
+      # offloaded to and hydrated back from a real S3 bucket) - one LocalStack container serves both.
+      - SERVICES=sqs,s3
     ports:
       - 4566:4566

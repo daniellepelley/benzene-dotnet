@@ -103,6 +103,7 @@
     <ProjectReference Include="..\..\src\Benzene.Cache.Core\Benzene.Cache.Core.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Cache.Redis\Benzene.Cache.Redis.csproj" />
     <ProjectReference Include="..\..\src\Benzene.ClaimCheck\Benzene.ClaimCheck.csproj" />
+    <ProjectReference Include="..\..\src\Benzene.ClaimCheck.Aws.S3\Benzene.ClaimCheck.Aws.S3.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Clients.Http\Benzene.Clients.Http.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Clients.InProcess\Benzene.Clients.InProcess.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Clients.Aws\Benzene.Clients.Aws.csproj" />

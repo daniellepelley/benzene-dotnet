@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Benzene.ClaimCheck.Aws.S3</AssemblyName>
+    <RootNamespace>Benzene.ClaimCheck.Aws.S3</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Description>An Amazon S3-backed IClaimCheckStore for Benzene.ClaimCheck: offloads oversized outbound message payloads to an S3 bucket and resolves the store-issued s3:// reference back to the payload on hydration. Retention is a caller-provisioned S3 lifecycle expiration rule; this package never creates the bucket or the rule.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AWSSDK.S3" Version="3.7.309.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Benzene.Abstractions\Benzene.Abstractions.csproj" />
+    <ProjectReference Include="..\Benzene.ClaimCheck\Benzene.ClaimCheck.csproj" />
+  </ItemGroup>
+
+</Project>

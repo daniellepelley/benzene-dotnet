@@ -26,6 +26,8 @@
 	  <ProjectReference Include="..\..\src\Benzene.Aws.Lambda.Sqs\Benzene.Aws.Lambda.Sqs.csproj" />
 	  <ProjectReference Include="..\..\src\Benzene.Aws.Lambda.Sqs.TestHelpers\Benzene.Aws.Lambda.Sqs.TestHelpers.csproj" />
 	  <ProjectReference Include="..\..\src\Benzene.Aws.Sqs\Benzene.Aws.Sqs.csproj" />
+	  <ProjectReference Include="..\..\src\Benzene.ClaimCheck\Benzene.ClaimCheck.csproj" />
+	  <ProjectReference Include="..\..\src\Benzene.ClaimCheck.Aws.S3\Benzene.ClaimCheck.Aws.S3.csproj" />
 	  <ProjectReference Include="..\..\src\Benzene.Azure.EventHub\Benzene.Azure.EventHub.csproj" />
 	  <ProjectReference Include="..\..\src\Benzene.Azure.Function.Core\Benzene.Azure.Function.Core.csproj" />
 	  <ProjectReference Include="..\..\src\Benzene.Azure.Function.EventHub\Benzene.Azure.Function.EventHub.csproj" />

@@ -51,6 +51,10 @@ public static class DependencyInjectionExtensions
         services.TryAddHeaderMessageVersionGetter<SqsConsumerMessageContext>();
         services.TryAddScoped<IMessageHeadersGetter<SqsConsumerMessageContext>, SqsConsumerMessageHeadersGetter>();
         services.TryAddScoped<IMessageBodyGetter<SqsConsumerMessageContext>, SqsConsumerMessageBodyGetter>();
+        // Only needed by Benzene.ClaimCheck's UseClaimCheck<SqsConsumerMessageContext>() hydrate
+        // middleware, resolved with TryGetService there - registered unconditionally here (like the
+        // getters above) so it's simply present when a pipeline asks for it.
+        services.TryAddScoped<IMessageBodySetter<SqsConsumerMessageContext>, SqsConsumerMessageBodySetter>();
         services.TryAddScoped<IMessageHandlerResultSetter<SqsConsumerMessageContext>, SqsConsumerMessageHandlerResultSetter>();
         services.AddMediaFormatNegotiation<SqsConsumerMessageContext>();
         services
