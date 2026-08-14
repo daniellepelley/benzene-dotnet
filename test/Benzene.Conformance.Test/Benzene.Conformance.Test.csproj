@@ -26,6 +26,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\Benzene.AspNet.Core\Benzene.AspNet.Core.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Clients\Benzene.Clients.csproj" />
     <ProjectReference Include="..\..\src\Benzene.CodeGen.Client\Benzene.CodeGen.Client.csproj" />
     <ProjectReference Include="..\..\src\Benzene.CodeGen.Core\Benzene.CodeGen.Core.csproj" />
@@ -33,12 +34,14 @@
     <ProjectReference Include="..\..\src\Benzene.Core.Messages\Benzene.Core.Messages.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Grpc\Benzene.Grpc.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Grpc.Client\Benzene.Grpc.Client.csproj" />
+    <ProjectReference Include="..\..\src\Benzene.HostedService\Benzene.HostedService.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Http\Benzene.Http.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Mesh.Collector\Benzene.Mesh.Collector.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Mesh.Wire\Benzene.Mesh.Wire.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Microsoft.Dependencies\Benzene.Microsoft.Dependencies.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Results\Benzene.Results.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Schema.OpenApi\Benzene.Schema.OpenApi.csproj" />
+    <ProjectReference Include="..\..\src\Benzene.SelfHost\Benzene.SelfHost.csproj" />
   </ItemGroup>
 
 </Project>

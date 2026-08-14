@@ -49,6 +49,16 @@ public class EnvelopeConformanceTest
         /// receiver honors over any classification it derives from <c>statusCode</c> text.
         /// </summary>
         public bool? IsSuccessful { get; set; }
+
+        /// <summary>
+        /// Optional (README.md's envelope case format): members that must be genuinely absent from the
+        /// parsed response body - not present-with-null, but missing as a JSON key entirely. Mirrors
+        /// <c>transport-metadata-cases.json</c>'s <c>headersExclude</c>. A subset match on
+        /// <see cref="Body"/> alone can't pin absence (an unmentioned member is unconstrained either
+        /// way), so this is the only way a case can assert that e.g. no numeric <c>status</c> member
+        /// leaked onto a transport with no HTTP response (wire-contracts.md §1.3).
+        /// </summary>
+        public List<string>? BodyExclude { get; set; }
     }
 
     private static readonly Lazy<EnvelopeFixture> Fixture = new(() =>
@@ -87,6 +97,17 @@ public class EnvelopeConformanceTest
             using var actualBody = JsonDocument.Parse(response.Body);
             var mismatch = ConformanceFixtures.FindSubsetMismatch(expectedBody, actualBody.RootElement);
             Assert.True(mismatch == null, $"{caseName}: body mismatch at {mismatch}");
+        }
+
+        if (envelopeCase.Expected.BodyExclude is { } bodyExclude)
+        {
+            Assert.False(string.IsNullOrEmpty(response.Body), $"{caseName}: expected a response body but none was written");
+            using var actualBody = JsonDocument.Parse(response.Body);
+            foreach (var excludedMember in bodyExclude)
+            {
+                Assert.False(actualBody.RootElement.TryGetProperty(excludedMember, out _),
+                    $"{caseName}: body member '{excludedMember}' was expected to be genuinely absent but was present");
+            }
         }
 
         if (envelopeCase.Expected.Headers != null)

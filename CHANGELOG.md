@@ -910,6 +910,52 @@ alongside notes on the two critical bug fixes.
     literal `IReadOnlyList<BenzeneError>` - `System.Xml.Serialization.XmlSerializer` can't reflect
     an interface-typed member).
 
+### Fixed
+- **`DefaultResponsePayloadMapper` now actually emits a handler-authored problem document.** Phase 6
+  of `work/problem-details-plan.md` (the conformance re-vendor) surfaced a real gap left by Phase 3:
+  the mapper unconditionally serialized `ProblemTypes.From(result)` on failure, so a result built
+  via `BenzeneResult.Problem<T>` (Phase 5's API for a deliberate, custom-`type` problem) had its
+  handler-authored document silently discarded and replaced with the synthesized registry document -
+  an application's own `type`/extension members never reached the wire, contradicting Phase 3's own
+  "capability probe for handler-authored problems" step. Fixed: the mapper now checks
+  `IHasProblemDetails` and, when present, emits that exact document (preserving a `ProblemDetails`
+  subclass's extension members) with only the members a handler left absent backfilled from the
+  registry (`type`/`title` from `ProblemTypes`, `benzeneStatus` from the result's own status) -
+  otherwise unchanged, still synthesizing via `ProblemTypes.From` for the overwhelming majority of
+  failures that never attach a document. Caught by the new `problem-app-defined-type-passthrough`/
+  `problem-app-defined-type-with-field-and-code` conformance cases (below), confirmed red before the
+  fix and green after.
+
+### Added
+- **Conformance re-vendor + `ProblemDetailsConformanceTest`** - Phase 6 of
+  `work/problem-details-plan.md`, the gate proving Phases 3-5 actually implemented what Phase 1
+  (spec repo commit `b732a74`) pinned; the .NET conformance suite is green against these fixtures
+  for the first time since that Phase 1 commit deliberately left it red.
+  - Re-vendored `test/conformance-fixtures/*.json` from the spec repo verbatim: `envelope-cases.json`
+    updated in place (failure bodies now `{type, benzeneStatus, errors}` instead of the retired
+    `{status, detail}` shape, plus `bodyExclude: ["status"]` on every failure case) and the new
+    `problem-details-cases.json` (`registry`/`envelopeCases`/`httpRules` groups). `SPEC_VERSION`
+    bumped to `b732a743b391248d28c8f08b7283e8e1457f9c3b`.
+  - `EnvelopeConformanceTest` (and the new test below) now implement the fixture format's
+    `expected.bodyExclude`: a negative assertion that a listed member is genuinely **absent** from
+    the parsed response body (not present-with-null), mirroring `transport-metadata-cases.json`'s
+    `headersExclude`. Proven by a deliberately-broken local run: forcing `ProblemTypes.From` to emit
+    a numeric `status` on a non-HTTP transport turns 11 envelope cases red; reverted before commit.
+  - New canonical `conformance:problem` handler (`ProblemConformanceHandler`, registered alongside
+    the existing `conformance:greet`/`conformance:status` handlers): returns a `validation-error`
+    result carrying one structured error from the request's `message`/`field`/`code`, or - when
+    `appType` is given - an application-authored problem built via `BenzeneResult.Problem<T>` with
+    `type` set to `appType` verbatim, pinning the passthrough case the Fixed entry above closes.
+  - New `ProblemDetailsConformanceTest`: `registry` rows asserted directly against
+    `Benzene.Results.ProblemTypes.TypeFor`/`HttpStatusFor` (plus the unknown-status fallback);
+    `envelopeCases` run through the real `BenzeneMessage` pipeline exactly like
+    `EnvelopeConformanceTest`; `httpRules` run against a real `Benzene.AspNet.Core` (Kestrel) host
+    over a socket - the same probe shape as `AspNetProblemDetailsPipelineTest`, needed because only a
+    real HTTP response line reliably exercises the status-code/content-type assertions this group
+    makes - driving every registry row through the canonical `conformance:status` handler and
+    asserting the mapped HTTP status line, `application/problem+json` content type, and a body
+    `status` member equal to the response code, plus the unaffected success-response case.
+
 ## [0.x.x-alpha] - Historical
 
 ### Added
