@@ -1,11 +1,12 @@
 # Benzene.Resilience
 
 ## What this package does
-Provides a single retry middleware for the Benzene pipeline: `RetryMiddleware<TContext>`, added
-via `.UseRetry(...)`. Retry uses **exponential backoff only**. There is **no Polly dependency** —
-this package is pure Benzene middleware over `Benzene.Abstractions.Middleware`. See the
-[Capability Matrix](../../docs/capability-matrix.md) for where retry fits and when to reach for
-`Benzene.Resilience.Polly` (circuit breaker / timeout / hedging / fallback).
+Provides two middlewares for the Benzene pipeline: `RetryMiddleware<TContext>` (`.UseRetry(...)`)
+and `TimeoutMiddleware<TContext>` (`.UseTimeout(...)`). Retry uses **exponential backoff only**.
+There is **no Polly dependency** — this package is pure Benzene middleware over
+`Benzene.Abstractions.Middleware`. See the [Capability Matrix](../../docs/capability-matrix.md) for
+where retry/timeout fit and when to reach for `Benzene.Resilience.Polly` (circuit breaker / hedging
+/ fallback / a more configurable timeout policy).
 
 ## Key types/interfaces
 - **`RetryMiddleware<TContext>`** — re-invokes the downstream pipeline (`next`) on failure. Retries
@@ -32,27 +33,63 @@ this package is pure Benzene middleware over `Benzene.Abstractions.Middleware`. 
   (not `RetryMiddleware<TContext>` — it needs no `TContext`, matching the `Task`/`Task<T>` pattern).
 - **`Extensions.UseRetry<TContext>(...)`** — pipeline-builder extension registering the middleware
   with the same parameters.
+- **`TimeoutMiddleware<TContext>`** — wraps the downstream pipeline (`next`) in a deadline. Composes
+  with the ambient `Benzene.Abstractions.DI.ICancellationTokenAccessor` (see
+  `work/cancellation-design.md` §2.2/§2.4 for the full design): saves the accessor's current token,
+  links a new `CancellationTokenSource` to it, arms it with `CancelAfter(timeout)`, sets the linked
+  token as ambient for the duration of `next()`, and restores the original token in a `finally`
+  (`using` on the linked source, so it — and its timer, and its registration on the original token —
+  is disposed on every path). If the timer fires it translates the resulting
+  `OperationCanceledException` into a `TimeoutException`; if the *original* token was already
+  cancelled (a genuine host cancellation, e.g. shutdown or client disconnect) the
+  `OperationCanceledException` is left to propagate untouched, so queue/settle/ack transports still
+  redeliver interrupted work exactly as they would without this middleware in the pipeline. Nested
+  `.UseTimeout(...)` calls compose naturally (innermost deadline governs while inside it).
+- **`Extensions.UseTimeout<TContext>(...)`** — pipeline-builder extension registering
+  `TimeoutMiddleware<TContext>`, resolving `Benzene.Core.CancellationTokenAccessor` from the
+  per-invocation scope.
 
 ## When to use this package
-- When you want a downstream pipeline step retried on transient failure with exponential backoff.
+- When you want a downstream pipeline step retried on transient failure with exponential backoff
+  (`.UseRetry`).
+- When you want a hard deadline around the downstream pipeline that turns into a precise
+  `BenzeneResultStatus.Timeout` failure result rather than an opaque hang or aborted call
+  (`.UseTimeout`) — see `MessageHandler`'s `catch (TimeoutException)` for the status mapping.
 
 ## Deliberate boundaries (this package)
-- **This package is retry-only, and stays that way.** No circuit breaker, timeout, bulkhead, hedging,
-  or fallback here, and **no Polly dependency** — that keeps `Benzene.Resilience` the zero-dependency
-  option for callers who only want retry.
-- **The full toolkit lives in the sibling `Benzene.Resilience.Polly`.** For circuit breaker / timeout
-  / hedging / fallback / rate limiting, use `.UseResiliencePipeline(...)` from that package, which
-  runs the pipeline through a Polly v8 `ResiliencePipeline`. It also bridges Benzene's
-  result-on-context failure model to Polly's outcome model via an optional `isFailure` predicate —
-  see `src/Benzene.Resilience.Polly/CLAUDE.md`. Pick this package (`.UseRetry`) for retry with no
-  extra dependency; pick `Benzene.Resilience.Polly` for anything more.
+- **This package is retry + a simple deadline-based timeout, and stays that way.** No circuit
+  breaker, bulkhead, hedging, or fallback here, and **no Polly dependency** — that keeps
+  `Benzene.Resilience` the zero-dependency option for callers who only want these two policies.
+  `TimeoutMiddleware`'s timeout is intentionally simple: one fixed `TimeSpan`, no per-attempt reset,
+  no combination with retry beyond ordinary middleware composition (`.UseRetry(...).UseTimeout(...)`
+  applies the same deadline to every retry attempt combined; `.UseTimeout(...).UseRetry(...)` applies
+  it once across all attempts).
+- **The full toolkit lives in the sibling `Benzene.Resilience.Polly`.** For circuit breaker / hedging
+  / fallback / rate limiting / a more configurable timeout policy, use `.UseResiliencePipeline(...)`
+  from that package, which runs the pipeline through a Polly v8 `ResiliencePipeline`. It also bridges
+  Benzene's result-on-context failure model to Polly's outcome model via an optional `isFailure`
+  predicate — see `src/Benzene.Resilience.Polly/CLAUDE.md`. Pick this package (`.UseRetry`/
+  `.UseTimeout`) for retry/timeout with no extra dependency; pick `Benzene.Resilience.Polly` for
+  anything more.
 
 ## Important conventions
 - **Retry re-invokes the whole downstream pipeline.** Do not place it on an inbound context that has
   already written a response (e.g. an inbound HTTP context) — a re-invocation would run those steps
   again. It is intended for outbound/port calls that are safe to re-run.
 - `OperationCanceledException` is not retried by default (respects cancellation).
+- **`UseTimeout` only interrupts cooperative work.** It sets the ambient cancellation token; it does
+  not forcibly abort a handler or middleware that never reads
+  `ICancellationTokenAccessor.CancellationToken`. Downstream code has to actually pass the token into
+  its own I/O (an HTTP call, `Task.Delay`, a DB query) for the deadline to have a visible effect.
+- **The timeout-vs-cancellation line is load-bearing.** A fired *timer* becomes a
+  `TimeoutException` → `BenzeneResultStatus.Timeout` failure result. A fired *host* token (the
+  original, pre-existing ambient token) must keep propagating as an untouched
+  `OperationCanceledException` — do not weaken the `when (ex.CancellationToken == cts.Token &&
+  !original.IsCancellationRequested)` filter in `TimeoutMiddleware.HandleAsync`, it's what tells the
+  two apart.
 
 ## Dependencies on other Benzene packages
 - **Benzene.Abstractions.Middleware** — `IMiddleware<TContext>`, `IMiddlewarePipelineBuilder<TContext>`
+- **Benzene.Core** — `CancellationTokenAccessor` (`TimeoutMiddleware`'s write handle onto the ambient
+  cancellation token)
 - **Benzene.Core.Middleware** — middleware pipeline implementation

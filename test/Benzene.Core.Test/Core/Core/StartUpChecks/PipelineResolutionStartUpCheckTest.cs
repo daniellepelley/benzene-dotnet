@@ -6,10 +6,11 @@ using Benzene.Abstractions.Middleware;
 using Benzene.Abstractions.Pipelines;
 using Benzene.Abstractions.StartUpChecks;
 using Benzene.Core.MessageHandlers;
-using Benzene.Core.MessageHandlers.DI;
+using Benzene.Core.MessageHandlers.DI; // AddBenzene
 using Benzene.Core.MessageHandlers.StartUpChecks;
 using Benzene.Core.Middleware;
 using Benzene.Microsoft.Dependencies;
+using Benzene.Resilience;
 using Benzene.Test.Examples;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -99,6 +100,28 @@ public class PipelineResolutionStartUpCheckTest
         var container = new MicrosoftBenzeneServiceContainer(services);
         var builder = new MiddlewarePipelineBuilder<string>(container);
         builder.Use(_ => new Harmless());
+        builder.Build();
+
+        using var scope = new MicrosoftServiceResolverFactory(services).CreateScope();
+
+        new PipelineResolutionStartUpCheck().Check(scope);
+    }
+
+    [Fact]
+    public void APipelineWithUseTimeout_ConstructsCleanlyAtStartUp()
+    {
+        // TimeoutMiddleware's factory resolves the scoped CancellationTokenAccessor
+        // (Benzene.Resilience.Extensions.UseTimeout). PipelineResolutionStartUpCheck constructs every
+        // middleware factory outside a real message scope, so this pins that resolving the accessor
+        // from a throwaway startup scope just yields a default (CancellationToken.None) holder rather
+        // than failing - AddBenzene() registers it unconditionally, with no transport required.
+        var services = new ServiceCollection();
+        var container = new MicrosoftBenzeneServiceContainer(services);
+        container.AddBenzene();
+        var builder = new MiddlewarePipelineBuilder<string>(container);
+
+        builder.Use(_ => new Harmless());
+        builder.UseTimeout(TimeSpan.FromSeconds(5));
         builder.Build();
 
         using var scope = new MicrosoftServiceResolverFactory(services).CreateScope();

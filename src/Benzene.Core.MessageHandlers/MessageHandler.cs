@@ -18,8 +18,13 @@ namespace Benzene.Core.MessageHandlers;
 /// This is the last piece of adaptation before a handler is invoked by <see cref="MessageRouter{TContext}"/>:
 /// deserialization failures become a <see cref="IDefaultStatuses.BadRequest"/> result,
 /// <see cref="ArgumentException"/>s thrown by the handler become a <see cref="IDefaultStatuses.ValidationError"/>
-/// result, and any other exception becomes a service-unavailable result. A <c>null</c> result from the
-/// inner handler is treated as an accepted no-content response.
+/// result, a <see cref="TimeoutException"/> (as thrown by <c>Benzene.Resilience.TimeoutMiddleware</c>
+/// when a configured deadline elapses) becomes a precise <c>BenzeneResultStatus.Timeout</c> result,
+/// and any other exception becomes a service-unavailable result. A <c>null</c> result from the
+/// inner handler is treated as an accepted no-content response. A genuine host cancellation (an
+/// <see cref="OperationCanceledException"/> whose token has actually fired) is deliberately NOT
+/// converted into any of these - it propagates so a settle/ack/checkpoint transport redelivers the
+/// interrupted work instead of treating it as done or failed.
 /// </remarks>
 internal class MessageHandler<TRequest, TResponse> : IMessageHandler where TRequest : class
 {
@@ -103,6 +108,23 @@ internal class MessageHandler<TRequest, TResponse> : IMessageHandler where TRequ
             // every in-flight message on every deploy) so ExceptionHandlerMiddleware can let the
             // transport redeliver the interrupted work. Mirrors ExceptionHandlerMiddleware's guard.
             throw;
+        }
+        catch (TimeoutException ex)
+        {
+            // Distinct from the OperationCanceledException case above: TimeoutMiddleware
+            // (Benzene.Resilience) already told the two apart by checking whether the *original*
+            // token (pre-dating its own linked CTS) had itself fired. A TimeoutException here means
+            // it hadn't - this is an operator-configured deadline, a service-side failure, not host
+            // cancellation - so it becomes a precise `timeout` status result instead of the generic
+            // ServiceUnavailable below (and instead of propagating and forcing redelivery the way a
+            // genuine cancellation must).
+            ActivityExceptionTag.TryStamp(ex);
+            // No hint: "deserialization" is the one spec-§4.1-registered remediation-hint key in use
+            // today (see the catch above) - inventing a new key here isn't this phase's call to make,
+            // so this follows the same no-hint default as the ArgumentException/generic catches below.
+            _errorState?.TrySet(ex);
+            _logger.LogWarning(ex, "Message handler exceeded its configured timeout");
+            return BenzeneResult.Timeout(ex.Message);
         }
         catch(Exception ex)
         {

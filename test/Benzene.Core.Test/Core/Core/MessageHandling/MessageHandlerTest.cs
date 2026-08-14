@@ -158,6 +158,28 @@ public class MessageHandlerTest
     }
 
     [Fact]
+    public async Task HandlersMessage_HandlerThrewTimeoutException_ReturnsTimeoutResult()
+    {
+        // TimeoutMiddleware (Benzene.Resilience) translates a service-side deadline into a
+        // TimeoutException; MessageHandler must map that to a precise `timeout` status result rather
+        // than the generic ServiceUnavailable every other exception gets - and, unlike a genuine
+        // cancellation, must NOT propagate it (a TimeoutException never carries a fired token).
+        var mockRequestFactory = new Mock<IDeferredRequestMapper>();
+        mockRequestFactory.Setup(x => x.GetRequest<ExampleRequestPayload>())
+            .Returns(new ExampleRequestPayload { Name = Defaults.Name });
+
+        var mockMessageHandler = new Mock<IMessageHandler<ExampleRequestPayload, ExampleResponsePayload>>();
+        mockMessageHandler.Setup(x => x.HandleAsync(It.IsAny<ExampleRequestPayload>()))
+            .ThrowsAsync(new TimeoutException("Pipeline exceeded the configured timeout of 00:00:05."));
+
+        var messageHandler =
+            new MessageHandler<ExampleRequestPayload, ExampleResponsePayload>(mockMessageHandler.Object, NullLogger.Instance, new DefaultStatuses());
+
+        var result = await messageHandler.HandleAsync(mockRequestFactory.Object);
+        Assert.Equal(BenzeneResultStatus.Timeout, result.Status);
+    }
+
+    [Fact]
     public async Task HandlersMessage_HandlerThrewNonCancellationOce_IsStillTreatedAsError()
     {
         // An OperationCanceledException whose token is NOT signaled is not a genuine host cancellation

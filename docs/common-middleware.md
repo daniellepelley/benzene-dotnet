@@ -26,6 +26,7 @@ links out for the full story.
 - [UseLogResult / UseLogContext](#uselogresult--uselogcontext)
 - [UseExceptionHandler](#useexceptionhandler)
 - [UseRetry](#useretry)
+- [UseTimeout](#usetimeout)
 - [UseCors](#usecors)
 - [UseOAuth2Bearer](#useoauth2bearer)
 - [UseBasicAuth](#usebasicauth)
@@ -465,6 +466,42 @@ public static IMiddlewarePipelineBuilder<TContext> UseRetry<TContext>(
 ```csharp
 app.UseRetry(numberOfRetries: 5, initialDelay: TimeSpan.FromMilliseconds(100));
 ```
+
+---
+
+## UseTimeout
+
+**Package:** `Benzene.Resilience` (`Benzene.Resilience.Extensions`)
+
+Wraps the rest of the pipeline in a deadline. Internally it composes with the ambient
+`ICancellationTokenAccessor`: it saves whatever token is already there, links a new
+`CancellationTokenSource` to it, arms that source with `CancelAfter(timeout)`, and sets it as the
+ambient token for the duration of the downstream call — restoring the original token afterward on
+every path (success, timeout, or a genuine cancellation).
+
+```csharp
+public static IMiddlewarePipelineBuilder<TContext> UseTimeout<TContext>(
+    this IMiddlewarePipelineBuilder<TContext> app,
+    TimeSpan timeout)
+```
+
+```csharp
+app.UseTimeout(TimeSpan.FromSeconds(5));
+```
+
+**The timeout-vs-cancellation line.** If the *timer* fires, `UseTimeout` translates that into a
+`TimeoutException` rather than letting an `OperationCanceledException` escape — a
+`BenzeneResultStatus.Timeout` (`"timeout"`) failure result, not a raw cancellation. If the *host's*
+own token fires first (shutdown, client disconnect), the original `OperationCanceledException`
+propagates untouched, so queue/settle/ack transports still redeliver the interrupted work exactly as
+they would without `UseTimeout` in the pipeline. `timeout` is a transient status but not
+retry-*safe* — see `BenzeneResultStatus`'s remarks — because a timeout leaves it unknown whether the
+operation was actually applied.
+
+Downstream code has to actually *observe* the ambient token (via `ICancellationTokenAccessor`) for a
+timeout to interrupt anything mid-flight; `UseTimeout` does not forcibly abort non-cooperative work.
+A dedicated "Cancellation" section covering the full injectable-accessor model (handlers, middleware,
+per-host seeding table) is a documentation follow-up, not yet published here.
 
 ---
 
