@@ -42,22 +42,38 @@ public enum OutboundTransport
 /// <c>Benzene.Outbox</c>'s <c>AddOutbox(...)</c> and an <c>IOutboxStore</c> (e.g.
 /// <c>AddDynamoDbOutboxStore</c>) — this flag only wires the per-route middleware.
 /// </param>
+/// <param name="ClaimChecked">
+/// When <see langword="true"/>, <see cref="MeshServiceWiring.ConfigureServices"/> adds
+/// <c>Benzene.ClaimCheck</c>'s <c>UseClaimCheck()</c> to this route's pipeline — placed AFTER
+/// <c>UseOutbox()</c> when <see cref="Outboxed"/> is also set, and before the terminal transport
+/// converter (see <c>work/claim-check-plan.md</c> Phase 6). Ordering matters here: capture (the first,
+/// terminal pass through <c>UseOutbox()</c>) needs the REAL typed <c>Request</c> to serialize into its
+/// envelope, so offload must not run before it — it would replace <c>Request</c> with a placeholder the
+/// envelope would then durably store instead of the real payload. Placing <c>UseClaimCheck()</c> after
+/// <c>UseOutbox()</c> means it only ever runs on the relay dispatcher's pass-through (when the envelope
+/// is re-sent with its real deserialized payload as <c>Request</c>) or, on a non-outboxed route, on
+/// every send — either way it sees the actual request that is about to hit the wire. Defaults to
+/// <see langword="false"/> so a service opts a route into claim-check one send at a time. The caller is
+/// also responsible for registering <c>Benzene.ClaimCheck</c>'s <c>IClaimCheckStore</c> (e.g.
+/// <c>AddS3ClaimCheckStore</c>) — this flag only wires the per-route middleware.
+/// </param>
 public record OutboundSend(
     string Topic,
     Type MessageType,
     OutboundTransport Transport,
     string TargetEnvVar,
-    bool Outboxed = false)
+    bool Outboxed = false,
+    bool ClaimChecked = false)
 {
     /// <summary>Convenience for the common SQS command hop.</summary>
-    public static OutboundSend Sqs(string topic, Type messageType, string queueUrlEnvVar, bool outboxed = false)
-        => new(topic, messageType, OutboundTransport.Sqs, queueUrlEnvVar, outboxed);
+    public static OutboundSend Sqs(string topic, Type messageType, string queueUrlEnvVar, bool outboxed = false, bool claimChecked = false)
+        => new(topic, messageType, OutboundTransport.Sqs, queueUrlEnvVar, outboxed, claimChecked);
 
     /// <summary>Convenience for an SNS fan-out event.</summary>
-    public static OutboundSend Sns(string topic, Type messageType, string topicArnEnvVar, bool outboxed = false)
-        => new(topic, messageType, OutboundTransport.Sns, topicArnEnvVar, outboxed);
+    public static OutboundSend Sns(string topic, Type messageType, string topicArnEnvVar, bool outboxed = false, bool claimChecked = false)
+        => new(topic, messageType, OutboundTransport.Sns, topicArnEnvVar, outboxed, claimChecked);
 
     /// <summary>Convenience for an EventBridge routed integration event.</summary>
-    public static OutboundSend EventBridge(string topic, Type messageType, string eventBusNameEnvVar, bool outboxed = false)
-        => new(topic, messageType, OutboundTransport.EventBridge, eventBusNameEnvVar, outboxed);
+    public static OutboundSend EventBridge(string topic, Type messageType, string eventBusNameEnvVar, bool outboxed = false, bool claimChecked = false)
+        => new(topic, messageType, OutboundTransport.EventBridge, eventBusNameEnvVar, outboxed, claimChecked);
 }

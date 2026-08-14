@@ -3,6 +3,7 @@ using Benzene.Abstractions.Results;
 using Benzene.Clients;
 using Benzene.Core.MessageHandlers;
 using Benzene.Examples.AwsMesh.Payments.Model;
+using Benzene.Examples.AwsMesh.Shared;
 using Benzene.Http;
 using Benzene.Results;
 using Microsoft.Extensions.Logging;
@@ -44,30 +45,44 @@ public class CapturePaymentMessageHandler : IMessageHandler<CapturePayment, Paym
 
     public async Task<IBenzeneResult<PaymentDto>> HandleAsync(CapturePayment request)
     {
-        var payment = new PaymentDto($"pay-{request.OrderId}", request.OrderId, request.Amount, request.Currency, "captured");
+        // Claim-check dogfood (README "Claim-check: oversized payloads"): orders-api may fold a large
+        // demo "supporting document" into OrderId rather than adding a field to this GENERATED contract
+        // (see ClaimCheckDemoPayload's remarks). Strip it back off here — payments-api never forwards
+        // the attachment further: shipping:book and payment:captured stay small on purpose, since
+        // neither of those downstream routes is claim-checked and would otherwise risk tripping
+        // SQS/EventBridge's own ~256 KB transport limit.
+        var orderId = ClaimCheckDemoPayload.Strip(request.OrderId);
+        if (orderId.Length != request.OrderId.Length)
+        {
+            _logger.LogInformation(
+                "payment capture for {orderId} arrived with an attached supporting document ({bytes} bytes) - not forwarded downstream",
+                orderId, request.OrderId.Length);
+        }
+
+        var payment = new PaymentDto($"pay-{orderId}", orderId, request.Amount, request.Currency, "captured");
 
         // Point-to-point command over SQS: shipping-api must book this exactly once.
         try
         {
             await _sender.SendAsync<OutboundShipmentBook, Void>("shipping:book",
-                new OutboundShipmentBook { OrderId = request.OrderId, Carrier = "DPD" });
-            _logger.LogInformation("payment captured for {orderId}; sent shipping:book", request.OrderId);
+                new OutboundShipmentBook { OrderId = orderId, Carrier = "DPD" });
+            _logger.LogInformation("payment captured for {orderId}; sent shipping:book", orderId);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "downstream shipping:book send failed for {orderId}", request.OrderId);
+            _logger.LogWarning(ex, "downstream shipping:book send failed for {orderId}", orderId);
         }
 
         // Integration event over EventBridge: routed by rule to notifications-api and analytics-api.
         try
         {
             await _sender.SendAsync<OutboundPaymentCaptured, Void>("payment:captured",
-                new OutboundPaymentCaptured { OrderId = request.OrderId, PaymentId = payment.Id, Amount = request.Amount, Currency = request.Currency });
-            _logger.LogInformation("payment captured for {orderId}; published payment:captured", request.OrderId);
+                new OutboundPaymentCaptured { OrderId = orderId, PaymentId = payment.Id, Amount = request.Amount, Currency = request.Currency });
+            _logger.LogInformation("payment captured for {orderId}; published payment:captured", orderId);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "payment:captured publish failed for {orderId}", request.OrderId);
+            _logger.LogWarning(ex, "payment:captured publish failed for {orderId}", orderId);
         }
 
         return BenzeneResult.Created(payment);

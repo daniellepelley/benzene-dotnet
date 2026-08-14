@@ -1,5 +1,7 @@
 using Amazon.DynamoDBv2;
+using Amazon.S3;
 using Benzene.Abstractions.Hosting;
+using Benzene.ClaimCheck.Aws.S3;
 using Benzene.Examples.AwsMesh.Payments.Handlers;
 using Benzene.Examples.AwsMesh.Payments.HealthChecks;
 using Benzene.Examples.AwsMesh.Payments.Model;
@@ -20,12 +22,24 @@ namespace Benzene.Examples.AwsMesh.Payments;
 /// (<c>work/outbox-plan.md</c> §2.6): the <c>payments:capture</c> SQS ingress runs
 /// <c>UseIdempotency()</c> (<c>enableSqsIdempotency</c>), deduping the redeliveries an at-least-once
 /// outbox relay can produce (orders-api's outbox stamps its envelope id into the <c>idempotency-key</c>
-/// header by default, matching this store's default key strategy with zero extra configuration).
+/// header by default, matching this store's default key strategy with zero extra configuration). Also
+/// the <b>hydrate side</b> of the claim-check pair (<c>work/claim-check-plan.md</c> Phase 6): the same
+/// ingress runs <c>UseClaimCheck&lt;SqsMessageContext&gt;()</c> (<c>enableClaimCheckHydration</c>),
+/// resolving any <c>benzene-claim-check</c> reference orders-api's oversized sends carry back to the
+/// real body before the handler runs.
 /// </summary>
 public class Startup : BenzeneStartUp
 {
     /// <summary>Provisioned by <c>deploy/main.tf</c>; see <c>Benzene.Idempotency.DynamoDb/CLAUDE.md</c> for the table shape.</summary>
     private const string PaymentsIdempotencyTableNameEnvVar = "PAYMENTS_IDEMPOTENCY_TABLE_NAME";
+
+    /// <summary>
+    /// The S3 bucket <c>Benzene.ClaimCheck.Aws.S3</c> hydrates offloaded <c>payments:capture</c>
+    /// receives from — the same bucket orders-api's <c>ClaimCheckBucketEnvVar</c> offloads to (see its
+    /// Startup for why it's a dedicated bucket). See README "Claim-check: oversized payloads" and
+    /// <c>work/claim-check-plan.md</c> Phase 6.
+    /// </summary>
+    private const string ClaimCheckBucketEnvVar = "CLAIM_CHECK_BUCKET";
 
     public override IConfiguration GetConfiguration()
         => new ConfigurationBuilder().AddEnvironmentVariables().Build();
@@ -46,6 +60,15 @@ public class Startup : BenzeneStartUp
         services.AddSingleton<IAmazonDynamoDB>(_ => new AmazonDynamoDBClient());
         var idempotencyTableName = Environment.GetEnvironmentVariable(PaymentsIdempotencyTableNameEnvVar) ?? "payments-idempotency";
         services.UsingBenzene(x => x.AddDynamoDbIdempotencyStore(idempotencyTableName));
+
+        // payments-api is also the RECEIVING side of the claim-check dogfood (orders-api sends with
+        // ClaimChecked: true) — registers a lazy IAmazonS3 client (same pattern as the IAmazonDynamoDB
+        // client above) and the S3-backed IClaimCheckStore, pointed at the same bucket orders-api writes
+        // to. Registered here, not inside the shared MeshServiceWiring, for the same reason the
+        // idempotency registration above is: it keeps the other five services' DI untouched.
+        var claimCheckBucket = Environment.GetEnvironmentVariable(ClaimCheckBucketEnvVar) ?? "benzene-mesh-claim-checks";
+        services.AddSingleton<IAmazonS3>(_ => new AmazonS3Client());
+        services.UsingBenzene(x => x.AddS3ClaimCheckStore(claimCheckBucket));
     }
 
     public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration)
@@ -59,7 +82,8 @@ public class Startup : BenzeneStartUp
         MeshServiceWiring.Configure(app, "payments",
             new[] { typeof(GetPaymentsMessageHandler), typeof(CapturePaymentMessageHandler) },
             healthChecks,
-            enableSqsIdempotency: true);
+            enableSqsIdempotency: true,
+            enableClaimCheckHydration: true);
     }
 }
 

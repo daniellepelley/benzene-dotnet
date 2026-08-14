@@ -32,3 +32,8 @@ output "orders_outbox_table_name" {
   description = "The orders-api outbox table (work/outbox-plan.md Phase 3) — inspect it (or the CloudWatch logs of orders_outbox_stream / orders_outbox_sweep) to watch envelopes go Pending -> Dispatched, or Parked after MaxAttempts."
   value       = aws_dynamodb_table.orders_outbox.name
 }
+
+output "claim_check_bucket" {
+  description = "The S3 bucket Benzene.ClaimCheck.Aws.S3 offloads oversized payments:capture payloads to (work/claim-check-plan.md Phase 6) — list objects under the claim-checks/ prefix (dated, one per offload) to see the pattern trigger on a POST /orders with a large SupportingDocument; the aws_s3_bucket_lifecycle_configuration expires them after 14 days regardless of whether they were ever consumed."
+  value       = aws_s3_bucket.claim_checks.id
+}

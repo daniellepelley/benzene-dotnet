@@ -16,6 +16,12 @@ variable "artifact_bucket_name" {
   default     = ""
 }
 
+variable "claim_check_bucket_name" {
+  description = "S3 bucket Benzene.ClaimCheck.Aws.S3 offloads/hydrates oversized payments:capture payloads to/from (work/claim-check-plan.md Phase 6). DEDICATED — kept separate from artifact_bucket_name: the mesh catalog is a durable registry read by the mesh's IAM role/audience, claim-checked payloads are expiring transients read by orders-api/payments-api's own role, and the two should never share a bucket policy. Must be globally unique; defaults to <project>-claim-checks-<account-id>."
+  type        = string
+  default     = ""
+}
+
 variable "discovery_tag_key" {
   description = "The resource tag key discovery filters on. Services carry this tag; the mesh Lambda does not (so it never discovers itself)."
   type        = string

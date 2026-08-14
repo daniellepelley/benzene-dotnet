@@ -21,6 +21,13 @@ data "aws_caller_identity" "current" {}
 locals {
   bucket_name = var.artifact_bucket_name != "" ? var.artifact_bucket_name : "${var.project}-${data.aws_caller_identity.current.account_id}"
 
+  # Benzene.ClaimCheck.Aws.S3's default key prefix (Benzene.ClaimCheck.Aws.S3/Extensions.cs's
+  # DefaultPrefix) — orders-api/payments-api register the store with no prefix override (Startup.cs), so
+  # this is the prefix every claim-checked object actually lands under, and what the lifecycle rule and
+  # IAM policy below are scoped to.
+  claim_check_prefix      = "claim-checks/"
+  claim_check_bucket_name = var.claim_check_bucket_name != "" ? var.claim_check_bucket_name : "${var.project}-claim-checks-${data.aws_caller_identity.current.account_id}"
+
   # The Cloud Service Lambdas. Each is tagged so discovery finds it; each gets its own HTTP API so its
   # Spec UI's relative fetches resolve cleanly. orders/payments/shipping form the command chain and
   # publish events; inventory/notifications/analytics are pure event consumers (SNS/EventBridge).
@@ -66,6 +73,56 @@ locals {
 resource "aws_s3_bucket" "artifacts" {
   bucket        = local.bucket_name
   force_destroy = true
+}
+
+# ---------------------------------------------------------------------------------------------------
+# S3 bucket for the claim-check dogfood (work/claim-check-plan.md Phase 6): orders-api offloads an
+# oversized payments:capture payload here (Benzene.ClaimCheck's UseClaimCheck() on that route,
+# OutboundSend.ClaimChecked), payments-api hydrates it back on receive (UseClaimCheck<SqsMessageContext>(),
+# enableClaimCheckHydration). DEDICATED from aws_s3_bucket.artifacts above — see claim_check_bucket_name's
+# description for why (different lifecycle, different IAM audience: only orders-api/payments-api's own
+# shared service role touches this bucket, never the mesh role).
+# ---------------------------------------------------------------------------------------------------
+resource "aws_s3_bucket" "claim_checks" {
+  bucket        = local.claim_check_bucket_name
+  force_destroy = true
+}
+
+# Block all public access — this bucket only ever holds transient message bodies, never anything meant
+# to be served publicly (unlike aws_s3_bucket.artifacts, whose catalog artifacts back the Mesh UI's own
+# fetches through the mesh's API, not direct bucket access either, but this is belt-and-braces for a
+# bucket that carries raw application payloads).
+resource "aws_s3_bucket_public_access_block" "claim_checks" {
+  bucket = aws_s3_bucket.claim_checks.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# Retention is TTL-based expiry, owned by infrastructure — Benzene.ClaimCheck.Aws.S3 never deletes an
+# object itself (see IClaimCheckStore's remarks: SNS-style fan-out and at-least-once redelivery both make
+# delete-on-consume unsafe). 14 days matches work/claim-check-plan.md §3's sizing rule: the TTL must
+# exceed the longest possible path from send to last possible consumption — queue retention plus any DLQ
+# redrive window — and SQS's own retention maxes out at 14 days, so this rule can never expire an object
+# while a redelivery could still need it. Scoped to claim_check_prefix, the exact prefix the store writes
+# under (see its definition above).
+resource "aws_s3_bucket_lifecycle_configuration" "claim_checks" {
+  bucket = aws_s3_bucket.claim_checks.id
+
+  rule {
+    id     = "expire-claim-checks"
+    status = "Enabled"
+
+    filter {
+      prefix = local.claim_check_prefix
+    }
+
+    expiration {
+      days = 14
+    }
+  }
 }
 
 # ---------------------------------------------------------------------------------------------------
@@ -261,12 +318,18 @@ locals {
       # captured envelopes for payments:capture/order:placed.
       ORDERS_TABLE_NAME        = aws_dynamodb_table.orders.name
       ORDERS_OUTBOX_TABLE_NAME = aws_dynamodb_table.orders_outbox.name
+      # The claim-check dogfood's sending side (work/claim-check-plan.md Phase 6): offloads an
+      # oversized payments:capture send here instead of inlining it on the SQS message.
+      CLAIM_CHECK_BUCKET       = aws_s3_bucket.claim_checks.id
     }
     payments = {
-      SHIPPING_QUEUE_URL               = aws_sqs_queue.shipping.url
-      EVENT_BUS_NAME                   = aws_cloudwatch_event_bus.bus.name
+      SHIPPING_QUEUE_URL              = aws_sqs_queue.shipping.url
+      EVENT_BUS_NAME                  = aws_cloudwatch_event_bus.bus.name
       # The consume side of the outbox+idempotency pair: dedups payments:capture redeliveries.
-      PAYMENTS_IDEMPOTENCY_TABLE_NAME  = aws_dynamodb_table.payments_idempotency.name
+      PAYMENTS_IDEMPOTENCY_TABLE_NAME = aws_dynamodb_table.payments_idempotency.name
+      # The claim-check dogfood's hydrating side: resolves the benzene-claim-check reference back to
+      # the real body before the handler runs. Same bucket orders-api writes to.
+      CLAIM_CHECK_BUCKET               = aws_s3_bucket.claim_checks.id
     }
     shipping      = { EVENT_BUS_NAME = aws_cloudwatch_event_bus.bus.name }
     inventory     = {}
@@ -553,6 +616,25 @@ resource "aws_iam_role_policy" "service_dynamodb" {
   name   = "${var.project}-service-dynamodb"
   role   = aws_iam_role.service.id
   policy = data.aws_iam_policy_document.service_dynamodb.json
+}
+
+# The shared service role's claim-check permissions, scoped to the bucket's claim_check_prefix path
+# only (never the bucket root). Only orders-api PUTs (offloading a payments:capture send) and only
+# payments-api GETs (hydrating on receive) — but both actions are granted to the ONE shared service role
+# both services run under, same broad-by-design posture as service_sqs/service_dynamodb above (the
+# comments on those explain why: this example role is intentionally not split per-service). A real
+# multi-role deployment would give orders-api put-only and payments-api get-only.
+data "aws_iam_policy_document" "service_claim_check" {
+  statement {
+    actions   = ["s3:PutObject", "s3:GetObject"]
+    resources = ["${aws_s3_bucket.claim_checks.arn}/${local.claim_check_prefix}*"]
+  }
+}
+
+resource "aws_iam_role_policy" "service_claim_check" {
+  name   = "${var.project}-service-claim-check"
+  role   = aws_iam_role.service.id
+  policy = data.aws_iam_policy_document.service_claim_check.json
 }
 
 # ---------------------------------------------------------------------------------------------------

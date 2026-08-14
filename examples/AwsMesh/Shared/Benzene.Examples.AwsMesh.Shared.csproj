@@ -29,6 +29,7 @@
     <ProjectReference Include="..\..\..\src\Benzene.Aws.Lambda.Sns\Benzene.Aws.Lambda.Sns.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Idempotency\Benzene.Idempotency.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Outbox\Benzene.Outbox.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.ClaimCheck\Benzene.ClaimCheck.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Clients\Benzene.Clients.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Clients.Aws.Sqs\Benzene.Clients.Aws.Sqs.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Clients.Aws.Sns\Benzene.Clients.Aws.Sns.csproj" />

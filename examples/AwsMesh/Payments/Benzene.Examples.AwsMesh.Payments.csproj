@@ -24,6 +24,9 @@
     <PackageReference Include="Amazon.Lambda.Core" Version="2.2.0" />
     <!-- Matches Benzene.Idempotency.DynamoDb's pin; Startup constructs the IAmazonDynamoDB client. -->
     <PackageReference Include="AWSSDK.DynamoDBv2" Version="3.7.301.4" />
+    <!-- Matches Benzene.ClaimCheck.Aws.S3's pin; Startup constructs the IAmazonS3 client (the
+         claim-check dogfood's hydrating side — see ClaimCheckBucketEnvVar). -->
+    <PackageReference Include="AWSSDK.S3" Version="3.7.309.4" />
   </ItemGroup>
 
   <ItemGroup>
@@ -38,6 +41,8 @@
     <ProjectReference Include="..\..\..\src\Benzene.Aws.Lambda.ApiGateway\Benzene.Aws.Lambda.ApiGateway.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Idempotency\Benzene.Idempotency.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Idempotency.DynamoDb\Benzene.Idempotency.DynamoDb.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.ClaimCheck\Benzene.ClaimCheck.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.ClaimCheck.Aws.S3\Benzene.ClaimCheck.Aws.S3.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.CloudService\Benzene.CloudService.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Schema.OpenApi\Benzene.Schema.OpenApi.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.HealthChecks\Benzene.HealthChecks.csproj" />

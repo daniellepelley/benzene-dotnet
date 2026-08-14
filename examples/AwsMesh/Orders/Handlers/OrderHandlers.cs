@@ -7,6 +7,7 @@ using Benzene.Core.MessageHandlers;
 // Generated at build time from contracts/payments.spec.json — see the csproj's <BenzeneServiceContract>.
 using Benzene.Examples.AwsMesh.Orders.Clients.PaymentsCapture;
 using Benzene.Examples.AwsMesh.Orders.Model;
+using Benzene.Examples.AwsMesh.Shared;
 using Benzene.Http;
 using Benzene.Outbox.DynamoDb;
 using Benzene.Results;
@@ -81,9 +82,15 @@ public class CreateOrderMessageHandler : IMessageHandler<CreateOrder, OrderDto>
         // an outboxed/SQS route is fire-and-forget only (SendAsync<TRequest, Void>; see
         // OutboundSqsContextConverter's remarks), and the generated client's method returns a typed
         // PaymentDto that no fire-and-forget transport can ever produce.
+        //
+        // Claim-check dogfood (README "Claim-check: oversized payloads", work/claim-check-plan.md Phase
+        // 6): this route is also ClaimChecked=true (Startup). When the caller attaches a
+        // SupportingDocument, ClaimCheckDemoPayload folds it into OrderId rather than adding a new field
+        // to CapturePayment — see that helper's remarks for why. Ordinary calls with no
+        // SupportingDocument stay small and exercise the normal under-threshold bypass path.
         await _sender.SendAsync<CapturePayment, Void>("payments:capture", new CapturePayment
         {
-            OrderId = order.Id,
+            OrderId = ClaimCheckDemoPayload.Embed(order.Id, request.SupportingDocument),
             // (double) because the contract's JSON Schema says "number" and the generator maps that to
             // double — payments-api's own CapturePayment.Amount is decimal. See the README note.
             Amount = (double)amount,
@@ -126,4 +133,20 @@ public class CreateOrder
 {
     public string Item { get; set; } = "";
     public int Quantity { get; set; }
+
+    /// <summary>
+    /// Optional, demo-only: a large "attached document" blob (e.g. a receipt/invoice a caller wants
+    /// captured alongside the payment). Not a real order-processing concern — it exists purely to
+    /// dogfood <c>Benzene.ClaimCheck</c>'s offload path on the <c>payments:capture</c> SQS route (see
+    /// README "Claim-check: oversized payloads"). When present, <see cref="ClaimCheckDemoPayload"/>
+    /// folds its bytes into <c>CapturePayment.OrderId</c> rather than adding a new field to that
+    /// GENERATED contract type — <c>contracts/payments.spec.json</c> stays untouched (see the README's
+    /// "Contract note"). Omit it (the common case) to exercise the ordinary, under-threshold send: a
+    /// value of roughly 200&#8211;300&#160;KB pushes the serialized <c>payments:capture</c> body over
+    /// <c>ClaimCheckOptions.DefaultThresholdBytes</c> (192&#160;KiB, 196,608 bytes) and triggers a real
+    /// offload — while staying clear of DynamoDB's unrelated 400&#160;KB item cap, which also applies
+    /// here because this route is outboxed (see README "Claim-check: oversized payloads" for the exact
+    /// sizing the demo uses and why).
+    /// </summary>
+    public string? SupportingDocument { get; set; }
 }

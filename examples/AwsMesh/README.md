@@ -50,20 +50,21 @@ non-trivial graph. See `work/aws-mesh-multi-transport-plan.md` for the plan and
 
 | Project | What it is | Sends | Consumes |
 |---|---|---|---|
-| `Orders/` (`…AwsMesh.Orders`) | orders-api Cloud Service Lambda. **Outboxed**: `payments:capture` + `order:placed` are captured by `Benzene.Outbox.DynamoDb` and committed atomically with the order row — see "The outbox" below. | `payments:capture` (SQS, outboxed), `order:placed` (SNS, outboxed) | `orders-outbox:INSERT` (DynamoDB Streams), `orders:outbox-sweep` (EventBridge schedule) |
-| `Payments/` (`…AwsMesh.Payments`) | payments-api Cloud Service Lambda. **Idempotent**: `payments:capture` runs `Benzene.Idempotency.DynamoDb`, deduping the outbox's at-least-once redeliveries — see "The outbox" below. | `shipping:book` (SQS), `payment:captured` (EventBridge) | `payments:capture` |
+| `Orders/` (`…AwsMesh.Orders`) | orders-api Cloud Service Lambda. **Outboxed**: `payments:capture` + `order:placed` are captured by `Benzene.Outbox.DynamoDb` and committed atomically with the order row — see "The outbox" below. **Claim-checked**: an oversized `payments:capture` send is offloaded to S3 via `Benzene.ClaimCheck.Aws.S3` — see "Claim-check: oversized payloads" below. | `payments:capture` (SQS, outboxed, claim-checked), `order:placed` (SNS, outboxed) | `orders-outbox:INSERT` (DynamoDB Streams), `orders:outbox-sweep` (EventBridge schedule) |
+| `Payments/` (`…AwsMesh.Payments`) | payments-api Cloud Service Lambda. **Idempotent**: `payments:capture` runs `Benzene.Idempotency.DynamoDb`, deduping the outbox's at-least-once redeliveries — see "The outbox" below. **Claim-check hydrating**: the same ingress resolves any `benzene-claim-check` reference back to the real body — see "Claim-check: oversized payloads" below. | `shipping:book` (SQS), `payment:captured` (EventBridge) | `payments:capture` |
 | `Shipping/` (`…AwsMesh.Shipping`) | shipping-api Cloud Service Lambda | `shipping:dispatched` (EventBridge) | `shipping:book` |
 | `Inventory/` (`…AwsMesh.Inventory`) | inventory-api Cloud Service Lambda | — | `order:placed` (SNS), `shipping:dispatched` (EventBridge) |
 | `Notifications/` (`…AwsMesh.Notifications`) | notifications-api Cloud Service Lambda | — | `order:placed` (SNS), `payment:captured` + `shipping:dispatched` (EventBridge) |
 | `Analytics/` (`…AwsMesh.Analytics`) | analytics-api Cloud Service Lambda | — | `payment:captured` + `shipping:dispatched` (EventBridge) |
 | `Mesh/` (`…AwsMesh.Mesh`) | the discovery + aggregator + UI Lambda (uses `Benzene.Mesh.Aws.S3`) | — | — |
-| `deploy/` | Terraform: 7 Lambdas, IAM, S3, one HTTP API per Lambda, SQS queues, an SNS topic, a custom EventBridge bus + rules, the aggregation schedule, the `orders`/`orders-outbox`/`payments-idempotency` DynamoDB tables, the outbox stream's event-source mapping, and the outbox sweep schedule | | |
+| `deploy/` | Terraform: 7 Lambdas, IAM, S3, one HTTP API per Lambda, SQS queues, an SNS topic, a custom EventBridge bus + rules, the aggregation schedule, the `orders`/`orders-outbox`/`payments-idempotency` DynamoDB tables, the outbox stream's event-source mapping, the outbox sweep schedule, and the dedicated `claim_checks` S3 bucket + lifecycle rule | | |
 | `.github/workflows/deploy-aws-mesh-example.yml` | GitHub Actions: build all 7 Lambdas + `terraform apply` | | |
 
-Only `orders-api` and `payments-api` opt into the outbox/idempotency pair — the other four services (and
-the mesh) are unaffected; `Shared/MeshServiceWiring` only wires either feature when a service explicitly
-asks for it (`OutboundSend(..., outboxed: true)` per route, `enableOutboxDispatchStream`/
-`enableSqsIdempotency` on `MeshServiceWiring.Configure`).
+Only `orders-api` and `payments-api` opt into the outbox/idempotency/claim-check trio — the other four
+services (and the mesh) are unaffected; `Shared/MeshServiceWiring` only wires any of them when a service
+explicitly asks for it (`OutboundSend(..., outboxed: true, claimChecked: true)` per route,
+`enableOutboxDispatchStream`/`enableSqsIdempotency`/`enableClaimCheckHydration` on
+`MeshServiceWiring.Configure`).
 
 Each service Lambda is a **self-contained executable** hosting the Benzene pipeline via an
 `Amazon.Lambda.RuntimeSupport` bootstrap — because .NET 10 has no managed Lambda runtime, they deploy
@@ -320,6 +321,106 @@ exactly-once — that's exactly why the consume side dedups. There's no ordering
 envelopes. `Immediate` mode (the default when a route omits `Transactional`) is store-and-forward, not
 atomic with a state write — `orders-api` deliberately opts into `Transactional` because it has a state
 write (the order row) to be atomic with; a service with no state write of its own would use the default.
+
+## Claim-check: oversized payloads
+
+Real transports cap message size — SQS/SNS/EventBridge at 256 KB (SQS raised its own max to 1 MiB in
+2025; SNS and EventBridge did not, so the smallest common limit still governs), Service Bus standard at
+256 KB, Azure Queue Storage at 64 KB. `Benzene.ClaimCheck` ships the pattern as a middleware pair —
+offload on the outbound route, hydrate on the inbound transport pipeline — rather than making it a
+transport or client-generation concern. This example dogfoods it on the same hop the outbox dogfoods:
+`orders-api → payments-api`'s `payments:capture` (`work/claim-check-plan.md` Phase 6).
+
+**Send side (`orders-api`).** `Startup` marks the `payments:capture` route `claimChecked: true`
+(`OutboundSend.ClaimChecked`) and registers `AddS3ClaimCheckStore(bucket)` against the dedicated
+`claim_checks` S3 bucket (`CLAIM_CHECK_BUCKET` env var). `Shared/MeshServiceWiring` wires
+`UseClaimCheck()` on that route — **after** `UseOutbox()`, deliberately: capture's terminal pass needs
+the *real* typed request to serialize into the durable envelope, so offload must not run until a send is
+actually about to hit the wire (a non-outboxed route's normal send, or the outbox relay dispatcher's
+pass-through re-send of a captured envelope's real deserialized payload). See `OutboundSend.ClaimChecked`'s
+remarks for the full reasoning. `UseClaimCheck()` measures the serialized `payments:capture` body; under
+`ClaimCheckOptions.DefaultThresholdBytes` (192 KiB) it's a no-op — the ordinary small send goes out
+inline exactly as before. At or over threshold it `PutAsync`s the body to S3, stamps the
+`benzene-claim-check` header with the store-issued `s3://…` reference, and replaces the outbound request
+with a tiny placeholder — so the actual SQS message stays trivially small regardless of how large the
+real payload was.
+
+**Receive side (`payments-api`).** `Startup` registers the same `AddS3ClaimCheckStore(bucket)` (same
+bucket, same `CLAIM_CHECK_BUCKET` env var), and `MeshServiceWiring.Configure` gets
+`enableClaimCheckHydration: true`, which adds `UseClaimCheck<SqsMessageContext>()` to the SQS ingress —
+after `UseIdempotency()` (a redelivered offloaded message still carries the same placeholder body and
+the same reference, so its idempotency-key body hash is stable; deduping first avoids a store fetch for
+a duplicate the handler will never see) and before `UseMessageHandlers` (the deserialization boundary).
+A message with no `benzene-claim-check` header passes through untouched, without touching the store —
+the common case stays free. A message that carries the header resolves it via `GetAsync`, replaces the
+raw body with the real one, and only then reaches `CapturePaymentMessageHandler` — the handler and its
+`CapturePaymentValidator` never know an offload happened.
+
+**Triggering it for real.** `CapturePayment.OrderId`/`Amount`/`Currency` alone never gets near 192 KiB, so
+`Orders/Handlers/OrderHandlers.cs`'s `CreateOrder` request carries an optional demo-only
+`SupportingDocument` field (e.g. a large "attached receipt" blob). When present,
+`Shared/ClaimCheckDemoPayload.Embed` folds it into `CapturePayment.OrderId` for the send (see the
+"Contract note" below for why it rides an existing field rather than a new one), and
+`Shared/ClaimCheckDemoPayload.Strip` takes it back off in `CapturePaymentMessageHandler` before
+`payments-api` does anything with the order id or forwards it downstream — `shipping:book` and
+`payment:captured` stay small on purpose, since neither of those routes is claim-checked and would
+otherwise risk tripping SQS/EventBridge's own transport limit themselves. Fire an oversized order:
+
+```bash
+orders_api=$(terraform -chdir=deploy output -json service_spec_ui_urls | jq -r .orders | sed 's#/benzene/spec-ui$##')
+doc=$(head -c 250000 /dev/zero | tr '\0' 'A')
+curl -X POST "$orders_api/orders" -H 'content-type: application/json' \
+  -d "{\"item\":\"Espresso Machine\",\"quantity\":1,\"supportingDocument\":\"$doc\"}"
+```
+
+250,000 bytes of filler is a deliberate choice, not just "big enough": `payments:capture` is also
+**outboxed** (see "The outbox" above), and capture writes the full, real `CapturePayment` — including
+the attachment — into a single DynamoDB item as part of the atomic `TransactWriteItems`. DynamoDB caps
+an item at 400 KB, so the demo payload has to clear `ClaimCheckOptions.DefaultThresholdBytes`
+(196,608 bytes) comfortably while staying well clear of that unrelated, tighter ceiling too — 250 KB
+does both with room either side. (A base64-encoded binary attachment would have been the more realistic
+"document" shape, but base64's ~4/3 size inflation pushes a 300 KB source file uncomfortably close to
+the 400 KB DynamoDB limit on this particular route; plain filler sidesteps that for the demo.) A service
+without an outboxed hop in front of its claim-checked route has no such ceiling to mind.
+
+Ordinary `orders:create` calls (no `supportingDocument`) keep exercising the normal under-threshold
+bypass path — most of this example's traffic never touches the claim-check store at all, which is the
+point: the middleware only does work when a payload actually needs it.
+
+**What to look for when it runs:**
+- **Trace tags.** `ClaimCheckOffloadMiddleware`/`ClaimCheckHydrateMiddleware` tag the current Activity
+  `benzene.claim-check = "offloaded"`/`"hydrated"` plus `benzene.claim-check.bytes` — with
+  `AddDiagnostics()`'s per-middleware spans (see "OpenTelemetry" above) these show up as their own
+  spans on the `orders-api → payments-api` X-Ray trace, right next to the correlation-id/trace-context
+  middleware's own spans.
+- **The bucket.** `terraform output claim_check_bucket`, then list objects under `claim-checks/` — one
+  dated `claim-checks/payments:capture/yyyy/MM/dd/{guid}` object per offload
+  (`S3ClaimCheckStore`'s key shape; the topic name travels into the key verbatim).
+- **The lifecycle rule.** `aws_s3_bucket_lifecycle_configuration.claim_checks` expires objects under that
+  prefix after **14 days** — sized to exceed SQS's own maximum retention (14 days) plus any DLQ redrive
+  window, per `work/claim-check-plan.md` §3's sizing rule, so the rule can never expire an object while a
+  redelivery could still need it.
+
+**Honest limits.** There is **no delete-on-consume** — a redelivered offloaded message must still be able
+to hydrate, and SNS-style fan-out means the first consumer to read a claim-checked payload is never
+guaranteed to be the only one, so nobody deletes at read time. Offload and send are two non-atomic steps,
+offload first: if the S3 `PutObject` succeeds but the subsequent SQS `SendMessage` then fails, the
+uploaded object is **orphaned** — nobody ever consumes it, and the TTL-based lifecycle rule above is the
+only cleanup, not a two-phase commit. That means payloads linger in the bucket for up to 14 days whether
+or not they were ever read; encryption defers to the bucket's own default settings (SSE), and access
+control is exactly the `service_claim_check` IAM policy `deploy/main.tf` grants.
+
+**Contract note.** The offloaded payload's *schema* is unchanged by any of this — `Orders/contracts/payments.spec.json`
+and the generated `CapturePayment` client type (see "orders → payments uses a *generated* client" below)
+are completely untouched by claim-checking, because offload happens in outbound *middleware*, below the
+typed client call, not inside it. That is the actual point of shipping claim-check as a middleware pair
+rather than a client-generation feature: any existing route can adopt it with zero contract or codegen
+changes. This dogfood takes that literally — rather than growing `CapturePayment` with a new field just
+to manufacture an oversized demo payload (which *would* have touched the contract, only for demo
+plumbing, not because claim-check needed it to), the oversized `SupportingDocument` rides inside the
+existing `OrderId` string field (see `Shared/ClaimCheckDemoPayload`'s remarks). A real service adding a
+genuinely large field to a contract remains free to do so — claim-check would offload it exactly the same
+way with no further wiring.
 
 ## Deploy it (via GitHub Actions — no local tooling)
 

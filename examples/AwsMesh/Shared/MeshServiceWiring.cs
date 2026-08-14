@@ -18,6 +18,7 @@ using Benzene.Clients.Aws.Sns;
 using Benzene.Clients.Aws.Sqs;
 using Benzene.Clients.CorrelationId;
 using Benzene.Clients.TraceContext;
+using Benzene.ClaimCheck;
 using Benzene.Core.MessageHandlers;
 using Benzene.Core.MessageHandlers.DI;
 using Benzene.Core.MessageHandlers.WarmUp;
@@ -150,6 +151,18 @@ public static class MeshServiceWiring
                             {
                                 pipeline.UseOutbox();
                             }
+                            // Per-send opt-in only (OutboundSend.ClaimChecked) — placed AFTER UseOutbox()
+                            // deliberately: capture's terminal pass needs the REAL Request to serialize
+                            // into the durable envelope, so offload must run no earlier than the point a
+                            // send is actually about to hit the wire (either a non-outboxed route's normal
+                            // send, or the relay dispatcher's pass-through re-send of a captured envelope's
+                            // real deserialized payload). See OutboundSend.ClaimChecked's remarks and
+                            // work/claim-check-plan.md Phase 6. A service that never sets ClaimChecked=true
+                            // never adds this middleware, and its routes behave exactly as before.
+                            if (send.ClaimChecked)
+                            {
+                                pipeline.UseClaimCheck();
+                            }
                             switch (send.Transport)
                             {
                                 case OutboundTransport.Sqs:
@@ -196,13 +209,26 @@ public static class MeshServiceWiring
     /// dedups it before the handler runs. Defaults to <see langword="false"/> so only the service
     /// actually consuming outboxed traffic pays for the store lookup.
     /// </param>
+    /// <param name="enableClaimCheckHydration">
+    /// When <see langword="true"/>, adds <c>Benzene.ClaimCheck</c>'s <c>UseClaimCheck&lt;SqsMessageContext&gt;()</c>
+    /// to this service's SQS ingress — the receive-side half of the claim-check pair
+    /// (<c>work/claim-check-plan.md</c> Phase 6): a message whose sender offloaded it (see
+    /// <see cref="OutboundSend.ClaimChecked"/>) carries the <c>benzene-claim-check</c> header, and this
+    /// resolves it back to the real body before the handler runs. Placed after <c>UseIdempotency()</c>
+    /// when both are enabled — a redelivered offloaded message still carries the same placeholder body
+    /// and the same reference, so its body-hash key is stable, and deduping first avoids a store fetch
+    /// for a duplicate the handler will never see. Defaults to <see langword="false"/> so only the
+    /// service actually consuming claim-checked traffic pays for the store lookup. Requires an
+    /// <c>IClaimCheckStore</c> to be registered (e.g. <c>AddS3ClaimCheckStore</c>).
+    /// </param>
     public static void Configure(
         IBenzeneApplicationBuilder app,
         string serviceName,
         Type[] handlers,
         IHealthCheck[] healthChecks,
         bool enableOutboxDispatchStream = false,
-        bool enableSqsIdempotency = false)
+        bool enableSqsIdempotency = false,
+        bool enableClaimCheckHydration = false)
     {
         var region = Environment.GetEnvironmentVariable("AWS_REGION") ?? "eu-west-1";
 
@@ -235,6 +261,13 @@ public static class MeshServiceWiring
                     // (see the parameter doc above). Requires an IIdempotencyStore to be registered
                     // (the caller wires AddDynamoDbIdempotencyStore alongside this flag).
                     pipeline = pipeline.UseIdempotency();
+                }
+                if (enableClaimCheckHydration)
+                {
+                    // Before UseMessageHandlers (the deserialization boundary), after idempotency (see
+                    // the parameter doc above). Requires an IClaimCheckStore to be registered (the
+                    // caller wires AddS3ClaimCheckStore alongside this flag).
+                    pipeline = pipeline.UseClaimCheck<SqsMessageContext>();
                 }
                 pipeline.UseMessageHandlers(handlers, router => router.UseFluentValidation());
             });

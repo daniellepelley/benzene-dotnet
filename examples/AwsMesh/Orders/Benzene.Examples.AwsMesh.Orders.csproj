@@ -31,6 +31,9 @@
     <!-- Matches Benzene.Outbox.DynamoDb's pin. Orders builds the TransactWriteItem for its own order
          row directly (Amazon.DynamoDBv2.Model), and constructs the IAmazonDynamoDB client in Startup. -->
     <PackageReference Include="AWSSDK.DynamoDBv2" Version="3.7.301.4" />
+    <!-- Matches Benzene.ClaimCheck.Aws.S3's pin. Orders constructs the IAmazonS3 client in Startup (the
+         claim-check dogfood's sending side — see ClaimCheckBucketEnvVar). -->
+    <PackageReference Include="AWSSDK.S3" Version="3.7.309.4" />
     <!-- Targets-only package (auto-imports its build\*.targets): generates the payments client below
          before CoreCompile. PrivateAssets - build-time only, must not flow to referencing projects. -->
     <PackageReference Include="Benzene.CodeGen.Build" Version="0.0.2-alpha.6" PrivateAssets="all" />
@@ -62,6 +65,8 @@
     <ProjectReference Include="..\..\..\src\Benzene.Aws.Lambda.Core\Benzene.Aws.Lambda.Core.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Outbox\Benzene.Outbox.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Outbox.DynamoDb\Benzene.Outbox.DynamoDb.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.ClaimCheck\Benzene.ClaimCheck.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.ClaimCheck.Aws.S3\Benzene.ClaimCheck.Aws.S3.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Aws.Lambda.ApiGateway\Benzene.Aws.Lambda.ApiGateway.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.CloudService\Benzene.CloudService.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Schema.OpenApi\Benzene.Schema.OpenApi.csproj" />

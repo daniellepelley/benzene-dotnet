@@ -1,5 +1,7 @@
 using Amazon.DynamoDBv2;
+using Amazon.S3;
 using Benzene.Abstractions.Hosting;
+using Benzene.ClaimCheck.Aws.S3;
 using Benzene.Examples.AwsMesh.Orders.Clients;
 using Benzene.Examples.AwsMesh.Orders.Clients.PaymentsCapture;
 using Benzene.Examples.AwsMesh.Orders.Handlers;
@@ -33,18 +35,32 @@ public class Startup : BenzeneStartUp
     /// </summary>
     private const string OrdersOutboxTableNameEnvVar = "ORDERS_OUTBOX_TABLE_NAME";
 
+    /// <summary>
+    /// The S3 bucket <c>Benzene.ClaimCheck.Aws.S3</c> offloads oversized <c>payments:capture</c> sends
+    /// to — provisioned by <c>deploy/main.tf</c> (<c>aws_s3_bucket.claim_checks</c>, a DEDICATED bucket,
+    /// separate from <c>aws_s3_bucket.artifacts</c> — see its comment for why). See README "Claim-check:
+    /// oversized payloads" and <c>work/claim-check-plan.md</c> Phase 6.
+    /// </summary>
+    private const string ClaimCheckBucketEnvVar = "CLAIM_CHECK_BUCKET";
+
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
         MeshServiceWiring.ConfigureServices(services, "orders", typeof(Startup).Assembly,
             // orders-api → payments-api: on create, send payments:capture to the payments SQS queue (a
             // point-to-point command — one consumer, must arrive). The payload type is the GENERATED
             // contract type, so the edge the mesh draws is declared with payments-api's own request shape
-            // rather than a hand-copied mirror of it. Outboxed=true: this is the dogfood — see
-            // Handlers/OrderHandlers.cs and work/outbox-plan.md's Phase 3.
-            OutboundSend.Sqs("payments:capture", typeof(CapturePayment), "PAYMENTS_QUEUE_URL", outboxed: true),
+            // rather than a hand-copied mirror of it. Outboxed=true: this is the outbox dogfood — see
+            // Handlers/OrderHandlers.cs and work/outbox-plan.md's Phase 3. ClaimChecked=true: this is
+            // ALSO the claim-check dogfood (work/claim-check-plan.md Phase 6) — a caller that attaches a
+            // large SupportingDocument (see Handlers/OrderHandlers.cs) pushes this send's serialized body
+            // over Benzene.ClaimCheck's default 192 KiB threshold, and UseClaimCheck() (wired below
+            // OutboundSend.ClaimChecked in MeshServiceWiring, AFTER UseOutbox()) offloads it to the
+            // dedicated claim-checks S3 bucket instead of inlining it on the SQS message.
+            OutboundSend.Sqs("payments:capture", typeof(CapturePayment), "PAYMENTS_QUEUE_URL", outboxed: true, claimChecked: true),
             // orders-api → inventory-api + notifications-api: publish order:placed to SNS, which fans it
             // out to every subscriber (a domain event, not a command). Also outboxed, atomically with the
-            // send above and the order row (see CreateOrderMessageHandler).
+            // send above and the order row (see CreateOrderMessageHandler). Not claim-checked: it never
+            // carries the oversized demo field (see Handlers/OrderHandlers.cs).
             OutboundSend.Sns("order:placed", typeof(OutboundOrderPlaced), "ORDER_PLACED_TOPIC_ARN", outboxed: true));
 
         // The GENERATED DI registration, not a hand-written one: `benzene build -output topic-client`
@@ -70,6 +86,14 @@ public class Startup : BenzeneStartUp
             .AddOutbox(o => o.WriteMode = OutboxWriteMode.Transactional)
             .AddDynamoDbOutboxStore(outboxTableName)
             .AddDynamoDbOutboxTransaction(outboxTableName));
+
+        // orders-api is the SENDING side of the claim-check dogfood (via ClaimChecked: true above) —
+        // registers a lazy IAmazonS3 client (same pattern as the IAmazonDynamoDB client above) and the
+        // S3-backed IClaimCheckStore. Registered here, not inside the shared MeshServiceWiring, for the
+        // same reason the outbox registrations above are: it keeps the other five services' DI untouched.
+        var claimCheckBucket = Environment.GetEnvironmentVariable(ClaimCheckBucketEnvVar) ?? "benzene-mesh-claim-checks";
+        services.AddSingleton<IAmazonS3>(_ => new AmazonS3Client());
+        services.UsingBenzene(x => x.AddS3ClaimCheckStore(claimCheckBucket));
     }
 
     public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration)
