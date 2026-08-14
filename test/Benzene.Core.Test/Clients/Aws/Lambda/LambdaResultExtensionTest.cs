@@ -1,4 +1,5 @@
 ﻿using System;
+using Benzene.Abstractions.Results;
 using Benzene.Clients;
 using Benzene.Clients.Common;
 using Benzene.Results;
@@ -182,6 +183,70 @@ public class LambdaResultExtensionTest
         Assert.Equal(benzeneStatus, lambdaBenzeneResult.Status);
         Assert.False(lambdaBenzeneResult.IsSuccessful);
         Assert.Equal("some-error", lambdaBenzeneResult.Errors[0].Message);
+    }
+
+    // Phase 5 of work/problem-details-plan.md: a multi-error problem body's "errors" member is
+    // authoritative and round-trips as structured BenzeneErrors (field/code/order intact) rather than
+    // collapsing into a single joined-string message (ruling §5.2's defect).
+    [Fact]
+    public void MapFailure_ProblemWithStructuredErrors_RoundTripsFieldCodeAndOrder()
+    {
+        var problem = new ProblemDetails
+        {
+            BenzeneStatus = BenzeneResultStatus.ValidationError,
+            Detail = "Name must not be empty, Age must be greater than 0",
+            Errors = new[]
+            {
+                new BenzeneError("Name must not be empty", "Name", "NotEmptyValidator"),
+                new BenzeneError("Age must be greater than 0", "Age", "GreaterThanValidator"),
+            },
+        };
+        var lambdaResponse = new BenzeneMessageClientResponse("422", JsonConvert.SerializeObject(problem));
+
+        var result = lambdaResponse.AsBenzeneResult<ExamplePayload>(new JsonSerializer());
+
+        Assert.False(result.IsSuccessful);
+        Assert.Equal(BenzeneResultStatus.ValidationError, result.Status);
+        Assert.Equal(2, result.Errors.Count);
+        Assert.Equal("Name must not be empty", result.Errors[0].Message);
+        Assert.Equal("Name", result.Errors[0].Field);
+        Assert.Equal("NotEmptyValidator", result.Errors[0].Code);
+        Assert.Equal("Age must be greater than 0", result.Errors[1].Message);
+        Assert.Equal("Age", result.Errors[1].Field);
+        Assert.Equal("GreaterThanValidator", result.Errors[1].Code);
+    }
+
+    [Fact]
+    public void MapFailure_ProblemWithStructuredErrors_AttachesTheReceivedDocumentForGetProblem()
+    {
+        var problem = new ProblemDetails
+        {
+            Type = "https://benzene.app/problems/validation-error",
+            BenzeneStatus = BenzeneResultStatus.ValidationError,
+            Errors = new[] { new BenzeneError("Name must not be empty", "Name", "NotEmptyValidator") },
+        };
+        var lambdaResponse = new BenzeneMessageClientResponse("422", JsonConvert.SerializeObject(problem));
+
+        var result = lambdaResponse.AsBenzeneResult<ExamplePayload>(new JsonSerializer());
+
+        var receivedProblem = result.GetProblem();
+        Assert.Equal("https://benzene.app/problems/validation-error", receivedProblem.Type);
+        var error = Assert.Single(receivedProblem.Errors!);
+        Assert.Equal("Name", error.Field);
+    }
+
+    [Fact]
+    public void MapFailure_ProblemWithNoErrorsMember_FallsBackToAMessageOnlyErrorFromDetail()
+    {
+        // Unchanged behavior for an older producer still emitting only { status, detail }.
+        var lambdaResponse = new BenzeneMessageClientResponse("404", JsonConvert.SerializeObject(new ProblemDetails { Detail = "Order 123 not found" }));
+
+        var result = lambdaResponse.AsBenzeneResult<ExamplePayload>(new JsonSerializer());
+
+        var error = Assert.Single(result.Errors);
+        Assert.Equal("Order 123 not found", error.Message);
+        Assert.Null(error.Field);
+        Assert.Null(error.Code);
     }
 
     [Fact]

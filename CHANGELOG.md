@@ -865,6 +865,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The `**BREAKING:**`-prefixed entries above list the API renames between alpha and 1.0,
 alongside notes on the two critical bug fixes.
 
+### Added
+- **Problem-details client read-side, typed accessor, app-authored problems, and gRPC field
+  violations** - Phase 5 of `work/problem-details-plan.md` (additive; no member removed).
+  - `Benzene.Results.IHasProblemDetails` - a capability interface (`ProblemDetails? Problem { get; }`)
+    a concrete result type can implement to carry a deliberately-attached problem document;
+    deliberately not a new `IBenzeneResult` member (the ruling's R7 freeze / plan decision 3).
+  - `BenzeneResult.Problem<T>(ProblemDetails problem)` / `BenzeneResult.Problem(ProblemDetails problem)`
+    - builds a failed result for a handler-authored problem (custom `type`/`instance`, or an
+    application subclass of `ProblemDetails` carrying extension members). Status comes from
+    `problem.BenzeneStatus` (**required** - throws `ArgumentException` when missing/empty, since a
+    problem with no status can't be classified downstream); errors project from `problem.Errors`
+    (empty when `null`); the result is always unsuccessful.
+  - `GetProblem(this IBenzeneResult result)` (`Benzene.Results`) - a total-function typed accessor:
+    returns the attached document verbatim when the result implements `IHasProblemDetails` with a
+    non-`null` `Problem`, otherwise synthesizes one via `ProblemTypes.From` (documented in the XML
+    doc as the received-vs-synthesized distinction). No `TryGetProblem` twin - `null` never escapes.
+  - **Client round-trip fix** (`Benzene.Clients.Common.ClientResultExtensions.AsBenzeneResult`):
+    closes the ruling §5.2 defect where a multi-error failure round-tripped through the client as a
+    single joined-string message. When the received `ProblemDetails.Errors` is present and
+    non-empty, the client's result now carries those `BenzeneError`s verbatim (field/code/order
+    intact) instead of one message built from `Detail`; absent `Errors` (an older producer emitting
+    only `{ status, detail }`) keeps the historical single-message fallback. Either way the received
+    document is attached (via the new internal `BenzeneResult.AttachReceivedProblem<T>` seam, so
+    `result.GetProblem()` returns exactly what was received - not a synthesized document. Status
+    classification stays envelope-first, unchanged: the attached document's own `BenzeneStatus` is
+    **not** used to pick the result's status, since it could disagree with the already-computed
+    envelope/HTTP classification for a still-transitioning producer.
+  - `Benzene.CodeGen.Client`'s generated clients read failures only through
+    `IBenzeneMessageSender`/`ClientResultExtensions.AsBenzeneResult`, so they inherit this fix with
+    zero template change - verified, no `ErrorPayload` references remained anywhere in the codebase
+    (Phase 3 already retired it cleanly).
+  - **gRPC**: `GrpcMethodHandler.AddRichErrorDetails` now fills
+    `Google.Rpc.BadRequest.Types.FieldViolation.Field` from `BenzeneError.Field` (left unset, not
+    empty, when the error isn't scoped to a field) - the ruling §5.3 "free correctness win".
+    Carrying `code` in `google.rpc.ErrorInfo` stays out of scope (parked). On the client
+    (`GrpcBenzeneMessageClient.SendMessageAsync`), a non-OK call now reads the
+    `grpc-status-details-bin` trailer's `google.rpc.BadRequest` (when present) into structured
+    `BenzeneError`s the same way, falling back to a single message-only error from `Status.Detail`
+    when no `BadRequest` details are attached (a non-Benzene server, or a Benzene failure status
+    other than `ValidationError`).
+  - **Deviation from the plan's literal text, confirmed deliberate:** every touched signature uses
+    `BenzeneError[]?` for `ProblemDetails.Errors` (Phase 3's already-shipped type, not the plan's
+    literal `IReadOnlyList<BenzeneError>` - `System.Xml.Serialization.XmlSerializer` can't reflect
+    an interface-typed member).
+
 ## [0.x.x-alpha] - Historical
 
 ### Added

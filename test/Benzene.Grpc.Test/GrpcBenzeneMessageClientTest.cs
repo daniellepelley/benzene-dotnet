@@ -8,6 +8,7 @@ using Benzene.Grpc.Test.Helpers;
 using Benzene.Grpc.Test.Protos;
 using Benzene.Grpc.TestHelpers;
 using Benzene.Results;
+using Google.Protobuf;
 using Grpc.Core;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -45,6 +46,52 @@ public class GrpcBenzeneMessageClientTest
         Assert.False(result.IsSuccessful);
         Assert.Equal(BenzeneResultStatus.NotFound, result.Status);
         Assert.Contains(result.Errors, e => e.Message == "no such thing");
+    }
+
+    // Phase 5 of work/problem-details-plan.md: the reverse read of GrpcMethodHandler.AddRichErrorDetails'
+    // grpc-status-details-bin google.rpc.BadRequest, mirroring the HTTP client's ProblemDetails.Errors fix.
+    [Fact]
+    public async Task SendMessageAsync_FailureWithBadRequestDetails_PopulatesStructuredErrorsFromFieldViolations()
+    {
+        var richStatus = new Google.Rpc.Status { Code = (int)StatusCode.InvalidArgument, Message = "bad request" };
+        var badRequest = new Google.Rpc.BadRequest();
+        badRequest.FieldViolations.Add(new Google.Rpc.BadRequest.Types.FieldViolation { Field = "Name", Description = "Name must not be empty" });
+        badRequest.FieldViolations.Add(new Google.Rpc.BadRequest.Types.FieldViolation { Description = "Age must be greater than 0" });
+        richStatus.Details.Add(Google.Protobuf.WellKnownTypes.Any.Pack(badRequest));
+
+        var trailers = new Metadata { { "grpc-status-details-bin", richStatus.ToByteArray() } };
+        var invoker = new TestCallInvoker
+        {
+            RpcExceptionToThrow = new RpcException(new Status(StatusCode.InvalidArgument, "bad request"), trailers),
+        };
+        var client = BuildClient(invoker, out var registry);
+        registry.Add<EchoRequest, EchoReply>("echo-topic", "/benzene.test.TestService/Echo");
+
+        var result = await client.SendMessageAsync<EchoRequest, EchoReply>(
+            new BenzeneClientRequest<EchoRequest>("echo-topic", new EchoRequest { Name = "world" }, new Dictionary<string, string>()));
+
+        Assert.False(result.IsSuccessful);
+        Assert.Equal(BenzeneResultStatus.BadRequest, result.Status);
+        Assert.Equal(2, result.Errors.Count);
+        Assert.Equal("Name must not be empty", result.Errors[0].Message);
+        Assert.Equal("Name", result.Errors[0].Field);
+        Assert.Equal("Age must be greater than 0", result.Errors[1].Message);
+        Assert.Null(result.Errors[1].Field);
+    }
+
+    [Fact]
+    public async Task SendMessageAsync_FailureWithNoBadRequestDetails_FallsBackToAMessageOnlyErrorFromStatusDetail()
+    {
+        var invoker = new TestCallInvoker { RpcExceptionToThrow = new RpcException(new Status(StatusCode.NotFound, "no such thing")) };
+        var client = BuildClient(invoker, out var registry);
+        registry.Add<EchoRequest, EchoReply>("echo-topic", "/benzene.test.TestService/Echo");
+
+        var result = await client.SendMessageAsync<EchoRequest, EchoReply>(
+            new BenzeneClientRequest<EchoRequest>("echo-topic", new EchoRequest { Name = "world" }, new Dictionary<string, string>()));
+
+        var error = Assert.Single(result.Errors);
+        Assert.Equal("no such thing", error.Message);
+        Assert.Null(error.Field);
     }
 
     [Fact]

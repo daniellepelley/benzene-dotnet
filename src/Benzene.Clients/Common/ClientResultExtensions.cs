@@ -12,13 +12,17 @@ namespace Benzene.Clients.Common
         /// contract, preserved verbatim - including an application-defined status, which now
         /// round-trips instead of being coerced to <c>unexpected-error</c>) or a numeric HTTP status
         /// code (older or HTTP-shaped services, mapped to its Benzene equivalent). Failure bodies are
-        /// read as an RFC 9457 problem document (<see cref="ProblemDetails"/>) and only
-        /// <see cref="ProblemDetails.Detail"/> is used - a minimal read-site fix for Phase 3 of
-        /// work/problem-details-plan.md (which retired the old <c>ErrorPayload</c> type this used to
-        /// deserialize into; the shape and behavior here are unchanged). Populating the result's
-        /// structured errors from <see cref="ProblemDetails.Errors"/> and attaching the received
-        /// document for <c>GetProblem()</c> is Phase 5's job (ruling §5.2/plan §Phase 5.3) -
-        /// TODO(Phase 5).
+        /// read as an RFC 9457 problem document (<see cref="ProblemDetails"/>): when its
+        /// <see cref="ProblemDetails.Errors"/> member is present and non-empty, the result's
+        /// structured errors are populated from it directly - field/code and all, and in order -
+        /// closing the defect where a multi-error failure used to round-trip as a single joined
+        /// <see cref="ProblemDetails.Detail"/> string (work/benzene-result-errors-ruling.md §5.2,
+        /// Phase 5 of work/problem-details-plan.md). When <c>Errors</c> is absent (an older producer
+        /// still emitting only <c>{ status, detail }</c>), this falls back to a single message-only
+        /// error built from <see cref="ProblemDetails.Detail"/> - unchanged behavior. Either way the
+        /// received document is attached to the result (via <see cref="BenzeneResult.AttachReceivedProblem{T}"/>)
+        /// so <c>result.GetProblem()</c> (<c>Benzene.Results</c>) returns exactly what was received,
+        /// not a synthesized document.
         /// </summary>
         /// <remarks>
         /// Success/failure classification prefers <see cref="BenzeneMessageClientResponse.IsSuccessful"/>
@@ -56,10 +60,7 @@ namespace Benzene.Clients.Common
                 return BenzeneResult.Set(status, serializer.Deserialize<T>(body), true);
             }
 
-            var problem = serializer.Deserialize<ProblemDetails>(body);
-            return string.IsNullOrEmpty(problem?.Detail)
-                ? BenzeneResult.Set<T>(status, false)
-                : BenzeneResult.SetFailed<T>(status, problem.Detail);
+            return FailedResultFromProblem<T>(status, serializer.Deserialize<ProblemDetails>(body));
         }
 
         private static IBenzeneResult<T> ReturnGuidResult<T>(string status, bool isSuccessful, string body, ISerializer serializer)
@@ -69,10 +70,29 @@ namespace Benzene.Clients.Common
                 return (IBenzeneResult<T>)BenzeneResult.Set(status, ParseGuid(body, serializer), true);
             }
 
-            var problem = serializer.Deserialize<ProblemDetails>(body);
-            return string.IsNullOrEmpty(problem?.Detail)
-                ? BenzeneResult.Set<T>(status, false)
-                : BenzeneResult.SetFailed<T>(status, problem.Detail);
+            return FailedResultFromProblem<T>(status, serializer.Deserialize<ProblemDetails>(body));
+        }
+
+        /// <summary>
+        /// Builds the failed <paramref name="status"/> result for a deserialized failure body, per the
+        /// rules in <see cref="AsBenzeneResult{T}"/>'s remarks. <paramref name="problem"/> is
+        /// <c>null</c> when the body didn't deserialize to anything (e.g. an empty body) - that keeps
+        /// the historical no-errors behavior instead of throwing.
+        /// </summary>
+        private static IBenzeneResult<T> FailedResultFromProblem<T>(string status, ProblemDetails? problem)
+        {
+            if (problem == null)
+            {
+                return BenzeneResult.Set<T>(status, false);
+            }
+
+            IReadOnlyList<BenzeneError> errors = problem.Errors is { Length: > 0 }
+                ? problem.Errors
+                : string.IsNullOrEmpty(problem.Detail)
+                    ? Array.Empty<BenzeneError>()
+                    : new[] { new BenzeneError(problem.Detail) };
+
+            return BenzeneResult.AttachReceivedProblem<T>(status, isSuccessful: false, errors, problem);
         }
 
         private static Guid ParseGuid(string body, ISerializer serializer)

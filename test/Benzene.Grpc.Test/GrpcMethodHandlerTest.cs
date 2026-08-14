@@ -100,6 +100,52 @@ public class GrpcMethodHandlerTest
         Assert.Equal("Name is required", badRequest.FieldViolations[0].Description);
     }
 
+    // Phase 5 of work/problem-details-plan.md ("gRPC gets a free correctness win", ruling §5.3):
+    // FieldViolation.Field is filled from BenzeneError.Field when the producer supplied one.
+    [Fact]
+    public async Task HandleAsync_ValidationErrorWithStructuredErrors_FillsFieldViolationFieldFromBenzeneErrorField()
+    {
+        var errors = new[]
+        {
+            new Benzene.Abstractions.Results.BenzeneError("Name must not be empty", "Name", "NotEmptyValidator"),
+            new Benzene.Abstractions.Results.BenzeneError("Age must be greater than 0", "Age", "GreaterThanValidator"),
+        };
+        var pipeline = BuildResultPipeline(BenzeneResult.ValidationError(errors), out var serviceResolverFactory);
+        var handler = new GrpcMethodHandler(new GrpcMethodDefinition("/x/y", "topic"), serviceResolverFactory, pipeline);
+        var callContext = TestServerCallContext.Create();
+
+        await Assert.ThrowsAsync<RpcException>(() =>
+            handler.HandleAsync<EchoRequest, EchoReply>(new EchoRequest { Name = "x" }, callContext));
+
+        var detailsBytes = callContext.ResponseTrailers.GetValueBytes("grpc-status-details-bin");
+        var richStatus = Google.Rpc.Status.Parser.ParseFrom(detailsBytes);
+        var badRequest = richStatus.Details[0].Unpack<Google.Rpc.BadRequest>();
+
+        Assert.Equal(2, badRequest.FieldViolations.Count);
+        Assert.Equal("Name", badRequest.FieldViolations[0].Field);
+        Assert.Equal("Name must not be empty", badRequest.FieldViolations[0].Description);
+        Assert.Equal("Age", badRequest.FieldViolations[1].Field);
+        Assert.Equal("Age must be greater than 0", badRequest.FieldViolations[1].Description);
+    }
+
+    [Fact]
+    public async Task HandleAsync_ValidationErrorWithNoField_LeavesFieldViolationFieldUnset()
+    {
+        var errors = new[] { new Benzene.Abstractions.Results.BenzeneError("Something went wrong") };
+        var pipeline = BuildResultPipeline(BenzeneResult.ValidationError(errors), out var serviceResolverFactory);
+        var handler = new GrpcMethodHandler(new GrpcMethodDefinition("/x/y", "topic"), serviceResolverFactory, pipeline);
+        var callContext = TestServerCallContext.Create();
+
+        await Assert.ThrowsAsync<RpcException>(() =>
+            handler.HandleAsync<EchoRequest, EchoReply>(new EchoRequest { Name = "x" }, callContext));
+
+        var detailsBytes = callContext.ResponseTrailers.GetValueBytes("grpc-status-details-bin");
+        var richStatus = Google.Rpc.Status.Parser.ParseFrom(detailsBytes);
+        var badRequest = richStatus.Details[0].Unpack<Google.Rpc.BadRequest>();
+
+        Assert.Equal(string.Empty, badRequest.FieldViolations[0].Field);
+    }
+
     private static IMiddlewarePipeline<GrpcContext> BuildResultPipeline(Benzene.Abstractions.Results.IBenzeneResult result, out IServiceResolverFactory serviceResolverFactory)
     {
         var services = new ServiceCollection();

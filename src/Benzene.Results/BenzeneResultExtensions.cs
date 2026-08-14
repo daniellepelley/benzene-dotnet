@@ -16,6 +16,38 @@ public static class BenzeneResultExtensions
         return result.Errors.Select(e => e.Message).ToArray();
     }
 
+    /// <summary>
+    /// Returns <paramref name="result"/>'s problem document - a total function, always non-<c>null</c>.
+    /// </summary>
+    /// <remarks>
+    /// Two cases, and the caller can't (and shouldn't need to) tell them apart from the return value
+    /// alone:
+    /// <list type="bullet">
+    /// <item><b>Received</b> - <paramref name="result"/>'s concrete type implements
+    /// <see cref="IHasProblemDetails"/> and has a non-<c>null</c> <see cref="IHasProblemDetails.Problem"/>
+    /// (a handler-authored problem built via <see cref="BenzeneResult.Problem{T}"/>, or a document a
+    /// Benzene client actually deserialized off a failure response,
+    /// <c>Benzene.Clients.Common.ClientResultExtensions</c>): that document is returned verbatim.</item>
+    /// <item><b>Synthesized</b> - every other result (the overwhelming majority - any ordinary failure
+    /// built with <see cref="BenzeneResult.NotFound{T}(string[])"/>/<c>.ValidationError(...)</c>/etc.):
+    /// a document is built on the spot via <see cref="ProblemTypes.From"/> from the result's status and
+    /// errors. Calling this twice on the same synthesized-path result returns two distinct
+    /// <see cref="ProblemDetails"/> instances with equal content, not the same reference.</item>
+    /// </list>
+    /// There is no <c>TryGetProblem</c> twin - <c>null</c> never escapes this method, by design, so
+    /// every caller can treat "does this result have a problem" as "call <see cref="GetProblem"/>",
+    /// full stop.
+    /// </remarks>
+    public static ProblemDetails GetProblem(this IBenzeneResult result)
+    {
+        if (result is IHasProblemDetails { Problem: { } problem })
+        {
+            return problem;
+        }
+
+        return ProblemTypes.From(result);
+    }
+
     public static bool IsAccepted(this IBenzeneResult serviceBenzeneResult)
     {
         return serviceBenzeneResult.Status == BenzeneResultStatus.Accepted;

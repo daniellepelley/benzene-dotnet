@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Messages.BenzeneClient;
 using Benzene.Abstractions.Middleware;
@@ -8,6 +9,7 @@ using Benzene.Core.Middleware;
 using Benzene.Grpc;
 using Benzene.Grpc.Serialization;
 using Benzene.Results;
+using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
@@ -65,8 +67,7 @@ public class GrpcBenzeneMessageClient : IBenzeneMessageClient
 
             if (context.Status.StatusCode != StatusCode.OK)
             {
-                var errors = string.IsNullOrEmpty(context.Status.Detail) ? Array.Empty<string>() : new[] { context.Status.Detail };
-                return BenzeneResult.SetFailed<TResponse>(status, errors);
+                return BenzeneResult.Set<TResponse>(status, ExtractErrors(context.Status, context.ResponseTrailers));
             }
 
             var payload = _adapter.ConvertRequest<TResponse>(context.Response);
@@ -77,6 +78,43 @@ public class GrpcBenzeneMessageClient : IBenzeneMessageClient
             _logger.LogError(ex, "Sending message {topic} failed", request.Topic);
             return BenzeneResult.ServiceUnavailable<TResponse>(ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Recovers structured errors for a non-<see cref="StatusCode.OK"/> call: when the server attached
+    /// a <c>google.rpc.BadRequest</c> to the <c>grpc-status-details-bin</c> trailer (see
+    /// <c>Benzene.Grpc.GrpcMethodHandler.AddRichErrorDetails</c>), one <see cref="BenzeneError"/> per
+    /// <c>FieldViolation</c> - <see cref="Google.Rpc.BadRequest.Types.FieldViolation.Description"/> as
+    /// the message, <see cref="Google.Rpc.BadRequest.Types.FieldViolation.Field"/> as the field when
+    /// non-empty (mirroring the HTTP client's <c>ProblemDetails.Errors</c> read). Otherwise falls back
+    /// to a single message-only error from <see cref="Status.Detail"/> - unchanged behavior for a
+    /// non-Benzene gRPC server, or a Benzene failure that isn't <c>ValidationError</c> (the only status
+    /// the server attaches field violations for today).
+    /// </summary>
+    private static IReadOnlyList<BenzeneError> ExtractErrors(Status status, Metadata? trailers)
+    {
+        var fieldViolations = trailers?.GetRpcStatus(ignoreParseError: true)?.Details
+            .Select(TryUnpackBadRequest)
+            .FirstOrDefault(badRequest => badRequest != null)
+            ?.FieldViolations;
+
+        if (fieldViolations is { Count: > 0 })
+        {
+            return fieldViolations
+                .Select(fieldViolation => new BenzeneError(
+                    fieldViolation.Description,
+                    string.IsNullOrEmpty(fieldViolation.Field) ? null : fieldViolation.Field))
+                .ToArray();
+        }
+
+        return string.IsNullOrEmpty(status.Detail)
+            ? Array.Empty<BenzeneError>()
+            : new[] { new BenzeneError(status.Detail) };
+    }
+
+    private static Google.Rpc.BadRequest? TryUnpackBadRequest(Any detail)
+    {
+        return detail.Is(Google.Rpc.BadRequest.Descriptor) ? detail.Unpack<Google.Rpc.BadRequest>() : null;
     }
 
     private DateTime? ResolveDeadline()

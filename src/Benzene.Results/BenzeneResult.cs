@@ -116,6 +116,71 @@ public static class BenzeneResult
         return ServiceBenzeneResultInternal<T>.Internal(status, errors);
     }
 
+    /// <summary>
+    /// Builds a failed, non-generic result carrying a deliberately-authored problem document - the
+    /// API for a handler that wants to return a rich problem (custom <see cref="ProblemDetails.Type"/>/
+    /// <see cref="ProblemDetails.Instance"/>, or an application subclass of <see cref="ProblemDetails"/>
+    /// carrying extension members) rather than the one <see cref="ProblemTypes.From"/> would synthesize.
+    /// See <see cref="Problem{T}"/> for the coherence rules (status source, error projection).
+    /// </summary>
+    public static IBenzeneResult Problem(ProblemDetails problem)
+    {
+        return Problem<Void>(problem);
+    }
+
+    /// <summary>
+    /// Builds a failed result carrying a deliberately-authored problem document - the typed
+    /// counterpart of <see cref="Problem(ProblemDetails)"/>.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="IBenzeneResult.Status"/> comes from <paramref name="problem"/>'s
+    /// <see cref="ProblemDetails.BenzeneStatus"/> (required - a problem document with no status is
+    /// meaningless as a result, since nothing downstream could classify it), <see cref="IBenzeneResult.Errors"/>
+    /// is projected from <see cref="ProblemDetails.Errors"/> (an empty list when it's <c>null</c>), and
+    /// the result is always unsuccessful - this factory exists to *fail* deliberately with a rich
+    /// document attached, never to succeed with one. Retrieve the attached document later with the
+    /// <see cref="BenzeneResultExtensions.GetProblem"/> extension (it returns this document verbatim,
+    /// not a synthesized one, because the result implements <see cref="IHasProblemDetails"/>).
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="problem"/>'s <see cref="ProblemDetails.BenzeneStatus"/> is <c>null</c> or empty.
+    /// </exception>
+    public static IBenzeneResult<T> Problem<T>(ProblemDetails problem)
+    {
+        ArgumentNullException.ThrowIfNull(problem);
+
+        if (string.IsNullOrEmpty(problem.BenzeneStatus))
+        {
+            throw new ArgumentException(
+                "problem.BenzeneStatus is required to build a BenzeneResult.Problem(...) - a problem " +
+                "document with no status can't be classified by anything downstream. Set " +
+                "ProblemDetails.BenzeneStatus before passing it here.",
+                nameof(problem));
+        }
+
+        var errors = problem.Errors is { Length: > 0 }
+            ? (IReadOnlyList<BenzeneError>)problem.Errors
+            : Array.Empty<BenzeneError>();
+
+        return AttachReceivedProblem<T>(problem.BenzeneStatus, false, errors, problem);
+    }
+
+    /// <summary>
+    /// Builds a result under an explicit <paramref name="status"/>/<paramref name="isSuccessful"/>
+    /// (not derived from <paramref name="problem"/>) carrying <paramref name="errors"/>, with
+    /// <paramref name="problem"/> attached so <see cref="BenzeneResultExtensions.GetProblem"/> returns
+    /// it verbatim. Internal - reached through <see cref="Problem{T}"/> for a handler-authored problem
+    /// (status IS derived from the problem there), and through <c>Benzene.Clients.Common.ClientResultExtensions</c>
+    /// for a client that deserialized a problem document off the wire, where the result's status must
+    /// stay whatever the envelope/HTTP classification already decided (see that type's remarks) rather
+    /// than being re-derived from the received document's <see cref="ProblemDetails.BenzeneStatus"/>,
+    /// which could disagree with it for a still-transitioning producer.
+    /// </summary>
+    internal static IBenzeneResult<T> AttachReceivedProblem<T>(string status, bool isSuccessful, IReadOnlyList<BenzeneError> errors, ProblemDetails? problem)
+    {
+        return ServiceBenzeneResultInternal<T>.ProblemInternal(status, isSuccessful, errors, problem);
+    }
+
     public static IBenzeneResult Ok()
     {
         return Ok(new Void());
@@ -349,7 +414,7 @@ public static class BenzeneResult
         return ServiceBenzeneResultInternal<Void>.Internal(BenzeneResultStatus.Timeout, errors);
     }
 
-    private class ServiceBenzeneResultInternal<T> : IBenzeneResult<T>
+    private class ServiceBenzeneResultInternal<T> : IBenzeneResult<T>, IHasProblemDetails
     {
         // Shared across every successful (and error-less) result so that path allocates nothing for
         // Errors - see work/benzene-result-errors-ruling.md §3.2.
@@ -391,8 +456,23 @@ public static class BenzeneResult
             Errors = errors is { Count: > 0 } ? errors : EmptyErrors;
         }
 
+        // The Phase 5 problem-carrying constructor: status/isSuccessful are explicit (not derived
+        // from Problem), so both BenzeneResult.Problem<T> (status ← problem.BenzeneStatus) and the
+        // client's received-document attachment (status ← the already-classified envelope/HTTP
+        // status, see AttachReceivedProblem<T>'s remarks) go through the same representation.
+        private ServiceBenzeneResultInternal(string status, bool isSuccessful, IReadOnlyList<BenzeneError> errors, ProblemDetails? problem)
+            : this(status, isSuccessful)
+        {
+            Errors = errors is { Count: > 0 } ? errors : EmptyErrors;
+            Problem = problem;
+        }
+
         public string Status { get; }
         public bool IsSuccessful { get; }
+
+        /// <summary>See <see cref="IHasProblemDetails.Problem"/>. <c>null</c> unless attached via
+        /// <see cref="BenzeneResult.Problem{T}"/> or the client's received-document path.</summary>
+        public ProblemDetails? Problem { get; }
         public IReadOnlyList<BenzeneError> Errors { get; }
 
         public T Payload { get; }
@@ -422,6 +502,11 @@ public static class BenzeneResult
         public static IBenzeneResult<T> Internal(string status, IReadOnlyList<BenzeneError> errors)
         {
             return new ServiceBenzeneResultInternal<T>(status, errors);
+        }
+
+        public static IBenzeneResult<T> ProblemInternal(string status, bool isSuccessful, IReadOnlyList<BenzeneError> errors, ProblemDetails? problem)
+        {
+            return new ServiceBenzeneResultInternal<T>(status, isSuccessful, errors, problem);
         }
 
         public static IBenzeneResult<T> OkInternal(T payload)

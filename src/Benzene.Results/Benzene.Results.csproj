@@ -12,4 +12,11 @@
     <ProjectReference Include="..\Benzene.Abstractions\Benzene.Abstractions.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Benzene.Clients.Common.ClientResultExtensions attaches a received ProblemDetails document to
+         a result under the envelope/HTTP-classified status (not one re-derived from the document's
+         own BenzeneStatus) via the internal AttachReceivedProblem seam - see BenzeneResult.cs. -->
+    <InternalsVisibleTo Include="Benzene.Clients" />
+  </ItemGroup>
+
 </Project>

@@ -135,7 +135,12 @@ public class GrpcMethodHandler : IGrpcMethodHandler
     /// Attaches a <c>google.rpc.Status</c> to the <c>grpc-status-details-bin</c> trailer alongside the
     /// flat <c>benzene-status</c> trailer, so a gRPC client can read structured error details. A
     /// <see cref="Benzene.Results.BenzeneResultStatus.ValidationError"/> maps its error messages to a
-    /// <c>google.rpc.BadRequest</c> with one field violation per message.
+    /// <c>google.rpc.BadRequest</c> with one field violation per message - <see cref="Benzene.Abstractions.Results.BenzeneError.Field"/>
+    /// fills <see cref="Google.Rpc.BadRequest.Types.FieldViolation.Field"/> when present (left unset,
+    /// not empty-string, when the error isn't scoped to a field - Phase 5 of
+    /// work/problem-details-plan.md, "gRPC gets a free correctness win", ruling §5.3). Carrying
+    /// <see cref="Benzene.Abstractions.Results.BenzeneError.Code"/> in <c>google.rpc.ErrorInfo</c> is
+    /// out of scope (parked, plan §8) - not added here.
     /// </summary>
     private static void AddRichErrorDetails(Metadata trailers, StatusCode statusCode, string detail, string? status, IReadOnlyList<Benzene.Abstractions.Results.BenzeneError>? errors)
     {
@@ -150,10 +155,13 @@ public class GrpcMethodHandler : IGrpcMethodHandler
             var badRequest = new Google.Rpc.BadRequest();
             foreach (var error in errors)
             {
-                // FieldViolation.Field is left unset here - filling it from BenzeneError.Field is
-                // Phase 5 of work/problem-details-plan.md ("gRPC gets a free correctness win",
-                // ruling §5.3), not this phase.
-                badRequest.FieldViolations.Add(new Google.Rpc.BadRequest.Types.FieldViolation { Description = error.Message });
+                var fieldViolation = new Google.Rpc.BadRequest.Types.FieldViolation { Description = error.Message };
+                if (!string.IsNullOrEmpty(error.Field))
+                {
+                    fieldViolation.Field = error.Field;
+                }
+
+                badRequest.FieldViolations.Add(fieldViolation);
             }
 
             richStatus.Details.Add(Google.Protobuf.WellKnownTypes.Any.Pack(badRequest));
