@@ -1,5 +1,7 @@
+using System;
 using Benzene.AspNet.Core;
 using Benzene.Auth.OAuth2;
+using Benzene.Example.Asp.Cancellation;
 using Benzene.Example.Asp.DemoAuth;
 using Benzene.Examples.App.Data;
 using Benzene.Examples.App.Logging;
@@ -25,6 +27,7 @@ using Benzene.Core.Middleware;
 using Benzene.Diagnostics.Correlation;
 using Benzene.FluentValidation;
 using Benzene.Http.Routing;
+using Benzene.Resilience;
 using Benzene.Schema.OpenApi;
 using Benzene.Spec.Ui;
 using ILogger = Microsoft.Extensions.Logging.ILogger;
@@ -128,6 +131,25 @@ public class Startup
                 )
             );
             protectedApp.UseEndpoints(endpoints => { });
+        });
+
+        // Cancellation demo (docs/message-handlers.md#cancellation): isolated the same way the
+        // /protected branch is above, so .UseTimeout(...) only applies a deadline to this one
+        // route rather than every request the service handles. SlowOperationMessageHandler
+        // injects ICancellationTokenAccessor and reads its token at the point of use; the 2-second
+        // timeout here fires before the handler's simulated 5-second call completes, so the
+        // response comes back as a "timeout" failure result instead of an aborted connection. Try
+        // it: curl http://localhost:5000/slow/slow-operation
+        app.Map("/slow", slowApp =>
+        {
+            slowApp.UseRouting();
+            slowApp.UseBenzene(benzene => benzene
+                .UseHttp(asp => asp
+                    .UseTimeout(TimeSpan.FromSeconds(2))
+                    .UseMessageHandlers(typeof(SlowOperationMessageHandler))
+                )
+            );
+            slowApp.UseEndpoints(endpoints => { });
         });
 
         app.UseEndpoints(endpoints => { endpoints.MapControllers(); });

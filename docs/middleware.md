@@ -364,6 +364,46 @@ tracing backend via `Benzene.OpenTelemetry`, and [Common Middleware](common-midd
 `UseTimer`, which opens an additional, explicitly-named `Activity` around a whole pipeline stage
 (distinct from the automatic per-middleware spans described here).
 
+## Middleware and cancellation
+
+Like a handler, a piece of middleware can resolve `Benzene.Abstractions.DI.ICancellationTokenAccessor`
+(constructor injection — it's scoped) and read its `.CancellationToken` property, always at the
+point of use rather than a value captured earlier. See
+[Message Handlers — Cancellation](message-handlers.md#cancellation) for the full model and the
+guarantee that governs it (default `CancellationToken.None`; a component that never resolves the
+accessor is unaffected) — this section only covers what's specific to *middleware*.
+
+Most middleware just reads the token and passes it on. A middleware that instead **creates** or
+**replaces** the ambient token for the duration of the downstream call (a deadline, a linked source
+tied to some other signal) must save the original and restore it afterward, so outer middleware sees
+its own token again once the inner call returns:
+
+```csharp
+public async Task HandleAsync(TContext context, Func<Task> next)
+{
+    var original = _accessor.CancellationToken;
+    using var cts = CancellationTokenSource.CreateLinkedTokenSource(original);
+    cts.CancelAfter(_timeout);                 // or link any other source
+    _accessor.CancellationToken = cts.Token;
+    try
+    {
+        await next();
+    }
+    finally
+    {
+        _accessor.CancellationToken = original;
+    }
+}
+```
+
+The `using` disposes the linked source (and its timer, and its registration on the original token) on
+every path, and restoring `original` in `finally` means nested wrappers compose naturally — the
+innermost deadline governs while inside it, and an outer middleware never observes an inner one's
+already-disposed linked token. `TimeoutMiddleware<TContext>` (`Benzene.Resilience`, behind
+[`.UseTimeout(...)`](common-middleware.md#usetimeout)) is the reference implementation of this
+pattern, including the extra step of telling a genuine host cancellation apart from its own timer
+firing — see its section in [Common Middleware](common-middleware.md#usetimeout) for that detail.
+
 ## See also
 
 - [Common Middleware](common-middleware.md) — the ready-made middleware Benzene ships (correlation

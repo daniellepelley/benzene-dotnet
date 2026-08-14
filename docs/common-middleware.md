@@ -500,8 +500,15 @@ operation was actually applied.
 
 Downstream code has to actually *observe* the ambient token (via `ICancellationTokenAccessor`) for a
 timeout to interrupt anything mid-flight; `UseTimeout` does not forcibly abort non-cooperative work.
-A dedicated "Cancellation" section covering the full injectable-accessor model (handlers, middleware,
-per-host seeding table) is a documentation follow-up, not yet published here.
+See [Message Handlers — Cancellation](message-handlers.md#cancellation) for the full injectable-accessor
+model (the guarantee, a handler snippet, and the per-host seeding table) and
+[Middleware — Middleware and cancellation](middleware.md#middleware-and-cancellation) for how a
+middleware like this one reads and replaces the ambient token.
+
+Nesting: `.UseTimeout(...)` composes with itself and with the ambient host token — the innermost
+deadline governs while inside it, and each layer restores exactly the token it saw on the way in, so
+`.UseRetry(...).UseTimeout(...)` applies the same deadline to every retry attempt combined, while
+`.UseTimeout(...).UseRetry(...)` applies it once across all attempts.
 
 ---
 

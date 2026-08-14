@@ -290,6 +290,73 @@ this — it's what actually stores the `IMessageHandlerResult` on the context so
 handlers (and diagnostics, e.g. `ActivityMiddlewareDecorator`'s `benzene.handler` tag — see
 [Middleware](middleware.md#automatic-activity-wrapping-imiddlewarewrapper)) can read it afterwards.
 
+## Cancellation
+
+Handler and middleware signatures never carry a `CancellationToken` parameter — that's a deliberate
+design choice (`IMessageHandler<TRequest, TResponse>.HandleAsync(TRequest request)` stays exactly as
+shown above, on every transport). Instead, cancellation is **ambient**: inject
+`ICancellationTokenAccessor` (`Benzene.Abstractions.DI`) like any other scoped dependency, and read
+its `.CancellationToken` property at the point you actually need it — for example, right before an
+outbound call — rather than caching it in a field at construction time. Wrapping middleware (like
+[`UseTimeout`](common-middleware.md#usetimeout)) can replace the ambient token for the duration of an
+inner call, so a value captured earlier can be stale by the time it matters.
+
+```csharp
+[Message("order:sync")]
+public class SyncOrderMessageHandler : IMessageHandler<SyncOrderMessage>
+{
+    private readonly HttpClient _httpClient;
+    private readonly ICancellationTokenAccessor _cancellation;
+
+    public SyncOrderMessageHandler(HttpClient httpClient, ICancellationTokenAccessor cancellation)
+    {
+        _httpClient = httpClient;
+        _cancellation = cancellation;
+    }
+
+    public async Task HandleAsync(SyncOrderMessage request)
+    {
+        // Read .CancellationToken here, at the point of use - not captured in the constructor.
+        await _httpClient.PostAsJsonAsync("https://partner.example.com/orders", request, _cancellation.CancellationToken);
+    }
+}
+```
+
+**The guarantee.** The accessor's token defaults to `CancellationToken.None`. A handler, middleware,
+or component that never resolves `ICancellationTokenAccessor` behaves byte-for-byte as before — no
+new exceptions, no new statuses, no timing changes. A component that does resolve it must treat the
+token as *advisory and possibly `CancellationToken.None`*: on transports with no cancellation concept
+it simply never fires, and code written as `await client.DoAsync(x, cancellation.CancellationToken)`
+is correct everywhere without checking which host it runs on.
+
+**When would I actually use this?** For a handler that makes a long-running external call (an HTTP
+request to a partner API, a slow database query) that should be interrupted rather than left running
+to completion when the host is shutting down, the caller has disconnected, or an operator-configured
+deadline ([`UseTimeout`](common-middleware.md#usetimeout)) has elapsed. Most handlers never need it —
+short, fast handlers can safely ignore `ICancellationTokenAccessor` entirely and rely on the guarantee
+above.
+
+**Which hosts seed a real token, and with what.** A host that has nothing to seed simply leaves the
+accessor at its default `CancellationToken.None` — every handler still runs correctly, it just can't
+be interrupted by that host's own signal (`UseTimeout` still works everywhere, since it supplies its
+own timer regardless of what, if anything, the host seeded).
+
+| Host / entry point | What gets seeded |
+| --- | --- |
+| ASP.NET Core, Azure Functions HTTP (AspNet) | `HttpContext.RequestAborted` |
+| gRPC | `ServerCallContext.CancellationToken` |
+| RabbitMQ worker | `BasicDeliverEventArgs.CancellationToken` |
+| Kafka worker | the worker's own shutdown/run token |
+| Azure Service Bus worker | `ProcessMessageEventArgs.CancellationToken` |
+| Azure Event Hub worker | `ProcessEventArgs.CancellationToken` |
+| SQS consumer (self-hosted worker) | the consumer's run/shutdown token |
+| Google Cloud Functions (Pub/Sub) | the function's own `CancellationToken` parameter |
+| Azure Functions (isolated worker, non-HTTP triggers) | `FunctionContext.CancellationToken` |
+| AWS Lambda (all `Benzene.Aws.Lambda.*`) | nothing — `ILambdaContext` has no cancellation token, so this is `CancellationToken.None` by design. Use [`UseTimeout`](common-middleware.md#usetimeout) with a value derived from your function's configured timeout if you need a deadline here. |
+
+See [Middleware and cancellation](middleware.md#middleware-and-cancellation) for how middleware reads
+and (for a component like `UseTimeout` that creates a deadline) replaces the ambient token.
+
 ## See also
 
 - [Message Results](message-result.md) — `IBenzeneResult<T>`, the `BenzeneResult` factory, result

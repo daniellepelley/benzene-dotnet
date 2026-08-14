@@ -56,16 +56,29 @@ a no-op for `CancellationToken.None`) right after `CreateScope()`, so any compon
 `ICancellationTokenAccessor` during the pipeline observes the transport's real cancellation signal
 without a signature change to the pipeline/handlers (the scoped-accessor pattern, like
 `PresetTopicHolder`). The original no-token overload delegates with `CancellationToken.None`.
+`MiddlewareMultiApplication<...>` has the same overload, seeding **each per-record scope**
+individually (batch = one invocation per message per the spec's scope rule).
+`IEntryPointMiddlewareApplication<...>`/`IMiddlewareApplication<...>` (`Benzene.Abstractions.Middleware`)
+carry the token overload too, as default interface methods delegating to the tokenless overload, so a
+pre-existing implementor of either interface (including user-written ones) still compiles and runs
+unchanged with no override required; the concrete classes here override them to forward to the real
+seeding path. See `work/cancellation-design.md` for the full design and `ICancellationTokenAccessor`'s
+XML docs for the read/write-at-point-of-use guarantee.
 Transports seed it where they have a signal: **per-message/-call** - `Benzene.AspNet.Core` +
 `Benzene.Azure.Function.AspNet` (`HttpContext.RequestAborted`, via a `SeedCancellationToken`
 middleware), `Benzene.Grpc` (`ServerCallContext.CancellationToken`), `Benzene.RabbitMq`
 (`BasicDeliverEventArgs.CancellationToken`), the `Benzene.Azure.ServiceBus`/`Benzene.Azure.EventHub`
-workers (`ProcessMessageEventArgs`/`ProcessEventArgs.CancellationToken`, via the token overload); and
+workers (`ProcessMessageEventArgs`/`ProcessEventArgs.CancellationToken`, via the token overload),
+`Benzene.Aws.Sqs`'s self-hosted consumer (its run/shutdown token, per-message scope - see
+`Benzene.Aws.Sqs/CLAUDE.md`), `Benzene.GoogleCloud.Functions.PubSub` (the function's own
+`CancellationToken` parameter, via `SendAsync(data, cancellationToken)`), and the Azure Functions
+(isolated worker) non-HTTP triggers (`FunctionContext.CancellationToken`, bound automatically by the
+Functions host and threaded through by the source-generated trigger methods); and
 **worker-shutdown** - `Benzene.Kafka.Core` (the worker's linked run token).
-AWS Lambda (no `ILambdaContext` token) and the Azure Functions non-HTTP triggers (their
-`FunctionContext.CancellationToken` never reaches Benzene) have no signal to seed;
-`Benzene.GoogleCloud.Functions.PubSub` has one but seeding it needs a token overload on
-`IEntryPointMiddlewareApplication` (a public-interface change) - deferred. Covered by
+AWS Lambda has no signal to seed - `ILambdaContext` carries no cancellation token (only
+`RemainingTime`); by design this stays `CancellationToken.None` there, and a Lambda handler that wants
+a deadline uses `Benzene.Resilience`'s `.UseTimeout(...)` with a value derived from the function's
+configured timeout instead. Covered by
 `test/Benzene.Core.Test/Core/Middleware/CancellationTokenSeedingTest.cs`.
 
 **Cancellation surfaced as an exception (known edge — by design).** `ExceptionHandlerMiddleware<TContext>`

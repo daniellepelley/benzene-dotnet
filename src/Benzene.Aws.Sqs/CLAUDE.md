@@ -93,6 +93,17 @@ resolves inside each message's dispatch (`InvocationId` = the message's SQS `Mes
 = `"Worker"`) - a long-running worker has no Lambda-style outer invocation boundary at all, so this
 is the only invocation identity available here. No application code changes needed for either fix.
 
+### Cancellation seeding
+`SqsConsumer.StartAsync`'s `cancellationToken` (its run/shutdown token) reaches
+`SqsConsumerApplication`'s `HandleAsync(ReceiveMessageResponse, IServiceResolverFactory,
+CancellationToken)` overload, which seeds it into **each per-message scope** individually right after
+`CreateScope()` (one invocation per message even within a batch, so there is one token to seed per
+scope) - the same pattern `MiddlewareApplication`/`MiddlewareMultiApplication` use (see
+`Benzene.Core.Middleware/CLAUDE.md`). Any component resolving `ICancellationTokenAccessor` during a
+message's pipeline run observes it. A handler that reads the token and throws once it has fired is
+caught like any other exception and reported as failed (not deleted), so the message is redelivered
+under `PerMessage` instead of lost - see `work/cancellation-design.md` for the full design.
+
 ## Claim-check hydration
 Not wired here yet: `Benzene.ClaimCheck`'s hydrate middleware needs an
 `IMessageBodySetter<SqsConsumerMessageContext>` registered — the same 5-line pattern as
