@@ -138,6 +138,38 @@ with caveats:
   obsoleted in favor of `SetFailed<T>(status, errors)` (errors case) and
   `Set<T>(status, payload, isSuccessful: true)` (string payload case).
 
+## Problem-type registry
+
+Every failed result is served on the wire as an [RFC 9457 problem
+document](../message-result.md#problem-documents-rfc-9457) (`Benzene.Results.ProblemDetails`). The
+document's `type`/`title` come from `Benzene.Results.ProblemTypes`, a static registry keyed by the
+same status vocabulary as the tables above — one row per failure status, plus a fallback for an
+application-defined one:
+
+| `benzeneStatus` | `type` (`https://benzene.app/problems/` + ) | `title` | HTTP `status` |
+|---|---|---|---|
+| `bad-request` | `bad-request` | Bad request | 400 |
+| `unauthorized` | `unauthorized` | Unauthorized | 401 |
+| `forbidden` | `forbidden` | Forbidden | 403 |
+| `not-found` | `not-found` | Not found | 404 |
+| `conflict` | `conflict` | Conflict | 409 |
+| `validation-error` | `validation-error` | Validation failed | 422 |
+| `too-many-requests` | `too-many-requests` | Too many requests | 429 |
+| `unexpected-error` | `unexpected-error` | Unexpected error | 500 |
+| `not-implemented` | `not-implemented` | Not implemented | 501 |
+| `service-unavailable` | `service-unavailable` | Service unavailable | 503 |
+| `timeout` | `timeout` | Timeout | 504 |
+| *(application-defined status)* | `null` — or your own URI via `BenzeneResult.Problem(...)` | `null` | 500 (the unknown-status fallback, same row as the status table above) |
+
+`ProblemTypes.TypeFor(status)` / `.TitleFor(status)` / `.HttpStatusFor(status)` expose this table in
+code; `ProblemTypes.From(result)` is the factory that builds a full `ProblemDetails` document from an
+ordinary result — `DefaultResponsePayloadMapper` calls it for every failed result automatically, so
+application code rarely calls it directly. Treat `type` as an opaque identifier: compare it by string
+equality, never dereference it as a URL. See [Message Results — Problem
+documents](../message-result.md#problem-documents-rfc-9457) for the full document shape, an example,
+`BenzeneResult.Problem(...)` (a handler returning its own rich problem), and `GetProblem()` (reading
+one back).
+
 ## Mapping in both directions
 
 - **Outbound (handler → transport):** `DefaultHttpStatusCodeMapper` (`Benzene.Http`) converts a
@@ -149,6 +181,7 @@ with caveats:
 
 ## See also
 
-- [Message Results](../message-result.md) — the conceptual introduction.
+- [Message Results](../message-result.md) — the conceptual introduction, including problem documents,
+  `BenzeneResult.Problem(...)`, and `GetProblem()`.
 - [Message Handlers](../message-handlers.md) — where results are returned.
 - [Fluent Validation](../fluent-validation.md) / [Data Annotations](../data-annotations.md) — produce `validation-error` results automatically.

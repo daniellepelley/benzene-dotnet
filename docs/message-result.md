@@ -16,7 +16,7 @@ public interface IBenzeneResult
     string Status { get; }
     bool IsSuccessful { get; }
     object PayloadAsObject { get; }
-    string[] Errors { get; }
+    IReadOnlyList<BenzeneError> Errors { get; }
 }
 
 public interface IBenzeneResult<T> : IBenzeneResult
@@ -28,6 +28,18 @@ public interface IBenzeneResult<T> : IBenzeneResult
 `Status` is a plain string (see [`BenzeneResultStatus`](#benzeneresultstatus) below) — not a .NET
 `enum` — which is what lets transport-specific status mappers (HTTP status codes, SQS
 acknowledgement, ...) key off it without a hard dependency on `Benzene.Results` itself.
+
+`Errors` (`Benzene.Abstractions.Results`) is a list of `BenzeneError { Message, Field?, Code? }`, not
+bare strings — `Message` is the human-readable text, `Field`/`Code` are populated by whichever
+producer built the error (a validation integration, or your own handler) when it has something
+structured to say; both are `null` for a plain `BenzeneResult.NotFound("Order 123 not found")`-style
+message. A success result's `Errors` is always an empty list, never `null`. `BenzeneError.ToString()`
+returns `Message`, so a pre-existing `string.Join(", ", result.Errors)` still compiles and produces
+the same text; `result.ErrorMessages()` (`Benzene.Results`) does the same projection as an explicit
+`string[]`. See [Problem documents](#problem-documents-rfc-9457) below for where `Field`/`Code` end up
+on the wire, and [Fluent Validation](fluent-validation.md#structured-errors-on-the-wire-field-and-code) /
+[Data Annotations](data-annotations.md#structured-errors-on-the-wire-field-and-code) for which
+integration populates what.
 
 ## `BenzeneResult` factory
 
@@ -72,6 +84,120 @@ result's payload type while preserving its status/success/errors — handy when 
 handler's result to another shape. It also has `HttpStatusCode.Convert()` / `Convert<T>()`
 extensions that go the other direction: turning a raw `HttpStatusCode` (e.g. from an outbound HTTP
 call inside a handler) into an `IBenzeneResult`/`IBenzeneResult<T>`.
+
+## Problem documents (RFC 9457)
+
+Whenever a result is unsuccessful, the payload it would have carried is replaced on the wire by a
+**problem document** — an [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) "Problem Details"
+object, the same shape on every transport. `Benzene.Results.ProblemDetails` is the wire type:
+
+```csharp
+public class ProblemDetails
+{
+    public string? Type { get; set; }
+    public string? Title { get; set; }
+    public int? Status { get; set; }
+    public string? Detail { get; set; }
+    public string? Instance { get; set; }
+    public string? BenzeneStatus { get; set; }
+    public BenzeneError[]? Errors { get; set; }
+}
+```
+
+You never build this by hand for the ordinary case — `BenzeneResult.NotFound(...)`,
+`.ValidationError(...)`, and every other failure factory get one for free. Every optional member is
+**omitted from the wire, not emitted as `null`**, when it doesn't apply — most visibly `Status`,
+which only ever appears on an HTTP-bound response (an envelope over a queue or a direct invocation
+never carries a fabricated HTTP status number). A `validation-error` produced by a FluentValidation
+failure and served over HTTP looks like this on the wire:
+
+```json
+{
+  "type": "https://benzene.app/problems/validation-error",
+  "title": "Validation failed",
+  "status": 422,
+  "detail": "Name must not be empty, Age must be greater than 0",
+  "benzeneStatus": "validation-error",
+  "errors": [
+    { "message": "Name must not be empty", "field": "Name", "code": "NotEmptyValidator" },
+    { "message": "Age must be greater than 0", "field": "Age", "code": "GreaterThanValidator" }
+  ]
+}
+```
+
+- `type`/`title` come from the [problem-type registry](reference/results.md#problem-type-registry),
+  keyed by the result's `Status`.
+- `detail` is the result's `Errors` joined with `", "` — the one member every pre-RFC-9457 reader
+  already used, unchanged.
+- `benzeneStatus` mirrors the result's `Status` string — the transport-neutral discriminator every
+  reader should classify on; `status` (numeric) only exists for HTTP.
+- `errors`, when present, is the result's structured `BenzeneError`s. See
+  [Fluent Validation](fluent-validation.md#structured-errors-on-the-wire-field-and-code) /
+  [Data Annotations](data-annotations.md#structured-errors-on-the-wire-field-and-code) for which
+  integration populates `field`/`code` and how.
+- `instance` is never set by the framework — it's an application-owned member (see below).
+
+`DefaultResponsePayloadMapper` builds this document via `ProblemTypes.From(result)` for every failed
+result automatically; HTTP-facing transports additionally fill in `status` from the same mapper that
+decides the actual HTTP response code, so the two can never disagree (see
+[Transport mapping](#transport-mapping) below). `SerializerResponseRenderer` also rewrites the
+response `content-type` to `application/problem+json` (or `application/problem+xml`) on failure.
+
+### Returning a rich problem with BenzeneResult.Problem
+
+The registry covers the ordinary case. For a handler that wants to return something the registry
+can't express — a custom `type` outside it, an `instance` URI identifying this specific occurrence,
+or extension members via a `ProblemDetails` subclass — build the document yourself and hand it to
+`BenzeneResult.Problem(...)`:
+
+```csharp
+public class OutOfStockProblem : ProblemDetails
+{
+    public int AvailableQuantity { get; set; }
+}
+
+public async Task<IBenzeneResult<OrderDto>> HandleAsync(CreateOrderMessage request)
+{
+    var available = await _stock.AvailableAsync(request.Sku);
+    if (available < request.Quantity)
+    {
+        return BenzeneResult.Problem<OrderDto>(new OutOfStockProblem
+        {
+            Type = "https://example.com/problems/out-of-stock",
+            Title = "Not enough stock",
+            Detail = $"Only {available} of '{request.Sku}' left.",
+            Instance = $"urn:order-sku:{request.Sku}",
+            BenzeneStatus = BenzeneResultStatus.Conflict,
+            AvailableQuantity = available,
+        });
+    }
+
+    return await _orderService.SaveAsync(request);
+}
+```
+
+`problem.BenzeneStatus` is required — it becomes the result's `Status` (and therefore drives every
+transport mapping below), so `BenzeneResult.Problem(...)` throws `ArgumentException` naming the fix
+if it's missing. The result this returns is always unsuccessful, and the document you passed in is
+attached to it verbatim (not re-derived from the registry) — retrieve it with `GetProblem()` below.
+There's also a non-generic `BenzeneResult.Problem(problem)` for `IMessageHandler<TRequest>` handlers.
+
+### Reading a problem document back — `GetProblem()`
+
+`GetProblem(this IBenzeneResult result)` (`Benzene.Results`) is the one API you need on the reading
+side — whether the result came from your own handler's `BenzeneResult.Problem(...)`, from a Benzene
+client's failure response, or from an ordinary `BenzeneResult.NotFound(...)` you never attached a
+document to:
+
+```csharp
+ProblemDetails problem = result.GetProblem();
+```
+
+It never returns `null` — there's no `TryGetProblem` twin. If the result carries a
+deliberately-attached document (built via `BenzeneResult.Problem(...)`, or received over the wire by
+a Benzene client, which attaches exactly what it deserialized) you get that document back verbatim;
+otherwise one is synthesized on the spot via `ProblemTypes.From(result)`. Callers don't need to know,
+or care, which case they're in.
 
 ## `BenzeneResultStatus`
 
@@ -159,11 +285,12 @@ the result's `IsSuccessful` is `true`, else `500` (a null status is always `500`
 `HttpStatusCodeResponseHandler<TContext>` applies this mapping to the HTTP response via
 `IBenzeneResponseAdapter<TContext>`. On success, `SerializerResponseRenderer<TContext>` (see
 [Message Handlers](message-handlers.md#response-handling)) serializes `Payload`; on failure, it
-serializes an RFC 9457 problem document (`ProblemDetails`, built by `ProblemTypes.From` —
-`{ type, title, detail, benzeneStatus, errors? }`, where `detail` is `Errors` joined with `", "` and
-`errors` carries the result's structured errors when present) — so a
-`BenzeneResult.NotFound<OrderDto>("Order 123 not found")` becomes an HTTP `404` with a JSON body
-describing the error, not the (empty) `OrderDto` payload.
+serializes the [problem document](#problem-documents-rfc-9457) described above — so a
+`BenzeneResult.NotFound<OrderDto>("Order 123 not found")` becomes an HTTP `404` with an
+`application/problem+json` body describing the error, not the (empty) `OrderDto` payload. On every
+HTTP-facing context (`Benzene.AspNet.Core`, API Gateway v1/v2, the Lambda/Azure/Google Cloud HTTP
+hosts), the problem document's `status` member is filled in from this same mapping, so the body's
+`status` and the response line's HTTP code can never disagree.
 
 ### Async/event transports — settlement (ack/nack/checkpoint)
 
@@ -207,3 +334,9 @@ Two representative examples:
 - [Message Handlers](message-handlers.md) — how handlers produce `IBenzeneResult<T>` and how the
   router/response-handling pipeline consumes it.
 - [Middleware](middleware.md) — the pipeline mechanism handlers run inside.
+- [Result & Status Reference](reference/results.md#problem-type-registry) — the full problem-type
+  registry table.
+- [Diagnosing Failures](diagnosing-failures.md) — reading a problem document back out when a message
+  failed in production, and how it relates to the mesh's operator-facing issue classification.
+- [Global Error Handling](cookbooks/global-error-handling.md) — building a problem document by hand
+  for a caught exception, where the automatic mapper doesn't run.

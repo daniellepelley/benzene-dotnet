@@ -292,6 +292,27 @@ public class CreateProductRequestValidator : AbstractValidator<CreateProductRequ
 }
 ```
 
+### 6. A stable `code` for the duplicate-name rule
+
+The result's structured errors carry FluentValidation's `ErrorCode` verbatim as `BenzeneError.Code`
+— by default that's the validator type name (`NotEmptyValidator`, `MustAsyncValidator`, ...), which
+isn't a code you'd want a caller branching on. Set your own with `.WithErrorCode(...)`, chained the
+same way as `.WithStatus(...)`:
+
+```csharp
+RuleFor(x => x.Name)
+    .MustAsync(async (name, cancellationToken) => !await productRepository.NameExistsAsync(name, cancellationToken))
+    .WithMessage(x => $"A product named '{x.Name}' already exists")
+    .WithErrorCode("duplicate_name")
+    .WithStatus(BenzeneResultStatus.Conflict);
+```
+
+A caller reading the response's [problem document](../message-result.md#problem-documents-rfc-9457)
+now sees `{ "message": "A product named 'Widget' already exists", "field": "Name", "code":
+"duplicate_name" }` in `errors`, and can branch on `"duplicate_name"` without parsing `message` text.
+See [Fluent Validation — Structured errors on the wire](../fluent-validation.md#structured-errors-on-the-wire-field-and-code)
+for the general `field`/`code` rule this follows.
+
 ## Testing
 
 Use FluentValidation's own `TestValidate` helpers for the validator in isolation — the pattern used

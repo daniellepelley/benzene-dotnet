@@ -86,7 +86,7 @@ public async Task ExceptionHandler_ExceptionRethrownByHandler_IsStillLogged()
 
 Because the middleware only wraps what comes *after* it, **placement matters**: add `.UseExceptionHandler(...)` as early as possible in the pipeline you want protected — before `.UseMessageHandlers()` and before any other middleware whose exceptions you want caught. Anything registered before it is unprotected.
 
-There's also an important gap between this and how Benzene normally reports handler failures: when a handler returns `BenzeneResult.UnexpectedError(...)` (an *unsuccessful result*, not a thrown exception), the framework's own response pipeline (`DefaultResponsePayloadMapper`/`HttpStatusCodeResponseHandler`, see `src/Benzene.Core.MessageHandlers/Response/DefaultResponsePayloadMapper.cs` and `src/Benzene.Http/HttpStatusCodeResponseHandler.cs`) automatically serializes an RFC 9457 problem document (`ProblemTypes.From`) and maps the status to an HTTP code. A raw *thrown* exception caught by `UseExceptionHandler` bypasses that pipeline entirely — nothing builds a response for you. Your `onException` callback is responsible for constructing whatever response shape you want.
+There's also an important gap between this and how Benzene normally reports handler failures: when a handler returns `BenzeneResult.UnexpectedError(...)` (an *unsuccessful result*, not a thrown exception), the framework's own response pipeline (`DefaultResponsePayloadMapper`/`HttpStatusCodeResponseHandler`, see `src/Benzene.Core.MessageHandlers/Response/DefaultResponsePayloadMapper.cs` and `src/Benzene.Http/HttpStatusCodeResponseHandler.cs`) automatically serializes a [problem document](../message-result.md#problem-documents-rfc-9457) (`ProblemTypes.From`) and, on an HTTP-facing context, fills in its `status` from the same mapping that sets the response line. A raw *thrown* exception caught by `UseExceptionHandler` bypasses that pipeline entirely — nothing builds a response for you, including that `status` fill-in. Your `onException` callback is responsible for constructing whatever response shape you want, `status` included.
 
 ## Step-by-Step Implementation
 
@@ -104,13 +104,14 @@ app.UseApiGateway(apiGatewayApp => apiGatewayApp
         context.EnsureResponseExists();
         context.ApiGatewayProxyResponse.StatusCode = 500; // matches DefaultHttpStatusCodeMapper's unexpected-error -> 500
         context.ApiGatewayProxyResponse.Headers["content-type"] = "application/problem+json";
-        context.ApiGatewayProxyResponse.Body = JsonSerializer.Serialize(
-            ProblemTypes.From(BenzeneResult.UnexpectedError("An unexpected error occurred.")));
+        var problem = ProblemTypes.From(BenzeneResult.UnexpectedError("An unexpected error occurred."));
+        problem.Status = 500; // matches the StatusCode above -- the automatic mapper isn't in play here, so set it yourself
+        context.ApiGatewayProxyResponse.Body = JsonSerializer.Serialize(problem);
     })
     .UseMessageHandlers());
 ```
 
-`500` here isn't an arbitrary choice — it's the same value `DefaultHttpStatusCodeMapper` (`src/Benzene.Http/DefaultHttpStatusCodeMapper.cs`) maps `BenzeneResultStatus.UnexpectedError` to for handlers that fail normally, so a thrown exception and a handler explicitly returning `BenzeneResult.UnexpectedError()` end up looking the same to the client. `ProblemTypes.From(...)` (`Benzene.Results`) builds the same RFC 9457 problem document shape `DefaultResponsePayloadMapper` uses for unsuccessful results, so the JSON body is consistent with the framework's own error responses too — you're just building it by hand because the exception path doesn't run that mapper for you. (`ProblemDetails.Status`, the numeric HTTP code, isn't filled in here — that's an HTTP-binding-specific concern a later phase of `work/problem-details-plan.md` adds; set it explicitly if you want it, matching the `StatusCode` above.)
+`500` here isn't an arbitrary choice — it's the same value `DefaultHttpStatusCodeMapper` (`src/Benzene.Http/DefaultHttpStatusCodeMapper.cs`) maps `BenzeneResultStatus.UnexpectedError` to for handlers that fail normally, so a thrown exception and a handler explicitly returning `BenzeneResult.UnexpectedError()` end up looking the same to the client. `ProblemTypes.From(...)` (`Benzene.Results`) builds the same problem document shape `DefaultResponsePayloadMapper` uses for unsuccessful results (`type`/`title` from the [problem-type registry](../reference/results.md#problem-type-registry), `detail`, `benzeneStatus`), so the JSON body is consistent with the framework's own error responses too — you're just building it by hand because the exception path doesn't run that mapper for you, so nothing fills in `Status` (the numeric HTTP code) automatically either; set it explicitly, matching the `StatusCode` above, as shown.
 
 The same pattern applies to `Benzene.AspNet.Core`'s `AspNetContext` (set `context.HttpContext.Response.StatusCode` and write the body) if you're hosting in ASP.NET Core instead of Lambda.
 
@@ -220,6 +221,20 @@ For the SQS-specific fallback behavior (what happens with *no* `UseExceptionHand
 
 ## Variations
 
+### Choosing `type`/`title` for a hand-built problem document
+
+`ProblemTypes.From(...)` in the examples above always uses the framework's own [problem-type
+registry](../reference/results.md#problem-type-registry) (one row per `BenzeneResultStatus` failure
+value, e.g. `unexpected-error` → `https://benzene.app/problems/unexpected-error` / "Unexpected
+error" / HTTP 500). This `type` is **caller-facing** — it's what a consumer of your service branches
+on — and is a different concept from the mesh's operator-facing issue **`classification`**
+(`exception`/`validation`/`config-wiring`/`dependency`/`contract-drift`/`unclassified`, shown in the
+[Mesh UI](../mesh-ui.md)'s issue feed): `classification` is derived independently from the exception
+type and never appears in the wire body, and `type`/a structured error's `code` never enters the mesh
+issue fingerprint. See [Diagnosing Failures — Caller-facing vs. operator-facing failure
+identity](../diagnosing-failures.md#caller-facing-vs-operator-facing-failure-identity) for the full
+split; this cookbook only builds the caller-facing document.
+
 ### Different callback per transport
 
 Nothing requires a single shared `onException` — as shown above, the HTTP and SQS pipelines each get their own callback tailored to that transport's response shape. There's no single "global" registration point across transports; `UseExceptionHandler` is added per pipeline (per `app.UseApiGateway(...)`, `app.UseSqs(...)`, etc.), so "global" here means "consistently applied to every pipeline you configure," not one process-wide handler.
@@ -234,6 +249,10 @@ If you want the exception to still propagate (e.g. to let a Lambda invocation fa
 
 ## Further Reading
 
+- [Message Results — Problem documents](../message-result.md#problem-documents-rfc-9457) — the full
+  `ProblemDetails` shape, the registry, `BenzeneResult.Problem(...)`, and `GetProblem()`
+- [Diagnosing Failures](../diagnosing-failures.md) — the wider picture: logs/traces/metrics for a
+  failure, and the caller-facing vs. operator-facing identity split
 - [Common Middleware — UseExceptionHandler](../common-middleware.md#useexceptionhandler) — reference documentation for this middleware
 - [Middleware — `.UseExceptionHandler()`](../middleware.md#useexceptionhandler) — pipeline-construction-level reference
 - [Common Middleware — UseRetry](../common-middleware.md#useretry) — pairing retries with centralized error handling

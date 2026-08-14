@@ -119,6 +119,61 @@ Benzene distinguishes between two failure modes, and they surface differently:
 The distinction matters when you're reading logs: an unsuccessful result and an exception are
 *different events* with different log lines, and a stack trace only exists for the second kind.
 
+## What the caller sees: the problem document
+
+Whatever failed, the caller doesn't see your logs — it sees the [problem
+document](message-result.md#problem-documents-rfc-9457) (`Benzene.Results.ProblemDetails`) the
+response pipeline built from the result:
+
+```json
+{
+  "type": "https://benzene.app/problems/not-found",
+  "title": "Not found",
+  "status": 404,
+  "detail": "Order 123 not found",
+  "benzeneStatus": "not-found"
+}
+```
+
+`type`/`title`/the HTTP `status` come from the framework's problem-type registry, one row per
+failure status:
+
+| `benzeneStatus` | `type` (`https://benzene.app/problems/` + ) | HTTP `status` |
+|---|---|---|
+| `bad-request` | `bad-request` | 400 |
+| `unauthorized` | `unauthorized` | 401 |
+| `forbidden` | `forbidden` | 403 |
+| `not-found` | `not-found` | 404 |
+| `conflict` | `conflict` | 409 |
+| `validation-error` | `validation-error` | 422 |
+| `too-many-requests` | `too-many-requests` | 429 |
+| `unexpected-error` | `unexpected-error` | 500 |
+| `not-implemented` | `not-implemented` | 501 |
+| `service-unavailable` | `service-unavailable` | 503 |
+| `timeout` | `timeout` | 504 |
+| *(application-defined status)* | `null`, or your own URI | 500 (fallback) |
+
+(Full detail, `BenzeneResult.Problem(...)` for a handler-authored problem, and `GetProblem()` for
+reading one back: [Message Results — Problem documents](message-result.md#problem-documents-rfc-9457)
+/ [Result & Status Reference — Problem-type registry](reference/results.md#problem-type-registry).)
+
+### Caller-facing vs. operator-facing failure identity
+
+Two different audiences read two different identifiers off the *same* failing invocation, and they
+are deliberately not merged into one taxonomy:
+
+- **`type`** (and a structured error's `code`) is **caller-facing** — open, per-response, part of the
+  wire contract a consumer of your service branches on.
+- The mesh issue **`classification`** (`exception` / `validation` / `config-wiring` / `dependency` /
+  `contract-drift` / `unclassified`) is **operator-facing** — closed, per-invocation, the roll-up an
+  operator triages from in the [Mesh UI](mesh-ui.md)'s issue feed. It's derived from the same status
+  plus the captured exception type, independently of `type`/`code`.
+
+Neither `type` nor `code` ever enters the mesh issue fingerprint, and `classification` is never sent
+to a caller — see the cross-language spec's [mesh
+contracts](https://benzene.app/docs/specification/mesh.html) for the full classification rules; this
+page doesn't re-derive them.
+
 ## What you get with nothing wired
 
 Even with no logging or diagnostics middleware added, Benzene emits a baseline error signal so
@@ -285,8 +340,11 @@ When a message failed and you're trying to find out why:
 
 ## Further reading
 
+- [Message Results — Problem documents](message-result.md#problem-documents-rfc-9457) — the full
+  document shape, `BenzeneResult.Problem(...)`, and `GetProblem()`
 - [Monitoring & Diagnostics](monitoring.md) — configuring logging providers, tracing, W3C context, and OpenTelemetry export
 - [Global Error Handling](cookbooks/global-error-handling.md) — `UseExceptionHandler` behavior and per-transport response mapping
 - [Common Middleware](common-middleware.md) — reference for `UseBenzeneEnrichment`, `UseLogResult`, `UseBenzeneMetrics`
+- [Mesh UI](mesh-ui.md) — the operator-facing issue feed a mesh collector builds from these same failures
 - [Correlation Ids](correlation-ids.md) / [Request Correlation cookbook](cookbooks/request-correlation.md) — tracking a request across services
 - [Privacy & Data Handling](privacy-and-data-handling.md) — keeping PII out of the logs/traces above

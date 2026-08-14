@@ -27,6 +27,8 @@ Benzene is a hexagonal framework designed for services running in serverless env
   - [Diagnosing Failures](diagnosing-failures.md) — a message failed in production; how to find out why, across logs, traces, and metrics
   - [Sampling Strategies](sampling-strategies.md)
   - [Privacy & Data Handling](privacy-and-data-handling.md)
+  - [Deprecations & Removals](deprecations.md) — APIs no longer recommended or removed, and what to use instead
+  - [Migration: Alpha to 1.0](migration-alpha-to-1.0.md) — breaking API changes to react to when upgrading, one before/after example each
 
 - **Benzene Specification (Draft)** — the language-neutral core Benzene itself is defined by, independent of the .NET implementation, so a future port to another language is a translation of a design rather than a rewrite. The spec is the cross-language source of truth and lives in the [`benzene`](https://github.com/daniellepelley/Benzene/tree/main/docs/specification) repo, not in this .NET repo:
   - [Read the specification](https://benzene.app/docs/specification/index.html) — overview, design

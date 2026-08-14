@@ -367,6 +367,11 @@ app.UseJsonSchema();
 Register a custom `IJsonSchemaProvider<TContext>` if you need schema generation behavior other than
 the default.
 
+A failed evaluation carries one structured `BenzeneError` per failed schema keyword in the
+[problem document](message-result.md#problem-documents-rfc-9457)'s `errors` array: `field` is the
+failing value's JSON Pointer (e.g. `/name`; `null` at the root — not prefixed into `message`, so it
+appears only in `field`), and `code` is the failed schema keyword (e.g. `maxLength`, `required`).
+
 ---
 
 ## UseLogResult / UseLogContext

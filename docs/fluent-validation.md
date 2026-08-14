@@ -197,6 +197,41 @@ var schemas = schemaBuilder.GetValidationSchemas(typeof(TestValidationObject));
 
 Recognized rule types include minimum/maximum length, regular expressions, `NotEmpty`/`NotNull`, `IsOneOf`, email, phone number, numeric comparisons (`GreaterThan`, `LessThanOrEqual`, etc.), and the custom string validators listed above. Rules it doesn't recognize are omitted from the schema rather than causing an error.
 
+## Structured errors on the wire (field and code)
+
+A validation failure doesn't just carry a joined `detail` string — each `ValidationFailure` becomes
+one `BenzeneError` (`Message`/`Field`/`Code`) on the result, and (when the failure travels over the
+wire) one entry in the [problem document](message-result.md#problem-documents-rfc-9457)'s `errors`
+array:
+
+- **`Field`** ← `ValidationFailure.PropertyName` (empty → `null`) — the .NET property path, e.g.
+  `Name`.
+- **`Code`** ← `ValidationFailure.ErrorCode`, emitted **verbatim** — FluentValidation's own default
+  is the validator type name (e.g. `NotEmptyValidator`, `GreaterThanValidator`), not a
+  hand-stripped/normalized code. Set your own with `.WithErrorCode("...")` on a rule if you want a
+  stable, hand-authored value your caller can branch on instead:
+
+  ```csharp
+  RuleFor(x => x.Name).NotEmpty().WithErrorCode("name_required");
+  ```
+
+```json
+{
+  "type": "https://benzene.app/problems/validation-error",
+  "title": "Validation failed",
+  "status": 422,
+  "detail": "'Name' must not be empty.",
+  "benzeneStatus": "validation-error",
+  "errors": [
+    { "message": "'Name' must not be empty.", "field": "Name", "code": "NotEmptyValidator" }
+  ]
+}
+```
+
+The same rule applies to `ValidationClientMiddleware` on the outgoing-client side. See [Message
+Results — Problem documents](message-result.md#problem-documents-rfc-9457) for the full document
+shape and how to read one back with `GetProblem()`.
+
 ## See Also
 - [Message Handlers](message-handlers.md) — where validation middleware sits in the request lifecycle
 - [Handler Result](message-result.md) — `IBenzeneResult` statuses, including `validation-error`

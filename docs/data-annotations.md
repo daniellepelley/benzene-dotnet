@@ -119,6 +119,33 @@ public class CreateWidgetRequest
 }
 ```
 
+## Structured errors on the wire (field and code)
+
+Each `ValidationResult` DataAnnotations returns becomes one `BenzeneError` (`Message`/`Field`/`Code`)
+on the result — one error per entry in `ValidationResult.MemberNames` (a result naming no member
+yields a single field-less error) — and (when the failure travels over the wire) one entry in the
+[problem document](message-result.md#problem-documents-rfc-9457)'s `errors` array:
+
+- **`Field`** ← the member name(s) `ValidationResult.MemberNames` reports, e.g. `Name`.
+- **`Code`** — always `null`. `ValidationResult` doesn't expose which `ValidationAttribute` produced
+  it, so there's no machine-readable code to carry (unlike FluentValidation's `ErrorCode`).
+
+```json
+{
+  "type": "https://benzene.app/problems/validation-error",
+  "title": "Validation failed",
+  "status": 422,
+  "detail": "The Name field is required.",
+  "benzeneStatus": "validation-error",
+  "errors": [
+    { "message": "The Name field is required.", "field": "Name" }
+  ]
+}
+```
+
+See [Message Results — Problem documents](message-result.md#problem-documents-rfc-9457) for the full
+document shape and how to read one back with `GetProblem()`.
+
 ## See Also
 - [Fluent Validation](fluent-validation.md) — the rule-based alternative with configurable failure statuses and schema generation
 - [Message Handlers](message-handlers.md) — where validation middleware sits in the request lifecycle

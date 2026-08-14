@@ -270,7 +270,8 @@ needs:
   `CanRender` matches. Every transport registers exactly one built-in renderer,
   `SerializerResponseRenderer<TContext>` (the catch-all, registered last): it asks
   `IMediaFormatNegotiator<TContext>.SelectWrite` for the format, then serializes the payload
-  (success) or an RFC 9457 problem document (failure — `ProblemTypes.From`) via
+  (success) or a [problem document](message-result.md#problem-documents-rfc-9457) (failure —
+  `ProblemTypes.From`, or your own document via `BenzeneResult.Problem(...)`) via
   `IResponsePayloadMapper<TContext>` (`DefaultResponsePayloadMapper<TContext>`), rewriting the
   negotiated content type to its `problem+` counterpart on failure (`application/json` →
   `application/problem+json`, `application/xml` → `application/problem+xml`). A handler whose
@@ -280,6 +281,12 @@ needs:
   delivered verbatim. A custom `IResponseRenderer<TContext>` (e.g. an HTML templating renderer,
   matched via `accept: text/html`) registers *before* the serializer renderer and owns its own error
   representation instead of the problem-details JSON.
+
+  A handler that wants to return a specific, deliberate failure body — a custom `type`, an
+  `instance`, or its own extension members — returns `BenzeneResult.Problem(...)` instead of one of
+  the ordinary failure factories; see [Message Results — Returning a deliberate, rich
+  problem](message-result.md#returning-a-rich-problem-with-benzeneresultproblem) for the API
+  and an example.
 - **`DefaultResponseStatusHandler<TContext>`** / transport-specific status handlers — map the
   `IBenzeneResult.Status` string onto the transport's native status/acknowledgement concept (HTTP
   status code, SQS batch-item-failure, etc. — see [Message Results](message-result.md#transport-mapping)
