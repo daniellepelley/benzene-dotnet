@@ -79,7 +79,15 @@ public class ClaimCheckS3IntegrationTest
         var host = new HostBuilder()
             .ConfigureServices(services =>
             {
+                // Both AWS clients, pointed at the emulator: IAmazonS3 for the claim-check store,
+                // and IAmazonSQS because the outbound .UseSqs(queueUrl) route below resolves
+                // SqsClientMiddleware's IAmazonSQS from *this* container. Without it the route
+                // builds but fails to activate at send time ("Unable to resolve service for type
+                // 'Amazon.SQS.IAmazonSQS'"). The consumer side gets its client the other way, via
+                // the SqsClientFactory handed to UseSqs - which is why only this side needs it
+                // registered and why the gap wasn't obvious.
                 services.AddSingleton<IAmazonS3>(s3Client);
+                services.AddSingleton<IAmazonSQS>(sqsClient);
                 services.UsingBenzene(b => b
                     .AddBenzene()
                     .AddS3ClaimCheckStore(Bucket)
