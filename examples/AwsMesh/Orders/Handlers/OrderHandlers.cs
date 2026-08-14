@@ -1,3 +1,5 @@
+using System.Globalization;
+using Amazon.DynamoDBv2.Model;
 using Benzene.Abstractions.MessageHandlers;
 using Benzene.Abstractions.Results;
 using Benzene.Clients;
@@ -6,6 +8,7 @@ using Benzene.Core.MessageHandlers;
 using Benzene.Examples.AwsMesh.Orders.Clients.PaymentsCapture;
 using Benzene.Examples.AwsMesh.Orders.Model;
 using Benzene.Http;
+using Benzene.Outbox.DynamoDb;
 using Benzene.Results;
 using Microsoft.Extensions.Logging;
 using Void = Benzene.Abstractions.Results.Void;
@@ -28,25 +31,38 @@ public class GetOrdersMessageHandler : IMessageHandler<Void, OrderDto[]>
 }
 
 /// <summary>
-/// Places a new order and chains the next hop — asks payments-api to capture (topic
-/// <c>payments:capture</c>, routed to its SQS ingress). Best-effort: a downstream hiccup never fails
-/// the order, and with no queue wired (e.g. the Lambda test tool) it just logs and returns.
+/// Places a new order and chains the next hop, atomically: <c>payments:capture</c> (SQS) and
+/// <c>order:placed</c> (SNS) are captured by <c>Benzene.Outbox</c> (<c>UseOutbox()</c> on both routes,
+/// wired in <c>Startup</c>) rather than sent inline, and committed in <b>one</b> DynamoDB
+/// <c>TransactWriteItems</c> together with the order row itself
+/// (<see cref="IDynamoDbOutboxTransaction.CommitAsync"/>) — all-or-nothing. This is the fix for the
+/// best-effort hole this handler used to document: previously each downstream send was wrapped in its
+/// own swallow-and-log try/catch, so a transport hiccup silently lost the send while the order still
+/// "succeeded". Now a persistence failure on either the order row or a captured envelope fails the
+/// whole request loudly (the caller sees the failure, exactly as before a transport failure would),
+/// and once the transaction commits, both downstream sends are durable — a relay Lambda (see
+/// <c>Handlers/OutboxHandlers.cs</c>) delivers them out of band, retried with backoff, parked after
+/// <c>OutboxOptions.MaxAttempts</c>. See <c>work/outbox-plan.md</c> §2.3's "Transactional" mode for
+/// exactly what this does and does not guarantee (delivery is still at-least-once, never
+/// exactly-once).
 /// </summary>
 [HttpEndpoint("POST", "/orders")]
 [Message("orders:create")]
 public class CreateOrderMessageHandler : IMessageHandler<CreateOrder, OrderDto>
 {
     private readonly IBenzeneMessageSender _sender;
-    private readonly IPaymentsCaptureServiceClient _payments;
+    private readonly IDynamoDbOutboxTransaction _outboxTransaction;
+    private readonly string _ordersTableName;
     private readonly ILogger<CreateOrderMessageHandler> _logger;
 
     public CreateOrderMessageHandler(
         IBenzeneMessageSender sender,
-        IPaymentsCaptureServiceClient payments,
+        IDynamoDbOutboxTransaction outboxTransaction,
         ILogger<CreateOrderMessageHandler> logger)
     {
         _sender = sender;
-        _payments = payments;
+        _outboxTransaction = outboxTransaction;
+        _ordersTableName = Environment.GetEnvironmentVariable("ORDERS_TABLE_NAME") ?? "orders";
         _logger = logger;
     }
 
@@ -55,57 +71,53 @@ public class CreateOrderMessageHandler : IMessageHandler<CreateOrder, OrderDto>
         var order = new OrderDto($"ord-{request.Item.GetHashCode():x}", request.Item, request.Quantity);
         var amount = request.Quantity * 10m;
 
-        // The two downstream messages are independent and best-effort, so send them concurrently rather
-        // than one-then-the-other. A warm X-Ray trace showed the SQS send (~25ms) and the SNS publish
-        // (~15ms) running sequentially and together dominating the create pipeline; Task.WhenAll collapses
-        // that to the slower of the two. Each send keeps its own try/catch, so one downstream hiccup never
-        // fails the order or the other send. (This is app-level fan-out of two DISTINCT messages — not
-        // Benzene's UseParallel, which fans a single message across transports.)
-        await Task.WhenAll(
-            SendPaymentsCaptureAsync(order, amount),
-            PublishOrderPlacedAsync(order, amount));
+        // Both sends hit UseOutbox() routes (Startup wires it on payments:capture + order:placed), so
+        // neither one goes out over the wire here — each is staged on this scope's BufferedOutboxStage
+        // (drained by the CommitAsync below) and returns Accepted<Void> immediately. Point-to-point
+        // command to payments-api: the topic id and request shape come from the GENERATED client's
+        // request type (payments-api's own contract, see the csproj's <BenzeneServiceContract>), so this
+        // call site cannot drift from what payments-api actually serves the way a hand-copied mirror DTO
+        // could — sent directly via the sender (not the generated client's CapturePaymentsAsync) because
+        // an outboxed/SQS route is fire-and-forget only (SendAsync<TRequest, Void>; see
+        // OutboundSqsContextConverter's remarks), and the generated client's method returns a typed
+        // PaymentDto that no fire-and-forget transport can ever produce.
+        await _sender.SendAsync<CapturePayment, Void>("payments:capture", new CapturePayment
+        {
+            OrderId = order.Id,
+            // (double) because the contract's JSON Schema says "number" and the generator maps that to
+            // double — payments-api's own CapturePayment.Amount is decimal. See the README note.
+            Amount = (double)amount,
+            Currency = "GBP",
+        });
+
+        // Fan-out event over SNS: every subscriber (inventory-api, notifications-api) gets it.
+        await _sender.SendAsync<OutboundOrderPlaced, Void>("order:placed",
+            new OutboundOrderPlaced { OrderId = order.Id, Item = order.Item, Quantity = order.Quantity, Amount = amount, Currency = "GBP" });
+
+        var orderPut = new TransactWriteItem
+        {
+            Put = new Put
+            {
+                TableName = _ordersTableName,
+                Item = new Dictionary<string, AttributeValue>
+                {
+                    ["id"] = new AttributeValue { S = order.Id },
+                    ["item"] = new AttributeValue { S = order.Item },
+                    ["quantity"] = new AttributeValue { N = order.Quantity.ToString(CultureInfo.InvariantCulture) },
+                    ["amount"] = new AttributeValue { N = amount.ToString(CultureInfo.InvariantCulture) },
+                    ["currency"] = new AttributeValue { S = "GBP" },
+                },
+            },
+        };
+
+        // ONE TransactWriteItems: the order row + both staged outbox envelopes, all-or-nothing.
+        await _outboxTransaction.CommitAsync([orderPut]);
+
+        _logger.LogInformation(
+            "order {orderId} created; committed order row + payments:capture + order:placed atomically",
+            order.Id);
 
         return BenzeneResult.Created(order);
-    }
-
-    // Point-to-point command over SQS: exactly one consumer (payments-api) must capture this. The topic
-    // id and the request shape are not written here at all — they come from the GENERATED client
-    // (payments-api's own contract, see the csproj's <BenzeneServiceContract>), so this call site cannot
-    // drift from what payments-api actually serves the way the old hand-written mirror DTO could.
-    private async Task SendPaymentsCaptureAsync(OrderDto order, decimal amount)
-    {
-        try
-        {
-            await _payments.CapturePaymentsAsync(new CapturePayment
-            {
-                OrderId = order.Id,
-                // (double) because the contract's JSON Schema says "number" and the generator maps that
-                // to double — payments-api's own CapturePayment.Amount is decimal. See the README note.
-                Amount = (double)amount,
-                Currency = "GBP",
-            });
-            _logger.LogInformation("order {orderId} created; sent payments:capture", order.Id);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "downstream payments:capture send failed for {orderId}", order.Id);
-        }
-    }
-
-    // Fan-out event over SNS: every subscriber (inventory-api, notifications-api) gets it. Separate
-    // from the command above — the order is placed regardless of who's listening.
-    private async Task PublishOrderPlacedAsync(OrderDto order, decimal amount)
-    {
-        try
-        {
-            await _sender.SendAsync<OutboundOrderPlaced, Void>("order:placed",
-                new OutboundOrderPlaced { OrderId = order.Id, Item = order.Item, Quantity = order.Quantity, Amount = amount, Currency = "GBP" });
-            _logger.LogInformation("order {orderId} created; published order:placed", order.Id);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "order:placed publish failed for {orderId}", order.Id);
-        }
     }
 }
 

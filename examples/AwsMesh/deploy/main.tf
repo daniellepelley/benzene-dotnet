@@ -254,8 +254,20 @@ resource "aws_lambda_function" "service" {
 # ---------------------------------------------------------------------------------------------------
 locals {
   service_env = {
-    orders        = { PAYMENTS_QUEUE_URL = aws_sqs_queue.payments.url, ORDER_PLACED_TOPIC_ARN = aws_sns_topic.order_placed.arn }
-    payments      = { SHIPPING_QUEUE_URL = aws_sqs_queue.shipping.url, EVENT_BUS_NAME = aws_cloudwatch_event_bus.bus.name }
+    orders = {
+      PAYMENTS_QUEUE_URL       = aws_sqs_queue.payments.url
+      ORDER_PLACED_TOPIC_ARN   = aws_sns_topic.order_placed.arn
+      # The outbox pair (work/outbox-plan.md Phase 3): the order row + the atomically-committed
+      # captured envelopes for payments:capture/order:placed.
+      ORDERS_TABLE_NAME        = aws_dynamodb_table.orders.name
+      ORDERS_OUTBOX_TABLE_NAME = aws_dynamodb_table.orders_outbox.name
+    }
+    payments = {
+      SHIPPING_QUEUE_URL               = aws_sqs_queue.shipping.url
+      EVENT_BUS_NAME                   = aws_cloudwatch_event_bus.bus.name
+      # The consume side of the outbox+idempotency pair: dedups payments:capture redeliveries.
+      PAYMENTS_IDEMPOTENCY_TABLE_NAME  = aws_dynamodb_table.payments_idempotency.name
+    }
     shipping      = { EVENT_BUS_NAME = aws_cloudwatch_event_bus.bus.name }
     inventory     = {}
     notifications = {}
@@ -355,6 +367,115 @@ resource "aws_lambda_permission" "eventbridge_invoke" {
   source_arn    = aws_cloudwatch_event_rule.integration[each.value.rule_key].arn
 }
 
+# --- DynamoDB: the outbox pair (work/outbox-plan.md Phase 3) + the consume-side idempotency table ----
+# orders-api dogfoods the transactional outbox: `orders` is its own state table, `orders-outbox` is the
+# captured-envelope table Benzene.Outbox.DynamoDb writes to and streams from. payments-api is the
+# consume side of the pair: `payments-idempotency` dedups the at-least-once redeliveries the outbox
+# relay can produce on payments:capture.
+resource "aws_dynamodb_table" "orders" {
+  name         = "${var.project}-orders"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "id"
+
+  attribute {
+    name = "id"
+    type = "S"
+  }
+}
+
+# Table shape required by Benzene.Outbox.DynamoDb (see src/Benzene.Outbox.DynamoDb/CLAUDE.md "Table
+# shape"): partition key `id`; a sparse GSI `pending-index` (gsiPk/gsiSk, ProjectionType ALL) the
+# sweeper queries; native TTL on `expiresAt`, set only once an envelope dispatches. Streams enabled with
+# NEW_IMAGE so the event-source mapping below can hand INSERT records to OutboxStreamDispatchMessageHandler.
+resource "aws_dynamodb_table" "orders_outbox" {
+  name             = "${var.project}-orders-outbox"
+  billing_mode     = "PAY_PER_REQUEST"
+  hash_key         = "id"
+  stream_enabled   = true
+  stream_view_type = "NEW_IMAGE"
+
+  attribute {
+    name = "id"
+    type = "S"
+  }
+  attribute {
+    name = "gsiPk"
+    type = "S"
+  }
+  attribute {
+    name = "gsiSk"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "pending-index"
+    hash_key        = "gsiPk"
+    range_key       = "gsiSk"
+    projection_type = "ALL"
+  }
+
+  ttl {
+    attribute_name = "expiresAt"
+    enabled        = true
+  }
+}
+
+# Table shape required by Benzene.Idempotency.DynamoDb: partition key `pk`; native TTL on `expiresAt`.
+resource "aws_dynamodb_table" "payments_idempotency" {
+  name         = "${var.project}-payments-idempotency"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "pk"
+
+  attribute {
+    name = "pk"
+    type = "S"
+  }
+
+  ttl {
+    attribute_name = "expiresAt"
+    enabled        = true
+  }
+}
+
+# Streams dispatch: near-real-time half of the relay pair (work/outbox-plan.md §2.5 option 1). The
+# event-source mapping polls with the orders Lambda's OWN execution role (aws_iam_role.service) — see
+# the service_dynamodb IAM policy below for the stream-read grant. maximum_retry_attempts bounds how
+# long a persistently-failing dispatch can block this shard before the mapping gives up on that batch
+# and moves on — the scheduled sweep (below) is the backstop for whatever's left Pending after that.
+resource "aws_lambda_event_source_mapping" "orders_outbox_stream" {
+  event_source_arn       = aws_dynamodb_table.orders_outbox.stream_arn
+  function_name          = aws_lambda_function.service["orders"].arn
+  starting_position       = "LATEST"
+  batch_size              = 1
+  maximum_retry_attempts  = 3
+}
+
+# Scheduled sweep: the required backstop (work/outbox-plan.md §2.5 option 2) — retries what the stream
+# missed, parks anything past MaxAttempts, and (on a store with no native TTL) would own retention. Same
+# shape as the mesh's own `aggregate` schedule below: an EventBridge rule invoking the Lambda directly,
+# routed by detail-type to the app-chosen `orders:outbox-sweep` topic (never `benzene:*` — reserved
+# topics are spec surface).
+resource "aws_cloudwatch_event_rule" "orders_outbox_sweep" {
+  name                = "${var.project}-orders-outbox-sweep"
+  schedule_expression = var.orders_outbox_sweep_schedule
+}
+
+resource "aws_cloudwatch_event_target" "orders_outbox_sweep" {
+  rule      = aws_cloudwatch_event_rule.orders_outbox_sweep.name
+  target_id = "orders"
+  arn       = aws_lambda_function.service["orders"].arn
+  # See the aggregate target below for why `detail` must be a JSON object, not a string.
+  input = jsonencode({ "detail-type" = "orders:outbox-sweep", "source" = "benzene.outbox", "detail" = {} })
+}
+
+resource "aws_lambda_permission" "orders_outbox_sweep_events" {
+  statement_id  = "AllowEventBridgeInvokeOutboxSweep"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.service["orders"].function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.orders_outbox_sweep.arn
+}
+
 # --- IAM: the shared service role's producer permissions --------------------------------------------
 # The shared service role can send to both queues (as a producer) and consume them (the event-source
 # mapping polls with the function's role), publish the SNS topic, and put events on the custom bus.
@@ -389,6 +510,49 @@ resource "aws_iam_role_policy" "service_sqs" {
   name   = "${var.project}-service-messaging"
   role   = aws_iam_role.service.id
   policy = data.aws_iam_policy_document.service_sqs.json
+}
+
+# The shared service role's DynamoDB permissions: item-level access to the three outbox/idempotency
+# tables (only orders/payments actually use them; the shared role is broad by design in this example,
+# same pattern as service_sqs above granting both queues to every service's role), plus the stream-read
+# actions the orders_outbox_stream event-source mapping needs (it polls with the FUNCTION's own role,
+# not a separate one).
+data "aws_iam_policy_document" "service_dynamodb" {
+  statement {
+    actions = [
+      "dynamodb:PutItem",
+      "dynamodb:GetItem",
+      "dynamodb:UpdateItem",
+      "dynamodb:Query",
+    ]
+    resources = [
+      aws_dynamodb_table.orders.arn,
+      aws_dynamodb_table.orders_outbox.arn,
+      "${aws_dynamodb_table.orders_outbox.arn}/index/*",
+      aws_dynamodb_table.payments_idempotency.arn,
+    ]
+  }
+  # TransactWriteItems (the atomic order-row + captured-envelopes commit) needs its own action
+  # alongside the item-level ones above.
+  statement {
+    actions   = ["dynamodb:TransactWriteItems"]
+    resources = [aws_dynamodb_table.orders.arn, aws_dynamodb_table.orders_outbox.arn]
+  }
+  statement {
+    actions = [
+      "dynamodb:DescribeStream",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:ListStreams",
+    ]
+    resources = [aws_dynamodb_table.orders_outbox.stream_arn]
+  }
+}
+
+resource "aws_iam_role_policy" "service_dynamodb" {
+  name   = "${var.project}-service-dynamodb"
+  role   = aws_iam_role.service.id
+  policy = data.aws_iam_policy_document.service_dynamodb.json
 }
 
 # ---------------------------------------------------------------------------------------------------

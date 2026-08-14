@@ -27,3 +27,8 @@ output "artifact_bucket" {
   description = "The S3 bucket holding the discovered registry.json and the generated catalog artifacts."
   value       = aws_s3_bucket.artifacts.id
 }
+
+output "orders_outbox_table_name" {
+  description = "The orders-api outbox table (work/outbox-plan.md Phase 3) — inspect it (or the CloudWatch logs of orders_outbox_stream / orders_outbox_sweep) to watch envelopes go Pending -> Dispatched, or Parked after MaxAttempts."
+  value       = aws_dynamodb_table.orders_outbox.name
+}

@@ -45,6 +45,12 @@ variable "aggregate_schedule" {
   default     = "rate(15 minutes)"
 }
 
+variable "orders_outbox_sweep_schedule" {
+  description = "EventBridge schedule expression for orders-api's outbox sweep (work/outbox-plan.md §2.5) — the backstop that retries/parks/cleans up whatever the DynamoDB-Streams dispatch path (near-real-time) missed. Defaults to every 5 minutes: frequent enough that a parked envelope is discovered promptly in a demo, infrequent enough to stay cheap alongside the mesh's own aggregate schedule."
+  type        = string
+  default     = "rate(5 minutes)"
+}
+
 variable "adot_collector_layer_arn" {
   description = <<-EOT
     ARN of the AWS Distro for OpenTelemetry (ADOT) collector Lambda layer. When set, it is attached to

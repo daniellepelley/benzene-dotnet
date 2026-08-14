@@ -22,6 +22,8 @@
   <ItemGroup>
     <PackageReference Include="Amazon.Lambda.RuntimeSupport" Version="1.10.0" />
     <PackageReference Include="Amazon.Lambda.Core" Version="2.2.0" />
+    <!-- Matches Benzene.Idempotency.DynamoDb's pin; Startup constructs the IAmazonDynamoDB client. -->
+    <PackageReference Include="AWSSDK.DynamoDBv2" Version="3.7.301.4" />
   </ItemGroup>
 
   <ItemGroup>
@@ -34,6 +36,8 @@
     <ProjectReference Include="..\Shared\Benzene.Examples.AwsMesh.Shared.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Aws.Lambda.Core\Benzene.Aws.Lambda.Core.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Aws.Lambda.ApiGateway\Benzene.Aws.Lambda.ApiGateway.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Idempotency\Benzene.Idempotency.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Idempotency.DynamoDb\Benzene.Idempotency.DynamoDb.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.CloudService\Benzene.CloudService.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Schema.OpenApi\Benzene.Schema.OpenApi.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.HealthChecks\Benzene.HealthChecks.csproj" />

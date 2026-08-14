@@ -23,9 +23,12 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Benzene.Aws.Lambda.Core\Benzene.Aws.Lambda.Core.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Aws.Lambda.ApiGateway\Benzene.Aws.Lambda.ApiGateway.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Aws.Lambda.DynamoDb\Benzene.Aws.Lambda.DynamoDb.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Aws.Lambda.EventBridge\Benzene.Aws.Lambda.EventBridge.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Aws.Lambda.Sqs\Benzene.Aws.Lambda.Sqs.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Aws.Lambda.Sns\Benzene.Aws.Lambda.Sns.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Idempotency\Benzene.Idempotency.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Outbox\Benzene.Outbox.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Clients\Benzene.Clients.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Clients.Aws.Sqs\Benzene.Clients.Aws.Sqs.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Clients.Aws.Sns\Benzene.Clients.Aws.Sns.csproj" />

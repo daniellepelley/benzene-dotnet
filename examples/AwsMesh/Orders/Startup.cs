@@ -1,3 +1,4 @@
+using Amazon.DynamoDBv2;
 using Benzene.Abstractions.Hosting;
 using Benzene.Examples.AwsMesh.Orders.Clients;
 using Benzene.Examples.AwsMesh.Orders.Clients.PaymentsCapture;
@@ -7,6 +8,8 @@ using Benzene.Examples.AwsMesh.Orders.Model;
 using Benzene.Examples.AwsMesh.Shared;
 using Benzene.HealthChecks.Core;
 using Benzene.Microsoft.Dependencies;
+using Benzene.Outbox;
+using Benzene.Outbox.DynamoDb;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -23,17 +26,26 @@ public class Startup : BenzeneStartUp
     public override IConfiguration GetConfiguration()
         => new ConfigurationBuilder().AddEnvironmentVariables().Build();
 
+    /// <summary>
+    /// The DynamoDB table names the outbox reads/writes — provisioned by <c>deploy/main.tf</c>
+    /// (<c>orders</c>, <c>orders-outbox</c>), handed in as env vars so this project never hard-codes an
+    /// account/region-specific name.
+    /// </summary>
+    private const string OrdersOutboxTableNameEnvVar = "ORDERS_OUTBOX_TABLE_NAME";
+
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
         MeshServiceWiring.ConfigureServices(services, "orders", typeof(Startup).Assembly,
-            // orders-api → payments-api: on create, send payments:capture to the payments SQS queue
-            // (a point-to-point command — one consumer, must arrive). The payload type is the GENERATED
+            // orders-api → payments-api: on create, send payments:capture to the payments SQS queue (a
+            // point-to-point command — one consumer, must arrive). The payload type is the GENERATED
             // contract type, so the edge the mesh draws is declared with payments-api's own request shape
-            // rather than a hand-copied mirror of it.
-            OutboundSend.Sqs("payments:capture", typeof(CapturePayment), "PAYMENTS_QUEUE_URL"),
+            // rather than a hand-copied mirror of it. Outboxed=true: this is the dogfood — see
+            // Handlers/OrderHandlers.cs and work/outbox-plan.md's Phase 3.
+            OutboundSend.Sqs("payments:capture", typeof(CapturePayment), "PAYMENTS_QUEUE_URL", outboxed: true),
             // orders-api → inventory-api + notifications-api: publish order:placed to SNS, which fans it
-            // out to every subscriber (a domain event, not a command).
-            OutboundSend.Sns("order:placed", typeof(OutboundOrderPlaced), "ORDER_PLACED_TOPIC_ARN"));
+            // out to every subscriber (a domain event, not a command). Also outboxed, atomically with the
+            // send above and the order row (see CreateOrderMessageHandler).
+            OutboundSend.Sns("order:placed", typeof(OutboundOrderPlaced), "ORDER_PLACED_TOPIC_ARN", outboxed: true));
 
         // The GENERATED DI registration, not a hand-written one: `benzene build -output topic-client`
         // now emits AddPaymentsClients() (plus a per-topic AddPaymentsCaptureServiceClient()) beside the
@@ -41,7 +53,23 @@ public class Startup : BenzeneStartUp
         // so the client can never become a captive dependency. It extends IBenzeneServiceContainer,
         // Benzene's own container abstraction, so it works whatever container is underneath rather than
         // assuming Microsoft's. See work/spec-mesh-tooling-implementation-plan.md's finding 7c.
+        // (Not used by CreateOrderMessageHandler any more — an outboxed/SQS route is fire-and-forget
+        // only, and this generated client's CapturePaymentsAsync asks for a typed PaymentDto response,
+        // which no such route can ever produce. Left registered/generated as the from-source codegen
+        // dogfood this project otherwise exists to exercise; see the csproj's <BenzeneServiceContract>.)
         services.UsingBenzene(x => x.AddPaymentsClients());
+
+        // orders-api is the ONE service in this example that opts into the outbox (via Outboxed: true
+        // above) — Transactional so the order row and both captured envelopes commit in a single
+        // DynamoDB TransactWriteItems (CreateOrderMessageHandler). Registering AddOutbox/
+        // AddDynamoDbOutboxStore/AddDynamoDbOutboxTransaction here, rather than inside the shared
+        // MeshServiceWiring, keeps the other five services' DI untouched.
+        services.AddSingleton<IAmazonDynamoDB>(_ => new AmazonDynamoDBClient());
+        var outboxTableName = Environment.GetEnvironmentVariable(OrdersOutboxTableNameEnvVar) ?? "orders-outbox";
+        services.UsingBenzene(x => x
+            .AddOutbox(o => o.WriteMode = OutboxWriteMode.Transactional)
+            .AddDynamoDbOutboxStore(outboxTableName)
+            .AddDynamoDbOutboxTransaction(outboxTableName));
     }
 
     public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration)
@@ -53,8 +81,17 @@ public class Startup : BenzeneStartUp
         };
 
         MeshServiceWiring.Configure(app, "orders",
-            new[] { typeof(GetOrdersMessageHandler), typeof(CreateOrderMessageHandler) },
-            healthChecks);
+            new[]
+            {
+                typeof(GetOrdersMessageHandler),
+                typeof(CreateOrderMessageHandler),
+                // The Lambda relay pair (work/outbox-plan.md §2.5): streams dispatch (near-real-time) +
+                // scheduled sweep (retry/park/cleanup backstop). See Handlers/OutboxHandlers.cs.
+                typeof(OutboxStreamDispatchMessageHandler),
+                typeof(OutboxSweepMessageHandler),
+            },
+            healthChecks,
+            enableOutboxDispatchStream: true);
     }
 }
 

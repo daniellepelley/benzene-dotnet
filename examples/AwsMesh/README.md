@@ -50,15 +50,20 @@ non-trivial graph. See `work/aws-mesh-multi-transport-plan.md` for the plan and
 
 | Project | What it is | Sends | Consumes |
 |---|---|---|---|
-| `Orders/` (`…AwsMesh.Orders`) | orders-api Cloud Service Lambda | `payments:capture` (SQS), `order:placed` (SNS) | — |
-| `Payments/` (`…AwsMesh.Payments`) | payments-api Cloud Service Lambda | `shipping:book` (SQS), `payment:captured` (EventBridge) | `payments:capture` |
+| `Orders/` (`…AwsMesh.Orders`) | orders-api Cloud Service Lambda. **Outboxed**: `payments:capture` + `order:placed` are captured by `Benzene.Outbox.DynamoDb` and committed atomically with the order row — see "The outbox" below. | `payments:capture` (SQS, outboxed), `order:placed` (SNS, outboxed) | `orders-outbox:INSERT` (DynamoDB Streams), `orders:outbox-sweep` (EventBridge schedule) |
+| `Payments/` (`…AwsMesh.Payments`) | payments-api Cloud Service Lambda. **Idempotent**: `payments:capture` runs `Benzene.Idempotency.DynamoDb`, deduping the outbox's at-least-once redeliveries — see "The outbox" below. | `shipping:book` (SQS), `payment:captured` (EventBridge) | `payments:capture` |
 | `Shipping/` (`…AwsMesh.Shipping`) | shipping-api Cloud Service Lambda | `shipping:dispatched` (EventBridge) | `shipping:book` |
 | `Inventory/` (`…AwsMesh.Inventory`) | inventory-api Cloud Service Lambda | — | `order:placed` (SNS), `shipping:dispatched` (EventBridge) |
 | `Notifications/` (`…AwsMesh.Notifications`) | notifications-api Cloud Service Lambda | — | `order:placed` (SNS), `payment:captured` + `shipping:dispatched` (EventBridge) |
 | `Analytics/` (`…AwsMesh.Analytics`) | analytics-api Cloud Service Lambda | — | `payment:captured` + `shipping:dispatched` (EventBridge) |
 | `Mesh/` (`…AwsMesh.Mesh`) | the discovery + aggregator + UI Lambda (uses `Benzene.Mesh.Aws.S3`) | — | — |
-| `deploy/` | Terraform: 7 Lambdas, IAM, S3, one HTTP API per Lambda, SQS queues, an SNS topic, a custom EventBridge bus + rules, and the aggregation schedule | | |
+| `deploy/` | Terraform: 7 Lambdas, IAM, S3, one HTTP API per Lambda, SQS queues, an SNS topic, a custom EventBridge bus + rules, the aggregation schedule, the `orders`/`orders-outbox`/`payments-idempotency` DynamoDB tables, the outbox stream's event-source mapping, and the outbox sweep schedule | | |
 | `.github/workflows/deploy-aws-mesh-example.yml` | GitHub Actions: build all 7 Lambdas + `terraform apply` | | |
+
+Only `orders-api` and `payments-api` opt into the outbox/idempotency pair — the other four services (and
+the mesh) are unaffected; `Shared/MeshServiceWiring` only wires either feature when a service explicitly
+asks for it (`OutboundSend(..., outboxed: true)` per route, `enableOutboxDispatchStream`/
+`enableSqsIdempotency` on `MeshServiceWiring.Configure`).
 
 Each service Lambda is a **self-contained executable** hosting the Benzene pipeline via an
 `Amazon.Lambda.RuntimeSupport` bootstrap — because .NET 10 has no managed Lambda runtime, they deploy
@@ -237,8 +242,10 @@ wiring already registers (`aws.UseSqs` / `aws.UseSns` / `aws.UseEventBridge`) �
 per-transport code. The choice of transport per send lives entirely in each service's `Startup`
 (`OutboundSend.Sqs/Sns/EventBridge(...)`). Terraform provisions the two SQS queues + event-source
 mappings, the SNS topic + Lambda subscriptions, and a **custom EventBridge bus** + rules + targets, plus
-the send/publish IAM. Sends are best-effort, so a downstream hiccup never fails the upstream call (and
-locally, with no target wired, they just log).
+the send/publish IAM. Most sends are best-effort — a downstream hiccup never fails the upstream call
+(and locally, with no target wired, they just log) — **except** orders-api's two sends
+(`payments:capture`, `order:placed`), which are **outboxed**: see "The outbox" below for why those two
+specifically no longer follow this best-effort posture.
 
 Because each service also **declares** what it sends (in its spec's `events`), the mesh aggregator
 derives a **structural topology** — an edge from each sender to each consuming handler — and publishes
@@ -250,10 +257,69 @@ notifications`, `payments → analytics`, `shipping → inventory/notifications/
 (real req-rate / error / latency) on top.
 
 **See the flow fire:** invoke `orders-api` (any transport — `orders-create-sqs.json`, the API, …), then
-watch CloudWatch: `orders` logs "sent payments:capture" + "published order:placed"; `inventory` and
-`notifications` log the `order:placed` fan-out; `payments` logs "sent shipping:book" + "published
-payment:captured"; `shipping` logs the booking + "published shipping:dispatched"; `analytics` logs its
-metrics — all tied together by the propagated correlation id.
+watch CloudWatch: `orders` logs "order ... created; committed order row + payments:capture + order:placed
+atomically" (the outboxed commit — see "The outbox" below for the stream-dispatch/sweep log lines that
+follow it); `inventory` and `notifications` log the `order:placed` fan-out; `payments` logs "payment
+captured for ...; sent shipping:book" + "published payment:captured"; `shipping` logs the booking +
+"published shipping:dispatched"; `analytics` logs its metrics — all tied together by the propagated
+correlation id.
+
+## The outbox: atomic commit, stream dispatch, sweep redrive, dedup at the consumer
+
+`orders-api`'s `orders:create` used to send `payments:capture` and `order:placed` best-effort, each
+wrapped in its own swallow-and-log try/catch (`CreateOrderMessageHandler`, before this change) — a
+transport hiccup silently lost the send while the order still "succeeded". This example now dogfoods
+`Benzene.Outbox` + `Benzene.Outbox.DynamoDb` on that exact hop, the shipped fix for that hole
+(`work/outbox-plan.md`; the cross-language spec at `docs/specification/` is unaffected — the outbox is
+.NET-internal plumbing, not a wire-level change).
+
+**Produce side (`orders-api`).**
+1. `Startup` marks both routes `outboxed: true` and registers `AddOutbox(o => o.WriteMode =
+   OutboxWriteMode.Transactional)` + `AddDynamoDbOutboxStore`/`AddDynamoDbOutboxTransaction` against the
+   `orders-outbox` table. Only `orders-api` does this — see `Shared/OutboundSend.Outboxed` and
+   `Shared/MeshServiceWiring`'s `enableOutboxDispatchStream` — the other five services are untouched.
+2. `CreateOrderMessageHandler` sends both messages as usual (`IBenzeneMessageSender.SendAsync<T,
+   Void>`); because the routes are outboxed, neither goes out over the wire yet — each is staged on the
+   request's scoped buffer. The handler then builds the order row as a DynamoDB `TransactWriteItem` and
+   commits it, **in one `TransactWriteItems` call**, together with both staged envelopes via
+   `IDynamoDbOutboxTransaction.CommitAsync`. All-or-nothing: either the order and both envelopes persist,
+   or none of them do — no more silent partial success.
+3. Relay: `orders-outbox`'s DynamoDB stream (`NEW_IMAGE`) triggers `orders-api`'s own Lambda via an
+   `aws_lambda_event_source_mapping`; `OutboxStreamDispatchMessageHandler` (topic
+   `orders-outbox:INSERT`) dispatches the just-inserted envelope near-real-time. A scheduled EventBridge
+   rule (`orders_outbox_sweep_schedule`, default every 5 minutes) invokes the same Lambda on the
+   app-chosen topic `orders:outbox-sweep` (never `benzene:*` — reserved topics are spec surface);
+   `OutboxSweepMessageHandler` redrives whatever the stream missed, retries with backoff, and parks
+   anything past `OutboxOptions.MaxAttempts` (default 10).
+
+**Consume side (`payments-api`).** An outboxed relay is at-least-once, so `payments:capture` can arrive
+more than once (a stream dispatch AND a later sweep redrive both attempting the same envelope, or a
+crash after send but before the envelope is marked dispatched). `Benzene.Outbox`'s capture middleware
+stamps the envelope's own id into the `idempotency-key` header by default (`StampIdempotencyKey`);
+`payments-api`'s SQS ingress runs `Benzene.Idempotency.DynamoDb`'s `UseIdempotency()`
+(`enableSqsIdempotency: true`, its own `payments-idempotency` table), which dedups on that header with
+zero extra configuration — the two packages are designed to click together.
+
+**How to observe it:**
+- **Normal path** — fire `orders:create` (see "Generate traffic" above) and watch `orders-api`'s
+  CloudWatch logs: the commit log line, then (within a second or two) `OutboxStreamDispatchMessageHandler`'s
+  "outbox stream dispatch ... Dispatched" line. `payments-api` should show exactly one capture per order
+  even if you fire the same envelope's redelivery by hand.
+- **Failure/redrive path** — revoke `orders-api`'s `sqs:SendMessage` on the payments queue (or point
+  `PAYMENTS_QUEUE_URL` at a queue it can't reach) and fire `orders:create` again: the stream dispatch
+  fails and reschedules with backoff; `terraform apply` it back, or wait for the next
+  `orders:outbox-sweep` run, and watch the envelope go `Pending` → `Dispatched`. Leave the permission
+  broken and the envelope reschedules with exponential backoff until `MaxAttempts` is reached, at which
+  point the sweep parks it (`Parked`, kept for operator inspection — see `work/outbox-plan.md` §2.7);
+  `OutboxSweepMessageHandler`'s log line reports the dispatched/rescheduled/parked/retired tally each run.
+- Inspect the `orders-outbox` table directly (`terraform output orders_outbox_table_name`) to see
+  envelope status/attemptCount/lastError first-hand.
+
+**Honest limits, stated the way `work/outbox-plan.md` states them:** delivery is **at-least-once**, never
+exactly-once — that's exactly why the consume side dedups. There's no ordering guarantee across
+envelopes. `Immediate` mode (the default when a route omits `Transactional`) is store-and-forward, not
+atomic with a state write — `orders-api` deliberately opts into `Transactional` because it has a state
+write (the order row) to be atomic with; a service with no state write of its own would use the default.
 
 ## Deploy it (via GitHub Actions — no local tooling)
 
@@ -461,6 +527,12 @@ The most likely things to tweak on the first run (all localized):
   attribute**; the SNS→Lambda subscription delivers it to inventory-api and notifications-api, whose
   `aws.UseSns` ingress routes on that attribute. If a subscriber doesn't route, check the attribute is
   present on the published message.
+- **Outbox stream/sweep IAM** — `orders-outbox`'s event-source mapping polls with `orders-api`'s own
+  execution role (not a separate one); if the stream dispatch handler never fires, check
+  `service_dynamodb`'s `dynamodb:DescribeStream`/`GetRecords`/`GetShardIterator`/`ListStreams` grant on
+  the table's `stream_arn` before anything else. This example has not been deploy-verified end to end
+  against real AWS — the flow above is verified by compiling and by the unit tests under
+  `test/Benzene.Core.Test/Outbox/`, not by an actual `terraform apply` + live traffic run.
 
 ## Build locally
 
@@ -485,11 +557,22 @@ contract — and its csproj turns that into a typed client at build time:
                         Namespace="Benzene.Examples.AwsMesh.Orders.Clients" />
 ```
 
-`CreateOrderMessageHandler` then calls `_payments.CapturePaymentsAsync(new CapturePayment { … })`
-instead of `_sender.SendAsync<OutboundPaymentCapture, Void>("payments:capture", …)`. The topic id and
-the request shape now come from payments-api's contract, and the hand-written `OutboundPaymentCapture`
-mirror DTO is gone. `Topics="payments:capture"` scopes the client to the one topic orders-api actually
-calls, so none of payments-api's other surface is coupled in.
+The generated `CapturePayment` **request type** is what `CreateOrderMessageHandler` builds and sends —
+the topic id and the request shape come from payments-api's contract, so the hand-written
+`OutboundPaymentCapture` mirror DTO this used to require is gone. `Topics="payments:capture"` scopes the
+client to the one topic orders-api actually calls, so none of payments-api's other surface is coupled in.
+
+The handler does NOT call the generated client's `CapturePaymentsAsync(...)` method, though — it sends
+via `IBenzeneMessageSender.SendAsync<CapturePayment, Void>("payments:capture", …)` directly. That's the
+outbox talking (see "The outbox" above): `payments:capture` is now an **outboxed** route, and an
+outboxed/SQS route is fire-and-forget only (`TResponse` must be `Void` — a captured-not-yet-sent
+message has no response to give). `CapturePaymentsAsync` asks for a typed `PaymentDto` response, which
+no such route can ever produce (this was latent before the outbox too — SQS itself is
+send-acknowledgement-only, so that call was always going to hit `OutboundResponseTypeMismatchException`
+the moment a queue was actually wired; the best-effort try/catch silently swallowed it). The client and
+its DI registration (`AddPaymentsClients()`) are still generated and still wired, dogfooding the
+from-source codegen path this project otherwise exists to exercise — just not called from this one
+call site any more.
 
 This example deliberately uses the **published** CLI from NuGet (pinned in
 `.config/dotnet-tools.json`) rather than building it from source, so it exercises what a real consumer

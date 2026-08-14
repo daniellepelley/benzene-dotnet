@@ -32,21 +32,32 @@ public enum OutboundTransport
 /// The env var holding the transport's target identifier — an SQS queue URL, an SNS topic ARN, or an
 /// EventBridge event bus name (e.g. <c>PAYMENTS_QUEUE_URL</c>, <c>ORDER_PLACED_TOPIC_ARN</c>, <c>EVENT_BUS_NAME</c>).
 /// </param>
+/// <param name="Outboxed">
+/// When <see langword="true"/>, <see cref="MeshServiceWiring.ConfigureServices"/> adds
+/// <c>Benzene.Outbox</c>'s <c>UseOutbox()</c> to this route's pipeline (after the trace/correlation
+/// stamping middleware, before the terminal transport converter) — see
+/// <c>work/outbox-plan.md</c> §2.1. Defaults to <see langword="false"/> so a service opts a route
+/// into the outbox one send at a time, without dragging every other service's routes (or this
+/// service's other routes) through it. The caller is also responsible for registering
+/// <c>Benzene.Outbox</c>'s <c>AddOutbox(...)</c> and an <c>IOutboxStore</c> (e.g.
+/// <c>AddDynamoDbOutboxStore</c>) — this flag only wires the per-route middleware.
+/// </param>
 public record OutboundSend(
     string Topic,
     Type MessageType,
     OutboundTransport Transport,
-    string TargetEnvVar)
+    string TargetEnvVar,
+    bool Outboxed = false)
 {
     /// <summary>Convenience for the common SQS command hop.</summary>
-    public static OutboundSend Sqs(string topic, Type messageType, string queueUrlEnvVar)
-        => new(topic, messageType, OutboundTransport.Sqs, queueUrlEnvVar);
+    public static OutboundSend Sqs(string topic, Type messageType, string queueUrlEnvVar, bool outboxed = false)
+        => new(topic, messageType, OutboundTransport.Sqs, queueUrlEnvVar, outboxed);
 
     /// <summary>Convenience for an SNS fan-out event.</summary>
-    public static OutboundSend Sns(string topic, Type messageType, string topicArnEnvVar)
-        => new(topic, messageType, OutboundTransport.Sns, topicArnEnvVar);
+    public static OutboundSend Sns(string topic, Type messageType, string topicArnEnvVar, bool outboxed = false)
+        => new(topic, messageType, OutboundTransport.Sns, topicArnEnvVar, outboxed);
 
     /// <summary>Convenience for an EventBridge routed integration event.</summary>
-    public static OutboundSend EventBridge(string topic, Type messageType, string eventBusNameEnvVar)
-        => new(topic, messageType, OutboundTransport.EventBridge, eventBusNameEnvVar);
+    public static OutboundSend EventBridge(string topic, Type messageType, string eventBusNameEnvVar, bool outboxed = false)
+        => new(topic, messageType, OutboundTransport.EventBridge, eventBusNameEnvVar, outboxed);
 }

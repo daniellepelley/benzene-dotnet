@@ -7,6 +7,7 @@ using Benzene.Abstractions.Middleware;
 using Benzene.Aws.Lambda.ApiGateway;
 using Benzene.Aws.Lambda.Core;
 using Benzene.Aws.Lambda.Core.BenzeneMessage;
+using Benzene.Aws.Lambda.DynamoDb;
 using Benzene.Aws.Lambda.EventBridge;
 using Benzene.Aws.Lambda.Sns;
 using Benzene.Aws.Lambda.Sqs;
@@ -24,6 +25,8 @@ using Benzene.Core.Middleware;
 using Benzene.Abstractions.Messages;
 using Benzene.Diagnostics;
 using Benzene.Diagnostics.Correlation;
+using Benzene.Idempotency;
+using Benzene.Outbox;
 using Benzene.ResponseEvents;
 using Benzene.FluentValidation;
 using Benzene.HealthChecks;
@@ -138,6 +141,15 @@ public static class MeshServiceWiring
                             // attribute, or embedded in the EventBridge detail). UseCorrelationId() does the
                             // same for x-correlation-id, so the mesh's cross-service correlation lookup works too.
                             pipeline.UseW3CTraceContext().UseCorrelationId();
+                            // Per-send opt-in only (OutboundSend.Outboxed) — placed after the trace/
+                            // correlation stamping and before the terminal transport converter, per
+                            // work/outbox-plan.md §2.1, so the outbox captures the same business-time
+                            // context a live send would carry. A service that never sets Outboxed=true
+                            // never adds this middleware, and its routes behave exactly as before.
+                            if (send.Outboxed)
+                            {
+                                pipeline.UseOutbox();
+                            }
                             switch (send.Transport)
                             {
                                 case OutboundTransport.Sqs:
@@ -168,7 +180,29 @@ public static class MeshServiceWiring
     /// <param name="serviceName">The logical service name (e.g. <c>orders</c>).</param>
     /// <param name="handlers">The domain handler types this service exposes.</param>
     /// <param name="healthChecks">The service's health checks.</param>
-    public static void Configure(IBenzeneApplicationBuilder app, string serviceName, Type[] handlers, IHealthCheck[] healthChecks)
+    /// <param name="enableOutboxDispatchStream">
+    /// When <see langword="true"/>, also mounts <c>Benzene.Aws.Lambda.DynamoDb</c>'s <c>UseDynamoDb</c>
+    /// so this Lambda handles its own outbox table's DynamoDB Streams <c>INSERT</c> records (the
+    /// near-real-time half of the outbox relay pair, <c>work/outbox-plan.md</c> §2.5) via the same
+    /// <paramref name="handlers"/> list — e.g. Orders' <c>OutboxStreamDispatchMessageHandler</c>.
+    /// Defaults to <see langword="false"/>: a service with no outbox has nothing to stream-dispatch,
+    /// and this flag keeps the other five services' Lambdas exactly as before.
+    /// </param>
+    /// <param name="enableSqsIdempotency">
+    /// When <see langword="true"/>, adds <c>Benzene.Idempotency</c>'s <c>UseIdempotency()</c> to this
+    /// service's SQS ingress, ahead of message-handler dispatch — the consume-side half of the
+    /// outbox+idempotency pair (<c>work/outbox-plan.md</c> §2.6): an at-least-once redelivery off an
+    /// outboxed route carries the envelope id as the <c>idempotency-key</c> header by default, and this
+    /// dedups it before the handler runs. Defaults to <see langword="false"/> so only the service
+    /// actually consuming outboxed traffic pays for the store lookup.
+    /// </param>
+    public static void Configure(
+        IBenzeneApplicationBuilder app,
+        string serviceName,
+        Type[] handlers,
+        IHealthCheck[] healthChecks,
+        bool enableOutboxDispatchStream = false,
+        bool enableSqsIdempotency = false)
     {
         var region = Environment.GetEnvironmentVariable("AWS_REGION") ?? "eu-west-1";
 
@@ -192,14 +226,38 @@ public static class MeshServiceWiring
 
             // The same domain handlers, now reachable over three more event sources — so you can fire
             // any of them from the Lambda test tool (see .lambda-test-tool/SavedRequests).
-            aws.UseSqs(sqs => Observe(sqs)
-                .UseMessageHandlers(handlers, router => router.UseFluentValidation()));
+            aws.UseSqs(sqs =>
+            {
+                var pipeline = Observe(sqs);
+                if (enableSqsIdempotency)
+                {
+                    // Ahead of dispatch: dedups an at-least-once relay redelivery before the handler runs
+                    // (see the parameter doc above). Requires an IIdempotencyStore to be registered
+                    // (the caller wires AddDynamoDbIdempotencyStore alongside this flag).
+                    pipeline = pipeline.UseIdempotency();
+                }
+                pipeline.UseMessageHandlers(handlers, router => router.UseFluentValidation());
+            });
 
             aws.UseSns(sns => Observe(sns)
                 .UseMessageHandlers(handlers, router => router.UseFluentValidation()));
 
+            // Also where an EventBridge-scheduled "sweep" rule lands (e.g. Orders' outbox sweep,
+            // work/outbox-plan.md §2.5): a scheduled rule invokes the Lambda directly with the same
+            // detail-type-routed envelope any other EventBridge-delivered event uses, so a scheduled
+            // sweep needs no wiring beyond an ordinary [Message("...")] handler in this list.
             aws.UseEventBridge(eventBridge => Observe(eventBridge)
                 .UseMessageHandlers(handlers, router => router.UseFluentValidation()));
+
+            if (enableOutboxDispatchStream)
+            {
+                // The other half of the relay pair: a DynamoDB Streams INSERT on this service's own
+                // outbox table dispatches the just-captured envelope near-real-time (work/outbox-plan.md
+                // §2.5). No IAmazonDynamoDB is needed here — that's only for the outbox store/transaction
+                // the caller registers separately; this pipeline just deserializes the stream record.
+                aws.UseDynamoDb(ddb => Observe(ddb)
+                    .UseMessageHandlers(handlers, router => router.UseFluentValidation()));
+            }
         });
     }
 
