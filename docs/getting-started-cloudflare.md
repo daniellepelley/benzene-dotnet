@@ -1,9 +1,18 @@
 # Getting Started: Benzene on Cloudflare Containers
 
-> **⚠️ Experimental / community-supported — not part of the Benzene 1.0 support commitment.**
-> Cloudflare is **out of scope for the 1.0 release**. It's a valid, working path, but it receives
-> less testing and no API-stability guarantee compared with the AWS, Azure, ASP.NET Core, and
-> self-hosted surfaces that 1.0 commits to. Treat it as a community/experimental offering.
+> **⚠️ The deployment recipe here is documentation-verified, not live-verified.**
+> The *Benzene* side of this guide is not Cloudflare-specific at all — it is `Benzene.AspNet.Core`
+> running in a container, the same integration used for Kubernetes, IIS, or any other container
+> host, and it carries the same support commitment those surfaces do. What *is* Cloudflare-specific
+> is the deployment recipe in steps 5–6 (the Dockerfile's listen port, the `wrangler.toml`, the
+> Durable Object binding model): that has been checked against Cloudflare's documentation but has
+> never been run against a live Cloudflare account, and Cloudflare Containers is a young product
+> whose binding model has changed before. Check it against the
+> [current Cloudflare Containers docs](https://developers.cloudflare.com/containers/) before
+> production use.
+>
+> **Scope:** this guide covers the HTTP surface only. Cloudflare's own message transports (Queues,
+> R2 event notifications) have no Benzene binding yet.
 
 Cloudflare Workers has no native .NET runtime, so a Benzene app can't run *inside* a Worker the
 way it runs in AWS Lambda or Azure Functions. [Cloudflare Containers](https://developers.cloudflare.com/containers/)

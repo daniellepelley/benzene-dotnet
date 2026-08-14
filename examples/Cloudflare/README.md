@@ -1,8 +1,9 @@
 # Benzene.Example.Cloudflare
 
-> **⚠️ Experimental / community-supported — not part of the Benzene 1.0 support commitment.**
-> Cloudflare is **out of scope for the 1.0 release**; it works but receives less testing and no
-> API-stability guarantee than the AWS / Azure / ASP.NET / self-hosted surfaces.
+> **⚠️ The Cloudflare-side deployment config here is documentation-verified, not live-verified**
+> (see the note at the bottom of this file). The Benzene side carries no separate caveat: it is
+> `Benzene.AspNet.Core` in a container, under the same support commitment as every other container
+> host.
 
 A minimal ASP.NET Core Benzene app, deployed behind [Cloudflare Containers](https://developers.cloudflare.com/containers/)
 via a thin Worker that proxies HTTP traffic into a Docker container running this project.
