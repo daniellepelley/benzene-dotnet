@@ -194,6 +194,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixing there.
 
 ### Added
+- **New `Benzene.ClaimCheck` package — the claim-check pattern for oversized payloads**, plus two
+  store packages: `Benzene.ClaimCheck.Aws.S3` and `Benzene.ClaimCheck.Azure.Blob`. Ships as a
+  middleware pair rather than a client/transport feature: `.UseClaimCheck()` on an outbound route
+  pipeline serializes and measures the request, and at or over a configurable threshold
+  (`ClaimCheckOptions.ThresholdBytes`, default 192 KiB) puts the serialized body into a pluggable
+  `IClaimCheckStore` and replaces the request with a tiny placeholder, carrying the store-issued
+  reference on the new **Tier C** `benzene-claim-check` wire header;
+  `.UseClaimCheck<TContext>()` on the receiving transport's inbound pipeline resolves that header
+  back to the real body before deserialization. `Benzene.ClaimCheck` ships
+  `InMemoryClaimCheckStore` for single-instance/test use; `Benzene.ClaimCheck.Aws.S3`
+  (`AddS3ClaimCheckStore`) and `Benzene.ClaimCheck.Azure.Blob` (`AddBlobClaimCheckStore`) are the
+  production stores. Retention is TTL-based (an S3 lifecycle rule / Azure Blob lifecycle-management
+  delete rule you provision — there is no delete-on-consume, so fan-out and at-least-once
+  redelivery both stay safe); a missing or expired claim on receive fails loud
+  (`ClaimCheckNotFoundException`), letting the transport's own redelivery/DLQ semantics apply.
+  Body-setter support for hydration ships for the AWS Lambda SQS/SNS/EventBridge transports and the
+  standalone SQS consumer today; other transports adopt it by implementing and registering an
+  `IMessageBodySetter<TContext>`. Dogfooded end-to-end in `examples/AwsMesh` (an oversized
+  `orders-api` → `payments-api` `payments:capture` send). See [Claim Check](docs/claim-check.md),
+  the cross-language spec's
+  [wire-contracts.md §2.1](https://benzene.app/docs/specification/wire-contracts.html#21-claim-check-add-on),
+  and `work/claim-check-plan.md`.
 - **`benzene profile-check` is now a real CI gate.** Added `--fail-on` (`not-satisfied` default,
   `inconclusive`, or `none`) and `--format` (`text` default, or `json` — the full
   `CloudServiceProbeReport` plus the probed `url`), mirroring `benzene diff`'s existing

@@ -70,6 +70,7 @@ Benzene is a hexagonal framework designed for services running in serverless env
   - [Resilience](resilience.md) — retry-with-backoff, plus the full Polly toolkit via `Benzene.Resilience.Polly`
   - [Polly Resilience Pipelines](cookbooks/polly-resilience.md) — circuit breaker, timeout, hedging, fallback
   - [Rate Limiting](rate-limiting.md) — best-effort, per-instance protection for public endpoints (health checks, spec); authoritative limits belong at the gateway
+  - [Claim Check](claim-check.md) — offload an oversized payload past a transport's size limit (SQS/SNS/EventBridge, Service Bus, Queue Storage, Kafka) via a middleware pair, backed by `Benzene.ClaimCheck.Aws.S3` / `Benzene.ClaimCheck.Azure.Blob`
 
 - **Code Generation**
   - [Contract Artifacts](contract-artifacts.md) — the `benzene-descriptor` build tool: emit `spec.json` / `service.json` from a built, non-deployed service, no network required

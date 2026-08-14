@@ -219,6 +219,9 @@ See [Health Checks](../health-checks.md).
 | `Benzene.Outbox` | The produce-side transactional outbox: `UseOutbox()` route middleware that captures a send durably (`Immediate` mode) or stages it for an atomic commit (`Transactional` mode), plus the host-agnostic dispatch engine and `InMemoryOutboxStore`. See [Transactional Outbox](../cookbooks/transactional-outbox.md). |
 | `Benzene.Outbox.DynamoDb` | The DynamoDB outbox store, plus the `IDynamoDbOutboxTransaction` unit of work that makes `Transactional` mode's atomic commit real (one `TransactWriteItems` for state + envelopes). |
 | `Benzene.Outbox.EntityFramework` | The EF Core outbox store, plus the `IOutboxStage` that commits state + envelope together via the application's own `SaveChangesAsync`. |
+| `Benzene.ClaimCheck` | Offload/hydrate an oversized payload past a transport's size limit via a middleware pair (`UseClaimCheck()` offload on an outbound route, `UseClaimCheck<TContext>()` hydrate on an inbound transport pipeline) backed by a pluggable `IClaimCheckStore`; ships `InMemoryClaimCheckStore` (single-process). See [Claim Check](../claim-check.md). |
+| `Benzene.ClaimCheck.Aws.S3` | A distributed `IClaimCheckStore` backed by an S3 bucket (`S3ClaimCheckStore`, `AddS3ClaimCheckStore(bucket)`) for a multi-instance/Lambda deployment. |
+| `Benzene.ClaimCheck.Azure.Blob` | A distributed `IClaimCheckStore` backed by Azure Blob Storage (`BlobClaimCheckStore`, `AddBlobClaimCheckStore(...)`). |
 
 ## Code generation & tooling
 

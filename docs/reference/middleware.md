@@ -187,6 +187,30 @@ exponential backoff.
 | `jitter` | `null` | Optional per-delay jitter applied to the computed delay. |
 | `delay` | `null` | Custom delay implementation (override the default `Task.Delay`). |
 
+### `UseClaimCheck()` / `UseClaimCheck<TContext>()`
+
+**Package:** `Benzene.ClaimCheck`. An offload/hydrate middleware pair for payloads that exceed a
+transport's size limit (SQS/SNS/EventBridge 256 KB, Service Bus standard 256 KB, Azure Queue
+Storage 64 KB, …). `.UseClaimCheck()` on an **outbound route** pipeline serializes and measures the
+request; at or over a configurable threshold it puts the body into a pluggable `IClaimCheckStore`
+and replaces the request with a tiny placeholder, carrying the store-issued reference on the
+`benzene-claim-check` header. `.UseClaimCheck<TContext>()` on an **inbound transport** pipeline
+reads that header and resolves the reference back to the real body before deserialization. See
+[Claim Check](../claim-check.md).
+
+```csharp
+// Outbound: last non-terminal step of the route, before the transport converter.
+routing.Route("payments:capture", pipeline => pipeline
+    .UseCorrelationId()
+    .UseClaimCheck()          // offload
+    .UseSqs(queueUrl));
+
+// Inbound: after the observability prelude, before UseMessageHandlers.
+aws.UseSqs(sqs => Observe(sqs)
+    .UseClaimCheck()          // hydrate — TContext inferred as SqsMessageContext
+    .UseMessageHandlers(handlers, ...));
+```
+
 ### `UseHealthCheck(...)`
 
 **Package:** transport packages (e.g. `Benzene.Aws.Lambda.ApiGateway`) plus
