@@ -92,6 +92,20 @@ To cut a new base version, change `version.txt` — nothing else. To flip from p
 stable, run the workflow with the `stable` channel once the base is right (e.g. set `version.txt`
 to `1.0.0` and publish `stable`).
 
+> **A new base must sort above every version already on nuget.org — including legacy ones.**
+> Before ~2026-07-23, releases used a four-part scheme (`0.0.2.16-alpha` … `0.0.2.18-alpha`; the
+> last of those was published 2026-07-14). The switch to the current dotted-prerelease scheme
+> reused base `0.0.2`, producing `0.0.2-alpha.1` … `0.0.2-alpha.6` — **newer in time but lower in
+> version order**, because NuGet reads `0.0.2.18` as greater than `0.0.2`.
+>
+> The consequences were real and silent: `dotnet add package <pkg> --prerelease` resolved to the
+> July `0.0.2.18-alpha` rather than the August `0.0.2-alpha.6` for every package that had both,
+> while packages introduced after the switch (`Benzene.Saga`, `Benzene.Clients.Http`) only ever
+> had `0.0.2-alpha.*`. A consumer taking "latest prerelease" of each therefore got a **mix of two
+> generations never built together**. `version.txt` moved to `0.0.3` to clear the legacy ceiling:
+> `0.0.3-alpha.1` sorts above `0.0.2.18-alpha`, so latest-prerelease resolution is correct again.
+> Never set the base below a version already published.
+
 ### Packability
 
 Projects do not pack by default (`IsPackable=false` in the root
