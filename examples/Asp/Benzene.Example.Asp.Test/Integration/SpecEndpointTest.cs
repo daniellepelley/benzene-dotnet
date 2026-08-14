@@ -40,7 +40,10 @@ public class SpecEndpointTest : InMemoryOrdersTestBase
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var html = await response.Content.ReadAsStringAsync();
 
-        // The bundled Spec Explorer page (Benzene.Spec.Ui/spec-ui.html) - a marker only that page carries.
-        Assert.Contains("Benzene Spec Explorer", html);
+        // The bundled Spec UI page (Benzene.Spec.Ui/spec-ui.html) - a marker only that page carries.
+        // Asserts the <title> rather than bare prose: the Aug 10 re-vendor (880c05b) renamed the page
+        // from "Benzene Spec Explorer" to "Benzene Service Spec", and matching the tag makes the next
+        // copy change fail here loudly instead of silently passing on some other occurrence of the words.
+        Assert.Contains("<title>Benzene Service Spec</title>", html);
     }
 }
