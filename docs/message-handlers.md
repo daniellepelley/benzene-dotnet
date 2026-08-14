@@ -270,14 +270,16 @@ needs:
   `CanRender` matches. Every transport registers exactly one built-in renderer,
   `SerializerResponseRenderer<TContext>` (the catch-all, registered last): it asks
   `IMediaFormatNegotiator<TContext>.SelectWrite` for the format, then serializes the payload
-  (success) or an `ErrorPayload` (failure) via `IResponsePayloadMapper<TContext>`
-  (`DefaultResponsePayloadMapper<TContext>`). A handler whose payload implements
-  `IRawContentMessage` (`Benzene.Abstractions.Messages`) is delivered as-is, with the response
-  content type taken from `IRawContentMessage.ContentType` instead of the negotiated format —
-  useful for a handler that renders its own body (e.g. pre-built HTML) and wants it delivered
-  verbatim. A custom `IResponseRenderer<TContext>` (e.g. an HTML templating renderer, matched via
-  `accept: text/html`) registers *before* the serializer renderer and owns its own error
-  representation instead of `ErrorPayload` JSON.
+  (success) or an RFC 9457 problem document (failure — `ProblemTypes.From`) via
+  `IResponsePayloadMapper<TContext>` (`DefaultResponsePayloadMapper<TContext>`), rewriting the
+  negotiated content type to its `problem+` counterpart on failure (`application/json` →
+  `application/problem+json`, `application/xml` → `application/problem+xml`). A handler whose
+  payload implements `IRawContentMessage` (`Benzene.Abstractions.Messages`) is delivered as-is, with
+  the response content type taken from `IRawContentMessage.ContentType` instead of the negotiated
+  format — useful for a handler that renders its own body (e.g. pre-built HTML) and wants it
+  delivered verbatim. A custom `IResponseRenderer<TContext>` (e.g. an HTML templating renderer,
+  matched via `accept: text/html`) registers *before* the serializer renderer and owns its own error
+  representation instead of the problem-details JSON.
 - **`DefaultResponseStatusHandler<TContext>`** / transport-specific status handlers — map the
   `IBenzeneResult.Status` string onto the transport's native status/acknowledgement concept (HTTP
   status code, SQS batch-item-failure, etc. — see [Message Results](message-result.md#transport-mapping)

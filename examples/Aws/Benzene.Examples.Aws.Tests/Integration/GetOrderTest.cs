@@ -107,9 +107,9 @@ public class GetOrderTest : InMemoryOrdersTestBase
 
         var response = await TestLambdaHosting.SendEventAsync<APIGatewayProxyResponse>(apiGatewayProxyRequest);
 
-        var order = new XmlSerializer().Deserialize<ErrorPayload>(response.Body);
+        var problem = new XmlSerializer().Deserialize<ProblemDetails>(response.Body);
 
-        Assert.Equal("validation-error", order.Status);
+        Assert.Equal("validation-error", problem.BenzeneStatus);
 
         Assert.Equal(422, response.StatusCode);
         Assert.NotNull(response.Body);

@@ -24,8 +24,8 @@ public interface IResponseRenderer<TContext>
     /// <summary>
     /// Writes the response body (and content type, and anything else this representation needs) onto
     /// <paramref name="response"/>. A renderer owns its own error representation - e.g. the serializer
-    /// renderer keeps <c>DefaultResponsePayloadMapper</c>'s <c>ErrorPayload</c> JSON, while an HTML
-    /// renderer would render its own error page.
+    /// renderer keeps <c>DefaultResponsePayloadMapper</c>'s RFC 9457 problem-details JSON, while an
+    /// HTML renderer would render its own error page.
     /// </summary>
     /// <param name="context">The transport-specific context for the current message.</param>
     /// <param name="result">The outcome of routing and invoking the handler.</param>

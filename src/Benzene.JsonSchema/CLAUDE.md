@@ -20,8 +20,8 @@ OpenAPI feature (that is `Benzene.Schema.OpenApi`).
   `IMessageHandlerResultSetter<TContext>` - the structured `BenzeneError`s travel as the result's
   **errors** (same failure contract as FluentValidation/DataAnnotations). The topic's handler
   definition is attached to the result so the response payload mapper writes a body (it skips
-  definition-less results); as of this package's current state the wire body itself
-  (`ErrorPayload`/`ProblemDetails`) still only carries the joined message text, not `Field`/`Code` -
+  definition-less results); the wire body itself (`ProblemDetails`, via `ProblemTypes.From`) carries
+  both the joined message text (`detail`) and the structured `Field`/`Code` per error (`errors`) -
   see `Benzene.Results/CLAUDE.md`.
 - `JsonSchemaValidationErrors.Format(EvaluationResults) : IReadOnlyList<BenzeneError>` - flattens a
   failed evaluation into one `BenzeneError` per failed keyword: `Field` is the failing value's JSON
@@ -68,7 +68,8 @@ OpenAPI feature (that is `Benzene.Schema.OpenApi`).
 ## Important conventions
 - The failure result matches the other validation libraries: `ValidationError` status with one
   structured `BenzeneError` per failed keyword as the result's errors (`Field`/`Code` populated per
-  the table above), serialized in the response as `ErrorPayload`. (Until 2026-07 this was a bare
+  the table above), serialized in the response as an RFC 9457 problem document (`ProblemDetails`).
+  (Until 2026-07 this was a bare
   `false` payload with no detail - flagged as a behavior change, along with `JsonSchemaMiddleware`'s
   constructor gaining the topic getter + definition lookup. As of 2026-08 the messages stopped
   carrying an inline `"<pointer>: "` prefix - the pointer moved to `Field` - see

@@ -86,7 +86,11 @@ public class SpecTest
         var response = await host.SendBenzeneMessageAsync(MessageBuilder.Create("benzene:spec", new SpecRequest("openapi","json")));
         var document = new OpenApiStringReader().Read(response.Body, out _);
 
-        Assert.Equal(2, document.Components.Schemas.Count);
+        // 3, not 2: the error-response schema is now Benzene.Results.ProblemDetails (Phase 3 of
+        // work/problem-details-plan.md), whose Errors member references BenzeneError as its own
+        // schema component - the old ErrorPayload had no nested object-typed member, so it never
+        // contributed a second schema.
+        Assert.Equal(3, document.Components.Schemas.Count);
     }
 
     [Fact]

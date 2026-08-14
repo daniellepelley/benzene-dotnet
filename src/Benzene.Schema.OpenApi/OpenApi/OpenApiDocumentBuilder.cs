@@ -246,9 +246,9 @@ public class OpenApiDocumentBuilder :
                 Content = new Dictionary<string, OpenApiMediaType>
                 {
                     {
-                        "application/json", new OpenApiMediaType
+                        "application/problem+json", new OpenApiMediaType
                         {
-                            Schema = _schemaBuilder.AddSchema(typeof(ErrorPayload))
+                            Schema = _schemaBuilder.AddSchema(typeof(ProblemDetails))
                         }
                     }
                 }

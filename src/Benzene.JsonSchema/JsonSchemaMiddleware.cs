@@ -94,9 +94,10 @@ public class JsonSchemaMiddleware<TContext> : IMiddleware<TContext> where TConte
     private Task SetValidationErrorAsync(TContext context, IReadOnlyList<BenzeneError> errors)
     {
         // Same failure contract as Benzene.FluentValidation/Benzene.DataAnnotations: the errors
-        // travel as the result's errors, which the response pipeline serializes as an ErrorPayload
-        // ({ status, errors }). The topic's handler definition is attached so the response payload
-        // mapper actually writes that body (it skips definition-less results).
+        // travel as the result's errors, which the response pipeline serializes as an RFC 9457
+        // problem document ({ benzeneStatus, detail, errors, ... } - ProblemTypes.From). The topic's
+        // handler definition is attached so the response payload mapper actually writes that body
+        // (it skips definition-less results).
         var topic = _messageTopicGetter.GetTopic(context);
         var messageHandlerDefinition = topic != null ? _messageHandlerDefinitionLookUp.FindHandler(topic) : null;
 

@@ -56,7 +56,7 @@ public class FakeHtmlRendererTest
         public bool CanRender(TestContext context, IMessageHandlerResult result, IServiceResolver resolver) =>
             context.Headers.TryGetValue("accept", out var accept) && accept.Contains("text/html");
 
-        // Owns its own error representation instead of DefaultResponsePayloadMapper's ErrorPayload JSON.
+        // Owns its own error representation instead of DefaultResponsePayloadMapper's problem-details JSON.
         public async Task RenderAsync(TestContext context, IMessageHandlerResult result, IBenzeneResponseAdapter<TestContext> response)
         {
             await _gate;

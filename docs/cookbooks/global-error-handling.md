@@ -23,7 +23,7 @@ No new package is required — `UseExceptionHandler<TContext>()` lives in `Benze
 dotnet add package Benzene.Core.Middleware --prerelease
 ```
 
-For the HTTP example below you'll also use `Benzene.Results` (`ErrorPayload`, `BenzeneResultStatus`) and `Benzene.Http` (`DefaultHttpStatusCodeMapper`), both of which are already dependencies of any HTTP-based transport package (`Benzene.AspNet.Core`, `Benzene.Aws.Lambda.ApiGateway`, ...).
+For the HTTP example below you'll also use `Benzene.Results` (`ProblemTypes`, `BenzeneResult`) and `Benzene.Http` (`DefaultHttpStatusCodeMapper`), both of which are already dependencies of any HTTP-based transport package (`Benzene.AspNet.Core`, `Benzene.Aws.Lambda.ApiGateway`, ...).
 
 ## What `UseExceptionHandler` actually does
 
@@ -86,7 +86,7 @@ public async Task ExceptionHandler_ExceptionRethrownByHandler_IsStillLogged()
 
 Because the middleware only wraps what comes *after* it, **placement matters**: add `.UseExceptionHandler(...)` as early as possible in the pipeline you want protected — before `.UseMessageHandlers()` and before any other middleware whose exceptions you want caught. Anything registered before it is unprotected.
 
-There's also an important gap between this and how Benzene normally reports handler failures: when a handler returns `BenzeneResult.UnexpectedError(...)` (an *unsuccessful result*, not a thrown exception), the framework's own response pipeline (`DefaultResponsePayloadMapper`/`HttpStatusCodeResponseHandler`, see `src/Benzene.Core.MessageHandlers/Response/DefaultResponsePayloadMapper.cs` and `src/Benzene.Http/HttpStatusCodeResponseHandler.cs`) automatically serializes an `ErrorPayload` and maps the status to an HTTP code. A raw *thrown* exception caught by `UseExceptionHandler` bypasses that pipeline entirely — nothing builds a response for you. Your `onException` callback is responsible for constructing whatever response shape you want.
+There's also an important gap between this and how Benzene normally reports handler failures: when a handler returns `BenzeneResult.UnexpectedError(...)` (an *unsuccessful result*, not a thrown exception), the framework's own response pipeline (`DefaultResponsePayloadMapper`/`HttpStatusCodeResponseHandler`, see `src/Benzene.Core.MessageHandlers/Response/DefaultResponsePayloadMapper.cs` and `src/Benzene.Http/HttpStatusCodeResponseHandler.cs`) automatically serializes an RFC 9457 problem document (`ProblemTypes.From`) and maps the status to an HTTP code. A raw *thrown* exception caught by `UseExceptionHandler` bypasses that pipeline entirely — nothing builds a response for you. Your `onException` callback is responsible for constructing whatever response shape you want.
 
 ## Step-by-Step Implementation
 
@@ -103,14 +103,14 @@ app.UseApiGateway(apiGatewayApp => apiGatewayApp
     {
         context.EnsureResponseExists();
         context.ApiGatewayProxyResponse.StatusCode = 500; // matches DefaultHttpStatusCodeMapper's unexpected-error -> 500
-        context.ApiGatewayProxyResponse.Headers["content-type"] = "application/json";
+        context.ApiGatewayProxyResponse.Headers["content-type"] = "application/problem+json";
         context.ApiGatewayProxyResponse.Body = JsonSerializer.Serialize(
-            new ErrorPayload(BenzeneResultStatus.UnexpectedError, new[] { "An unexpected error occurred." }));
+            ProblemTypes.From(BenzeneResult.UnexpectedError("An unexpected error occurred.")));
     })
     .UseMessageHandlers());
 ```
 
-`500` here isn't an arbitrary choice — it's the same value `DefaultHttpStatusCodeMapper` (`src/Benzene.Http/DefaultHttpStatusCodeMapper.cs`) maps `BenzeneResultStatus.UnexpectedError` to for handlers that fail normally, so a thrown exception and a handler explicitly returning `BenzeneResult.UnexpectedError()` end up looking the same to the client. `ErrorPayload` (`Benzene.Results`) is the same payload shape `DefaultResponsePayloadMapper` uses for unsuccessful results, so the JSON body is consistent with the framework's own error responses too — you're just building it by hand because the exception path doesn't run that mapper for you.
+`500` here isn't an arbitrary choice — it's the same value `DefaultHttpStatusCodeMapper` (`src/Benzene.Http/DefaultHttpStatusCodeMapper.cs`) maps `BenzeneResultStatus.UnexpectedError` to for handlers that fail normally, so a thrown exception and a handler explicitly returning `BenzeneResult.UnexpectedError()` end up looking the same to the client. `ProblemTypes.From(...)` (`Benzene.Results`) builds the same RFC 9457 problem document shape `DefaultResponsePayloadMapper` uses for unsuccessful results, so the JSON body is consistent with the framework's own error responses too — you're just building it by hand because the exception path doesn't run that mapper for you. (`ProblemDetails.Status`, the numeric HTTP code, isn't filled in here — that's an HTTP-binding-specific concern a later phase of `work/problem-details-plan.md` adds; set it explicitly if you want it, matching the `StatusCode` above.)
 
 The same pattern applies to `Benzene.AspNet.Core`'s `AspNetContext` (set `context.HttpContext.Response.StatusCode` and write the body) if you're hosting in ASP.NET Core instead of Lambda.
 
@@ -212,7 +212,7 @@ For the SQS-specific fallback behavior (what happens with *no* `UseExceptionHand
 
 ### HTTP responses come back with the wrong status/no body
 
-**Solution:** Remember the automatic `ErrorPayload`/status-code mapping (`DefaultResponsePayloadMapper`, `HttpStatusCodeResponseHandler`) only runs for handlers that *return* an unsuccessful `IBenzeneResult` — it never runs for a caught exception. Your `onException` callback has to set the status code and body itself, as in the API Gateway example above.
+**Solution:** Remember the automatic problem-document/status-code mapping (`DefaultResponsePayloadMapper`, `HttpStatusCodeResponseHandler`) only runs for handlers that *return* an unsuccessful `IBenzeneResult` — it never runs for a caught exception. Your `onException` callback has to set the status code and body itself, as in the API Gateway example above.
 
 ### An SQS message keeps failing the whole batch, not just itself
 

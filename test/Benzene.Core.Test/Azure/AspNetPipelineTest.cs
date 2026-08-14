@@ -11,6 +11,7 @@ using Benzene.Testing;
 using Benzene.Xml;
 using Microsoft.AspNetCore.Mvc;
 using Xunit;
+using ProblemDetails = Benzene.Results.ProblemDetails;
 
 namespace Benzene.Test.Azure;
 
@@ -78,10 +79,15 @@ public class AspNetPipelineTest
 
         Assert.NotNull(response);
 
-        var payload = new JsonSerializer().Deserialize<ErrorPayload>(response.Content);
+        var payload = new JsonSerializer().Deserialize<ProblemDetails>(response.Content);
 
         Assert.Equal(422, response.StatusCode);
-        Assert.Equal("validation-error", payload.Status);
+        Assert.Equal("validation-error", payload.BenzeneStatus);
+        // Numeric Status is an HTTP-binding concern filled in by Phase 4 of
+        // work/problem-details-plan.md; Phase 3's transport-neutral emission never sets it, even on
+        // an HTTP-hosted pipeline like this one - the HTTP response line's 422 above comes from a
+        // separate mapper (IHttpStatusCodeMapper), not this body.
+        Assert.Null(payload.Status);
         Assert.NotEmpty(payload.Detail);
     }
 }

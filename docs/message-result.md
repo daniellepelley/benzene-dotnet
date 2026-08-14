@@ -159,9 +159,11 @@ the result's `IsSuccessful` is `true`, else `500` (a null status is always `500`
 `HttpStatusCodeResponseHandler<TContext>` applies this mapping to the HTTP response via
 `IBenzeneResponseAdapter<TContext>`. On success, `SerializerResponseRenderer<TContext>` (see
 [Message Handlers](message-handlers.md#response-handling)) serializes `Payload`; on failure, it
-serializes an `ErrorPayload` (`{ Status, Detail }`, where `Detail` is `Errors` joined with `", "`) —
-so a `BenzeneResult.NotFound<OrderDto>("Order 123 not found")` becomes an HTTP `404` with a JSON
-body describing the error, not the (empty) `OrderDto` payload.
+serializes an RFC 9457 problem document (`ProblemDetails`, built by `ProblemTypes.From` —
+`{ type, title, detail, benzeneStatus, errors? }`, where `detail` is `Errors` joined with `", "` and
+`errors` carries the result's structured errors when present) — so a
+`BenzeneResult.NotFound<OrderDto>("Order 123 not found")` becomes an HTTP `404` with a JSON body
+describing the error, not the (empty) `OrderDto` payload.
 
 ### Async/event transports — settlement (ack/nack/checkpoint)
 

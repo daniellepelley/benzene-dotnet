@@ -110,8 +110,9 @@ Benzene distinguishes between two failure modes, and they surface differently:
 
 - **An unsuccessful result** — a handler returns `BenzeneResult.NotFound(...)`,
   `BenzeneResult.BadRequest(...)`, `BenzeneResult.UnexpectedError(...)`, etc. This is a *normal*
-  return value: the response pipeline serializes an `ErrorPayload` and maps the status to the
-  transport (an HTTP 404/400/500, an SQS batch-item-failure, ...). Nothing threw.
+  return value: the response pipeline serializes an RFC 9457 problem document
+  (`ProblemTypes.From`) and maps the status to the transport (an HTTP 404/400/500, an SQS
+  batch-item-failure, ...). Nothing threw.
 - **A thrown exception** — a handler (or middleware, or a mapper) throws. This bypasses the response
   pipeline entirely; how it settles depends on the transport (see the [catch matrix](#what-reaches-your-logs-per-transport)).
 

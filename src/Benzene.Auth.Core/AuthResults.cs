@@ -11,10 +11,10 @@ namespace Benzene.Auth.Core;
 /// (see <c>Benzene.HealthChecks</c>' <c>UseHealthCheckMiddleware</c> and <c>Benzene.Http</c>'s
 /// <c>CorsMiddleware</c>) for applying an <see cref="Benzene.Abstractions.Results.IBenzeneResult"/>
 /// through <see cref="IMessageHandlerResultSetter{TContext}"/> - this invents no new wire shape.
-/// The <c>detail</c> string ends up as <c>ErrorPayload.Detail</c> (see
-/// <c>docs/specification/wire-contracts.md</c> §1.3/§3): <see cref="BenzeneResult.Unauthorized(string[])"/>/
+/// The <c>detail</c> string ends up as the RFC 9457 problem document's <c>ProblemDetails.Detail</c>
+/// (see <c>docs/specification/wire-contracts.md</c> §1.3/§3): <see cref="BenzeneResult.Unauthorized(string[])"/>/
 /// <see cref="BenzeneResult.Forbidden(string[])"/> attach it as the result's single error, which
-/// <c>ErrorPayload</c>'s constructor joins into <c>Detail</c>.
+/// <c>ProblemTypes.From</c> joins into <c>Detail</c>.
 /// </summary>
 public static class AuthResults
 {

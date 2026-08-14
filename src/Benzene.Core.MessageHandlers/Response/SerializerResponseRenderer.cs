@@ -77,11 +77,36 @@ public class SerializerResponseRenderer<TContext> : IResponseRenderer<TContext> 
         }
 
         response.SetBody(context, body);
-        response.SetContentType(context,
-            result.BenzeneResult.PayloadAsObject is IRawContentMessage rawContentMessage
-                ? rawContentMessage.ContentType
-                : format.ContentType);
+        response.SetContentType(context, ResolveContentType(result, format));
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// The response content type: a raw content payload's own type verbatim; otherwise, on a failed
+    /// result, the negotiated format's media type rewritten to its RFC 9457 "problem" counterpart
+    /// (<c>application/json</c> → <c>application/problem+json</c>, <c>application/xml</c> →
+    /// <c>application/problem+xml</c> per RFC 9457 §11.2; any other negotiated format is left as-is -
+    /// this framework only defines a problem media type for the two it ships signalling for);
+    /// otherwise the negotiated format's ordinary media type.
+    /// </summary>
+    private static string ResolveContentType(IMessageHandlerResult result, IMediaFormat<TContext> format)
+    {
+        if (result.BenzeneResult.PayloadAsObject is IRawContentMessage rawContentMessage)
+        {
+            return rawContentMessage.ContentType;
+        }
+
+        return result.BenzeneResult.IsSuccessful ? format.ContentType : ProblemContentType(format.ContentType);
+    }
+
+    private static string ProblemContentType(string contentType)
+    {
+        return contentType switch
+        {
+            "application/json" => "application/problem+json",
+            "application/xml" => "application/problem+xml",
+            _ => contentType,
+        };
     }
 }

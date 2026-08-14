@@ -194,9 +194,9 @@ public class CreateOrderTest : InMemoryOrdersTestBase
         Assert.Equal(BenzeneResultStatus.ValidationError, response.StatusCode);
         Assert.NotNull(response.Body);
 
-        var errorPayload = response.GetMessage<ErrorPayload>();
-        Assert.Equal(Defaults.ErrorStatus.ValidationError, errorPayload.Status);
-        Assert.NotEmpty(errorPayload.Detail);
+        var problem = response.GetMessage<ProblemDetails>();
+        Assert.Equal(Defaults.ErrorStatus.ValidationError, problem.BenzeneStatus);
+        Assert.NotEmpty(problem.Detail);
     }
 
     [Fact]

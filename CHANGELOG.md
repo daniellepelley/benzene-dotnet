@@ -132,6 +132,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `docs/migration-alpha-to-1.0.md` (owed by the ruling's R1) is created in a later phase of
     `work/problem-details-plan.md` (Phase 7), which folds this entry in alongside the Phase 3-4 wire
     changes rather than duplicating a migration doc per phase.
+- **BREAKING:** `Benzene.Results.ProblemDetails` is now a real RFC 9457 problem document, and
+  `Benzene.Results.ErrorPayload` is **deleted** - Phase 3 of `work/problem-details-plan.md`. A
+  failed result's wire body (`DefaultResponsePayloadMapper`) is now the document
+  `ProblemTypes.From(result)` builds: `type`/`title` from a new status-keyed registry
+  (`ProblemTypes`, mirroring `BenzeneResultStatus`'s own pattern), `detail` unchanged (the joined
+  error messages), `benzeneStatus` (the transport-neutral discriminator, mirroring the envelope's
+  `statusCode`), and `errors` (the result's structured `BenzeneError`s, when non-empty).
+  - **`ProblemDetails.Status` changes type `string` → `int?`** (the one breaking *member* change,
+    beyond the type's overall reshaping) - it is now the RFC 9457 member it was always meant to be
+    (the numeric HTTP status), not a mislabeled copy of the Benzene status string. It is filled in
+    only by an HTTP-aware response mapper (a later phase); this phase's transport-neutral emission
+    always leaves it unset, and `[JsonIgnore(Condition = WhenWritingNull)]` on every optional
+    member (including `Status`) means an unset member is **omitted from the wire, not emitted as
+    `null`** - load-bearing for a future conformance fixture that pins `status`'s absence off HTTP.
+  - **`ProblemDetails.Errors` is `BenzeneError[]?`, not `IReadOnlyList<BenzeneError>` like
+    `IBenzeneResult.Errors`** - a deliberate, measured deviation from the plan's literal type:
+    `System.Xml.Serialization.XmlSerializer` (`Benzene.Xml`, one of the five serializers this type
+    must round-trip through) refuses to reflect an interface-typed member at all ("Cannot serialize
+    member ... because it is an interface"), so the wire-facing property has to be concrete.
+    `ProblemTypes.From` projects with `.ToArray()`.
+  - **`ErrorPayload` deleted, no shim** (decision 4, clean break) - its two jobs move to
+    `ProblemTypes.From` (join-`detail` construction) and `ProblemDetails` itself (client-side
+    deserialization target). Every in-repo site fixed in this commit: emission
+    (`DefaultResponsePayloadMapper`), the OpenAPI error-response schema (now `application/problem+json`
+    referencing `ProblemDetails`, which itself now references a second `BenzeneError` schema
+    component - `Benzene.Test.Autogen.Schema.OpenApi.SpecTest.OpenApi_Test`'s schema count moves
+    2 → 3), and every read/test site that named `ErrorPayload`. `ClientResultExtensions`
+    (`Benzene.Clients`) now deserializes `ProblemDetails` and still reads only `.Detail` -
+    populating structured errors from `.Errors` is Phase 5's job, flagged `TODO(Phase 5)` in place.
+  - **`SerializerResponseRenderer` rewrites the negotiated content type on failure**:
+    `application/json` → `application/problem+json`, `application/xml` → `application/problem+xml`
+    (RFC 9457 §11.2); any other negotiated format, and every successful response, is unaffected.
+    `BenzeneMessageHttpMiddleware`'s **outer** envelope content-type (always `application/json`) is
+    a separate code path and is untouched.
+  - The .NET conformance suite (`test/Benzene.Conformance.Test`) is expected to stay red against the
+    Phase-1-updated spec fixtures until a later phase re-vendors them and implements `bodyExclude` -
+    not a regression from this commit.
 
 ### Added
 - **`benzene profile-check` is now a real CI gate.** Added `--fail-on` (`not-satisfied` default,

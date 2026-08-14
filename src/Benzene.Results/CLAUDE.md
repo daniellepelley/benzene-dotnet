@@ -28,11 +28,28 @@ status string rather than thrown exceptions. Transport adapters map the status t
   to/from Benzene statuses, and `ErrorMessages()` - projects a result's structured
   `IBenzeneResult.Errors` (`IReadOnlyList<BenzeneError>`) down to the pre-`BenzeneError` `string[]`
   shape, for callers that only want the message text.
-- `ProblemDetails` / `ErrorPayload` - RFC-7807-style error body shapes used when rendering a
-  failure result's errors. Still the pre-`BenzeneError` `{ status, detail }` shape as of this
-  package's current state (`errors` reaching the wire is a later phase of
-  `work/problem-details-plan.md`) - `DefaultResponsePayloadMapper` builds `ErrorPayload` from
-  `IBenzeneResult.ErrorMessages()`, not `.Errors` directly.
+- `ProblemDetails` - the RFC 9457 ("Problem Details for HTTP APIs") problem document Benzene emits
+  in place of the payload whenever a result is unsuccessful, on every transport (see
+  `docs/specification/wire-contracts.md` §1.3/§3.1 in the cross-language Benzene repo): `Type`,
+  `Title`, `Status` (`int?`, HTTP bindings only - never fabricated off-HTTP), `Detail` (the result's
+  error messages joined with `", "`), `Instance`, `BenzeneStatus` (the transport-neutral
+  discriminator, mirrors the envelope's `statusCode`), `Errors` (`IReadOnlyList<BenzeneError>?`,
+  present only when the result carries structured errors). Every member is
+  `[JsonIgnore(Condition = WhenWritingNull)]` so an absent member is omitted from the wire, not
+  emitted as `null` - load-bearing for `Status` off an HTTP transport. Build one from a result with
+  `ProblemTypes.From(result)` rather than constructing it by hand; an application needing its own
+  extension members should subclass it (the retired `ErrorPayload`'s pattern - see below).
+- `ProblemTypes` - the problem-type registry, keyed by `BenzeneResultStatus`'s failure vocabulary
+  (no new taxonomy): `TypeFor`/`TitleFor`/`HttpStatusFor(status)` (unknown/application-defined
+  status → `null`/`null`/`500`) plus the factory `From(IBenzeneResult)` that builds the `§2.1`
+  document (`Type`/`Title` from the registry, `Detail` joined exactly as the retired `ErrorPayload`
+  did, `Errors` from the result's structured errors when non-empty, `Status` deliberately never set
+  - that's an HTTP-binding concern for a later phase). `DefaultResponsePayloadMapper`
+  (`Benzene.Core.MessageHandlers`) calls this on every failed result.
+  - **`ErrorPayload` (retired):** the pre-RFC-9457 `{ status, detail }` shape this type used to be is
+    gone (Phase 3 of `work/problem-details-plan.md`, clean break, no shim) - `ProblemDetails` /
+    `ProblemTypes.From` took over both of its jobs (join-`detail` construction; client-side
+    deserialization target).
 
 ### Structured errors - which validation integration populates what
 `BenzeneError` (`Benzene.Abstractions.Results`) is `{ Message, Field?, Code? }`. Each validation

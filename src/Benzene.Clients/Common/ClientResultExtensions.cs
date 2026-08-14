@@ -12,7 +12,13 @@ namespace Benzene.Clients.Common
         /// contract, preserved verbatim - including an application-defined status, which now
         /// round-trips instead of being coerced to <c>unexpected-error</c>) or a numeric HTTP status
         /// code (older or HTTP-shaped services, mapped to its Benzene equivalent). Failure bodies are
-        /// read as the standard error payload (<c>{ "status": ..., "detail": ... }</c>).
+        /// read as an RFC 9457 problem document (<see cref="ProblemDetails"/>) and only
+        /// <see cref="ProblemDetails.Detail"/> is used - a minimal read-site fix for Phase 3 of
+        /// work/problem-details-plan.md (which retired the old <c>ErrorPayload</c> type this used to
+        /// deserialize into; the shape and behavior here are unchanged). Populating the result's
+        /// structured errors from <see cref="ProblemDetails.Errors"/> and attaching the received
+        /// document for <c>GetProblem()</c> is Phase 5's job (ruling §5.2/plan §Phase 5.3) -
+        /// TODO(Phase 5).
         /// </summary>
         /// <remarks>
         /// Success/failure classification prefers <see cref="BenzeneMessageClientResponse.IsSuccessful"/>
@@ -50,10 +56,10 @@ namespace Benzene.Clients.Common
                 return BenzeneResult.Set(status, serializer.Deserialize<T>(body), true);
             }
 
-            var errorPayload = serializer.Deserialize<ErrorPayload>(body);
-            return string.IsNullOrEmpty(errorPayload?.Detail)
+            var problem = serializer.Deserialize<ProblemDetails>(body);
+            return string.IsNullOrEmpty(problem?.Detail)
                 ? BenzeneResult.Set<T>(status, false)
-                : BenzeneResult.SetFailed<T>(status, errorPayload.Detail);
+                : BenzeneResult.SetFailed<T>(status, problem.Detail);
         }
 
         private static IBenzeneResult<T> ReturnGuidResult<T>(string status, bool isSuccessful, string body, ISerializer serializer)
@@ -63,10 +69,10 @@ namespace Benzene.Clients.Common
                 return (IBenzeneResult<T>)BenzeneResult.Set(status, ParseGuid(body, serializer), true);
             }
 
-            var errorPayload = serializer.Deserialize<ErrorPayload>(body);
-            return string.IsNullOrEmpty(errorPayload?.Detail)
+            var problem = serializer.Deserialize<ProblemDetails>(body);
+            return string.IsNullOrEmpty(problem?.Detail)
                 ? BenzeneResult.Set<T>(status, false)
-                : BenzeneResult.SetFailed<T>(status, errorPayload.Detail);
+                : BenzeneResult.SetFailed<T>(status, problem.Detail);
         }
 
         private static Guid ParseGuid(string body, ISerializer serializer)

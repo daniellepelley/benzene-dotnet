@@ -19,7 +19,7 @@ package documents that loudly (`docs/rate-limiting.md`); never present it as a h
   correctly (a no-op for window/bucket limiters). A cost the limiter could never grant
   (`ArgumentOutOfRangeException`, e.g. a payload bigger than the whole bucket) is a rejection, not
   an error. Rejection attaches the topic's handler definition (same pattern as
-  `Benzene.JsonSchema`) so the `ErrorPayload` body is written; includes the limiter's retry-after
+  `Benzene.JsonSchema`) so the problem-details body is written; includes the limiter's retry-after
   metadata in the message when present.
 - `Extensions` - pipeline entry points; call **before** the middleware to protect
   (`UseHealthCheck`/`UseSpec`/`UseMessageHandlers`):

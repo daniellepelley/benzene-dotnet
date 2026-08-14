@@ -118,8 +118,9 @@ public class MessagePackRequestResponseRoundTripTest
         await renderer.RenderAsync(context, result, responseAdapter);
 
         Assert.Equal("application/msgpack", context.BenzeneMessageResponse.Headers[Constants.ContentTypeHeader]);
-        var decoded = (ErrorPayload)serializer.Deserialize(typeof(ErrorPayload), context.BenzeneMessageResponse.Body);
-        Assert.Equal(BenzeneResultStatus.NotFound, decoded.Status);
+        var decoded = (ProblemDetails)serializer.Deserialize(typeof(ProblemDetails), context.BenzeneMessageResponse.Body);
+        Assert.Equal(BenzeneResultStatus.NotFound, decoded.BenzeneStatus);
+        Assert.Null(decoded.Status);
         Assert.Contains("not found", decoded.Detail);
     }
 }

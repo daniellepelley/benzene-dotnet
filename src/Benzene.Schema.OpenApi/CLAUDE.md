@@ -64,7 +64,8 @@ for the `benzene` contract.
 ### Document builders (one per format)
 - `OpenApi/OpenApiDocumentBuilder` - OpenAPI 3.0 (`SerializeAsJson/Yaml(OpenApiSpecVersion.OpenApi3_0)`).
   Builds paths/operations from HTTP endpoint definitions, request/response schemas, and a fixed set of
-  error responses (400/401/403/404/422/500/503) whose bodies reference `ErrorPayload`.
+  error responses (400/401/403/404/422/500/503), served as `application/problem+json`, whose
+  bodies reference `ProblemDetails` (`Benzene.Results`).
 - `AsyncApi/AsyncApiDocumentBuilder` - AsyncAPI **3.0** (`AsyncApiVersion.AsyncApi3_0`, via
   `ByteBard.AsyncAPI.NET`; serializes as `3.1.0`, the latest 3.x patch). Emits **channels** (each with
   an `address` = the topic and a `messages` map) and top-level **operations** that reference them.
@@ -171,7 +172,7 @@ for the `benzene` contract.
 - **Benzene.Abstractions.Validation** - `IValidationSchemaBuilder`/`IValidationSchema`/
   `ValidationConstants`, consumed by `OpenApiValidationSchemaBuilder`.
 - **Benzene.Http** - HTTP endpoint definitions/routing and the BenzeneMessage endpoint info.
-- **Benzene.Results** - `BenzeneResult`, `ErrorPayload`.
+- **Benzene.Results** - `BenzeneResult`, `ProblemDetails`.
 - NuGet: **Microsoft.OpenApi**(+**.Readers**), **ByteBard.AsyncAPI.NET** (AsyncAPI 3.0 model+serializer;
   the maintained continuation of `LEGO.AsyncAPI.NET`, which was 2.0-only), **Swashbuckle.AspNetCore.SwaggerGen**
   (schema generation only - no Swagger UI is bundled), **Newtonsoft.Json**.

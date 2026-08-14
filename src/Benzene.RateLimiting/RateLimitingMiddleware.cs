@@ -84,7 +84,7 @@ public class RateLimitingMiddleware<TContext> : IMiddleware<TContext> where TCon
             error = $"Rate limit exceeded; retry after {retryAfter.TotalSeconds:0}s";
         }
 
-        // Attach the topic's handler definition so the response pipeline writes the ErrorPayload
+        // Attach the topic's handler definition so the response pipeline writes the problem-details
         // body (it skips definition-less results) - same pattern as Benzene.JsonSchema.
         var topicGetter = _serviceResolver.TryGetService<IMessageTopicGetter<TContext>>();
         var topic = topicGetter?.GetTopic(context);

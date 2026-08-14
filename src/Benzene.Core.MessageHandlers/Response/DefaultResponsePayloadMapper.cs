@@ -9,15 +9,16 @@ namespace Benzene.Core.MessageHandlers.Response;
 
 /// <summary>
 /// Default <see cref="IResponsePayloadMapper{TContext}"/> implementation: serializes the handler's
-/// success payload using its declared response type, or an <see cref="ErrorPayload"/> built from the
-/// result's status and errors on failure.
+/// success payload using its declared response type, or an RFC 9457 <see cref="ProblemDetails"/>
+/// document (<see cref="ProblemTypes.From"/>) built from the result's status and errors on failure.
 /// </summary>
 /// <typeparam name="TContext">The transport-specific context type the result was produced for.</typeparam>
 public class DefaultResponsePayloadMapper<TContext> : IResponsePayloadMapper<TContext>
 {
     /// <summary>
     /// Maps a handler's result into a serialized response body: the success payload if
-    /// <see cref="IBenzeneResult.IsSuccessful"/>, otherwise a serialized <see cref="ErrorPayload"/>.
+    /// <see cref="IBenzeneResult.IsSuccessful"/>, otherwise a serialized problem document
+    /// (<see cref="ProblemTypes.From"/>).
     /// </summary>
     /// <param name="context">Unused; the mapping does not depend on the transport context.</param>
     /// <param name="messageHandlerResult">The outcome of routing and invoking the handler.</param>
@@ -35,15 +36,7 @@ public class DefaultResponsePayloadMapper<TContext> : IResponsePayloadMapper<TCo
 
         return messageHandlerResult.BenzeneResult.IsSuccessful
             ? SerializePayload(messageHandlerResult.MessageHandlerDefinition.ResponseType, messageHandlerResult.BenzeneResult.PayloadAsObject, serializer)
-            : serializer.Serialize(AsErrorPayload(messageHandlerResult.BenzeneResult));
-    }
-
-    private static ErrorPayload AsErrorPayload(IBenzeneResult benzeneResult)
-    {
-        // ErrorPayload's ctor still takes the pre-BenzeneError string[] shape (Phase 3 of
-        // work/problem-details-plan.md reconciles ErrorPayload/ProblemDetails with the structured
-        // model); ErrorMessages() is the documented projection back to that shape.
-        return new ErrorPayload(benzeneResult.Status, benzeneResult.ErrorMessages());
+            : serializer.Serialize(ProblemTypes.From(messageHandlerResult.BenzeneResult));
     }
 
     private string SerializePayload(Type type, object payload, ISerializer serializer)
