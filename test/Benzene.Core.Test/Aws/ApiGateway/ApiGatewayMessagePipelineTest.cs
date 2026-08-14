@@ -15,11 +15,13 @@ using Benzene.Core.MessageHandlers.DI;
 using Benzene.Core.MessageHandlers.Request;
 using Benzene.Core.MessageHandlers.Serialization;
 using Benzene.Core.Middleware;
+using Benzene.DataAnnotations;
 using Benzene.FluentValidation;
 using Benzene.HealthChecks.Core;
 using Benzene.Http;
 using Benzene.Http.Routing;
 using Benzene.Microsoft.Dependencies;
+using Benzene.Results;
 using Benzene.Test.Aws.ApiGateway.Examples;
 using Benzene.Test.Aws.Helpers;
 using Benzene.Test.Examples;
@@ -110,6 +112,37 @@ public class ApiGatewayMessagePipelineTest
         Assert.Equal(400, response.StatusCode);
     }
 
+
+    [Fact]
+    public async Task Send_ValidationError_MapsToTheHttpStatusLineAndCarriesTheSameStatusInTheBody()
+    {
+        // Phase 4 of work/problem-details-plan.md: on a failure the response is 422 +
+        // application/problem+json, and the problem document's numeric `status` member equals the
+        // response line - both are derived from the one IHttpStatusCodeMapper.
+        var host = new InlineAwsLambdaStartUp()
+            .ConfigureServices(services => services
+                .ConfigureServiceCollection()
+            )
+            .Configure(app => app
+                .UseApiGateway(apiGateway => apiGateway
+                    .UseMessageHandlers(x => x.UseDataAnnotationsValidation())
+                )
+            ).BuildHost();
+
+        var request = HttpBuilder.Create("GET", Defaults.Path, new ExampleRequestPayload { Name = "12345678901" })
+            .WithHeader("x-correlation-id", Guid.NewGuid().ToString())
+            .AsApiGatewayRequest();
+        var response = await host.SendApiGatewayAsync(request);
+
+        Assert.NotNull(response);
+        Assert.Equal(422, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Headers["content-type"]);
+
+        var problem = new JsonSerializer().Deserialize<ProblemDetails>(response.Body);
+        Assert.Equal(422, problem.Status);
+        Assert.Equal("validation-error", problem.BenzeneStatus);
+        Assert.NotEmpty(problem.Detail);
+    }
 
     [Fact]
     public async Task Send_Xml()

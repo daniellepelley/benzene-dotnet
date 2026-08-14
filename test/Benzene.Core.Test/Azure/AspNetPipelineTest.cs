@@ -83,11 +83,11 @@ public class AspNetPipelineTest
 
         Assert.Equal(422, response.StatusCode);
         Assert.Equal("validation-error", payload.BenzeneStatus);
-        // Numeric Status is an HTTP-binding concern filled in by Phase 4 of
-        // work/problem-details-plan.md; Phase 3's transport-neutral emission never sets it, even on
-        // an HTTP-hosted pipeline like this one - the HTTP response line's 422 above comes from a
-        // separate mapper (IHttpStatusCodeMapper), not this body.
-        Assert.Null(payload.Status);
+        // Phase 4 of work/problem-details-plan.md: the numeric HTTP status is filled in by
+        // HttpProblemDetailsResponsePayloadMapper via the same IHttpStatusCodeMapper the response
+        // line's 422 above comes from, so the two can never disagree.
+        Assert.Equal(422, payload.Status);
+        Assert.Equal("application/problem+json", response.ContentType);
         Assert.NotEmpty(payload.Detail);
     }
 }

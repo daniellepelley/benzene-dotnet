@@ -9,8 +9,10 @@ using Benzene.Core.Exceptions;
 using Benzene.Core.MessageHandlers;
 using Benzene.Core.MessageHandlers.Request;
 using Benzene.Core.MessageHandlers.Serialization;
+using Benzene.DataAnnotations;
 using Benzene.Http;
 using Benzene.Http.Routing;
+using Benzene.Results;
 using Benzene.Test.Aws.ApiGateway.Examples;
 using Benzene.Test.Examples;
 using Benzene.Testing;
@@ -62,6 +64,32 @@ public class ApiGatewayV2MessagePipelineTest
         Assert.NotNull(response);
         Assert.NotNull(response.Body);
         Assert.Equal(200, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Send_ValidationError_MapsToTheHttpStatusLineAndCarriesTheSameStatusInTheBody()
+    {
+        // Phase 4 of work/problem-details-plan.md, v2 counterpart of the v1 pipeline test: 422 +
+        // application/problem+json, and the body's numeric `status` matches the response line - both
+        // derived from the one IHttpStatusCodeMapper.
+        var host = new InlineAwsLambdaStartUp()
+            .ConfigureServices(services => services.ConfigureServiceCollection())
+            .Configure(app => app
+                .UseApiGatewayV2(apiGateway => apiGateway
+                    .UseMessageHandlers(x => x.UseDataAnnotationsValidation())))
+            .BuildHost();
+
+        var response = await host.SendEventAsync<APIGatewayHttpApiV2ProxyResponse>(
+            CreateV2Request("GET", Defaults.Path, new ExampleRequestPayload { Name = "12345678901" }));
+
+        Assert.NotNull(response);
+        Assert.Equal(422, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Headers["content-type"]);
+
+        var problem = new JsonSerializer().Deserialize<ProblemDetails>(response.Body);
+        Assert.Equal(422, problem.Status);
+        Assert.Equal("validation-error", problem.BenzeneStatus);
+        Assert.NotEmpty(problem.Detail);
     }
 
     [Fact]

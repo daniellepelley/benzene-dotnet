@@ -64,6 +64,10 @@ public static class DependencyInjectionExtensions
 
         services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.ApiGateway));
         services.AddHttpMessageHandlers();
+        // A failed result's problem document carries the numeric HTTP `status` member, filled in from
+        // the same IHttpStatusCodeMapper the response status line uses - work/problem-details-plan.md
+        // Phase 4.
+        services.UseHttpProblemDetailsStatus<ApiGatewayContext>();
 
         return services;
     }
@@ -106,6 +110,10 @@ public static class DependencyInjectionExtensions
 
         services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.ApiGateway));
         services.AddHttpMessageHandlers();
+        // A failed result's problem document carries the numeric HTTP `status` member, filled in from
+        // the same IHttpStatusCodeMapper the response status line uses - work/problem-details-plan.md
+        // Phase 4.
+        services.UseHttpProblemDetailsStatus<ApiGatewayV2Context>();
 
         return services;
     }

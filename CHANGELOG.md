@@ -169,6 +169,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The .NET conformance suite (`test/Benzene.Conformance.Test`) is expected to stay red against the
     Phase-1-updated spec fixtures until a later phase re-vendors them and implements `bodyExclude` -
     not a regression from this commit.
+- **HTTP bindings now fill in `ProblemDetails.Status`** - Phase 4 of `work/problem-details-plan.md`.
+  New `Benzene.Http.HttpProblemDetailsResponsePayloadMapper<TContext>` decorates a transport's
+  `IResponsePayloadMapper<TContext>`: on a failed result it builds the same `ProblemTypes.From`
+  document as before, then fills `Status` from the **same** `IHttpStatusCodeMapper` instance
+  `HttpStatusCodeResponseHandler<TContext>` uses to set the actual HTTP response status line, so the
+  body's `status` member and the response code are derived from one mapping and can never disagree.
+  Wired via a new `Benzene.Http.Extensions.UseHttpProblemDetailsStatus<TContext>()` (same
+  decorator-over-DI shape as `Benzene.Core.Versioning.PayloadVersionCastingExtensions.UsePayloadVersionCasting`,
+  registered `TryAddScoped` so an application's own earlier registration wins) into every HTTP-facing
+  context: `Benzene.AspNet.Core`'s `AspNetContext` (covering self-host ASP.NET Core, and - since they
+  reuse this exact type unmodified - `Benzene.GoogleCloud.Functions.Http`'s Cloud Functions Gen2 host
+  and `Benzene.Aws.Lambda.AspNet`'s mixed-Lambda HTTP path too), `Benzene.Aws.Lambda.ApiGateway`'s
+  `ApiGatewayContext`/`ApiGatewayV2Context` (v1 and v2), and `Benzene.Azure.Function.AspNet`'s own
+  (distinct) `AspNetContext`. **Deliberately not** wired for `BenzeneMessageContext` - the envelope's
+  inner problem body stays transport-neutral (no numeric HTTP status) even when the envelope travels
+  over HTTP, per §2.3's outer/inner distinction; verified every HTTP response adapter
+  (`AspNetResponseAdapter` ×2, `ApiGatewayResponseAdapter`, `ApiGatewayV2ResponseAdapter`) already
+  forwards `SerializerResponseRenderer`'s `application/problem+json` content type onto the real
+  response with no hard-coded `application/json` on this path (no fix needed). Swept
+  `Benzene.Clients.Http`/`Benzene.Clients`/API Gateway test helpers for a content-type equality check
+  that would reject a genuine `application/problem+json` response - found none; every response reader
+  in this repo classifies from the envelope/HTTP status, never from content-type, so nothing needed
+  fixing there.
 
 ### Added
 - **`benzene profile-check` is now a real CI gate.** Added `--fail-on` (`not-satisfied` default,

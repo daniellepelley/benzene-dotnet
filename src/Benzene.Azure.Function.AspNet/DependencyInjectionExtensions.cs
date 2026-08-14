@@ -97,6 +97,10 @@ public static class DependencyInjectionExtensions
         services.AddScoped<IResponseHandler<AspNetContext>, HttpStatusCodeResponseHandler<AspNetContext>>();
         services.AddScoped<IResponseHandler<AspNetContext>, RendererResponseHandler<AspNetContext>>();
         services.AddMediaFormatNegotiation<AspNetContext>();
+        // A failed result's problem document carries the numeric HTTP `status` member, filled in from
+        // the same IHttpStatusCodeMapper the response status line uses - work/problem-details-plan.md
+        // Phase 4.
+        services.UseHttpProblemDetailsStatus<AspNetContext>();
 
         // services.AddScoped<ResponseMiddleware<AspNetContext>>();
         services.AddScoped<IRequestEnricher<AspNetContext>, AspNetContextRequestEnricher>();

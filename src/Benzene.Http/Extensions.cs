@@ -1,5 +1,7 @@
 ﻿using System;
 using Benzene.Abstractions.DI;
+using Benzene.Abstractions.MessageHandlers.Response;
+using Benzene.Core.MessageHandlers.Response;
 using Benzene.Http.Routing;
 
 namespace Benzene.Http;
@@ -56,6 +58,41 @@ public static class Extensions
         
         services.TryAddScoped<IHttpStatusCodeMapper, DefaultHttpStatusCodeMapper>();
         services.TryAddScoped<IHttpHeaderMappings, DefaultHttpHeaderMappings>();
+        return services;
+    }
+
+    /// <summary>
+    /// Wraps <typeparamref name="TContext"/>'s response payload mapper with
+    /// <see cref="HttpProblemDetailsResponsePayloadMapper{TContext}"/>, so a failed result's problem
+    /// document carries the numeric HTTP <c>status</c> member (work/problem-details-plan.md Phase 4;
+    /// docs/specification/wire-contracts.md §2.1/§2.3). Call this for every context an HTTP-facing
+    /// transport serves requests on (self-host ASP.NET Core, API Gateway v1/v2, Azure Functions
+    /// ASP.NET, ...) - a transport that only carries a <c>BenzeneMessage</c> envelope (no real HTTP
+    /// response line) must NOT call this for its envelope context, since the envelope's inner problem
+    /// body is transport-neutral and must never carry a fabricated HTTP status.
+    /// </summary>
+    /// <remarks>
+    /// Registered via <c>TryAddScoped</c> on the closed <see cref="IResponsePayloadMapper{TContext}"/>
+    /// service type, so an application's own earlier registration for this exact context (made before
+    /// the transport's <c>Add*MessageHandlers</c>/<c>AddApiGateway</c>/etc. call) wins outright - the
+    /// same "TryAdd defaults, first registration wins" convention every other seam in this transport
+    /// layer follows. The wrapped inner mapper is self-registered under its own concrete
+    /// <see cref="DefaultResponsePayloadMapper{TContext}"/> type (mirroring
+    /// <c>Benzene.Core.Versioning.PayloadVersionCastingExtensions.UsePayloadVersionCasting</c>'s same
+    /// decorator-over-DI shape) so the decorator can resolve and wrap it without asking the container
+    /// to resolve the interface it is itself about to be registered under.
+    /// </remarks>
+    /// <typeparam name="TContext">The transport-specific context type to fill in the numeric HTTP status for.</typeparam>
+    /// <param name="services">The Benzene service container.</param>
+    /// <returns>The service container for method chaining.</returns>
+    public static IBenzeneServiceContainer UseHttpProblemDetailsStatus<TContext>(this IBenzeneServiceContainer services)
+        where TContext : class
+    {
+        services.TryAddScoped<DefaultResponsePayloadMapper<TContext>>();
+        services.TryAddScoped<IResponsePayloadMapper<TContext>>(resolver =>
+            new HttpProblemDetailsResponsePayloadMapper<TContext>(
+                resolver.GetService<DefaultResponsePayloadMapper<TContext>>(),
+                resolver.GetService<IHttpStatusCodeMapper>()));
         return services;
     }
 

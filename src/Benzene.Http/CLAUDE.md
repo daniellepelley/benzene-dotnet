@@ -58,6 +58,15 @@ Provides HTTP abstractions and utilities for building HTTP-based Benzene applica
 - `IHttpStatusCodeMapper` - Maps result status to HTTP status codes
 - `DefaultHttpStatusCodeMapper` - Default HTTP status mapping
 - `HttpStatusCodeResponseHandler<TContext>` - Sets HTTP status on response
+- `HttpProblemDetailsResponsePayloadMapper<TContext>` - decorates `IResponsePayloadMapper<TContext>`:
+  on a failed result, fills the RFC 9457 `ProblemDetails.Status` member from the same
+  `IHttpStatusCodeMapper` instance `HttpStatusCodeResponseHandler<TContext>` uses for the response
+  status line, so the two can never disagree (work/problem-details-plan.md Phase 4). Wired per HTTP
+  context via `Extensions.UseHttpProblemDetailsStatus<TContext>()` (`TryAddScoped`, same
+  decorator-over-DI shape as `Benzene.Core.Versioning`'s `UsePayloadVersionCasting`) - every real
+  HTTP-facing transport calls this (`Benzene.AspNet.Core`, `Benzene.Aws.Lambda.ApiGateway` v1/v2,
+  `Benzene.Azure.Function.AspNet`); the `BenzeneMessage` envelope context deliberately does not, so
+  its inner problem body stays transport-neutral even when the envelope travels over HTTP.
 
 ### Headers
 - `IHttpHeaderMappings` - Maps custom headers to constants
