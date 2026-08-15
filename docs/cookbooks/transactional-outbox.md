@@ -311,3 +311,8 @@ with.
 - [`examples/AwsMesh`](../../examples/AwsMesh/README.md#the-outbox-atomic-commit-stream-dispatch-sweep-redrive-dedup-at-the-consumer) —
   the real dogfooded example: `orders-api` commits an order and two outbound sends atomically via
   the DynamoDB unit of work, relayed by streams + a scheduled sweep, deduped by `payments-api`.
+- [`examples/Outbox`](../../examples/Outbox/Benzene.Example.Outbox) — a standalone, no-infrastructure
+  walkthrough of both write modes: the naive dual write losing a send, `Immediate` mode surviving a
+  crash and redelivering at-least-once, and `Transactional` mode committing the state write and the
+  capture together (or discarding both). `dotnet run`, no AWS account needed — start here before
+  `examples/AwsMesh`'s real DynamoDB unit of work.
