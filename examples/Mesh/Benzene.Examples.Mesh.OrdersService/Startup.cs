@@ -6,6 +6,7 @@ using Benzene.Examples.Mesh.OrdersService.HealthChecks;
 using Benzene.Examples.Mesh.OrdersService.Model;
 using Benzene.HealthChecks;
 using Benzene.Http.Routing;
+using Benzene.Mesh.Wire;
 using Benzene.Microsoft.Dependencies;
 using Benzene.ResponseEvents;
 using Microsoft.Extensions.DependencyInjection;
@@ -60,6 +61,14 @@ public class Startup
                     .WithHealthChecks(new OrdersDatabaseHealthCheck(), new OrdersCacheHealthCheck(), new OrdersQueueHealthCheck())
                     .WithCollector(Environment.GetEnvironmentVariable("MESH_COLLECTOR_ENVELOPE_URL")
                         ?? "http://localhost:5300/benzene/invoke")
+                    // mesh.md §2.3 outbound registration: orders-api explicitly declares that it CONSUMES
+                    // payments:get@1 (CheckoutOrderMessageHandler's cross-service call) - no handler, no
+                    // destination, the same PaymentsQueryV1 request shape the pre-existing response-event
+                    // declaration above already models. This is what puts a declared consumer edge on the
+                    // collector's Fleet view (spec §4, 2026-08 revision) for payments:get - present even
+                    // before checkout is ever called, and dropped automatically if a future redeploy stops
+                    // declaring it (re-registration replaces `consumes` wholesale, spec §4).
+                    .WithConsumes(new MeshOutboundRegistry().Register<PaymentsQueryV1>("payments:get", "1"))
                     .WithSpecPath("/spec")
                     .WithHealthPath("/healthcheck")
                 )

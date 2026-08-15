@@ -85,22 +85,177 @@ public class MeshCollectorStoreTest
         Assert.Equal("topic", fleet.Traces[0].Topic); // the flow's entry topic (earliest event's)
     }
 
+    private static MeshServiceDescriptor Descriptor(string service, string[]? topics = null, string[]? consumes = null)
+    {
+        return new MeshServiceDescriptor
+        {
+            Service = service,
+            Topics = (topics ?? Array.Empty<string>()).Select(id => new MeshTopicDescriptor { Id = id }).ToList(),
+            Consumes = (consumes ?? Array.Empty<string>()).Select(id => new MeshTopicDescriptor { Id = id }).ToList()
+        };
+    }
+
+    // ---- declared graph (spec §4, 2026-08 revision): the SOLE source of producer/consumer edges ----
+
     [Fact]
-    public void Consumers_AreDerivedAtQueryTimeFromParentage()
+    public void Consumers_AreDeclaredFromRegisteredConsumes_ZeroTrafficStillReportsTheFullGraph()
     {
         var store = new MeshCollectorStore();
+        store.Register(Descriptor("payments", topics: new[] { "payments:capture" }));
+        store.Register(Descriptor("orders", topics: new[] { "order:create" }, consumes: new[] { "payments:capture" }));
+
+        var topic = store.Topic("payments:capture", null);
+
+        Assert.NotNull(topic);
+        Assert.Equal(new List<string> { "payments" }, topic!.Providers);
+        Assert.Equal(new List<string> { "orders" }, topic.Consumers);
+        Assert.Equal(0, topic.Invocations); // declared, not a summary of traffic
+    }
+
+    [Fact]
+    public void TraceParentage_NeverAdmitsOrRemovesAGraphEdge_OnlyFeedsStatsAndLiveness()
+    {
+        var store = new MeshCollectorStore();
+        store.Register(Descriptor("greeter", topics: new[] { "greet" }));
         var now = DateTimeOffset.UtcNow;
-        var parent = Event("trace-1", "span-parent", "caller", "outer", now);
-        var child = Event("trace-1", "span-child", "callee", "inner", now.AddMilliseconds(1));
-        child.ParentSpanId = "span-parent";
-        var selfCall = Event("trace-2", "span-self", "callee", "inner", now.AddMilliseconds(2));
-        selfCall.ParentSpanId = "span-child"; // same-service parent: no edge
+        var caller = Event("trace-1", "span-parent", "frontdoor", "welcome", now);
+        var callee = Event("trace-1", "span-child", "greeter", "greet", now.AddMilliseconds(1));
+        callee.ParentSpanId = "span-parent";
 
-        store.AddEvents(new[] { parent, child, selfCall });
+        store.AddEvents(new[] { caller, callee });
 
-        var inner = store.Topic("inner", null);
-        Assert.NotNull(inner);
-        Assert.Equal(new List<string> { "caller" }, inner!.Consumers);
+        var greet = store.Topic("greet", null);
+        Assert.NotNull(greet);
+        Assert.Equal(new List<string> { "greeter" }, greet!.Providers);
+        // frontdoor called greeter but never registered a descriptor consuming "greet" - trace
+        // parentage does NOT admit it as a consumer (the 2026-08 revision's central rule).
+        Assert.Empty(greet.Consumers);
+        Assert.Equal(1, greet.Invocations); // stats still come from the trace feed, unaffected
+    }
+
+    [Fact]
+    public void Reregistration_ReplacesProviderAndConsumerEdges_Wholesale()
+    {
+        var store = new MeshCollectorStore();
+        store.Register(Descriptor("payments", topics: new[] { "payments:capture" }));
+        store.Register(Descriptor("orders", topics: new[] { "order:create" }, consumes: new[] { "payments:capture" }));
+        Assert.Equal(new List<string> { "orders" }, store.Topic("payments:capture", null)!.Consumers);
+
+        // orders redeploys and drops both the provided topic and the consumed one.
+        store.Register(Descriptor("orders", topics: new[] { "order:cancel" }));
+
+        Assert.Empty(store.Topic("order:create", null)!.Providers);
+        Assert.Empty(store.Topic("payments:capture", null)!.Consumers);
+        Assert.Equal(new List<string> { "orders" }, store.Topic("order:cancel", null)!.Providers);
+    }
+
+    // ---- §4.2 declared vs. observed: liveness ("Unobserved") ----
+
+    [Fact]
+    public void DeclaredEdge_WithNoMatchingTrace_ReportsAbsentLastObservedAt()
+    {
+        var store = new MeshCollectorStore();
+        store.Register(Descriptor("payments", topics: new[] { "payments:capture" }));
+        store.Register(Descriptor("orders", topics: new[] { "order:create" }, consumes: new[] { "payments:capture" }));
+
+        var topic = store.Topic("payments:capture", null)!;
+
+        Assert.True(topic.ProviderActivity.ContainsKey("payments"));
+        Assert.Null(topic.ProviderActivity["payments"].LastObservedAt);
+        Assert.True(topic.ConsumerActivity.ContainsKey("orders"));
+        Assert.Null(topic.ConsumerActivity["orders"].LastObservedAt);
+    }
+
+    [Fact]
+    public void DeclaredEdge_OnceExercised_ReportsLastObservedAt()
+    {
+        var store = new MeshCollectorStore();
+        store.Register(Descriptor("payments", topics: new[] { "payments:capture" }));
+        store.Register(Descriptor("orders", topics: new[] { "order:create" }, consumes: new[] { "payments:capture" }));
+        var now = DateTimeOffset.UtcNow;
+        var caller = Event("trace-1", "span-parent", "orders", "order:create", now);
+        var callee = Event("trace-1", "span-child", "payments", "payments:capture", now.AddMilliseconds(1));
+        callee.ParentSpanId = "span-parent";
+
+        store.AddEvents(new[] { caller, callee });
+
+        var topic = store.Topic("payments:capture", null)!;
+        Assert.NotNull(topic.ProviderActivity["payments"].LastObservedAt);
+        Assert.NotNull(topic.ConsumerActivity["orders"].LastObservedAt);
+    }
+
+    // ---- §4.2 declared vs. observed: drift ("Undeclared" → contract-drift) ----
+
+    [Fact]
+    public void UndeclaredProviderEdge_FilesAContractDriftIssue()
+    {
+        var store = new MeshCollectorStore();
+        // "greeter" registers but never declares "greet" as a provided topic.
+        store.Register(Descriptor("greeter", topics: Array.Empty<string>()));
+
+        store.AddEvents(new[] { Event("trace-1", "span-1", "greeter", "greet", DateTimeOffset.UtcNow) });
+
+        var issue = Assert.Single(store.Fleet().Issues);
+        Assert.Equal(MeshIssueClassification.ContractDrift, issue.Classification);
+        Assert.Equal("greeter", issue.Service);
+        Assert.Equal("greet", issue.Topic);
+    }
+
+    [Fact]
+    public void UndeclaredConsumerEdge_FilesAContractDriftIssue()
+    {
+        var store = new MeshCollectorStore();
+        store.Register(Descriptor("payments", topics: new[] { "payments:capture" }));
+        // "orders" registers but never declares "payments:capture" in its consumes.
+        store.Register(Descriptor("orders", topics: new[] { "order:create" }));
+        var now = DateTimeOffset.UtcNow;
+        var caller = Event("trace-1", "span-parent", "orders", "order:create", now);
+        var callee = Event("trace-1", "span-child", "payments", "payments:capture", now.AddMilliseconds(1));
+        callee.ParentSpanId = "span-parent";
+
+        store.AddEvents(new[] { caller, callee });
+
+        var driftIssue = store.Fleet().Issues.Single(x => x.Service == "orders");
+        Assert.Equal(MeshIssueClassification.ContractDrift, driftIssue.Classification);
+        Assert.Equal("payments:capture", driftIssue.Topic);
+    }
+
+    [Fact]
+    public void RepeatedUndeclaredCalls_MergeIntoOneIssue_CountingEachOccurrence()
+    {
+        var store = new MeshCollectorStore();
+        store.Register(Descriptor("greeter", topics: Array.Empty<string>()));
+        var now = DateTimeOffset.UtcNow;
+
+        store.AddEvents(new[] { Event("trace-1", "span-1", "greeter", "greet", now) });
+        store.AddEvents(new[] { Event("trace-2", "span-2", "greeter", "greet", now.AddSeconds(1)) });
+
+        var issue = Assert.Single(store.Fleet().Issues);
+        Assert.Equal(2, issue.Count);
+    }
+
+    [Fact]
+    public void AnonymousNeverRegisteredService_IsNeverFlaggedAsDrift()
+    {
+        // A service the collector only knows from traffic has no contract to diverge from.
+        var store = new MeshCollectorStore();
+
+        store.AddEvents(new[] { Event("trace-1", "span-1", "frontdoor", "welcome", DateTimeOffset.UtcNow) });
+
+        Assert.Empty(store.Fleet().Issues);
+    }
+
+    [Fact]
+    public void DegradedDescriptor_IsNeverFlaggedAsDrift()
+    {
+        // A service that HAS registered but honestly marked its registry/outbound-registry as
+        // degraded doesn't know its own topics/consumes yet - flagging it would be a false positive.
+        var store = new MeshCollectorStore();
+        store.Register(new MeshServiceDescriptor { Service = "greeter", Degraded = new List<string> { "registry" } });
+
+        store.AddEvents(new[] { Event("trace-1", "span-1", "greeter", "greet", DateTimeOffset.UtcNow) });
+
+        Assert.Empty(store.Fleet().Issues);
     }
 
     // ---- correlation lookup (mesh:query:correlation, mesh-product-owner ruling 2026-07-23) ----

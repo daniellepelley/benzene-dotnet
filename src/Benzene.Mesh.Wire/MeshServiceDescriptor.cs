@@ -28,12 +28,22 @@ public class MeshServiceDescriptor
 
     public List<MeshTopicDescriptor> Topics { get; set; } = new();
 
+    /// <summary>
+    /// Every registered outbound topic (spec §2, §2.3): what this service <b>consumes</b>, derived
+    /// from its outbound registration - never from scanning call sites. Same shape and
+    /// schema-derivation rules as <see cref="Topics"/>. This is what a collector reads to build
+    /// consumer edges (spec §4) - a topic absent here is not consumed by this service, regardless of
+    /// what traffic has or hasn't flowed.
+    /// </summary>
+    public List<MeshTopicDescriptor> Consumes { get; set; } = new();
+
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? DescriptorHash { get; set; }
 
     /// <summary>
-    /// Names the feeds that were unavailable when the descriptor was built (spec §2: currently only
-    /// "registry"), so a reduced descriptor is distinguishable from a service with no topics.
+    /// Names the feeds that were unavailable when the descriptor was built (spec §2: "registry" for
+    /// <see cref="Topics"/>, "outbound-registry" for <see cref="Consumes"/>), so a reduced descriptor
+    /// is distinguishable from a service that provides/consumes nothing.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<string>? Degraded { get; set; }

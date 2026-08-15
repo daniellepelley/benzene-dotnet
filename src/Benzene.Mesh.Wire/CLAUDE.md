@@ -16,14 +16,32 @@ pull-based collector idiom and can adopt these shapes as ingest sources (roadmap
 
 ## Key types/interfaces
 - `MeshServiceDescriptor`/`MeshTopicDescriptor`/`MeshPlacement` + `MeshDescriptorFactory.Create(
-  IMessageHandlerDefinitionLookUp?, MeshServiceInfo)` - the §2 descriptor derived from the live
-  handler registry (topics sorted by id then version). A null lookup degrades to a topic-less
-  descriptor with `degraded: ["registry"]`, per §6 - never an error.
+  IMessageHandlerDefinitionLookUp?, MeshServiceInfo, IMeshOutboundDefinitionLookUp?)` - the §2
+  descriptor derived from the live handler registry (`topics`, what the service **provides**,
+  sorted by id then version) and, since the 2026-08 revision, the outbound registry (`consumes`,
+  what it **consumes** - §2.3, same sort/schema-derivation rules). A null `lookUp` degrades to a
+  topic-less descriptor with `degraded` including `"registry"`; a null `outboundLookUp` degrades
+  `consumes` the same way with `"outbound-registry"` - both independently, per §6, never an error
+  and never a silent empty-array claim.
+- `MeshOutboundRegistry`/`IMeshOutboundDefinitionLookUp` (2026-08, spec §2.3) - the explicit
+  outbound-registration path every port MUST support, mirroring core-concepts.md §9's inbound
+  handler discovery exactly, minus the handler: `new MeshOutboundRegistry().Register<TRequest>(topic,
+  version?)` / `.Register<TRequest, TResponse>(topic, version?)`. Reuses the existing
+  `IMessageSenderDefinition`/`MessageSenderDefinition` shape (`Benzene.Abstractions.Messages`/
+  `Benzene.Core.Messages` - already the sender-side counterpart of `IMessageHandlerDefinition`,
+  previously only consumed by `Benzene.Schema.OpenApi`'s AsyncAPI/EventService document builders)
+  rather than inventing a parallel one; `SenderType` is left `Void` here since this registry only
+  ever answers "what would we send", never constructs a sender. No handler, no destination/transport
+  info - a registered outbound record is contract only (spec §2.3). A declared record with no
+  response type (`Register<TRequest>`) projects `responseSchema: {}` (unconstrained) in `consumes`,
+  per §2. `Benzene.CloudService`'s `ICloudServiceBuilder.WithConsumes(MeshOutboundRegistry)` is the
+  batteries-included wiring point (`CloudServiceBuilder.OutboundRegistry` → `CloudServiceDescriptorSource`).
 - `MeshSchemaGenerator.Derive(Type)` - the §2.1 CLR→JSON Schema mapping (startup-only
   reflection). "required" = properties the marshaler always emits: nullable-annotated (NRT or
   `Nullable<T>`) and ignore-when-null properties are optional. Recursion cut with `{}`.
 - `MeshDescriptorHashing` - §2.2: SHA-256 over canonical camelCase JSON with `instanceId`/
-  `degraded`/`profile`/`descriptorHash` blanked. NOT the same thing as
+  `degraded`/`profile`/`descriptorHash` blanked; `consumes` participates in the hash (sensitive to
+  the consumed-topic set, same as `topics`). NOT the same thing as
   `Benzene.Mesh.Contracts.MeshHashing` (HMAC over raw OpenAPI text for the aggregator's artifact
   drift) - do not merge them.
 - `MeshServiceDescriptor.Profile` (`MeshProfile`: `Name` + `Missing`) - the optional §2 `profile`

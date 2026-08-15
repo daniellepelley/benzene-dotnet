@@ -43,6 +43,17 @@ public class MeshDescriptorConformanceTest
         public bool InvariantToInstanceId { get; set; }
         public bool SensitiveToServiceVersion { get; set; }
         public bool SensitiveToTopics { get; set; }
+        public bool SensitiveToConsumes { get; set; }
+    }
+
+    /// <summary>
+    /// The canonical outbound registration (conformance/README.md "Canonical outbound registration"):
+    /// <c>conformance:log</c>, request <c>{ "message": string }</c>, no declared response type - no
+    /// handler, since nothing here receives.
+    /// </summary>
+    public class LogRequest
+    {
+        public string Message { get; set; } = string.Empty;
     }
 
     private static readonly Lazy<DescriptorFixture> Fixture = new(() =>
@@ -70,10 +81,23 @@ public class MeshDescriptorConformanceTest
         return new DefinitionsLookUp(new ReflectionMessageHandlersFinder(types).FindDefinitions());
     }
 
+    /// <summary>The canonical outbound registration, explicit registration (spec §2.3's MUST-support
+    /// path) rather than attribute scanning - no handler is registered for <c>conformance:log</c>
+    /// anywhere, and none should be.</summary>
+    private static MeshOutboundRegistry CanonicalOutboundLookUp(bool withExtraTopic = false)
+    {
+        var registry = new MeshOutboundRegistry().Register<LogRequest>("conformance:log");
+        if (withExtraTopic)
+        {
+            registry.Register<LogRequest>("conformance:log-extra");
+        }
+        return registry;
+    }
+
     [Fact]
     public void DerivedDescriptor_MatchesTheExpectedDescriptor()
     {
-        var descriptor = MeshDescriptorFactory.Create(CanonicalLookUp(), Info());
+        var descriptor = MeshDescriptorFactory.Create(CanonicalLookUp(), Info(), CanonicalOutboundLookUp());
 
         using var actual = JsonDocument.Parse(MeshJson.Serialize(descriptor));
         var mismatch = ConformanceFixtures.FindSubsetMismatch(Fixture.Value.ExpectedDescriptor, actual.RootElement);
@@ -83,7 +107,7 @@ public class MeshDescriptorConformanceTest
     [Fact]
     public void DescriptorHash_HasTheWireFormat()
     {
-        var hash = MeshDescriptorFactory.Create(CanonicalLookUp(), Info()).DescriptorHash;
+        var hash = MeshDescriptorFactory.Create(CanonicalLookUp(), Info(), CanonicalOutboundLookUp()).DescriptorHash;
 
         Assert.NotNull(hash);
         Assert.StartsWith(Fixture.Value.Hash.Prefix, hash);
@@ -96,8 +120,8 @@ public class MeshDescriptorConformanceTest
     {
         if (!Fixture.Value.Hash.InvariantToInstanceId) return; // not asserted by the fixture
 
-        var first = MeshDescriptorFactory.Create(CanonicalLookUp(), Info(instanceId: "instance-1"));
-        var second = MeshDescriptorFactory.Create(CanonicalLookUp(), Info(instanceId: "instance-2"));
+        var first = MeshDescriptorFactory.Create(CanonicalLookUp(), Info(instanceId: "instance-1"), CanonicalOutboundLookUp());
+        var second = MeshDescriptorFactory.Create(CanonicalLookUp(), Info(instanceId: "instance-2"), CanonicalOutboundLookUp());
 
         Assert.Equal(first.DescriptorHash, second.DescriptorHash);
     }
@@ -107,9 +131,9 @@ public class MeshDescriptorConformanceTest
     {
         if (!Fixture.Value.Hash.SensitiveToServiceVersion) return; // not asserted by the fixture
 
-        var baseline = MeshDescriptorFactory.Create(CanonicalLookUp(), Info());
+        var baseline = MeshDescriptorFactory.Create(CanonicalLookUp(), Info(), CanonicalOutboundLookUp());
         var bumped = MeshDescriptorFactory.Create(CanonicalLookUp(),
-            Info(serviceVersion: Fixture.Value.ServiceInfo.ServiceVersion + "-changed"));
+            Info(serviceVersion: Fixture.Value.ServiceInfo.ServiceVersion + "-changed"), CanonicalOutboundLookUp());
 
         Assert.NotEqual(baseline.DescriptorHash, bumped.DescriptorHash);
     }
@@ -119,8 +143,19 @@ public class MeshDescriptorConformanceTest
     {
         if (!Fixture.Value.Hash.SensitiveToTopics) return; // not asserted by the fixture
 
-        var baseline = MeshDescriptorFactory.Create(CanonicalLookUp(), Info());
-        var grown = MeshDescriptorFactory.Create(CanonicalLookUp(typeof(PanicConformanceHandler)), Info());
+        var baseline = MeshDescriptorFactory.Create(CanonicalLookUp(), Info(), CanonicalOutboundLookUp());
+        var grown = MeshDescriptorFactory.Create(CanonicalLookUp(typeof(PanicConformanceHandler)), Info(), CanonicalOutboundLookUp());
+
+        Assert.NotEqual(baseline.DescriptorHash, grown.DescriptorHash);
+    }
+
+    [Fact]
+    public void DescriptorHash_IsSensitiveToTheConsumedTopicSet()
+    {
+        if (!Fixture.Value.Hash.SensitiveToConsumes) return; // not asserted by the fixture
+
+        var baseline = MeshDescriptorFactory.Create(CanonicalLookUp(), Info(), CanonicalOutboundLookUp());
+        var grown = MeshDescriptorFactory.Create(CanonicalLookUp(), Info(), CanonicalOutboundLookUp(withExtraTopic: true));
 
         Assert.NotEqual(baseline.DescriptorHash, grown.DescriptorHash);
     }
@@ -128,12 +163,37 @@ public class MeshDescriptorConformanceTest
     [Fact]
     public void MissingRegistry_DegradesTheFeedNotTheDescriptor()
     {
-        var descriptor = MeshDescriptorFactory.Create(null, Info());
+        var descriptor = MeshDescriptorFactory.Create(null, Info(), CanonicalOutboundLookUp());
 
         Assert.Empty(descriptor.Topics);
         Assert.Equal(new List<string> { MeshDescriptorFactory.RegistryFeed }, descriptor.Degraded);
         Assert.Equal(Fixture.Value.ServiceInfo.Service, descriptor.Service);
         Assert.NotNull(descriptor.DescriptorHash);
+    }
+
+    [Fact]
+    public void MissingOutboundRegistry_DegradesTheFeedNotTheDescriptor()
+    {
+        // spec §2/§2.3: a port that hasn't wired up outbound registration MUST mark `consumes`
+        // degraded rather than emit an empty array - an empty array asserts "consumes nothing", which
+        // a port that cannot yet know that has no right to assert.
+        var descriptor = MeshDescriptorFactory.Create(CanonicalLookUp(), Info(), outboundLookUp: null);
+
+        Assert.Empty(descriptor.Consumes);
+        Assert.Equal(new List<string> { MeshDescriptorFactory.OutboundRegistryFeed }, descriptor.Degraded);
+        Assert.NotNull(descriptor.DescriptorHash);
+    }
+
+    [Fact]
+    public void MissingBothRegistries_DegradesBothFeeds()
+    {
+        var descriptor = MeshDescriptorFactory.Create(null, Info());
+
+        Assert.Empty(descriptor.Topics);
+        Assert.Empty(descriptor.Consumes);
+        Assert.Equal(
+            new List<string> { MeshDescriptorFactory.RegistryFeed, MeshDescriptorFactory.OutboundRegistryFeed },
+            descriptor.Degraded);
     }
 
     private class DefinitionsLookUp : IMessageHandlerDefinitionLookUp

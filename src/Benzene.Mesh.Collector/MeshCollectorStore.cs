@@ -8,10 +8,11 @@ namespace Benzene.Mesh.Collector;
 /// <summary>
 /// The in-memory state behind the spec collector (docs/specification/mesh.md §4-§6):
 /// cumulative per-service and per-topic stats, the latest heartbeat per instance, registered
-/// descriptors, and a bounded ring of recent trace events (the window consumer edges and the
-/// trace query derive from). Everything is derived - a service that never registered still
-/// appears once its traces do (anonymous but live, with its missing feeds named), a registered
-/// service with no traffic is a catalog entry with no stats, and no missing feed ever fails
+/// descriptors (the SOLE source of the producer/consumer graph, §4), and a bounded ring of recent
+/// trace events (the trace query and the additive §4.2 observed-liveness/drift signals derive
+/// from). Everything is derived - a service that never registered still appears once its traces do
+/// (anonymous but live, with its missing feeds named), a registered service with no traffic is a
+/// catalog entry with its full declared graph and no stats, and no missing feed ever fails
 /// ingestion or a query: the §6 degradation rule, collector side.
 /// </summary>
 public class MeshCollectorStore : IMeshFleetReadModel
@@ -24,6 +25,22 @@ public class MeshCollectorStore : IMeshFleetReadModel
     private readonly Dictionary<string, MeshIssue> _issues = new();
     private readonly List<MeshTraceEvent> _ring;
     private int _next;
+
+    // §4.2 (declared vs. observed) bookkeeping — additive read-model signals layered on the declared
+    // graph above, NEVER fed back into it. spanService is a bounded parent-lookup index (evicted in
+    // lockstep with the ring it shadows) used only to find who called a topic; it plays no role in
+    // Providers/Consumers membership. providerActivity/consumerActivity record when a declared edge
+    // was last actually exercised ("Unobserved" is the read model's job to report from these, not a
+    // stored boolean per edge).
+    private readonly Dictionary<string, string> _spanService = new();
+    private readonly Dictionary<(string Id, string Version), Dictionary<string, DateTimeOffset>> _providerActivity = new();
+    private readonly Dictionary<(string Id, string Version), Dictionary<string, DateTimeOffset>> _consumerActivity = new();
+
+    /// <summary>The fixed fingerprint discriminator for a collector-synthesized "Undeclared" drift
+    /// issue (spec §4.2/§4.1): unlike an emitter-reported issue, drift here isn't about one
+    /// invocation's outcome (there is no meaningful exceptionType/status to key off), so identity is
+    /// keyed on the edge alone - stable regardless of which status the exercising call happened to carry.</summary>
+    private const string UndeclaredEdgeDiscriminator = "undeclared-edge";
 
     private const int MaxFleetTraces = 20;
 
@@ -62,6 +79,7 @@ public class MeshCollectorStore : IMeshFleetReadModel
     private class TopicState
     {
         public readonly HashSet<string> Providers = new();
+        public readonly HashSet<string> Consumers = new();
         public readonly Dictionary<string, long> StatusCounts = new();
         public long Invocations;
         public long Errors;
@@ -70,7 +88,11 @@ public class MeshCollectorStore : IMeshFleetReadModel
     }
 
     /// <summary>Stores the descriptor as the service's current contract, replacing any previous
-    /// registration wholesale - a redeploy that drops a topic drops the provider claim with it.</summary>
+    /// registration wholesale - a redeploy that drops a topic drops the provider claim with it, and
+    /// one that drops a consumed topic drops the consumer claim with it, symmetrically (spec §4).
+    /// This - <c>topics</c> for providers, <c>consumes</c> for consumers - is now the SOLE source of
+    /// the producer/consumer graph (2026-08 revision): trace parentage never admits or removes an
+    /// edge here, only feeds the separate observed signals in <see cref="RecordObservedActivityAndDrift"/>.</summary>
     public void Register(MeshServiceDescriptor descriptor)
     {
         lock (_lock)
@@ -78,6 +100,7 @@ public class MeshCollectorStore : IMeshFleetReadModel
             foreach (var topic in _topics.Values)
             {
                 topic.Providers.Remove(descriptor.Service);
+                topic.Consumers.Remove(descriptor.Service);
             }
 
             var state = EnsureService(descriptor.Service);
@@ -87,6 +110,10 @@ public class MeshCollectorStore : IMeshFleetReadModel
             foreach (var topic in descriptor.Topics)
             {
                 EnsureTopic((topic.Id, topic.Version ?? string.Empty)).Providers.Add(descriptor.Service);
+            }
+            foreach (var topic in descriptor.Consumes)
+            {
+                EnsureTopic((topic.Id, topic.Version ?? string.Empty)).Consumers.Add(descriptor.Service);
             }
         }
     }
@@ -121,9 +148,21 @@ public class MeshCollectorStore : IMeshFleetReadModel
                 }
                 else
                 {
+                    var evicted = _ring[_next];
+                    if (!string.IsNullOrEmpty(evicted.SpanId))
+                    {
+                        _spanService.Remove(evicted.SpanId);
+                    }
                     _ring[_next] = traceEvent;
                     _next = (_next + 1) % _capacity;
                 }
+
+                if (!string.IsNullOrEmpty(traceEvent.SpanId) && !string.IsNullOrEmpty(traceEvent.Service))
+                {
+                    _spanService[traceEvent.SpanId] = traceEvent.Service!;
+                }
+
+                RecordObservedActivityAndDrift(traceEvent);
 
                 var failed = !BenzeneResultStatusExtensions.IsSuccess(traceEvent.Status);
 
@@ -227,14 +266,13 @@ public class MeshCollectorStore : IMeshFleetReadModel
         lock (_lock)
         {
             var window = MeshTimeRangeResolver.Resolve(range, DateTimeOffset.UtcNow);
-            var consumers = ConsumersByTopic();
             return new FleetView
             {
                 GeneratedAt = DateTimeOffset.UtcNow,
                 Services = _services.Keys.OrderBy(x => x, StringComparer.Ordinal).Select(ServiceSummaryLocked).ToList(),
                 Topics = _topics.Keys
                     .OrderBy(x => x.Id, StringComparer.Ordinal).ThenBy(x => x.Version, StringComparer.Ordinal)
-                    .Select(key => TopicSummaryLocked(key, consumers.GetValueOrDefault(key)))
+                    .Select(TopicSummaryLocked)
                     .ToList(),
                 // Flows honor the window (ring filtered by trace start); the per-topic/service counts above
                 // are cumulative-since-start and can't be sub-windowed - CollectorWindow says so.
@@ -320,7 +358,7 @@ public class MeshCollectorStore : IMeshFleetReadModel
             {
                 return null;
             }
-            var summary = TopicSummaryLocked(key, ConsumersByTopic().GetValueOrDefault(key));
+            var summary = TopicSummaryLocked(key);
             // Standalone topic response carries the window (cumulative counts on this plane); embedded in a
             // FleetView it stays null - the fleet's one Window covers the whole view.
             summary.Window = CollectorWindow(MeshTimeRangeResolver.Resolve(range, DateTimeOffset.UtcNow));
@@ -412,38 +450,131 @@ public class MeshCollectorStore : IMeshFleetReadModel
         return state;
     }
 
-    /// <summary>Derives who-calls-whom from the ring window: an event whose parent span belongs to
-    /// another service makes that service a consumer of the event's topic (spec §4). Unmeshed
-    /// callers have no parent span in the window and produce no edge - never a guess.</summary>
-    private Dictionary<(string Id, string Version), HashSet<string>> ConsumersByTopic()
+    /// <summary>
+    /// §4.2's two observed-only signals, both derived from this one trace event and both layered on
+    /// top of the declared graph (§4) - neither ever adds, removes, or otherwise touches
+    /// <see cref="TopicState.Providers"/>/<see cref="TopicState.Consumers"/>:
+    /// <list type="bullet">
+    /// <item><b>Activity</b> (feeds "Unobserved"): records that this topic/version was actually
+    /// exercised - as provider by the handling service (<see cref="MeshTraceEvent.Service"/>), and as
+    /// consumer by the calling service, found via <see cref="_spanService"/> off the parent span - so
+    /// <see cref="TopicSummaryLocked"/> can report a per-edge last-observed-at rather than a boolean.</item>
+    /// <item><b>Undeclared → contract-drift</b>: when the handling/calling service HAS a registered,
+    /// non-degraded descriptor, but this topic isn't in its declared <c>topics</c>/<c>consumes</c>, the
+    /// running system disagrees with the declared contract - filed as a contract-drift issue (spec
+    /// §4.1's classification vocabulary already reserves this bucket) via the same merged <see cref="_issues"/>
+    /// map the emitter-reported feed uses. An anonymous/never-registered service (no descriptor at
+    /// all) is never flagged - it has no contract to diverge from.</item>
+    /// </list>
+    /// </summary>
+    private void RecordObservedActivityAndDrift(MeshTraceEvent traceEvent)
     {
-        var spanService = new Dictionary<string, string>();
-        foreach (var traceEvent in _ring)
+        if (string.IsNullOrEmpty(traceEvent.Topic))
         {
-            if (!string.IsNullOrEmpty(traceEvent.Service))
+            return;
+        }
+
+        var key = (traceEvent.Topic, traceEvent.TopicVersion ?? string.Empty);
+        var observedAt = DateTimeOffset.UtcNow;
+
+        if (!string.IsNullOrEmpty(traceEvent.Service))
+        {
+            var handler = traceEvent.Service!;
+            EnsureActivity(_providerActivity, key)[handler] = observedAt;
+
+            if (_services.TryGetValue(handler, out var handlerState) &&
+                IsDeclared(handlerState.Descriptor, MeshDescriptorFactory.RegistryFeed) &&
+                !ContainsTopic(handlerState.Descriptor!.Topics, key))
             {
-                spanService[traceEvent.SpanId] = traceEvent.Service!;
+                FileContractDrift(handler, traceEvent);
             }
         }
 
-        var consumers = new Dictionary<(string, string), HashSet<string>>();
-        foreach (var traceEvent in _ring)
+        if (!string.IsNullOrEmpty(traceEvent.ParentSpanId) &&
+            _spanService.TryGetValue(traceEvent.ParentSpanId!, out var caller) &&
+            caller != traceEvent.Service)
         {
-            if (string.IsNullOrEmpty(traceEvent.ParentSpanId) ||
-                !spanService.TryGetValue(traceEvent.ParentSpanId!, out var caller) ||
-                caller == traceEvent.Service)
+            EnsureActivity(_consumerActivity, key)[caller] = observedAt;
+
+            if (_services.TryGetValue(caller, out var callerState) &&
+                IsDeclared(callerState.Descriptor, MeshDescriptorFactory.OutboundRegistryFeed) &&
+                !ContainsTopic(callerState.Descriptor!.Consumes, key))
             {
-                continue;
+                FileContractDrift(caller, traceEvent);
             }
-            var key = (traceEvent.Topic, traceEvent.TopicVersion ?? string.Empty);
-            if (!consumers.TryGetValue(key, out var set))
-            {
-                set = new HashSet<string>();
-                consumers[key] = set;
-            }
-            set.Add(caller);
         }
-        return consumers;
+    }
+
+    /// <summary>The recorded last-observed instant for <paramref name="service"/> on this edge, or
+    /// null when it has never been observed - never the struct default (spec §4.2: absence, not a
+    /// collapsed epoch/boolean).</summary>
+    private static DateTimeOffset? LastObservedAt(Dictionary<string, DateTimeOffset>? activity, string service)
+        => activity != null && activity.TryGetValue(service, out var when) ? when : null;
+
+    private static Dictionary<string, DateTimeOffset> EnsureActivity(
+        Dictionary<(string Id, string Version), Dictionary<string, DateTimeOffset>> activity, (string Id, string Version) key)
+    {
+        if (!activity.TryGetValue(key, out var map))
+        {
+            map = new Dictionary<string, DateTimeOffset>();
+            activity[key] = map;
+        }
+        return map;
+    }
+
+    /// <summary>A service "has a contract to diverge from" only when it registered a descriptor AND
+    /// that descriptor's relevant list isn't itself degraded (a port that hasn't wired up the
+    /// registry/outbound-registry yet genuinely doesn't know its own topics/consumes, so flagging it
+    /// would be a false positive, not a real drift).</summary>
+    private static bool IsDeclared(MeshServiceDescriptor? descriptor, string feedName)
+        => descriptor != null && !(descriptor.Degraded?.Contains(feedName) ?? false);
+
+    private static bool ContainsTopic(List<MeshTopicDescriptor> topics, (string Id, string Version) key)
+        => topics.Any(t => t.Id == key.Id && (t.Version ?? string.Empty) == key.Version);
+
+    /// <summary>Synthesizes one contract-drift occurrence and merges it into the same fingerprint-keyed
+    /// <see cref="_issues"/> map <see cref="AddIssues"/> merges emitter-reported occurrences into (spec
+    /// §4.1's merge rule: <c>count += 1</c> per observed occurrence here, <c>firstSeen</c>/<c>lastSeen</c>
+    /// span the observations, newest ≤3 exemplar trace ids). The fingerprint's discriminator is the
+    /// fixed <see cref="UndeclaredEdgeDiscriminator"/>, not the exercising call's status/exception - the
+    /// edge's identity shouldn't fragment across whatever outcome happened to trigger detection.</summary>
+    private void FileContractDrift(string service, MeshTraceEvent traceEvent)
+    {
+        var version = string.IsNullOrEmpty(traceEvent.TopicVersion) ? null : traceEvent.TopicVersion;
+        var fingerprint = MeshIssueFingerprint.Compute(
+            service, traceEvent.Topic, version, MeshIssueClassification.ContractDrift, null, UndeclaredEdgeDiscriminator);
+
+        if (!_issues.TryGetValue(fingerprint, out var issue))
+        {
+            if (_issues.Count >= _maxIssues)
+            {
+                var oldest = _issues.Values.OrderBy(x => x.LastSeen).First();
+                _issues.Remove(oldest.Fingerprint);
+            }
+            issue = new MeshIssue
+            {
+                Fingerprint = fingerprint,
+                Classification = MeshIssueClassification.ContractDrift,
+                Service = service,
+                Topic = traceEvent.Topic,
+                Version = version,
+                FirstSeen = traceEvent.StartedAt,
+                LastSeen = traceEvent.StartedAt
+            };
+            _issues[fingerprint] = issue;
+        }
+
+        issue.Count += 1;
+        if (traceEvent.StartedAt < issue.FirstSeen) issue.FirstSeen = traceEvent.StartedAt;
+        if (traceEvent.StartedAt > issue.LastSeen) issue.LastSeen = traceEvent.StartedAt;
+        if (!string.IsNullOrEmpty(traceEvent.TraceId) && !issue.ExemplarTraceIds.Contains(traceEvent.TraceId))
+        {
+            issue.ExemplarTraceIds.Add(traceEvent.TraceId);
+            if (issue.ExemplarTraceIds.Count > 3)
+            {
+                issue.ExemplarTraceIds.RemoveAt(0); // keep the newest
+            }
+        }
     }
 
     private ServiceSummary ServiceSummaryLocked(string name)
@@ -495,15 +626,26 @@ public class MeshCollectorStore : IMeshFleetReadModel
         return summary;
     }
 
-    private TopicSummary TopicSummaryLocked((string Id, string Version) key, HashSet<string>? consumers)
+    private TopicSummary TopicSummaryLocked((string Id, string Version) key)
     {
         var state = _topics[key];
+        var providerActivity = _providerActivity.GetValueOrDefault(key);
+        var consumerActivity = _consumerActivity.GetValueOrDefault(key);
         return new TopicSummary
         {
             Topic = key.Id,
             Version = string.IsNullOrEmpty(key.Version) ? null : key.Version,
+            // Declared, unconditionally (spec §4, 2026-08 revision) - the full graph even for a
+            // service that registered but never sent or received a single message.
             Providers = state.Providers.OrderBy(x => x, StringComparer.Ordinal).ToList(),
-            Consumers = (consumers ?? new HashSet<string>()).OrderBy(x => x, StringComparer.Ordinal).ToList(),
+            Consumers = state.Consumers.OrderBy(x => x, StringComparer.Ordinal).ToList(),
+            // Observed-only, additive (spec §4.2): per declared edge, when it was last actually
+            // exercised - absent (not false) when never observed, so a reader can judge staleness
+            // rather than read a collapsed boolean.
+            ProviderActivity = state.Providers.OrderBy(x => x, StringComparer.Ordinal)
+                .ToDictionary(x => x, x => new MeshEdgeActivity { LastObservedAt = LastObservedAt(providerActivity, x) }),
+            ConsumerActivity = state.Consumers.OrderBy(x => x, StringComparer.Ordinal)
+                .ToDictionary(x => x, x => new MeshEdgeActivity { LastObservedAt = LastObservedAt(consumerActivity, x) }),
             Invocations = state.Invocations,
             Errors = state.Errors,
             AvgDurationMs = state.Invocations > 0 ? state.TotalDurationMs / state.Invocations : 0,

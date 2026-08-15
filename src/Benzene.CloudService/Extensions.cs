@@ -66,7 +66,7 @@ public static class Extensions
         var info = builder.BuildServiceInfo();
         var report = CloudServiceProfileReport.Evaluate(builder);
         builder.ProfileReportCallback?.Invoke(report);
-        var descriptorSource = new CloudServiceDescriptorSource(info, report, builder.HandlerTypes);
+        var descriptorSource = new CloudServiceDescriptorSource(info, report, builder.HandlerTypes, builder.OutboundRegistry);
         var healthChecks = builder.HealthChecks.ToArray();
 
         var announcer = builder.MeshEnabled && builder.CollectorEnvelopeUrl != null
