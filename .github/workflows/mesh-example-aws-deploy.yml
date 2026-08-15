@@ -159,6 +159,26 @@ jobs:
         run: |
           terraform apply -input=false -auto-approve -var "region=${{ inputs.region }}"
 
+      # The mesh Lambda only aggregates on its own schedule (deploy/variables.tf's
+      # aggregate_schedule, default rate(15 minutes)) — EventBridge rate schedules don't fire the
+      # instant they're created, so without this a fresh deploy's Mesh UI 404s on manifest.json
+      # for up to 15 minutes with no indication why. POST mesh_refresh_url once here to populate
+      # the catalog immediately; retry briefly since API Gateway/Lambda can take a few seconds to
+      # finish propagating right after apply.
+      - name: Trigger the first aggregation pass
+        working-directory: examples/AwsMesh/deploy
+        run: |
+          refresh_url="$(terraform output -raw mesh_refresh_url)"
+          for attempt in 1 2 3 4 5; do
+            if curl --fail --silent --show-error -X POST "$refresh_url"; then
+              echo "Mesh catalog populated."
+              exit 0
+            fi
+            echo "Attempt $attempt failed; retrying in 5s..."
+            sleep 5
+          done
+          echo "::warning::Could not trigger the first aggregation pass; the Mesh UI will populate itself within aggregate_schedule (default 15 minutes)."
+
       - name: Show URLs
         working-directory: examples/AwsMesh/deploy
         run: terraform output
