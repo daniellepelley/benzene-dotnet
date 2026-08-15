@@ -2,7 +2,10 @@ name: Mesh Example AWS Deploy
 
 # Manual-only: deploys examples/AwsMesh (3 Cloud Service Lambdas + the mesh Lambda) to AWS via
 # Terraform. Set repo secrets AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY (an IAM user/role that can
-# manage Lambda, IAM, S3, API Gateway, and EventBridge). Nothing here runs on push.
+# manage Lambda, IAM, S3, API Gateway, and EventBridge), plus GOOGLE_OAUTH_CLIENT_ID (a Variable) and
+# GOOGLE_OAUTH_CLIENT_SECRET (a Secret) for the mesh's Google OAuth login gate - see
+# examples/AwsMesh/README.md's "Auth setup" section for how to create the Google OAuth Client and where
+# these two values come from. Nothing here runs on push.
 on:
   workflow_dispatch:
     inputs:
@@ -103,6 +106,23 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ inputs.region }}
 
+      # The client ID is not sensitive (it's a Variable) but the client secret is (a Secret) - same
+      # split as the AWS credentials above. Fail fast with a clear message if either is empty, rather
+      # than letting `terraform apply` fail deep into the run with a less obvious error.
+      - name: Verify Google OAuth credentials are available
+        env:
+          CLIENT_ID: ${{ vars.GOOGLE_OAUTH_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+        run: |
+          missing=0
+          [ -z "$CLIENT_ID" ] && { echo "::error::GOOGLE_OAUTH_CLIENT_ID is empty."; missing=1; }
+          [ -z "$CLIENT_SECRET" ] && { echo "::error::GOOGLE_OAUTH_CLIENT_SECRET is empty."; missing=1; }
+          if [ "$missing" = "1" ]; then
+            echo "::error::In the 'test' GitHub Environment (Settings -> Environments -> test): set GOOGLE_OAUTH_CLIENT_ID as a Variable and GOOGLE_OAUTH_CLIENT_SECRET as a Secret. See examples/AwsMesh/README.md's 'Auth setup' section for how to create the Google OAuth Client these come from."
+            exit 1
+          fi
+          echo "Both Google OAuth credentials are present."
+
       # Remote state lives in a per-account S3 bucket so it survives between (ephemeral) CI runs.
       # Create it on first use (idempotent), then point `terraform init` at it via -backend-config.
       - name: Terraform init (remote S3 state)
@@ -156,6 +176,9 @@ jobs:
 
       - name: Terraform apply
         working-directory: examples/AwsMesh/deploy
+        env:
+          TF_VAR_google_oauth_client_id: ${{ vars.GOOGLE_OAUTH_CLIENT_ID }}
+          TF_VAR_google_oauth_client_secret: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
         run: |
           terraform apply -input=false -auto-approve -var "region=${{ inputs.region }}"
 
@@ -165,6 +188,12 @@ jobs:
       # for up to 15 minutes with no indication why. POST mesh_refresh_url once here to populate
       # the catalog immediately; retry briefly since API Gateway/Lambda can take a few seconds to
       # finish propagating right after apply.
+      #
+      # /mesh/refresh is now behind the mesh's Google OAuth login gate (Benzene.Mesh.Auth.Oidc), and
+      # this job has no browser session to authenticate with - so this always falls through to the
+      # warning below now, by design. It's kept (rather than removed) because the schedule alone still
+      # populates the catalog within aggregate_schedule; this was only ever a "don't make the first
+      # visitor wait" convenience, not something this job's success depends on.
       - name: Trigger the first aggregation pass
         working-directory: examples/AwsMesh/deploy
         run: |
@@ -177,7 +206,7 @@ jobs:
             echo "Attempt $attempt failed; retrying in 5s..."
             sleep 5
           done
-          echo "::warning::Could not trigger the first aggregation pass; the Mesh UI will populate itself within aggregate_schedule (default 15 minutes)."
+          echo "::warning::Could not trigger the first aggregation pass (expected now that /mesh/refresh requires login - see examples/AwsMesh/README.md's 'Auth setup' section); the Mesh UI will populate itself within aggregate_schedule (default 15 minutes)."
 
       - name: Show URLs
         working-directory: examples/AwsMesh/deploy

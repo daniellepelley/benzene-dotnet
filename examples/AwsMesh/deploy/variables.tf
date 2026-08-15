@@ -4,6 +4,29 @@ variable "region" {
   default     = "eu-west-1"
 }
 
+# ---------------------------------------------------------------------------------------------------
+# Google OAuth login gate (Benzene.Mesh.Auth.Oidc) for the mesh Lambda's HTTP surface. See
+# examples/AwsMesh/README.md's "Auth setup" section for how to create the Google OAuth Client these
+# come from, and outputs.tf's mesh_oauth_callback_url for the redirect URI to register with it.
+# ---------------------------------------------------------------------------------------------------
+
+variable "google_oauth_client_id" {
+  description = "The Google OAuth Client's Client ID (Google Cloud Console -> APIs & Services -> Credentials). Not sensitive - client IDs are public by design."
+  type        = string
+}
+
+variable "google_oauth_client_secret" {
+  description = "The Google OAuth Client's Client Secret. Sensitive - never commit a real value; set it via TF_VAR_google_oauth_client_secret or -var from a secret store (the GitHub Actions workflow sources it from the 'test' Environment's GOOGLE_OAUTH_CLIENT_SECRET Secret)."
+  type        = string
+  sensitive   = true
+}
+
+variable "mesh_allowed_emails" {
+  description = "The Google account emails allowed to log into the mesh's HTTP surface (Mesh UI, catalog artifacts, /mesh/refresh) - case-insensitive exact match, no domain matching. An empty list locks everyone out."
+  type        = list(string)
+  default     = ["daniellepelley@gmail.com"]
+}
+
 variable "project" {
   description = "Name prefix for all resources."
   type        = string

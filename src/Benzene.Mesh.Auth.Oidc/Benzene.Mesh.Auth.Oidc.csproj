@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Benzene.Mesh.Auth.Oidc</AssemblyName>
+    <RootNamespace>Benzene.Mesh.Auth.Oidc</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Description>Provider-agnostic OIDC login (Authorization Code flow) gated by an explicit email allowlist, as opt-in Benzene middleware (UseMeshOidcAuth) - a login/callback/logout surface plus session-gating for a mesh's HTTP surface (Mesh UI, catalog artifacts, refresh, dispatch).</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.19.2" />
+    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.19.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Benzene.Http\Benzene.Http.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Benzene.Mesh.Auth.Oidc.Test" />
+  </ItemGroup>
+
+</Project>

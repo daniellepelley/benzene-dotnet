@@ -427,15 +427,74 @@ way with no further wiring.
 Tooling: **Terraform, run by GitHub Actions**, fronted by **API Gateway HTTP APIs** (one per Lambda,
 so each service's Spec UI and the Mesh UI serve their relative assets from their own API root).
 
-1. **Add two repo secrets** (Settings → Secrets and variables → Actions):
-   - `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` — an IAM principal allowed to manage Lambda, IAM,
-     S3, API Gateway, and EventBridge.
+1. **Add the AWS credentials + Google OAuth credentials** to the `test` GitHub Environment (Settings →
+   Environments → `test` → add Environment secrets/variables):
+   - `AWS_ACCESS_KEY_ID` (Variable or Secret) / `AWS_SECRET_ACCESS_KEY` (Secret) — an IAM principal
+     allowed to manage Lambda, IAM, S3, API Gateway, and EventBridge.
+   - `GOOGLE_OAUTH_CLIENT_ID` (Variable) / `GOOGLE_OAUTH_CLIENT_SECRET` (Secret) — see **Auth setup**
+     below for where these come from. The mesh's entire HTTP surface requires logging in with an
+     allowlisted Google account, so both of these are required, not optional.
 2. **Run the workflow**: Actions → **Deploy AWS Mesh Example** → *Run workflow* (pick a region).
    It builds all seven Lambdas (self-contained `provided.al2023`), then `terraform apply`s the stack.
 3. **Grab the URLs** from the workflow's final `terraform output` step:
-   - `mesh_ui_url` — the Mesh UI.
-   - `service_spec_ui_urls` — each service's Spec UI.
-   - `mesh_refresh_url` — POST to force a discovery+aggregation pass now.
+   - `mesh_ui_url` — the Mesh UI (requires login - see **Auth setup**).
+   - `mesh_oauth_callback_url` — **copy this into the Google OAuth Client's Authorized redirect URIs**
+     (see **Auth setup**'s step 4) - a real, unavoidable manual step after the *first* apply, since the
+     API Gateway URL isn't known until then.
+   - `service_spec_ui_urls` — each service's Spec UI (not gated - the six domain services are out of
+     scope for the mesh's login gate).
+   - `mesh_refresh_url` — POST to force a discovery+aggregation pass now (requires login).
+
+## Auth setup (Google OAuth login gate)
+
+The mesh Lambda's entire HTTP surface (Mesh UI, catalog artifacts, `/mesh/refresh`) requires logging in
+as a Google account on an explicit allowlist - see `Benzene.Mesh.Auth.Oidc` (`src/Benzene.Mesh.Auth.Oidc/CLAUDE.md`)
+for how the login/callback/session gate actually works. That package is provider-agnostic OIDC; this
+example is what makes it Google specifically (`Issuer = "https://accounts.google.com"` in
+`Mesh/Startup.cs`, and the `google_oauth_*` Terraform variables). The six domain-service Lambdas
+(`orders`, `payments`, ...) are **not** gated - only the mesh Lambda's own HTTP surface is.
+
+1. **Create a Google OAuth Client** in [Google Cloud Console](https://console.cloud.google.com/) →
+   APIs & Services → Credentials → **Create Credentials** → **OAuth client ID** → Application type
+   **Web application**. (If this is the project's first OAuth client, Cloud Console first asks you to
+   configure an OAuth consent screen - "External" is fine for a demo; you don't need to submit it for
+   verification, just add your own Google account(s) as test users while it's in "Testing" status.)
+2. Leave **Authorized redirect URIs** empty for now - the exact URL isn't known until after the first
+   `terraform apply` (API Gateway assigns it). You'll come back and add it in step 4.
+3. Copy the **Client ID** and **Client Secret** Google Cloud Console shows you. Set them as
+   `GOOGLE_OAUTH_CLIENT_ID` (a Variable - client IDs are public, not sensitive) and
+   `GOOGLE_OAUTH_CLIENT_SECRET` (a Secret) on the `test` GitHub Environment, then run the deploy
+   workflow (or `terraform apply -var google_oauth_client_id=... -var google_oauth_client_secret=...`
+   locally).
+4. **After the first apply**, run `terraform output mesh_oauth_callback_url` (or read it from the
+   workflow's final "Show URLs" step) and paste that exact URL into the OAuth Client's **Authorized
+   redirect URIs** in Google Cloud Console, then **Save**. Until this step is done, every login attempt
+   fails at Google with `redirect_uri_mismatch` (see "Locked out or misconfigured?" below).
+5. **Set who's allowed in**: `mesh_allowed_emails` (a Terraform variable, default
+   `["daniellepelley@gmail.com"]`) is the list of Google account emails allowed to log in -
+   case-insensitive exact match, no domain matching. Override it (`-var 'mesh_allowed_emails=["you@gmail.com","teammate@gmail.com"]'`)
+   with your own account(s) before deploying, or you'll deploy a mesh only the default account can open.
+6. **Log in**: open `mesh_ui_url` - it redirects to `/mesh/auth/login`, then to Google, then back. A
+   successful login sets a session cookie good for 24 hours (`MeshOidcOptions.SessionDuration`).
+   `/mesh/auth/logout` clears it.
+
+### Locked out or misconfigured? Here's what each failure looks like
+
+- **Google shows `redirect_uri_mismatch`**: step 4 above wasn't done, or was done against a stale URL
+  from a previous deploy (API Gateway endpoints are stable across `terraform apply`, so this is usually
+  "step 4 was never done" rather than "it changed").
+- **"Access denied" page right after picking a Google account**: login and ID token verification both
+  succeeded, but the account's email isn't in `mesh_allowed_emails` - add it and re-apply
+  (`terraform apply` updates the running Lambda's environment variables in place, no rebuild needed).
+- **Redirected straight back to `/mesh/auth/login` in a loop**: almost always a browser rejecting the
+  session cookie - check the URL is `https://` (the cookie is `Secure`-flagged, so it's silently
+  refused over plain HTTP) and that cookies aren't blocked for the API Gateway domain.
+- **`GOOGLE_OAUTH_CLIENT_ID`/`GOOGLE_OAUTH_CLIENT_SECRET` missing**: the workflow's "Verify Google OAuth
+  credentials are available" step fails fast with a clear `::error::` before Terraform even runs - set
+  them on the `test` GitHub Environment per step 3 above.
+- **A fetch()/XHR call from the Mesh UI itself gets a 401 instead of a redirect**: expected if the
+  session cookie has expired mid-visit - reload the page, which (as a real browser navigation) redirects
+  through login instead.
 
 ### Deploy locally instead (if you do have Terraform)
 
@@ -473,16 +532,20 @@ recover, then leave it off for normal incremental deploys.
 ## See it working (both ends)
 
 1. **Open a service Spec UI** (`service_spec_ui_urls.orders`, etc.) — proof the services are up
-   and Cloud Service Profile-conformant, each with its own domain contract and health.
-2. **Trigger a mesh pass**: `curl -XPOST "$mesh_refresh_url"` (or wait for the schedule — every minute
-   by default, `var.aggregate_schedule`). It returns `{ "discovered": 6 }` once it has found the six
-   `benzene`-tagged Lambdas. The schedule keeps the catalog + usage feed fresh on its own; the Mesh UI
-   explorer loads artifacts once per page load, so reload the page to pick up a newer pass.
-3. **Open the Mesh UI** (`mesh_ui_url`) — the catalog of the six services the mesh **discovered by
-   itself** (no `mesh.json`), each interrogated by direct Lambda-Invoke, with health and dependencies.
-   Below the service list, the **Topics** table is the cross-service catalog (every topic across the
-   platform → which service owns it, its HTTP mapping, domain vs utility), with a **show utilities**
-   toggle that hides the reserved Benzene endpoints by default.
+   and Cloud Service Profile-conformant, each with its own domain contract and health. Not gated - the
+   mesh's login requirement below only applies to the mesh Lambda's own HTTP surface.
+2. **Trigger a mesh pass**: open `mesh_ui_url` in a browser first (logging in redirects you through
+   Google, per **Auth setup** above) - a plain `curl -XPOST "$mesh_refresh_url"` now gets `401` without
+   a session cookie. Once logged in, the browser session covers `/mesh/refresh` too, or wait for the
+   schedule (every 15 minutes by default, `var.aggregate_schedule`). A successful pass returns
+   `{ "discovered": 6 }` once it has found the six `benzene`-tagged Lambdas. The schedule keeps the
+   catalog + usage feed fresh on its own; the Mesh UI explorer loads artifacts once per page load, so
+   reload the page to pick up a newer pass.
+3. **Open the Mesh UI** (`mesh_ui_url`) — after logging in, the catalog of the six services the mesh
+   **discovered by itself** (no `mesh.json`), each interrogated by direct Lambda-Invoke, with health and
+   dependencies. Below the service list, the **Topics** table is the cross-service catalog (every topic
+   across the platform → which service owns it, its HTTP mapping, domain vs utility), with a **show
+   utilities** toggle that hides the reserved Benzene endpoints by default.
 4. **Open a service's Spec UI** and note the **Benzene utilities** panel — the reserved
    `spec`/`health`/`mesh` endpoints are collapsed out of the service's domain topics.
 
@@ -619,6 +682,9 @@ The most likely things to tweak on the first run (all localized):
   — without it the apphost aborts at init with "Couldn't find a valid ICU package installed".
 - **API Gateway payload format** — pinned to `1.0` to match `Benzene.Aws.Lambda.ApiGateway`; if a UI
   route 500s, this is the first thing to check.
+- **Google OAuth redirect URI** — the mesh's login gate (see **Auth setup**) needs
+  `mesh_oauth_callback_url` registered with the Google OAuth Client **after** the first apply (the API
+  Gateway URL isn't known before then) — the single most likely first-deploy "why can't I log in" trip.
 - **EventBridge → topic routing** — both the `mesh:aggregate` schedule and the inter-service
   integration events (`payment:captured`, `shipping:dispatched`) rely on the Benzene EventBridge adapter
   reading `detail-type` as the topic. The custom-bus rules match on that same `detail-type`; if a

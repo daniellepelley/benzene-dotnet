@@ -9,6 +9,7 @@ using Benzene.Http;
 using Benzene.Http.Cors;
 using Benzene.Http.BenzeneMessage;
 using Benzene.Mesh.Artifacts;
+using Benzene.Mesh.Auth.Oidc;
 using Benzene.Mesh.Aws.Lambda;
 using Benzene.Mesh.Aws.S3;
 using Benzene.Mesh.Collector;
@@ -40,6 +41,10 @@ public class Startup : BenzeneStartUp
         var bucket = Environment.GetEnvironmentVariable("MESH_ARTIFACT_BUCKET")
                      ?? throw new InvalidOperationException("MESH_ARTIFACT_BUCKET is required.");
         var prefix = Environment.GetEnvironmentVariable("MESH_ARTIFACT_PREFIX") ?? "";
+
+        // The AWS API Gateway (v1 payload) binding for Benzene.Mesh.Auth.Oidc's query-string
+        // abstraction - see ApiGatewayOidcQueryStringReader's remarks and that package's CLAUDE.md.
+        services.AddSingleton<IOidcQueryStringReader<ApiGatewayContext>, ApiGatewayOidcQueryStringReader>();
 
         // Full OpenTelemetry for the mesh Lambda too, so its discovery/aggregation + UI pipelines are
         // traced and metered alongside the services. Built eagerly (not via services.AddOpenTelemetry())
@@ -88,10 +93,13 @@ public class Startup : BenzeneStartUp
         // MeshAggregateMessageHandler — a second handler for topic "benzene:mesh:aggregate" (collision). This
         // example deliberately uses its own MeshAggregateHandler (discovery + aggregate) instead.
         var handlers = typeof(Startup).Assembly;
+        var oidcOptions = BuildOidcOptions();
 
         app.UseAwsLambda(aws =>
         {
             // Scheduled aggregation: an EventBridge rule fires with detail-type "benzene:mesh:aggregate".
+            // No auth gate here - this is Lambda-to-Lambda (EventBridge invoking this function directly),
+            // never a browser, and out of scope for a login-gated HTTP surface.
             aws.UseEventBridge(eb => eb
                 .UseW3CTraceContext()
                 .UseBenzeneEnrichment()
@@ -99,10 +107,14 @@ public class Startup : BenzeneStartUp
                 .UseMessageHandlers(handlers));
 
             // Public HTTP surface: the Mesh UI, the catalog artifacts (from S3), and POST /mesh/refresh.
+            // Everything below UseMeshOidcAuth is login-gated (see Benzene.Mesh.Auth.Oidc/CLAUDE.md) -
+            // it owns /mesh/auth/login, /mesh/auth/callback, /mesh/auth/logout itself and requires a
+            // valid session for every other route on this pipeline.
             aws.UseApiGateway(http => http
                 .UseW3CTraceContext()
                 .UseBenzeneEnrichment()
                 .UseBenzeneMetrics()
+                .UseMeshOidcAuth(oidcOptions)
                 // The Mesh UI: the service catalog (what services declare, from manifest.json) enriched
                 // in-page with the live fleet — what's actually running (X-Ray traces + CloudWatch usage) —
                 // polled from the /benzene/invoke envelope below. One page: the catalog is the spine and
@@ -123,6 +135,36 @@ public class Startup : BenzeneStartUp
                     fleet => fleet.UseMessageHandlers(MeshCollectorHandlers.Queries))
                 .UseMessageHandlers(handlers));
         });
+    }
+
+    /// <summary>
+    /// Builds the mesh's OIDC login config from environment variables (wired by Terraform - see
+    /// deploy/main.tf and deploy/variables.tf), never a hardcoded/example default. Every required value
+    /// throws a clear, actionable exception if missing, matching this repo's "fail fast, no silent
+    /// degraded defaults" ethos (see <c>MESH_ARTIFACT_BUCKET</c> above). <c>Benzene.Mesh.Auth.Oidc</c>
+    /// itself is provider-agnostic (see its <c>CLAUDE.md</c>) - Google is this example's own choice,
+    /// expressed only here as <see cref="MeshOidcOptions.Issuer"/>.
+    /// </summary>
+    private static MeshOidcOptions BuildOidcOptions()
+    {
+        var clientId = Environment.GetEnvironmentVariable("GOOGLE_OAUTH_CLIENT_ID")
+                       ?? throw new InvalidOperationException("GOOGLE_OAUTH_CLIENT_ID is required.");
+        var clientSecret = Environment.GetEnvironmentVariable("GOOGLE_OAUTH_CLIENT_SECRET")
+                            ?? throw new InvalidOperationException("GOOGLE_OAUTH_CLIENT_SECRET is required.");
+        var signingKey = Environment.GetEnvironmentVariable("MESH_OIDC_SIGNING_KEY")
+                          ?? throw new InvalidOperationException("MESH_OIDC_SIGNING_KEY is required.");
+        var allowedEmails = (Environment.GetEnvironmentVariable("MESH_ALLOWED_EMAILS") ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        return new MeshOidcOptions
+        {
+            Issuer = "https://accounts.google.com",
+            ClientId = clientId,
+            ClientSecret = clientSecret,
+            SigningKey = signingKey,
+            AllowedEmails = allowedEmails,
+            BasePath = "/mesh/auth",
+        };
     }
 }
 

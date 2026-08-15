@@ -1,6 +1,11 @@
 output "mesh_ui_url" {
-  description = "Open this in a browser to see the Mesh UI (the catalog of discovered services)."
+  description = "Open this in a browser to see the Mesh UI (the catalog of discovered services). Requires logging in with an allowlisted Google account first (see mesh_oauth_callback_url below) - the mesh's entire HTTP surface is gated."
   value       = "${aws_apigatewayv2_api.mesh.api_endpoint}/mesh-ui"
+}
+
+output "mesh_oauth_callback_url" {
+  description = "REQUIRED MANUAL STEP after the first apply: copy this exact URL into the Google OAuth Client's 'Authorized redirect URIs' in Google Cloud Console (APIs & Services -> Credentials -> your OAuth 2.0 Client ID). The API Gateway endpoint is only known after apply, so this can't be pre-registered - until it's added, every login attempt fails at Google with a redirect_uri_mismatch error. See examples/AwsMesh/README.md's 'Auth setup' section."
+  value       = "${aws_apigatewayv2_api.mesh.api_endpoint}/mesh/auth/callback"
 }
 
 output "mesh_manifest_url" {
