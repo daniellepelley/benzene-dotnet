@@ -46,6 +46,16 @@ public interface ICloudServiceBuilder
     ICloudServiceBuilder WithHandlers(params Type[] handlerTypes);
 
     /// <summary>
+    /// Declares what this service consumes (mesh.md §2.3's outbound registration) - the explicit,
+    /// no-handler, no-destination record of the (topic, version, request type, response type) tuples
+    /// this service may send, projected into the descriptor's <c>consumes</c> field. Without this, the
+    /// descriptor marks <c>consumes</c> degraded (<c>"outbound-registry"</c>) rather than asserting an
+    /// empty "consumes nothing" claim. Build the registry with <see cref="MeshOutboundRegistry"/>
+    /// (e.g. <c>new MeshOutboundRegistry().Register&lt;PaymentsCaptureRequest&gt;("payments:capture")</c>).
+    /// </summary>
+    ICloudServiceBuilder WithConsumes(MeshOutboundRegistry outboundRegistry);
+
+    /// <summary>
     /// Adds custom middleware to the wire-envelope pipeline, inside the profile's own middleware
     /// (trace, health, descriptor) and before the message router. Custom middleware for the outer
     /// HTTP pipeline needs no hook: add it to that pipeline before calling
@@ -104,6 +114,7 @@ internal sealed class CloudServiceBuilder : ICloudServiceBuilder
     public string? CollectorEnvelopeUrl { get; private set; }
     public List<IHealthCheck> HealthChecks { get; } = new();
     public Type[]? HandlerTypes { get; private set; }
+    public MeshOutboundRegistry? OutboundRegistry { get; private set; }
     public Action<IMiddlewarePipelineBuilder<BenzeneMessageContext>>? EnvelopeMiddleware { get; private set; }
     public string InvokePath { get; private set; } = CloudServicePaths.Invoke;
     public string SpecPath { get; private set; } = CloudServicePaths.Spec;
@@ -160,6 +171,12 @@ internal sealed class CloudServiceBuilder : ICloudServiceBuilder
     public ICloudServiceBuilder WithHandlers(params Type[] handlerTypes)
     {
         HandlerTypes = HandlerTypes == null ? handlerTypes : HandlerTypes.Concat(handlerTypes).ToArray();
+        return this;
+    }
+
+    public ICloudServiceBuilder WithConsumes(MeshOutboundRegistry outboundRegistry)
+    {
+        OutboundRegistry = outboundRegistry;
         return this;
     }
 

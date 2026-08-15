@@ -259,7 +259,9 @@ public static class CloudServiceProbe
         const string baseReason =
             "trace context propagation cannot be verified by a single-service black-box HTTP probe; proving it " +
             "requires either a second service to observe forwarded traceparent headers, or a mesh collector " +
-            "deriving consumer edges from trace parentage (mesh.md §3-4)";
+            "observing a declared edge actually being exercised via trace parentage (mesh.md §3, §4.2 - " +
+            "observed liveness only, since the 2026-08 revision: the producer/consumer graph itself is " +
+            "declared from ServiceDescriptor.topics/consumes, never derived from trace parentage)";
 
         if (!options.SendTraceParentProbe)
         {
