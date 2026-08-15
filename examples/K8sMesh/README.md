@@ -98,9 +98,10 @@ curl -XPOST localhost:8090/orders -H 'content-type: application/json' \
   what's *actually running*: the mesh pod also hosts a `Benzene.Mesh.Collector` at
   `/benzene/invoke`, and each Cloud Service reports to it (`WithCollector(...)`, driven by the
   `MESH_COLLECTOR_ENVELOPE_URL` the manifests set) — registrations, health heartbeats, and per-call
-  traces. The Fleet plane polls the collector and shows live health, observed consumer edges (who
-  actually calls whom, from trace parentage), recent flows, and "missing feed" markers for partial
-  data. The single always-on mesh pod is the right home for the collector's in-memory state (one
+  traces. The Fleet plane polls the collector and shows live health, the declared producer/consumer
+  graph (who provides and who consumes what, from each service's registered `ServiceDescriptor` —
+  mesh spec §4's 2026-08 revision, not trace parentage), recent flows, and "missing feed" markers for
+  partial data. The single always-on mesh pod is the right home for the collector's in-memory state (one
   process accumulates every service's feed) — which is why this live view fits K8sMesh but not the
   scale-to-zero Azure Functions Consumption mesh. It reduces gracefully: an unreachable collector
   never fails a service, it just leaves that service's live feed empty.

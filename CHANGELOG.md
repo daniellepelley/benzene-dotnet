@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **BREAKING (mesh.md's 2026-08 revision): the mesh producer/consumer graph is now declared, never
+  trace-derived.** `MeshServiceDescriptor` gains a `Consumes` field (mesh.md §2), populated from a new
+  explicit **outbound registration** concept (§2.3, mirroring core-concepts.md §9's inbound handler
+  discovery, minus the handler) via the new `Benzene.Mesh.Wire.MeshOutboundRegistry`/
+  `IMeshOutboundDefinitionLookUp` — reuses the existing `IMessageSenderDefinition` shape rather than a
+  parallel one. `MeshDescriptorFactory.Create` takes an optional third `IMeshOutboundDefinitionLookUp?`
+  parameter (source-compatible; a service that doesn't pass one gets `consumes` marked
+  `degraded: ["outbound-registry"]`, never a silent empty-array claim); `descriptorHash` is now
+  sensitive to the consumed-topic set. `Benzene.Mesh.Collector.MeshCollectorStore.Register` now
+  replaces **both** provider (`topics`) and consumer (`consumes`) edges wholesale from the latest
+  registered descriptor — the **sole** source of `TopicSummary.Providers`/`Consumers` (a registered
+  service with zero traffic reports its full graph); trace parentage no longer admits or removes a
+  graph edge. Two new, additive, observed-only §4.2 read-model signals are layered on top, never fed
+  back into the graph: **liveness** — `TopicSummary.ProviderActivity`/`ConsumerActivity` report a
+  per-declared-edge `lastObservedAt` (absent, not a boolean, when never observed in the ring — a
+  decommission *candidate*, never a fact); **drift** — a trace naming a topic a *registered,
+  non-degraded* service didn't declare as provider or consumer synthesizes a `contract-drift`
+  `MeshIssue`, merged into the same fingerprint-keyed issue map the `mesh:issues` feed uses (an
+  anonymous/never-registered service is never flagged — it has no contract to diverge from).
+  `Benzene.CloudService.ICloudServiceBuilder` gains `.WithConsumes(MeshOutboundRegistry)` as the
+  batteries-included wiring point. Conformance fixtures (`mesh-descriptor-cases.json`,
+  `mesh-collector-cases.json`) synced from the canonical spec repo to pin the new behavior. A port
+  conformant under the pre-2026-08 revision (trace-derived consumer edges) is not conformant under
+  this one until it adopts outbound registration — see the revision note at the top of mesh.md.
+
 ### Removed
 - **BREAKING:** removed the `Benzene.SelfHost.Http` package. It hosted HTTP on
   `System.Net.HttpListener`, which is materially slower than Kestrel and added no advantage over the

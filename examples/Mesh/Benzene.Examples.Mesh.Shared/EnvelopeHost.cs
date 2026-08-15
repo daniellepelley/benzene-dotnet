@@ -172,8 +172,9 @@ public sealed class EnvelopeHost
 
 /// <summary>
 /// A tiny envelope-speaking client for cross-service calls in the examples, forwarding the
-/// current mesh span as a <c>traceparent</c> header so the collector can derive consumer edges
-/// from parentage.
+/// current mesh span as a <c>traceparent</c> header so the collector can observe (mesh.md §4.2 -
+/// liveness/drift, additive to the declared graph) which of a service's declared edges are actually
+/// being exercised.
 /// </summary>
 public static class EnvelopeClient
 {

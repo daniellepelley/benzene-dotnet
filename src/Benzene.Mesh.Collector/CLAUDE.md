@@ -1,5 +1,27 @@
 # Benzene.Mesh.Collector
 
+> **2026-08 (mesh.md revision): the producer/consumer graph is declared, never trace-derived.**
+> Earlier drafts derived consumer edges solely from trace parentage - unknowable before deployment,
+> which defeated the mesh's own stated purpose. `ServiceDescriptor` gained `consumes` (§2, `Benzene.Mesh.Wire`'s
+> `MeshOutboundRegistry`/`IMeshOutboundDefinitionLookUp`, mirroring the inbound handler registry §9
+> exactly, minus the handler); `MeshCollectorStore.Register` now replaces BOTH `TopicState.Providers`
+> AND the new `TopicState.Consumers` wholesale from the latest descriptor's `topics`/`consumes` - the
+> **sole** source of the graph (§4). A registered service with zero traffic reports its full graph;
+> trace parentage MUST NOT admit or remove an edge here anymore. Trace parentage is now purely an
+> **observed, additive** signal (§4.2), layered on top via `RecordObservedActivityAndDrift`: (1)
+> **Unobserved/liveness** - `TopicSummary.ProviderActivity`/`ConsumerActivity` report a per-declared-edge
+> `lastObservedAt` (absent, not a boolean, when the edge has no matching trace in the ring - a
+> decommission *candidate*, never a fact); (2) **Undeclared/drift** - a trace naming a topic a
+> *registered, non-degraded* service didn't declare as provider or consumer synthesizes a
+> `contract-drift` `MeshIssue`, merged into the same fingerprint-keyed `_issues` map the emitter-reported
+> `mesh:issues` feed uses (an anonymous/never-registered or honestly-degraded service is never flagged -
+> it has no contract to diverge from). Old fixture case (single trace-derived-consumers case) replaced by
+> `mesh-descriptor-cases.json`'s `consumes` case plus `mesh-collector-cases.json`'s
+> `consumer-graph-is-declared-not-trace-derived` / `trace-parentage-feeds-stats-and-liveness-not-graph-membership`
+> / `reregistration-replaces-provider-and-consumer-edges` cases. `CompositeMeshFleetReadModel` (the
+> backend-composed OTel plane) is unaffected - it never had a descriptor feed or `Consumers`/`TopicAsync`
+> in the first place.
+
 > **2026-07-25 (cost round): `FleetQuery.IncludeFlows` — a wire COST HINT, not a contract change.**
 > Absent/null ⇒ true (today's behavior). False means "I only need the windowed counts", so a plane that
 > pays per flow lookup may return an empty `FleetView.Traces`. Motivation: on a trace-backed plane
@@ -113,10 +135,14 @@ hosted a live cross-language fleet (Go and C# services in one view - see the roa
     source measured it), anonymous service rows carry `["descriptor","health","stats"]`.
 - `MeshCollectorStore` - the in-memory state (singleton per collector): cumulative per-service
   and per-topic stats, latest heartbeat per instance, registered descriptors, and a bounded ring
-  of recent trace events (default 4096). Consumer edges are derived **at query time** from ring
-  parentage - an event whose parent span belongs to another service makes that service a
-  consumer of the event's topic; who-calls-whom is observed, never declared. Re-registration
-  replaces a service's provider edges wholesale (a redeploy that drops a topic drops the claim).
+  of recent trace events (default 4096). Provider AND consumer edges both come from the latest
+  registered `ServiceDescriptor` alone (`topics`/`consumes`, spec §4, 2026-08 revision) -
+  who-calls-whom is **declared**, never derived from trace parentage. Re-registration replaces a
+  service's provider **and** consumer edges wholesale (a redeploy that drops a topic drops the
+  claim, symmetrically for `topics` and `consumes`). Trace parentage still matters, just not for
+  graph membership: it feeds the additive §4.2 observed signals (`ProviderActivity`/`ConsumerActivity`
+  last-observed-at, and `contract-drift` issues for an observed-but-undeclared edge on a registered
+  service) via a bounded `spanId → service` index kept in lockstep with the ring.
 - `MeshCollectorHandlers.All` - the eight handlers to pass to `UseMessageHandlers`:
   `mesh:register`/`mesh:heartbeat`/`mesh:traces` ingest (service required → `BadRequest`; an
   empty trace batch is accepted) and `mesh:query:fleet`/`service`/`topic`/`trace`/`correlation`
@@ -139,7 +165,10 @@ hosted a live cross-language fleet (Go and C# services in one view - see the roa
   yet); shipped .NET-side, a fixture case + Go collector are the fast-follow. Covered by
   `MeshCollectorStoreTest`'s correlation cases.
 - View shapes (`FleetView`, `ServiceSummary`, `TopicSummary`, `ServiceView`, `InstanceView`,
-  `TraceView`, `TraceSummary`, `CorrelationView`, `Ack`) - `ServiceSummary.missingFeeds` names what the
+  `TraceView`, `TraceSummary`, `CorrelationView`, `Ack`, `MeshEdgeActivity`) -
+  `TopicSummary.ProviderActivity`/`ConsumerActivity` (spec §4.2, additive) map each declared
+  provider/consumer name to a `MeshEdgeActivity { LastObservedAt }` - absent (serializes `{}`), not a
+  boolean, when the ring holds no matching trace for that edge. `ServiceSummary.missingFeeds` names what the
   collector hasn't received per service ("descriptor"/"health"/"traces"); `TopicSummary.missingFeeds`
   (2026-07-23, additive) does the same at the topic grain, naming absent **stat dimensions**
   ("descriptor"/"duration"/"stats") so a backend-composed reader can mark a genuinely-absent count/duration

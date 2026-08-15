@@ -17,6 +17,19 @@ public class Ack
     public int Accepted { get; set; }
 }
 
+/// <summary>
+/// One declared edge's observed-liveness state (spec §4.2): <see cref="LastObservedAt"/> is the most
+/// recent trace evidence for the edge, or absent when the collector's retention window holds no
+/// evidence at all (a decommission CANDIDATE, never a fact - trace export is lossy by design, so a
+/// reader judges staleness for itself rather than trusting a boolean). Serializes as <c>{}</c> when
+/// never observed - deliberately distinguishable from a declared-but-inactive edge being omitted.
+/// </summary>
+public class MeshEdgeActivity
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? LastObservedAt { get; set; }
+}
+
 /// <summary>The <c>mesh:query:fleet</c> response: the whole known fleet in one shape.</summary>
 public class FleetView
 {
@@ -65,8 +78,11 @@ public class ServiceSummary
     public List<string> MissingFeeds { get; set; } = new();
 }
 
-/// <summary>One topic's catalog row: providers from descriptors, consumers observed from trace
-/// parentage, stats from the trace feed - nothing is declared.</summary>
+/// <summary>One topic's catalog row: providers AND consumers come from the latest registered
+/// ServiceDescriptor alone (spec §4, 2026-08 revision) - the full declared graph, reported even for a
+/// topic with zero traffic. Stats (invocations/errors/duration/statusCounts) still come from the
+/// trace feed, unaffected by the revision. <see cref="ProviderActivity"/>/<see cref="ConsumerActivity"/>
+/// are the separate, additive §4.2 observed signal layered on top - never part of graph membership.</summary>
 public class TopicSummary
 {
     public string Topic { get; set; } = string.Empty;
@@ -76,6 +92,17 @@ public class TopicSummary
 
     public List<string> Providers { get; set; } = new();
     public List<string> Consumers { get; set; } = new();
+
+    /// <summary>Per declared provider, when it was last actually observed serving this topic/version
+    /// (spec §4.2 "Unobserved") - keyed by service name, value <c>{}</c> (an empty
+    /// <see cref="MeshEdgeActivity"/>) when never observed, so a reader can tell "declared but never
+    /// exercised" from "exercised, but not recently" rather than reading a collapsed boolean.</summary>
+    public Dictionary<string, MeshEdgeActivity> ProviderActivity { get; set; } = new();
+
+    /// <summary>The consumer-side counterpart of <see cref="ProviderActivity"/>: per declared
+    /// consumer, when it was last observed actually calling this topic/version (via trace parentage).</summary>
+    public Dictionary<string, MeshEdgeActivity> ConsumerActivity { get; set; } = new();
+
     public long Invocations { get; set; }
     public long Errors { get; set; }
     public double AvgDurationMs { get; set; }

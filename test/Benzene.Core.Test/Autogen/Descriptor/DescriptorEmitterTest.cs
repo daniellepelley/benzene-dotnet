@@ -66,16 +66,26 @@ public class DescriptorEmitterTest
         using var doc = JsonDocument.Parse(result.DescriptorJson!);
         var root = doc.RootElement;
 
-        // Mesh §2 shape: service/serviceVersion/placement/topics[]/descriptorHash.
+        // Mesh §2 shape: service/serviceVersion/placement/topics[]/consumes[]/descriptorHash.
         Assert.Equal("minimal", root.GetProperty("service").GetString());
         Assert.Equal("1.0.0", root.GetProperty("serviceVersion").GetString());
         Assert.True(root.TryGetProperty("topics", out var topics));
         Assert.True(topics.GetArrayLength() > 0);
         Assert.StartsWith("sha256:", root.GetProperty("descriptorHash").GetString());
 
-        // NOT the old distilled projection (descriptorVersion/consumes/produces/transportsResolved).
+        // §2.3's `consumes` IS the mesh §2 shape (2026-08 revision) - present, but empty and honestly
+        // degraded: this offline, no-running-service tool has no outbound registration to read (spec
+        // §2.3 forbids inferring it from assembly reflection/call-site scanning), so it marks the gap
+        // rather than asserting "consumes nothing".
+        Assert.True(root.TryGetProperty("consumes", out var consumes));
+        Assert.Equal(0, consumes.GetArrayLength());
+        Assert.True(root.TryGetProperty("degraded", out var degraded));
+        Assert.Contains(degraded.EnumerateArray(), d => d.GetString() == "outbound-registry");
+
+        // NOT the OLD, unrelated distilled deployment projection (descriptorVersion/produces/
+        // transportsResolved - a completely different, now-deferred `--emit deploy` shape; see
+        // DescriptorEmitter's own doc comment).
         Assert.False(root.TryGetProperty("descriptorVersion", out _));
-        Assert.False(root.TryGetProperty("consumes", out _));
         Assert.False(root.TryGetProperty("produces", out _));
     }
 
