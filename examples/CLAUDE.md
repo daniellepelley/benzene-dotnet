@@ -41,17 +41,6 @@ handler/logic in `Benzene.Examples.App` and wiring it from the hosts, rather tha
     ingress: `PublishOrderCreatedMessageHandler` + `DependenciesBuilder`'s `AddOutboundRouting(...)` wiring
     — see [docs/clients.md](../docs/clients.md#runnable-example-the-ingressegress-symmetry).
 - **`Azure/`** — Azure Functions host. Same egress demonstration as `Aws/` above, via Service Bus.
-- **`Outbox/`** — transactional outbox pattern demo
-  ([docs/patterns/transactional-outbox.md](https://github.com/daniellepelley/benzene/blob/main/docs/patterns/transactional-outbox.md),
-  [docs/cookbooks/transactional-outbox.md](../docs/cookbooks/transactional-outbox.md)), self-contained
-  (does **not** use the shared `App` domain). Dogfoods the real, shipped `Benzene.Outbox` package —
-  `UseOutbox()` + `AddInMemoryOutboxStore()`, no AWS/EF Core needed to run — across three scenarios: a
-  naive dual write losing the send, `OutboxWriteMode.Immediate` (durable capture + reliable relay,
-  including a forced at-least-once redelivery), and `OutboxWriteMode.Transactional` (a minimal
-  `IOutboxStage`-draining unit of work standing in for what `Benzene.Outbox.DynamoDb`/`.EntityFramework`
-  do for real, showing the state write and the capture commit — or discard — together). Has its own
-  `README.md`. Builds/runs standalone (`dotnet build`/`dotnet run` on its `.csproj`) — **not yet added
-  to `Benzene.Examples.sln`**, per this file's own "Do NOT modify without explicit approval" rule below.
 - **`Versioning/`** — payload schema versioning demo ([docs/specification/versioning.md](../docs/specification/versioning.md)),
   self-contained (does **not** use the shared `App` domain). One AWS Lambda `StartUp` over four transports
   (BenzeneMessage envelope + API Gateway + SQS + SNS) dogfoods **both** axes: handler-version dispatch
