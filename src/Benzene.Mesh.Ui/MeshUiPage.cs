@@ -58,7 +58,34 @@ public static class MeshUiPage
     /// or whitespace, no <c>data-fleet-url</c> is injected and the Fleet plane stays dormant.
     /// </param>
     /// <returns>The complete, self-contained HTML document.</returns>
-    public static string GetHtml(string? manifestUrl, string? envelopeUrl)
+    public static string GetHtml(string? manifestUrl, string? envelopeUrl) => GetHtml(manifestUrl, envelopeUrl, null);
+
+    /// <summary>
+    /// Gets the viewer HTML with a manifest URL, a live fleet-envelope endpoint, and (optionally) a
+    /// dispatch endpoint injected onto the document root. With <paramref name="dispatchUrl"/> set,
+    /// the page's Test Console feature-detects (via the injected <c>data-dispatch-url</c>) and offers
+    /// to send a composed test message through that wire-envelope endpoint's <c>mesh:dispatch</c>
+    /// topic; without it the page renders test messages read-only (compose and copy, no send button).
+    /// </summary>
+    /// <param name="manifestUrl">
+    /// The URL the page should fetch <c>manifest.json</c> from. If null or whitespace, no
+    /// <c>data-manifest-url</c> is injected (the page falls back to <c>?url=</c>/relative fetch).
+    /// </param>
+    /// <param name="envelopeUrl">
+    /// The wire-envelope endpoint the Fleet plane polls (same-origin path or absolute URL). If null
+    /// or whitespace, no <c>data-fleet-url</c> is injected and the Fleet plane stays dormant.
+    /// </param>
+    /// <param name="dispatchUrl">
+    /// The wire-envelope endpoint the Test Console POSTs <c>mesh:dispatch</c> messages to
+    /// (same-origin path or absolute URL). This is a deliberate, separate opt-in from
+    /// <paramref name="envelopeUrl"/> - a mesh host that wires <c>Benzene.Mesh.Collector</c> alone
+    /// (read-only fleet queries) must not silently also expose live dispatch; the host must wire
+    /// <c>Benzene.Mesh.Dispatch</c>'s <c>UseMeshDispatch()</c> on the same pipeline AND pass this
+    /// explicitly (see <see cref="MeshUiExtensions"/>'s remarks). If null or whitespace, no
+    /// <c>data-dispatch-url</c> is injected and the Test Console cannot send messages.
+    /// </param>
+    /// <returns>The complete, self-contained HTML document.</returns>
+    public static string GetHtml(string? manifestUrl, string? envelopeUrl, string? dispatchUrl)
     {
         var attribute = string.Empty;
         if (!string.IsNullOrWhiteSpace(manifestUrl))
@@ -69,6 +96,11 @@ public static class MeshUiPage
         if (!string.IsNullOrWhiteSpace(envelopeUrl))
         {
             attribute += $" data-fleet-url=\"{WebUtility.HtmlEncode(envelopeUrl)}\"";
+        }
+
+        if (!string.IsNullOrWhiteSpace(dispatchUrl))
+        {
+            attribute += $" data-dispatch-url=\"{WebUtility.HtmlEncode(dispatchUrl)}\"";
         }
 
         if (attribute.Length == 0)

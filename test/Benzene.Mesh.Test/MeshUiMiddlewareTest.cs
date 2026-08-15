@@ -117,4 +117,36 @@ public class MeshUiMiddlewareTest
 
         Assert.Equal("MeshUi", middleware.Name);
     }
+
+    [Fact]
+    public async Task HandleAsync_WithDispatchUrl_WritesHtmlCarryingDispatchUrlAttribute()
+    {
+        var context = new FakeHttpContext();
+        var (requestAdapter, responseAdapter) = CreateAdapters(context, "GET", "/mesh-ui");
+        var middleware = new MeshUiMiddleware<FakeHttpContext>(
+            "/mesh-ui", "manifest.json", "/benzene/invoke", "/benzene/invoke",
+            requestAdapter.Object, responseAdapter.Object);
+
+        await middleware.HandleAsync(context, () => Task.CompletedTask);
+
+        responseAdapter.Verify(
+            x => x.SetBody(context, MeshUiPage.GetHtml("manifest.json", "/benzene/invoke", "/benzene/invoke")),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task HandleAsync_ThreeArgConstructor_OmitsDispatchUrl()
+    {
+        var context = new FakeHttpContext();
+        var (requestAdapter, responseAdapter) = CreateAdapters(context, "GET", "/mesh-ui");
+        var middleware = new MeshUiMiddleware<FakeHttpContext>(
+            "/mesh-ui", "manifest.json", "/benzene/invoke",
+            requestAdapter.Object, responseAdapter.Object);
+
+        await middleware.HandleAsync(context, () => Task.CompletedTask);
+
+        responseAdapter.Verify(
+            x => x.SetBody(context, MeshUiPage.GetHtml("manifest.json", "/benzene/invoke")),
+            Times.Once);
+    }
 }

@@ -45,17 +45,30 @@ public static class MeshUiExtensions
     /// recent flows, and a Fleet landing view. This folds in what <c>UseMeshFleetUi</c> served as a
     /// separate page.
     /// </param>
+    /// <param name="dispatchUrl">
+    /// The wire-envelope endpoint the page's Test Console POSTs <c>mesh:dispatch</c> messages to
+    /// (same-origin path or absolute URL). When null (the default) the Test Console renders read-only
+    /// (compose and copy a payload, no send button); when set — e.g. <see cref="DefaultDispatchUrl"/>
+    /// on a mesh host that also wires <c>Benzene.Mesh.Dispatch</c>'s <c>UseMeshDispatch()</c> — it can
+    /// send a composed message and show the response. Deliberately independent of
+    /// <paramref name="envelopeUrl"/>: a host that wires only <c>Benzene.Mesh.Collector</c> (read-only
+    /// fleet queries) must not have this silently turn on live dispatch too, even though the two often
+    /// share one endpoint in practice - pass <paramref name="dispatchUrl"/> explicitly to opt in.
+    /// <c>Benzene.Mesh.Dispatch</c> itself additionally gates dispatch behind a Production check
+    /// (refused unless the host sets <c>AllowInProduction</c>), independent of this parameter.
+    /// </param>
     /// <returns>The middleware pipeline builder, for chaining.</returns>
     public static IMiddlewarePipelineBuilder<TContext> UseMeshUi<TContext>(
         this IMiddlewarePipelineBuilder<TContext> app,
         string path = DefaultPath,
         string manifestUrl = DefaultManifestUrl,
-        string? envelopeUrl = null)
+        string? envelopeUrl = null,
+        string? dispatchUrl = null)
         where TContext : IHttpContext
     {
         app.Register(x =>
             x.AddSingleton(resolver => new MeshUiMiddleware<TContext>(
-                path, manifestUrl, envelopeUrl,
+                path, manifestUrl, envelopeUrl, dispatchUrl,
                 resolver.GetService<IHttpRequestAdapter<TContext>>(),
                 resolver.GetService<IBenzeneResponseAdapter<TContext>>()
             )));
@@ -109,4 +122,12 @@ public static class MeshUiExtensions
     /// Pass it as <c>UseMeshUi</c>'s <c>envelopeUrl</c> on a mesh host that also serves a
     /// <c>Benzene.Mesh.Collector</c> over the wire envelope.</summary>
     public const string DefaultEnvelopeUrl = "/benzene/invoke";
+
+    /// <summary>The default wire-envelope endpoint the mesh UI's Test Console sends
+    /// <c>mesh:dispatch</c> messages to. Same value as <see cref="DefaultEnvelopeUrl"/> - dispatch
+    /// typically rides the same message endpoint fleet queries already use - but named separately
+    /// since the two are independent opt-ins (see <c>UseMeshUi</c>'s <c>dispatchUrl</c> remarks). Pass
+    /// it as <c>UseMeshUi</c>'s <c>dispatchUrl</c> on a mesh host that also wires
+    /// <c>Benzene.Mesh.Dispatch</c>'s <c>UseMeshDispatch()</c> on the same pipeline.</summary>
+    public const string DefaultDispatchUrl = "/benzene/invoke";
 }
