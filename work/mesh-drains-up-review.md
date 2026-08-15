@@ -385,7 +385,7 @@ notifications. **Deferred (known, cosmetic-relative):** Tempo recent-flows enric
 >    breaks) — the inbox's 24h poll now asks for counts only and the composite plane skips the trace
 >    source entirely. Flow-derived issue evidence reads the range-windowed poll (`flowFleet`), which is
 >    what its wording already claimed.
-> 3. **Lifecycle:** a `destroy-aws-mesh-example.yml` workflow (typed DESTROY confirmation, same remote
+> 3. **Lifecycle:** a `mesh-example-aws-destroy.yml` workflow (typed DESTROY confirmation, same remote
 >    state as the deploy) that also empties the artifacts bucket and deletes the implicit
 >    `/aws/lambda/benzene-mesh-*` log groups Terraform doesn't own — so "stop paying" is one run.
 > The AwsMesh README gained a cost section stating both free-tier dimensions and the three knobs; the

@@ -7,7 +7,7 @@ name: Deploy EKS Mesh Example
 # internet-facing LoadBalancer. Ends by asserting {"discovered":3} and printing the public URL.
 #
 # Uses the same "test" GitHub Environment credentials and per-account S3 state bucket as
-# deploy-aws-mesh-example.yml (state key k8s-mesh/). NOTE: an EKS control plane bills ~$0.10/hour
+# mesh-example-aws-deploy.yml (state key k8s-mesh/). NOTE: an EKS control plane bills ~$0.10/hour
 # plus the EC2 nodes — re-run with destroy=true to tear everything down when finished.
 on:
   workflow_dispatch:

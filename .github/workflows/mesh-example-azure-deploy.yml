@@ -1,4 +1,4 @@
-name: Deploy Azure Mesh Example
+name: Mesh Example Azure Deploy
 
 # Manual-only: deploys examples/AzureMesh (3 Cloud Service Web Apps + the mesh Web App) to Azure via
 # Terraform. Needs an Azure service principal in the "test" GitHub Environment: AZURE_CREDENTIALS

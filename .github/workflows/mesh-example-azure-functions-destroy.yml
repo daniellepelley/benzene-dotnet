@@ -1,4 +1,4 @@
-name: Destroy Azure Functions Mesh Example
+name: Mesh Example Azure Functions Destroy
 
 # Manual-only teardown for examples/AzureFunctionsMesh — the counterpart of "Deploy Azure Functions
 # Mesh Example".

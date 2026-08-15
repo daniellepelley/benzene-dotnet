@@ -247,7 +247,7 @@ the Asp/Kafka `.Dev.Test` convention already established — is a clean follow-u
 
 **Scope correction:** the plan's original table had **AwsMesh** getting in-memory tests, but AwsMesh
 is not in `Benzene.Examples.sln` at all — it's built only by the manual, `workflow_dispatch`-only
-Terraform deploy workflow (`deploy-aws-mesh-example.yml`), so a test project there wouldn't run in
+Terraform deploy workflow (`mesh-example-aws-deploy.yml`), so a test project there wouldn't run in
 the CI gate without adding its four service projects to the solution (a structural change needing
 approval per `examples/CLAUDE.md`). Same reasoning applies to AzureMesh. Both are therefore **out of
 the in-memory Phase 1 scope**, matching how they were already out of the real-dependency tier scope.

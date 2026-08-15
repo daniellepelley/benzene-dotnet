@@ -58,7 +58,7 @@ non-trivial graph. See `work/aws-mesh-multi-transport-plan.md` for the plan and
 | `Analytics/` (`…AwsMesh.Analytics`) | analytics-api Cloud Service Lambda | — | `payment:captured` + `shipping:dispatched` (EventBridge) |
 | `Mesh/` (`…AwsMesh.Mesh`) | the discovery + aggregator + UI Lambda (uses `Benzene.Mesh.Aws.S3`) | — | — |
 | `deploy/` | Terraform: 7 Lambdas, IAM, S3, one HTTP API per Lambda, SQS queues, an SNS topic, a custom EventBridge bus + rules, the aggregation schedule, the `orders`/`orders-outbox`/`payments-idempotency` DynamoDB tables, the outbox stream's event-source mapping, the outbox sweep schedule, and the dedicated `claim_checks` S3 bucket + lifecycle rule | | |
-| `.github/workflows/deploy-aws-mesh-example.yml` | GitHub Actions: build all 7 Lambdas + `terraform apply` | | |
+| `.github/workflows/mesh-example-aws-deploy.yml` | GitHub Actions: build all 7 Lambdas + `terraform apply` | | |
 
 Only `orders-api` and `payments-api` opt into the outbox/idempotency/claim-check trio — the other four
 services (and the mesh) are unaffected; `Shared/MeshServiceWiring` only wires any of them when a service
@@ -531,7 +531,7 @@ cost to zero, and a redeploy is one workflow run.
 ## Teardown
 
 **Via GitHub Actions (recommended):** run the **Destroy AWS Mesh Example** workflow
-(`.github/workflows/destroy-aws-mesh-example.yml`) — the counterpart of the deploy workflow. It uses
+(`.github/workflows/mesh-example-aws-destroy.yml`) — the counterpart of the deploy workflow. It uses
 the same remote S3 state, so it destroys exactly what the deploy created. Pick the region you deployed
 to, and optionally tick **Also delete the Terraform state bucket** for a
 full cleanup. Beyond `terraform destroy` it also empties the artifacts bucket first (S3 refuses to
@@ -565,7 +565,7 @@ X-Ray trace isolate Benzene's own overhead from the .NET/AWS floor. What this ex
 and the levers beyond it, in rough order of value-for-effort:
 
 **Already applied here:**
-- **ReadyToRun** — the publish step (`.github/workflows/deploy-aws-mesh-example.yml`) uses
+- **ReadyToRun** — the publish step (`.github/workflows/mesh-example-aws-deploy.yml`) uses
   `-p:PublishReadyToRun=true`, precompiling IL to native so most framework/app code doesn't JIT at
   startup. This is the standard first move and it's on.
 - **`InvariantGlobalization=true`** — every service `.csproj` sets it (also required because

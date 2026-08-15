@@ -1,4 +1,4 @@
-name: Destroy Azure Mesh Example
+name: Mesh Example Azure Destroy
 
 # Manual-only teardown for examples/AzureMesh — the counterpart of "Deploy Azure Mesh Example".
 #

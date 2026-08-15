@@ -36,7 +36,7 @@ Storage**.
 | (shared) `examples/K8sMesh/Service` | the Cloud Service image, reused as-is for the 3 Azure Web Apps |
 | `Mesh/` | the Azure mesh service (Azure discovery + Blob store + UI, 30s background pass + `POST /mesh/refresh`) |
 | `deploy/` | Terraform: ACR, storage + container, App Service plan, 4 Web Apps, managed identity + role assignments |
-| `.github/workflows/deploy-azure-mesh-example.yml` | build+push images to ACR → `terraform apply` |
+| `.github/workflows/mesh-example-azure-deploy.yml` | build+push images to ACR → `terraform apply` |
 
 ## Deploy it (GitHub Actions)
 
@@ -57,7 +57,7 @@ mesh Web App, the Container Registry, and the storage account all cost money idl
 sessions and a redeploy is one workflow run.
 
 Run the **Destroy Azure Mesh Example** workflow
-(`.github/workflows/destroy-azure-mesh-example.yml`) — the counterpart of the deploy. It uses the same
+(`.github/workflows/mesh-example-azure-destroy.yml`) — the counterpart of the deploy. It uses the same
 remote azurerm state, so it destroys exactly what the deploy created. Pass the same `location` /
 `acr_name` / `storage_account` you deployed with, and optionally tick **Also delete the
 resource group** for a full cleanup (that removes `benzene-mesh-rg` and, with it, the tiny Terraform

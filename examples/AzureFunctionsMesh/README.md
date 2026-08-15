@@ -120,7 +120,7 @@ Service Profile.
 ## Deploy it (GitHub Actions)
 
 The **Deploy Azure Functions Mesh Example** workflow
-(`.github/workflows/deploy-azure-functions-mesh-example.yml`) is manual-only
+(`.github/workflows/mesh-example-azure-functions-deploy.yml`) is manual-only
 (**Actions → Deploy Azure Functions Mesh Example → Run workflow**). Put an Azure service principal in
 the **`test`** GitHub Environment as `AZURE_CREDENTIALS` (the `azure/login` JSON), with rights to
 create the resource group, storage, App Service plan, Function Apps, and **to assign roles** (Owner or
@@ -147,7 +147,7 @@ Event Hub, Event Grid topic/subscriptions, storage account and identity. Tear it
 and a redeploy is one workflow run.
 
 Run the **Destroy Azure Functions Mesh Example** workflow
-(`.github/workflows/destroy-azure-functions-mesh-example.yml`) — the counterpart of the deploy. It uses
+(`.github/workflows/mesh-example-azure-functions-destroy.yml`) — the counterpart of the deploy. It uses
 the same remote azurerm state, so it destroys exactly what the deploy created. Pass the same `location`
 / `storage_account` you deployed with, and optionally tick **Also delete the
 resource group** for a full cleanup (that removes `benzene-fnmesh-rg` and, with it, the Terraform state

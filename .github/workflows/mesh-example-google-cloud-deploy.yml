@@ -3,7 +3,7 @@
 # (Gen2, .NET 10, buildpack source deploy from the repo root so sibling src/ ProjectReferences
 # resolve). Manual only. NOT verified against live GCP from this repo — treat the first run as an
 # iteration exercise (see examples/GoogleCloudMesh/README.md).
-name: Deploy Google Cloud Mesh Example
+name: Mesh Example Google Cloud Deploy
 
 on:
   workflow_dispatch:

@@ -1,4 +1,4 @@
-name: Deploy Azure Functions Mesh Example
+name: Mesh Example Azure Functions Deploy
 
 # Manual-only: deploys examples/AzureFunctionsMesh (6 Cloud Service Function Apps + the mesh Function
 # App) to Azure via Terraform, then publishes the built code to each app with the Functions Core Tools.

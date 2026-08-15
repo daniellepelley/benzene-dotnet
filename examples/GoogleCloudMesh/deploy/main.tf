@@ -3,7 +3,7 @@
 # Cloud Scheduler job that periodically refreshes the mesh. The functions themselves (8: one HTTP per
 # service, one Pub/Sub per consumer, plus the mesh) are deployed by the CI workflow via
 # `gcloud functions deploy`, which creates each function's trigger/subscription — see
-# .github/workflows/deploy-google-cloud-mesh-example.yml.
+# .github/workflows/mesh-example-google-cloud-deploy.yml.
 #
 # NOT validated against live GCP from this repo — review before production use.
 

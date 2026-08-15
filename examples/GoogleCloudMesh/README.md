@@ -69,7 +69,7 @@ which **Cloud Scheduler** hits every couple of minutes (Cloud Functions has no t
 
 `deploy/` (Terraform) provisions the Pub/Sub inbox topics, the mesh GCS bucket, a runtime service
 account + IAM, and (second pass) the Cloud Scheduler job. The functions themselves are deployed by
-[`.github/workflows/deploy-google-cloud-mesh-example.yml`](../../.github/workflows/deploy-google-cloud-mesh-example.yml)
+[`.github/workflows/mesh-example-google-cloud-deploy.yml`](../../.github/workflows/mesh-example-google-cloud-deploy.yml)
 with `gcloud functions deploy` (Gen2, buildpack source deploy from the repo root so sibling `src/`
 project references resolve), which also creates each Pub/Sub function's trigger subscription. Run it
 manually with a project id and a Terraform-state bucket.
@@ -81,7 +81,7 @@ the Pub/Sub inbox topics, the mesh GCS bucket, a Cloud Scheduler job, and the ru
 Tear it down between sessions and a redeploy is one workflow run.
 
 Run the **Destroy Google Cloud Mesh Example** workflow
-(`.github/workflows/destroy-google-cloud-mesh-example.yml`) — the counterpart of the deploy. Pass the
+(`.github/workflows/mesh-example-google-cloud-destroy.yml`) — the counterpart of the deploy. Pass the
 same `project` / `region` / `state_bucket` you deployed with. Because
 the functions are created **outside** Terraform (`gcloud functions deploy`), the workflow first deletes
 all eight by name via `gcloud` (removing each function's Cloud Run service and Eventarc trigger), *then*

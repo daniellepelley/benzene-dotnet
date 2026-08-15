@@ -1,4 +1,4 @@
-name: Destroy AWS Mesh Example
+name: Mesh Example AWS Destroy
 
 # Manual-only teardown for examples/AwsMesh — the counterpart of "Deploy AWS Mesh Example".
 #

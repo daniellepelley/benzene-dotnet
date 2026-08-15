@@ -12,7 +12,7 @@
 #  * Everything else (topics, bucket [force_destroy], service account, IAM, the scheduler job) is
 #    Terraform-managed and removed by `terraform destroy` against the SAME remote GCS state the deploy
 #    wrote. mesh_refresh_url defaults to "" so the scheduler's count goes to 0 and it is destroyed.
-name: Destroy Google Cloud Mesh Example
+name: Mesh Example Google Cloud Destroy
 
 on:
   workflow_dispatch:

@@ -1,4 +1,4 @@
-name: Deploy AWS Mesh Example
+name: Mesh Example AWS Deploy
 
 # Manual-only: deploys examples/AwsMesh (3 Cloud Service Lambdas + the mesh Lambda) to AWS via
 # Terraform. Set repo secrets AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY (an IAM user/role that can
