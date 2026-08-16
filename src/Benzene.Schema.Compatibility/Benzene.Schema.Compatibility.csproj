@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Benzene.Schema.Compatibility</AssemblyName>
+    <!-- The namespace deliberately stays Benzene.Schema.OpenApi.Compatibility. These types were
+         extracted out of Benzene.Schema.OpenApi so a component that only needs the taxonomy does not
+         inherit an OpenAPI toolchain; keeping the namespace means every existing `using` still
+         compiles and TypeForwards.cs preserves binary compatibility too. -->
+    <RootNamespace>Benzene.Schema.OpenApi.Compatibility</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Description>The Benzene schema-compatibility taxonomy and rule table: what kinds of schema change exist, which side of a message they affect, and whether each is compatible, a warning, or breaking. Dependency-free, so any component can classify a change without taking an OpenAPI dependency.</Description>
+    <PackageTags>benzene;schema;compatibility;breaking-changes;contract-testing;json-schema</PackageTags>
+  </PropertyGroup>
+
+  <!-- No PackageReference, and no ProjectReference. This is the point of the package: it is the one
+       place the rules live, and anything may depend on it. See the invariant in
+       work/mesh-ui-product-vision.md §C1.3 - one rules table, one taxonomy, one verdict. -->
+
+</Project>

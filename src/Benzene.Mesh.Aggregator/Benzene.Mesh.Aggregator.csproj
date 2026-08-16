@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Benzene.Mesh.Contracts\Benzene.Mesh.Contracts.csproj" />
+    <ProjectReference Include="..\Benzene.Schema.Compatibility\Benzene.Schema.Compatibility.csproj" />
     <ProjectReference Include="..\Benzene.Abstractions.MessageHandlers\Benzene.Abstractions.MessageHandlers.csproj" />
     <ProjectReference Include="..\Benzene.Results\Benzene.Results.csproj" />
     <ProjectReference Include="..\Benzene.Core.MessageHandlers\Benzene.Core.MessageHandlers.csproj" />
