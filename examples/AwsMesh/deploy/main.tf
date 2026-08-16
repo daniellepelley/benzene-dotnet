@@ -795,7 +795,14 @@ resource "aws_cloudwatch_event_target" "aggregate" {
   # rejects it — surfacing as a 400 on every scheduled fire (visible in the fleet once the invocation
   # gets an X-Ray-compatible trace id). This matches the shape of a real EventBridge-delivered event,
   # whose `detail` is always an object.
-  input     = jsonencode({ "detail-type" = "mesh:aggregate", "source" = "benzene.mesh", "detail" = {} })
+  #
+  # The detail-type MUST equal the handler's registered topic EXACTLY: EventBridgeMessageTopicGetter
+  # returns `new Topic(context.Event.DetailType)` verbatim, with no prefix tolerance, and
+  # MeshAggregateHandler is [Message("benzene:mesh:aggregate")]. The reserved-topic rename onto the
+  # `benzene:` prefix updated the handler and missed this line, so every scheduled fire since then
+  # resolved no handler and silently did nothing — which is why a freshly-deployed mesh kept 404ing
+  # on manifest.json until someone POSTed /mesh/refresh by hand.
+  input = jsonencode({ "detail-type" = "benzene:mesh:aggregate", "source" = "benzene.mesh", "detail" = {} })
 }
 
 resource "aws_lambda_permission" "mesh_events" {
