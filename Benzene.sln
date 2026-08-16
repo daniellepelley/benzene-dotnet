@@ -410,6 +410,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Clients.InProcess",
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Mesh.Artifacts", "src\Benzene.Mesh.Artifacts\Benzene.Mesh.Artifacts.csproj", "{FAD1147E-4EB4-4AD7-AEAB-6B86C874FCE8}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Schema.Compatibility", "src\Benzene.Schema.Compatibility\Benzene.Schema.Compatibility.csproj", "{A268515B-E375-4174-92E3-E149D6179E0B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -2592,6 +2594,18 @@ Global
 		{FAD1147E-4EB4-4AD7-AEAB-6B86C874FCE8}.Release|x64.Build.0 = Release|Any CPU
 		{FAD1147E-4EB4-4AD7-AEAB-6B86C874FCE8}.Release|x86.ActiveCfg = Release|Any CPU
 		{FAD1147E-4EB4-4AD7-AEAB-6B86C874FCE8}.Release|x86.Build.0 = Release|Any CPU
+		{A268515B-E375-4174-92E3-E149D6179E0B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A268515B-E375-4174-92E3-E149D6179E0B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A268515B-E375-4174-92E3-E149D6179E0B}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{A268515B-E375-4174-92E3-E149D6179E0B}.Debug|x64.Build.0 = Debug|Any CPU
+		{A268515B-E375-4174-92E3-E149D6179E0B}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{A268515B-E375-4174-92E3-E149D6179E0B}.Debug|x86.Build.0 = Debug|Any CPU
+		{A268515B-E375-4174-92E3-E149D6179E0B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A268515B-E375-4174-92E3-E149D6179E0B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A268515B-E375-4174-92E3-E149D6179E0B}.Release|x64.ActiveCfg = Release|Any CPU
+		{A268515B-E375-4174-92E3-E149D6179E0B}.Release|x64.Build.0 = Release|Any CPU
+		{A268515B-E375-4174-92E3-E149D6179E0B}.Release|x86.ActiveCfg = Release|Any CPU
+		{A268515B-E375-4174-92E3-E149D6179E0B}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -2776,6 +2790,7 @@ Global
 		{2DE44AEF-1E2D-48C8-9144-6FF26045835E} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{2506FE3C-17A6-47FF-857C-D44EE8A5FCEA} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{FAD1147E-4EB4-4AD7-AEAB-6B86C874FCE8} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{A268515B-E375-4174-92E3-E149D6179E0B} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {B4E68A9C-300A-490A-B3A5-1F1D5A0A3260}

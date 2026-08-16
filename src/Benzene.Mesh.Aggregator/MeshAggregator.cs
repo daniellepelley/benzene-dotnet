@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Benzene.HealthChecks.Core;
 using Benzene.Mesh.Contracts;
+using Benzene.Schema.OpenApi.Compatibility;
 
 namespace Benzene.Mesh.Aggregator;
 
@@ -468,7 +469,139 @@ public class MeshAggregator
 
         var versionCompatibility = BuildVersionCompatibility(byTopic);
 
-        return new MeshTopicCatalog(_clock(), topics, versionCompatibility: versionCompatibility);
+        return new MeshTopicCatalog(_clock(), ApplyCrossVersionCompatibility(topics),
+            versionCompatibility: versionCompatibility);
+    }
+
+    /// <summary>
+    /// Classifies each version of each domain topic against the version published immediately before
+    /// it, field by field, using the shared taxonomy in <c>Benzene.Schema.Compatibility</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This answers a different question from <see cref="DiffTopicEntry"/>. That one asks "did this
+    /// (topic, version) change since the previous run?"; this asks "does this version break a consumer
+    /// still on the previous version?" - which is the question a reader actually arrives with, and
+    /// which had no code path at all before. Both schemas are already in this catalogue, in this run,
+    /// so it needs no history, no retained artifact and no wire change beyond the result.
+    /// </para>
+    /// <para>
+    /// Every outcome is a stated verdict, including "could not compare". A topic with one version gets
+    /// <c>notCompared</c> rather than <c>compatible</c>: an empty change set from a comparison that
+    /// never ran must never read as an all-clear.
+    /// </para>
+    /// </remarks>
+    private static MeshTopicEntry[] ApplyCrossVersionCompatibility(MeshTopicEntry[] topics)
+    {
+        // Reserved topics are excluded for the same reason DiffTopicEntry excludes them: utility-topic
+        // churn is noise, and every service in the fleet carries the same ones.
+        var byTopic = topics
+            .Where(entry => !entry.Reserved)
+            .GroupBy(entry => entry.Topic, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
+
+        return topics
+            .Select(entry =>
+            {
+                if (entry.Reserved || !byTopic.TryGetValue(entry.Topic, out var siblings))
+                {
+                    return entry;
+                }
+
+                // `topics` is already ordered ThenBy(Version, Ordinal), so a version's predecessor is
+                // the entry immediately before it within the same topic.
+                var index = Array.IndexOf(siblings, entry);
+                if (index <= 0)
+                {
+                    return siblings.Length <= 1
+                        ? WithCompatibility(entry, new MeshTopicCompatibility(
+                            null, MeshCompatibilityVerdict.NotCompared,
+                            notComparedReason: MeshNotComparedReason.OnlyOneVersion))
+                        : entry; // the oldest of several versions has nothing before it to compare to
+                }
+
+                return WithCompatibility(entry, CompareVersions(siblings[index - 1], entry));
+            })
+            .ToArray();
+    }
+
+    private static MeshTopicCompatibility CompareVersions(MeshTopicEntry baseline, MeshTopicEntry current)
+    {
+        var changes = new List<MeshSchemaChange>();
+        var notComparedSides = new List<string>();
+        var compared = 0;
+
+        foreach (var side in new[]
+                 {
+                     (Direction: SchemaDirection.Request, Name: "request",
+                         Before: baseline.RequestSchema, After: current.RequestSchema),
+                     (Direction: SchemaDirection.Response, Name: "response",
+                         Before: baseline.ResponseSchema, After: current.ResponseSchema),
+                     (Direction: SchemaDirection.Event, Name: "message",
+                         Before: baseline.MessageSchema, After: current.MessageSchema),
+                 })
+        {
+            if (side.Before == null && side.After == null)
+            {
+                continue; // this side simply isn't part of this topic's contract - not a finding
+            }
+
+            if (side.Before == null || side.After == null)
+            {
+                // Published on one version and not the other. That is a real gap in what can be said,
+                // and staying silent would let the verdict imply a coverage it does not have.
+                notComparedSides.Add(side.Name);
+                continue;
+            }
+
+            compared++;
+            foreach (var change in JsonSchemaComparer.Compare(
+                         side.Before, side.After, side.Direction, current.Topic, $"{current.Topic}.{side.Name}"))
+            {
+                changes.Add(new MeshSchemaChange(
+                    Camel(change.Kind.ToString()), Camel(change.Direction.ToString()),
+                    change.Path, change.Description, Camel(change.Compatibility.ToString())));
+            }
+        }
+
+        if (compared == 0)
+        {
+            return new MeshTopicCompatibility(baseline.Version, MeshCompatibilityVerdict.NotCompared,
+                notComparedReason: MeshNotComparedReason.NoSchemaPublished,
+                notComparedSides: notComparedSides.ToArray());
+        }
+
+        // A type change stops the walk, so anything beneath one of these paths was never looked at.
+        // Carrying the paths lets a reader be told, at those nodes, that the count below is a floor.
+        var truncated = changes
+            .Where(change => change.Kind == Camel(nameof(SchemaChangeKind.TypeChanged)))
+            .Select(change => change.Path)
+            .ToArray();
+
+        return new MeshTopicCompatibility(baseline.Version, Worst(changes), changes.ToArray(),
+            truncatedPaths: truncated, notComparedSides: notComparedSides.ToArray());
+    }
+
+    private static string Worst(List<MeshSchemaChange> changes)
+    {
+        if (changes.Any(change => change.Compatibility == MeshCompatibilityVerdict.Breaking))
+        {
+            return MeshCompatibilityVerdict.Breaking;
+        }
+
+        return changes.Any(change => change.Compatibility == MeshCompatibilityVerdict.Warning)
+            ? MeshCompatibilityVerdict.Warning
+            : MeshCompatibilityVerdict.Compatible;
+    }
+
+    private static string Camel(string name) => char.ToLowerInvariant(name[0]) + name.Substring(1);
+
+    private static MeshTopicEntry WithCompatibility(MeshTopicEntry entry, MeshTopicCompatibility compatibility)
+    {
+        return new MeshTopicEntry(
+            entry.Topic, entry.Version, entry.Reserved, entry.Consumers, entry.Producers, entry.Status,
+            entry.RequestSchema, entry.ResponseSchema, entry.MessageSchema, entry.SchemaMismatch, entry.Changes,
+            compatibility);
     }
 
     /// <summary>

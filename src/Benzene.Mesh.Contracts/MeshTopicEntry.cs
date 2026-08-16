@@ -22,10 +22,12 @@ public class MeshTopicEntry
     /// <param name="messageSchema">The broadcast message's JSON Schema (from a producer's spec <c>events</c>), <c>$ref</c>s inlined; <c>null</c> when unknown.</param>
     /// <param name="schemaMismatch">True when the topic's consumers do not all declare the same inbound payload — likely a contract error. See <see cref="SchemaMismatch"/>.</param>
     /// <param name="changes">What changed for this (topic, version) since the previous aggregator run — see <see cref="Changes"/>. Empty when nothing did (or on a first run).</param>
+    /// <param name="compatibility">How this version compares against the version published before it — see <see cref="Compatibility"/>.</param>
     public MeshTopicEntry(string topic, string version, bool reserved,
         MeshTopicService[] consumers, MeshTopicProducer[] producers, string? status,
         JsonObject? requestSchema = null, JsonObject? responseSchema = null, JsonObject? messageSchema = null,
-        bool schemaMismatch = false, MeshTopicChange[]? changes = null)
+        bool schemaMismatch = false, MeshTopicChange[]? changes = null,
+        MeshTopicCompatibility? compatibility = null)
     {
         Topic = topic;
         Version = version;
@@ -38,7 +40,22 @@ public class MeshTopicEntry
         MessageSchema = messageSchema;
         SchemaMismatch = schemaMismatch;
         Changes = changes ?? Array.Empty<MeshTopicChange>();
+        Compatibility = compatibility;
     }
+
+    /// <summary>
+    /// How this version's payload contract compares against the version published before it, in this
+    /// same catalogue — the "does the new version break the old consumers?" question.
+    /// <para>
+    /// <c>null</c> means this aggregator did not publish comparisons at all (an older build, or a port
+    /// that does not compute them). That is <b>not</b> the same as "nothing changed", and a reader
+    /// must not render it as one: absent means unknown, whereas
+    /// <see cref="MeshTopicCompatibility.Overall"/> of <c>notCompared</c> means "we looked and could
+    /// not compare". Distinct from <see cref="Changes"/>, which is run-over-run rather than
+    /// version-over-version.
+    /// </para>
+    /// </summary>
+    public MeshTopicCompatibility? Compatibility { get; }
 
     /// <summary>The topic id.</summary>
     public string Topic { get; }
