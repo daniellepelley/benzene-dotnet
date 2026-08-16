@@ -680,6 +680,10 @@ resource "aws_lambda_function" "mesh" {
       GOOGLE_OAUTH_CLIENT_SECRET = var.google_oauth_client_secret
       MESH_OIDC_SIGNING_KEY      = random_id.mesh_oidc_signing_key.b64_url
       MESH_ALLOWED_EMAILS        = join(",", var.mesh_allowed_emails)
+      # App-level throttle on POST /mesh/refresh (UseMeshRefreshGuard). Complements — never replaces —
+      # the API Gateway rate/burst limits on the stage below: those cap requests before a Lambda
+      # invocation is billed, this caps how often the expensive pass behind one actually runs.
+      MESH_REFRESH_MIN_INTERVAL_SECONDS = tostring(var.refresh_min_interval_seconds)
     }, local.otlp_env)
   }
 
@@ -752,6 +756,18 @@ resource "aws_apigatewayv2_stage" "mesh" {
   api_id      = aws_apigatewayv2_api.mesh.id
   name        = "$default"
   auto_deploy = true
+
+  # Cost/abuse protection at the EDGE, which is the only place it can be free: API Gateway refuses
+  # excess requests with its own 429 before the Lambda is invoked, so a flood costs no invocations, no
+  # X-Ray traces, no S3 reads, and no fan-out to the six service Lambdas. The app-level guard on
+  # POST /mesh/refresh (MESH_REFRESH_MIN_INTERVAL_SECONDS above) is the second, complementary layer —
+  # it bounds how often the expensive pass runs, but only after the invoke has already been billed.
+  # Applied to $default, so it covers every route on this API (the Mesh UI, the catalog artifacts, the
+  # /benzene/invoke fleet poll, the auth routes, and /mesh/refresh) rather than only the one endpoint.
+  default_route_settings {
+    throttling_rate_limit  = var.mesh_api_throttling_rate_limit
+    throttling_burst_limit = var.mesh_api_throttling_burst_limit
+  }
 }
 
 resource "aws_lambda_permission" "mesh_api" {

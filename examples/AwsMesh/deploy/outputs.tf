@@ -14,7 +14,7 @@ output "mesh_manifest_url" {
 }
 
 output "mesh_refresh_url" {
-  description = "POST here to trigger a discovery + aggregation pass on demand (instead of waiting for the schedule)."
+  description = "POST here to trigger a discovery + aggregation pass on demand (instead of waiting for the schedule). Protected four ways: a valid session cookie (401 without), the custom header 'X-Benzene-Refresh: 1' (403 without — a cross-site form can't set one), a minimum interval between passes (429 inside var.refresh_min_interval_seconds), and API Gateway rate/burst limits at the edge. From a shell: curl -XPOST -H 'X-Benzene-Refresh: 1' -b <session cookie> \"$mesh_refresh_url\". The Mesh UI's Refresh button does the same thing with the session you already have."
   value       = "${aws_apigatewayv2_api.mesh.api_endpoint}/mesh/refresh"
 }
 

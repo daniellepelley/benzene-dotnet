@@ -140,6 +140,37 @@ variable "mesh_zip" {
   default = "../artifacts/mesh.zip"
 }
 
+# ---------------------------------------------------------------------------------------------------
+# Abuse / cost protection for the mesh's HTTP API. Two independent layers, deliberately: the API
+# Gateway limits below cap request RATE at the edge, before a Lambda invocation is billed at all; the
+# app-level throttle (refresh_min_interval_seconds) caps how often the expensive discovery+aggregation
+# pass actually RUNS, which it can only do once you are already paying for the invoke. Neither
+# substitutes for the other.
+# ---------------------------------------------------------------------------------------------------
+
+variable "refresh_min_interval_seconds" {
+  description = "Minimum gap between two mesh discovery/aggregation passes triggered via POST /mesh/refresh. A request inside the window is answered 429 without running the pass (Benzene.Mesh.Artifacts' UseMeshRefreshGuard, wired in Mesh/Startup.cs, which compares now against the last pass's generatedAtUtc in manifest.json). Bounds sustained abuse — a held-down Refresh button, a stuck retry loop, a stolen session cookie — to roughly one pass per window; it is a rate limiter, NOT a distributed lock, so two simultaneous requests can still both proceed. 0 disables it. The default of 30s is long enough to stop hammering and short enough that a human who just changed something isn't made to wait."
+  type        = number
+  default     = 30
+
+  validation {
+    condition     = var.refresh_min_interval_seconds >= 0
+    error_message = "refresh_min_interval_seconds must be zero (throttle off) or positive."
+  }
+}
+
+variable "mesh_api_throttling_rate_limit" {
+  description = "Steady-state requests/second API Gateway allows across the whole mesh HTTP API before returning 429 itself. This is the layer that actually protects the bill: it refuses excess requests AT THE EDGE, so they never become billed Lambda invocations, X-Ray traces, or S3 reads — unlike the app-level refresh throttle, which can only decline work after the invoke has already been paid for. The default of 10 rps is generous for a mesh UI driven by one or two operators (page load, then a 15s fleet poll) while capping a runaway loop or a scripted flood at a knowable ceiling. Raise it if you genuinely have many concurrent viewers."
+  type        = number
+  default     = 10
+}
+
+variable "mesh_api_throttling_burst_limit" {
+  description = "Maximum concurrent/bucket-burst requests API Gateway allows on the mesh HTTP API. A page load legitimately fires several requests at once (the page, manifest.json, topics.json, the first fleet poll), so the burst must comfortably exceed the steady rate or normal use trips it. The default of 20 covers that with headroom while still bounding a flood."
+  type        = number
+  default     = 20
+}
+
 variable "usage_window_hours" {
   description = "Lookback window (hours) the mesh's CloudWatch usage source counts topic requests over, and the window the Mesh UI shows. Coarse usage only — fine-grained analysis belongs in CloudWatch/Grafana."
   type        = number

@@ -94,6 +94,7 @@ public class Startup : BenzeneStartUp
         // example deliberately uses its own MeshAggregateHandler (discovery + aggregate) instead.
         var handlers = typeof(Startup).Assembly;
         var oidcOptions = BuildOidcOptions();
+        var refreshGuardOptions = BuildRefreshGuardOptions();
 
         app.UseAwsLambda(aws =>
         {
@@ -115,12 +116,23 @@ public class Startup : BenzeneStartUp
                 .UseBenzeneEnrichment()
                 .UseBenzeneMetrics()
                 .UseMeshOidcAuth(oidcOptions)
+                // Everything a logged-in session can do to POST /mesh/refresh is bounded here, directly
+                // behind the login gate and ahead of every handler: a required X-Benzene-Refresh header
+                // (CSRF — a cross-site form can't set one, a cross-origin fetch that does gets preflighted
+                // and refused), then a manifest-age throttle. Deliberately NOT on the EventBridge
+                // sub-pipeline above: the schedule is not a browser and has no header to send.
+                .UseMeshRefreshGuard(refreshGuardOptions)
                 // The Mesh UI: the service catalog (what services declare, from manifest.json) enriched
                 // in-page with the live fleet — what's actually running (X-Ray traces + CloudWatch usage) —
                 // polled from the /benzene/invoke envelope below. One page: the catalog is the spine and
                 // the live data merges into it (health, observed-vs-declared consumers, recent flows, a
                 // Fleet landing view), rather than a disconnected second page.
-                .UseMeshUi("/mesh-ui", "manifest.json", "/benzene/invoke")
+                // logoutUrl/refreshUrl are explicit opt-ins (see UseMeshUi's remarks): they light up the
+                // page's Sign-out and Refresh controls, which the vendored bundle feature-detects.
+                .UseMeshUi("/mesh-ui", "manifest.json", "/benzene/invoke",
+                    dispatchUrl: null,
+                    logoutUrl: oidcOptions.BasePath + "/logout",
+                    refreshUrl: refreshGuardOptions.Path)
                 // The mesh-hosted per-service Spec UI (mesh-ui's "benzene:spec" link). Renders each service's
                 // spec from the same-origin services/{name}.json snapshot, so a service only serves JSON.
                 .UseMeshSpecUi("/mesh-spec-ui.html", "manifest.json")
@@ -131,10 +143,46 @@ public class Startup : BenzeneStartUp
                 // The Mesh UI's live fleet endpoint: an inner benzene-message pipeline routing only the
                 // collector's read queries (mesh:query:*) over the composite X-Ray+CloudWatch read model.
                 // Queries only - there's no push ingestion here (X-Ray/CloudWatch are the feeds).
-                .UseBenzeneMessage(new BenzeneMessageHttpOptions { Path = "/benzene/invoke" },
+                //
+                // The TopicFilter is load-bearing, not decoration. `UseMessageHandlers(types)` scopes
+                // which handler types get *registered*, NOT which topics this endpoint can *reach*:
+                // handler discovery is a single process-wide union of every AddMessageHandlers call (see
+                // Benzene.Core.MessageHandlers.DI.Extensions.RegisterHandlerFinderInfrastructure), so
+                // without this filter a POSTed envelope naming ANY topic in the app - including
+                // benzene:mesh:aggregate - would dispatch here, reaching the aggregation pass down a
+                // path that never goes past UseMeshRefreshGuard's header + throttle checks. Restricting
+                // the endpoint to the read queries it exists to serve closes that off at the door.
+                .UseBenzeneMessage(new BenzeneMessageHttpOptions
+                    {
+                        Path = "/benzene/invoke",
+                        TopicFilter = topic => topic.StartsWith("benzene:mesh:query:", StringComparison.OrdinalIgnoreCase),
+                    },
                     fleet => fleet.UseMessageHandlers(MeshCollectorHandlers.Queries))
                 .UseMessageHandlers(handlers));
         });
+    }
+
+    /// <summary>
+    /// Builds the refresh endpoint's guard config. Only the throttle window is configurable (via
+    /// <c>MESH_REFRESH_MIN_INTERVAL_SECONDS</c>, wired by Terraform from <c>var.refresh_min_interval_seconds</c>);
+    /// the path and the <c>X-Benzene-Refresh</c> header name are fixed contracts shared with the mesh UI,
+    /// so they stay as the guard's own defaults rather than becoming another thing that can drift.
+    /// Unlike the OIDC values this one does NOT throw when unset - a missing throttle window is not a
+    /// security hole (the guard's own 30s default applies), whereas a missing client secret is.
+    /// </summary>
+    private static MeshRefreshGuardOptions BuildRefreshGuardOptions()
+    {
+        var options = new MeshRefreshGuardOptions();
+
+        // Parse leniently but reject nonsense: a negative value would disable the throttle by accident,
+        // so only a non-negative parse wins. 0 is honoured as an explicit "throttle off" escape hatch.
+        if (double.TryParse(Environment.GetEnvironmentVariable("MESH_REFRESH_MIN_INTERVAL_SECONDS"),
+                out var seconds) && seconds >= 0)
+        {
+            options.MinimumInterval = TimeSpan.FromSeconds(seconds);
+        }
+
+        return options;
     }
 
     /// <summary>

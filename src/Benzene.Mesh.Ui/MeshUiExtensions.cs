@@ -57,18 +57,38 @@ public static class MeshUiExtensions
     /// <c>Benzene.Mesh.Dispatch</c> itself additionally gates dispatch behind a Production check
     /// (refused unless the host sets <c>AllowInProduction</c>), independent of this parameter.
     /// </param>
+    /// <param name="logoutUrl">
+    /// The URL the page's Sign-out control navigates to - the host's OIDC logout route (e.g.
+    /// <c>Benzene.Mesh.Auth.Oidc</c>'s <c>{BasePath}/logout</c>). When null (the default) the page
+    /// renders no Sign-out control, which is the right behaviour for an ungated host: a page nobody
+    /// had to log into has nothing to sign out of. There is deliberately no constant default for this
+    /// one - the logout route is the auth package's configurable <c>BasePath</c> plus <c>/logout</c>,
+    /// and only the host knows its <c>BasePath</c>.
+    /// </param>
+    /// <param name="refreshUrl">
+    /// The endpoint the page's Refresh control POSTs to, to trigger a discovery/aggregation pass -
+    /// e.g. <see cref="DefaultRefreshUrl"/> on a host that routes an aggregate handler over HTTP. When
+    /// null (the default) the page stays read-only. Deliberately a separate opt-in, for exactly the
+    /// reason <paramref name="dispatchUrl"/> is: a host that happens to have wired auth, or an
+    /// aggregator, must not thereby acquire a button that fans out to every service in the mesh and
+    /// rewrites the whole catalog on each click. Passing it is a statement that the host also guards
+    /// that endpoint - <c>Benzene.Mesh.Artifacts</c>'s <c>UseMeshRefreshGuard()</c> is the matching
+    /// server side, and the page's POST carries the <c>X-Benzene-Refresh</c> header it requires.
+    /// </param>
     /// <returns>The middleware pipeline builder, for chaining.</returns>
     public static IMiddlewarePipelineBuilder<TContext> UseMeshUi<TContext>(
         this IMiddlewarePipelineBuilder<TContext> app,
         string path = DefaultPath,
         string manifestUrl = DefaultManifestUrl,
         string? envelopeUrl = null,
-        string? dispatchUrl = null)
+        string? dispatchUrl = null,
+        string? logoutUrl = null,
+        string? refreshUrl = null)
         where TContext : IHttpContext
     {
         app.Register(x =>
             x.AddSingleton(resolver => new MeshUiMiddleware<TContext>(
-                path, manifestUrl, envelopeUrl, dispatchUrl,
+                path, manifestUrl, envelopeUrl, dispatchUrl, logoutUrl, refreshUrl,
                 resolver.GetService<IHttpRequestAdapter<TContext>>(),
                 resolver.GetService<IBenzeneResponseAdapter<TContext>>()
             )));
@@ -130,4 +150,11 @@ public static class MeshUiExtensions
     /// it as <c>UseMeshUi</c>'s <c>dispatchUrl</c> on a mesh host that also wires
     /// <c>Benzene.Mesh.Dispatch</c>'s <c>UseMeshDispatch()</c> on the same pipeline.</summary>
     public const string DefaultDispatchUrl = "/benzene/invoke";
+
+    /// <summary>The conventional path a mesh host routes its on-demand aggregation pass on, and so the
+    /// value to pass as <c>UseMeshUi</c>'s <c>refreshUrl</c> - matching
+    /// <c>Benzene.Mesh.Artifacts.MeshRefreshGuardOptions.DefaultPath</c>, the guard that stands in front
+    /// of it. Named rather than defaulted-on because opting in is the host's explicit decision (see
+    /// <c>UseMeshUi</c>'s <c>refreshUrl</c> remarks).</summary>
+    public const string DefaultRefreshUrl = "/mesh/refresh";
 }

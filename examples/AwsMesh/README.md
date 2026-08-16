@@ -192,8 +192,9 @@ Notes: the counter is recorded around the whole pipeline, so **every** invoke pr
 payload that fails validation just lands as `result=failure`. Validation to respect: `orders:create` needs a
 non-empty item and quantity 1–1000; `payments:capture` a 3-char currency and amount > 0; `shipping:book` a
 carrier in {DPD, RoyalMail, UPS, FedEx}. After firing a batch, give the metric ~1–2 min to reach CloudWatch,
-`POST /mesh/refresh` to aggregate now (instead of waiting for the schedule), then check `usage.json` / the
-Mesh UI Usage column.
+press **Refresh** in the Mesh UI (or `POST /mesh/refresh` with the `X-Benzene-Refresh: 1` header — see
+**Protecting `POST /mesh/refresh`**) to aggregate now instead of waiting for the schedule, then check
+`usage.json` / the Mesh UI Usage column.
 
 ## What each service shows off
 
@@ -443,7 +444,9 @@ so each service's Spec UI and the Mesh UI serve their relative assets from their
      API Gateway URL isn't known until then.
    - `service_spec_ui_urls` — each service's Spec UI (not gated - the six domain services are out of
      scope for the mesh's login gate).
-   - `mesh_refresh_url` — POST to force a discovery+aggregation pass now (requires login).
+   - `mesh_refresh_url` — POST to force a discovery+aggregation pass now. Requires login **and** the
+     `X-Benzene-Refresh: 1` header, and is throttled to one pass per `var.refresh_min_interval_seconds`
+     — see **Protecting `POST /mesh/refresh`** below.
 
 ## Auth setup (Google OAuth login gate)
 
@@ -476,7 +479,97 @@ example is what makes it Google specifically (`Issuer = "https://accounts.google
    with your own account(s) before deploying, or you'll deploy a mesh only the default account can open.
 6. **Log in**: open `mesh_ui_url` - it redirects to `/mesh/auth/login`, then to Google, then back. A
    successful login sets a session cookie good for 24 hours (`MeshOidcOptions.SessionDuration`).
-   `/mesh/auth/logout` clears it.
+   Once logged in the Mesh UI renders a **Sign out** control - the page feature-detects the
+   `data-logout-url` the host injects (`UseMeshUi`'s `logoutUrl`, wired in `Mesh/Startup.cs`) - which
+   hits the same `/mesh/auth/logout` route, still reachable directly if you prefer.
+
+## Protecting `POST /mesh/refresh`
+
+A refresh is not a cheap read. One call enumerates the account's Lambdas (`ListFunctions`/`ListTags`),
+directly `Invoke`s all six service Lambdas twice each (`spec` + `healthcheck`), rewrites the whole
+catalog in S3, and traces all of it into X-Ray. Login alone bounds none of that, so four independent
+layers sit in front of it - each closing something the others can't.
+
+| Layer | Where | What it stops | Response |
+| --- | --- | --- | --- |
+| **Session cookie** | `UseMeshOidcAuth` (`Benzene.Mesh.Auth.Oidc`) | Anyone without an allowlisted Google login | `401` |
+| **Custom header `X-Benzene-Refresh`** | `UseMeshRefreshGuard` (`Benzene.Mesh.Artifacts`) | CSRF - a logged-in operator's browser being made to POST by another site | `403` |
+| **Minimum interval between passes** | `UseMeshRefreshGuard` | Hammering, stuck retry loops, sustained cost from a stolen session | `429` + `Retry-After` |
+| **API Gateway rate/burst limits** | `aws_apigatewayv2_stage.mesh` | Floods, *before* a Lambda invocation is billed | `429` (from API Gateway) |
+
+**Why a custom header is the right CSRF control here.** A cross-site `<form method="post">` - the only
+cross-site POST a browser makes without asking permission - **cannot set a custom header at all**. A
+cross-origin `fetch()` that does set one is no longer a "simple request", so the browser must first send
+a CORS **preflight**, and nothing on this pipeline ever approves one for `/mesh/refresh`. Between them
+that leaves only genuine same-origin callers - which is exactly the Mesh UI's own Refresh button (it
+sends `X-Benzene-Refresh: 1`). The session cookie is already `SameSite=Lax`, which blocks the cookie on
+a cross-site POST by itself; the header is deliberate defense in depth, because `SameSite` is a single
+control, browser behaviour varies, and `Lax` has known edge cases. `GET` is separately not a way in: the
+route table maps `POST` only, and the guard refuses every method that lacks the header regardless -
+which matters, because a top-level `GET` navigation is the one cross-site request `Lax` *does* still
+send cookies on.
+
+**How the throttle works.** The aggregator already writes `generatedAtUtc` into `manifest.json` on every
+successful pass, so the guard reads that back from the same artifact store and, when the last pass was
+inside `var.refresh_min_interval_seconds` (default 30), answers `429` with a `Retry-After` instead of
+running one. Reusing state the mesh already maintains is the whole point: this needs **no new
+infrastructure** - no DynamoDB lock table, no Redis, no lease.
+
+**Configuring it.** `var.refresh_min_interval_seconds` → `MESH_REFRESH_MIN_INTERVAL_SECONDS` on the mesh
+Lambda → `MeshRefreshGuardOptions.MinimumInterval` (see `Mesh/Startup.cs`); `0` turns the throttle off.
+The edge limits are `var.mesh_api_throttling_rate_limit` (default 10 rps) and
+`var.mesh_api_throttling_burst_limit` (default 20), applied to the stage's `default_route_settings` so
+they cover every route on the mesh API, not just this one.
+
+**Calling it by hand:**
+
+```bash
+curl -XPOST -H 'X-Benzene-Refresh: 1' -b 'benzene_mesh_session=<cookie>' "$mesh_refresh_url"
+# 201 {"discovered":6}   a pass ran
+# 401                    no session, or an expired one
+# 403                    header missing
+# 429                    a pass ran less than refresh_min_interval_seconds ago
+```
+
+### Security notes - what this does and does not protect against
+
+Honest scope, so nobody reads more into it than is there.
+
+**It does protect against**
+
+- An unauthenticated stranger with the URL doing anything at all - the whole mesh HTTP surface is behind
+  the login gate.
+- A logged-in operator being made to trigger a pass by visiting a hostile page (CSRF): the custom header,
+  plus `SameSite=Lax`, plus POST-only routing.
+- Unbounded repeat passes from one session - a held-down Refresh button, a runaway client retry loop, a
+  replayed session cookie - being able to run a pass per request.
+- A request flood turning into a proportional bill: API Gateway refuses the excess at the edge, before
+  any Lambda invocation is billed.
+
+**It explicitly does not protect against**
+
+- **A compromised allowlisted Google account.** That account still has the full mesh surface, exactly as
+  designed. The throttle bounds how *fast* it can spend, not *whether* it can.
+- **Concurrent passes.** The throttle is a **rate limiter, not a distributed lock**: two requests that
+  arrive close enough together both read the same `generatedAtUtc` and both proceed, so they can race on
+  the same S3 keys. It bounds *sustained* abuse to roughly one pass per window, which is the cost-shaped
+  threat; it does not guarantee single-flight. Real single-flight would need a different mechanism (an S3
+  conditional write / `If-None-Match` lease, or a DynamoDB conditional put) - deliberately not built here.
+- **A missing or corrupt `manifest.json`.** The throttle **fails open** in that case, because the first
+  pass after a deploy legitimately has no manifest to read and failing closed would brick a fresh
+  deployment. Anyone able to delete or corrupt that object already has write access to the artifact
+  bucket, which is a strictly worse compromise than an unthrottled refresh; the edge limits still apply.
+- **Cost entirely.** The throttle *bounds* cost, it doesn't remove it - one pass per window, indefinitely,
+  is still real money. `var.aggregate_schedule` and the standing X-Ray/CloudWatch spend are the larger
+  line items anyway (see **Cost: this demo is not free while it merely exists**).
+- **The six domain-service Lambdas.** They aren't gated at all - only the mesh Lambda's own HTTP surface
+  is. Their spec/health endpoints are public by design in this demo.
+- **Anything a legitimate session can already read.** A `429` does tell the caller that a pass ran
+  recently - but that caller can simply `GET manifest.json` behind the same login and read the timestamp
+  directly, so it discloses nothing new. Both denial bodies are fixed and detail-free
+  (`{"error":"forbidden"}` / `{"error":"throttled"}`), matching `Benzene.Mesh.Auth.Oidc`'s
+  no-detail-leakage convention, and the `403` is answered before any storage read so it can't be used to
+  probe whether a catalog exists.
 
 ### Locked out or misconfigured? Here's what each failure looks like
 
@@ -535,12 +628,15 @@ recover, then leave it off for normal incremental deploys.
    and Cloud Service Profile-conformant, each with its own domain contract and health. Not gated - the
    mesh's login requirement below only applies to the mesh Lambda's own HTTP surface.
 2. **Trigger a mesh pass**: open `mesh_ui_url` in a browser first (logging in redirects you through
-   Google, per **Auth setup** above) - a plain `curl -XPOST "$mesh_refresh_url"` now gets `401` without
-   a session cookie. Once logged in, the browser session covers `/mesh/refresh` too, or wait for the
-   schedule (every 15 minutes by default, `var.aggregate_schedule`). A successful pass returns
-   `{ "discovered": 6 }` once it has found the six `benzene`-tagged Lambdas. The schedule keeps the
-   catalog + usage feed fresh on its own; the Mesh UI explorer loads artifacts once per page load, so
-   reload the page to pick up a newer pass.
+   Google, per **Auth setup** above), then press **Refresh** in the Mesh UI - the simplest route, since
+   the page already has the session and sends the required header. By hand it's
+   `curl -XPOST -H 'X-Benzene-Refresh: 1' -b '<session cookie>' "$mesh_refresh_url"`: a plain
+   `curl -XPOST "$mesh_refresh_url"` gets `401` (no session), and one with a session but no header gets
+   `403`. Or wait for the schedule (every 15 minutes by default, `var.aggregate_schedule`). A successful
+   pass returns `{ "discovered": 6 }` once it has found the six `benzene`-tagged Lambdas; pressing
+   Refresh again within 30 seconds gets `429` (see **Protecting `POST /mesh/refresh`**). The schedule
+   keeps the catalog + usage feed fresh on its own; the Mesh UI explorer loads artifacts once per page
+   load, so reload the page to pick up a newer pass.
 3. **Open the Mesh UI** (`mesh_ui_url`) — after logging in, the catalog of the six services the mesh
    **discovered by itself** (no `mesh.json`), each interrogated by direct Lambda-Invoke, with health and
    dependencies. Below the service list, the **Topics** table is the cross-service catalog (every topic
@@ -552,7 +648,7 @@ recover, then leave it off for normal incremental deploys.
 That's the end-to-end test: services on one end, the self-discovering mesh on the other.
 
 The `POST $mesh_refresh_url` endpoint returns **201 Created** (a pass creates/refreshes the catalog
-artifacts) with `{ "discovered": N }`.
+artifacts) with `{ "discovered": N }` — or `401`/`403`/`429` per **Protecting `POST /mesh/refresh`**.
 
 ## How discovery is scoped
 

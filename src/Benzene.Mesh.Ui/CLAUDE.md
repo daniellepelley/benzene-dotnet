@@ -533,14 +533,37 @@ This package renders the catalog; it does **not** generate it. Generation lives 
     catalog with `mesh:query:*` data polled from that wire-envelope endpoint. `envelopeUrl` null →
     the static catalog viewer, Fleet plane dormant (the folded-in successor to the retired
     `MeshFleetUiPage`).
+  - `GetHtml(string? manifestUrl, string? envelopeUrl, string? dispatchUrl)` — additionally injects
+    `data-dispatch-url`, which the **Test Console** feature-detects to offer a real send.
+  - `GetHtml(string? manifestUrl, string? envelopeUrl, string? dispatchUrl, string? logoutUrl, string? refreshUrl)`
+    — additionally injects `data-logout-url` (the page renders a **Sign out** control) and
+    `data-refresh-url` (the page renders a **Refresh** control, plus a self-service empty state offering
+    to run the first pass). Every value is HTML-encoded into the `<html>` tag's attribute list, and each
+    is independently optional: an attribute that isn't injected leaves that control unrendered, because
+    the page feature-detects each one separately.
 - `MeshUiMiddleware<TContext> : IMiddleware<TContext> where TContext : IHttpContext` — transport-
-  agnostic HTTP middleware, same short-circuit shape as `Benzene.Spec.Ui`'s `SpecUiMiddleware`. Two
-  ctors: `(path, manifestUrl, …)` and `(path, manifestUrl, envelopeUrl, …)` (the latter wires the
-  live Fleet plane).
-- `MeshUiExtensions.UseMeshUi<TContext>(this IMiddlewarePipelineBuilder<TContext>, path = "/mesh-ui", manifestUrl = "manifest.json", envelopeUrl = null)`
+  agnostic HTTP middleware, same short-circuit shape as `Benzene.Spec.Ui`'s `SpecUiMiddleware`. One
+  ctor per `GetHtml` overload shape, each delegating to the widest one.
+- `MeshUiExtensions.UseMeshUi<TContext>(this IMiddlewarePipelineBuilder<TContext>, path = "/mesh-ui", manifestUrl = "manifest.json", envelopeUrl = null, dispatchUrl = null, logoutUrl = null, refreshUrl = null)`
   — registers the middleware on any Benzene HTTP pipeline. This is a **secondary convenience**,
   not the primary deployment path (see below). Pass `envelopeUrl` (e.g. `"/benzene/invoke"`) on a
   mesh host that also serves a `Benzene.Mesh.Collector` to fold the live Fleet plane into the catalog.
+
+### Every capability parameter is an explicit opt-in — the new two included
+`dispatchUrl` set the precedent and `logoutUrl`/`refreshUrl` follow it exactly: **none may be inferred**
+from another being set, from auth happening to be wired, or from an aggregator being registered. The rule
+is that a parameter which turns a read-only viewer into a page that *acts* on the estate has to be a
+sentence the host wrote deliberately.
+- `refreshUrl` (`MeshUiExtensions.DefaultRefreshUrl` = `/mesh/refresh`) is the sharpest case: it adds a
+  button that fans out to every service in the mesh and rewrites the whole catalog on each press — real
+  money per click. Passing it is also an implicit statement that the host guards that endpoint;
+  `Benzene.Mesh.Artifacts`' `UseMeshRefreshGuard()` is the matching server side, and the page's POST
+  carries the `X-Benzene-Refresh: 1` header that guard requires. **The header name and the default path
+  are a contract with the vendored bundle** — change one end without the other and the button gets a
+  `403` it cannot explain.
+- `logoutUrl` deliberately has no constant default: the route is `Benzene.Mesh.Auth.Oidc`'s configurable
+  `BasePath` plus `/logout`, and only the host knows its `BasePath`. Left null (the right default for an
+  ungated host) no Sign-out control renders — a page nobody had to log into has nothing to sign out of.
 - `MeshSpecUiPage` / `MeshSpecUiMiddleware<TContext>` / `UseMeshSpecUi<TContext>(path =
   "/mesh-spec-ui.html", manifestUrl = "manifest.json")` — the **mesh-hosted per-service Spec UI**
   (page: `mesh-spec-ui.html`), the target of `mesh-ui.html`'s per-service *spec* link. It renders a

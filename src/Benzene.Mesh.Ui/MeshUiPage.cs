@@ -86,6 +86,47 @@ public static class MeshUiPage
     /// </param>
     /// <returns>The complete, self-contained HTML document.</returns>
     public static string GetHtml(string? manifestUrl, string? envelopeUrl, string? dispatchUrl)
+        => GetHtml(manifestUrl, envelopeUrl, dispatchUrl, null, null);
+
+    /// <summary>
+    /// Gets the viewer HTML with a manifest URL, a live fleet-envelope endpoint, a dispatch endpoint,
+    /// a sign-out URL, and a refresh URL injected onto the document root. The page feature-detects each
+    /// injected attribute independently: with <paramref name="logoutUrl"/> it renders a Sign-out
+    /// control, and with <paramref name="refreshUrl"/> a Refresh control (plus a self-service empty
+    /// state offering to run the first pass); without either, those controls simply don't appear.
+    /// </summary>
+    /// <param name="manifestUrl">
+    /// The URL the page should fetch <c>manifest.json</c> from. If null or whitespace, no
+    /// <c>data-manifest-url</c> is injected (the page falls back to <c>?url=</c>/relative fetch).
+    /// </param>
+    /// <param name="envelopeUrl">
+    /// The wire-envelope endpoint the Fleet plane polls (same-origin path or absolute URL). If null
+    /// or whitespace, no <c>data-fleet-url</c> is injected and the Fleet plane stays dormant.
+    /// </param>
+    /// <param name="dispatchUrl">
+    /// The wire-envelope endpoint the Test Console POSTs <c>mesh:dispatch</c> messages to. See the
+    /// three-argument overload for why this is a separate opt-in. If null or whitespace, no
+    /// <c>data-dispatch-url</c> is injected and the Test Console cannot send messages.
+    /// </param>
+    /// <param name="logoutUrl">
+    /// The URL the page's Sign-out control navigates to - the host's OIDC logout route (for example
+    /// <c>{MeshOidcOptions.BasePath}/logout</c>). If null or whitespace, no <c>data-logout-url</c> is
+    /// injected and no Sign-out control is rendered - which is the right default for an ungated host,
+    /// where a page nobody had to log into has nothing to sign out of.
+    /// </param>
+    /// <param name="refreshUrl">
+    /// The endpoint the page's Refresh control POSTs to, to trigger a discovery/aggregation pass (for
+    /// example <c>/mesh/refresh</c>). Like <paramref name="dispatchUrl"/> this is a <b>deliberate,
+    /// separate opt-in</b> and is never inferred from the host happening to have wired auth or an
+    /// aggregator: it turns a read-only catalog viewer into a page with a button that fans out to every
+    /// service and rewrites the catalog on each click, so the host has to say so explicitly. If null or
+    /// whitespace, no <c>data-refresh-url</c> is injected and the page stays read-only. The page sends
+    /// the <c>X-Benzene-Refresh</c> header on that POST; the server side of that contract is
+    /// <c>Benzene.Mesh.Artifacts</c>'s <c>UseMeshRefreshGuard()</c>.
+    /// </param>
+    /// <returns>The complete, self-contained HTML document.</returns>
+    public static string GetHtml(
+        string? manifestUrl, string? envelopeUrl, string? dispatchUrl, string? logoutUrl, string? refreshUrl)
     {
         var attribute = string.Empty;
         if (!string.IsNullOrWhiteSpace(manifestUrl))
@@ -101,6 +142,16 @@ public static class MeshUiPage
         if (!string.IsNullOrWhiteSpace(dispatchUrl))
         {
             attribute += $" data-dispatch-url=\"{WebUtility.HtmlEncode(dispatchUrl)}\"";
+        }
+
+        if (!string.IsNullOrWhiteSpace(logoutUrl))
+        {
+            attribute += $" data-logout-url=\"{WebUtility.HtmlEncode(logoutUrl)}\"";
+        }
+
+        if (!string.IsNullOrWhiteSpace(refreshUrl))
+        {
+            attribute += $" data-refresh-url=\"{WebUtility.HtmlEncode(refreshUrl)}\"";
         }
 
         if (attribute.Length == 0)

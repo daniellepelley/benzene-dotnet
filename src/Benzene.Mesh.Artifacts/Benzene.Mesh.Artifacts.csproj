@@ -6,13 +6,21 @@
     <Nullable>enable</Nullable>
     <AssemblyName>Benzene.Mesh.Artifacts</AssemblyName>
     <RootNamespace>Benzene.Mesh.Artifacts</RootNamespace>
-    <Description>Serves a Benzene.Mesh.Aggregator's generated catalog artifacts (manifest.json, topology.json, services/*.json, usage.json, annotations.json, asyncapi.json) over HTTP from any registered IMeshArtifactStore, so the Mesh UI has something to load regardless of which store backs it.</Description>
+    <Description>Serves a Benzene.Mesh.Aggregator's generated catalog artifacts (manifest.json, topology.json, services/*.json, usage.json, annotations.json, asyncapi.json) over HTTP from any registered IMeshArtifactStore, so the Mesh UI has something to load regardless of which store backs it, and guards the endpoint that regenerates them (UseMeshRefreshGuard: a custom-header CSRF check plus a manifest-age throttle).</Description>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Benzene.Mesh.Aggregator\Benzene.Mesh.Aggregator.csproj" />
     <ProjectReference Include="..\Benzene.Http\Benzene.Http.csproj" />
+  </ItemGroup>
+
+  <!-- So MeshRefreshRoutingTest can assert that MeshRefreshGuardMiddleware's internal path
+       normalization agrees, spelling for spelling, with the route table's own. Same convention as
+       Benzene.Mesh.Auth.Oidc: the helper stays internal rather than becoming public API just to be
+       reachable from a test. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Benzene.Mesh.Test" />
   </ItemGroup>
 
 </Project>
