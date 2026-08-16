@@ -66,7 +66,9 @@ public class OidcLoginMiddleware<TContext> : IMiddleware<TContext>, ITerminalMid
 
         var queryParameters = _queryStringReader.GetQueryParameters(context);
         var requestedReturnTo = queryParameters.TryGetValue("returnTo", out var raw) ? raw : null;
-        var returnTo = ReturnToValidator.IsSafe(requestedReturnTo) ? requestedReturnTo! : "/";
+        // Falls back to the host's own landing page, not a hardcoded "/" - a direct visit to /login
+        // (no returnTo) must land somewhere the host actually serves.
+        var returnTo = ReturnToValidator.IsSafe(requestedReturnTo) ? requestedReturnTo! : _options.HomePath;
 
         var configuration = await _configurationManager.GetConfigurationAsync();
         var redirectUri = RequestUrl.BuildBaseUrl(request, _options) + _options.BasePath + "/callback";

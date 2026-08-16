@@ -42,6 +42,21 @@ public class MeshOidcOptions
     /// </summary>
     public string BasePath { get; set; } = "/mesh/auth";
 
+    /// <summary>
+    /// Where this host's landing page actually lives - used as the redirect target after logout, and as
+    /// the fallback <c>returnTo</c> when a login arrives without a (valid) one. Defaults to <c>/</c>,
+    /// which is correct only for a host that genuinely serves something at its root.
+    /// </summary>
+    /// <remarks>
+    /// Set this whenever the thing being protected is NOT at the root - e.g. a mesh serving its UI at
+    /// <c>/mesh-ui</c>. Leaving it at <c>/</c> there produces a confusing loop rather than an obvious
+    /// error: logout clears the session and redirects to <c>/</c>, the gate bounces that to login, the
+    /// provider silently re-authenticates an already-signed-in user, and the callback returns them to
+    /// <c>/</c> - which resolves no route and renders a bare <c>not-found</c> problem document. The user
+    /// sees a 404 and no sign that they were ever signed out (they were).
+    /// </remarks>
+    public string HomePath { get; set; } = "/";
+
     /// <summary>The allowed <c>email</c> claim values (case-insensitive, exact match - no substring or
     /// domain matching). Re-checked on every gated request, not just cached into the session cookie, so
     /// removing an email here revokes access on the very next request even for an existing session.
@@ -141,6 +156,17 @@ public class MeshOidcOptions
         if (string.IsNullOrWhiteSpace(BasePath) || !BasePath.StartsWith('/'))
         {
             throw new System.ArgumentException($"{nameof(BasePath)} must be a non-empty, absolute path.", nameof(BasePath));
+        }
+
+        // HomePath is a redirect target (post-logout, and the login fallback), so it gets the same
+        // open-redirect guard as a caller-supplied returnTo - a misconfigured absolute URL here would
+        // otherwise hand every logout to another origin.
+        if (!ReturnToValidator.IsSafe(HomePath))
+        {
+            throw new System.ArgumentException(
+                $"{nameof(HomePath)} must be a same-origin, path-absolute URL (e.g. \"/mesh-ui\") - never " +
+                "an absolute or protocol-relative URL, which would turn logout into an open redirect.",
+                nameof(HomePath));
         }
 
         if (ValidAlgorithms is not { Length: > 0 })

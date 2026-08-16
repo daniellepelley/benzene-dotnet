@@ -94,4 +94,29 @@ public class MeshOidcOptionsValidateTest
         options.ValidAlgorithms = Array.Empty<string>();
         Assert.Throws<ArgumentException>(() => options.Validate());
     }
+
+    [Theory]
+    [InlineData("https://evil.com")]
+    [InlineData("//evil.com")]
+    [InlineData("/\\evil.com")]
+    [InlineData("mesh-ui")]
+    [InlineData("")]
+    public void HomePathThatIsNotASameOriginAbsolutePath_Throws(string homePath)
+    {
+        // HomePath is a redirect target (post-logout, and the login fallback), so a misconfigured
+        // absolute/protocol-relative value would turn every logout into an open redirect.
+        var options = Valid();
+        options.HomePath = homePath;
+        Assert.Throws<ArgumentException>(() => options.Validate());
+    }
+
+    [Theory]
+    [InlineData("/")]
+    [InlineData("/mesh-ui")]
+    public void SameOriginAbsoluteHomePath_IsAccepted(string homePath)
+    {
+        var options = Valid();
+        options.HomePath = homePath;
+        options.Validate();
+    }
 }

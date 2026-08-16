@@ -33,6 +33,13 @@ namespace Benzene.Examples.AwsMesh.Mesh;
 /// </summary>
 public class Startup : BenzeneStartUp
 {
+    /// <summary>
+    /// Where this mesh serves its UI — and therefore what counts as "home" for the auth gate
+    /// (<see cref="MeshOidcOptions.HomePath"/>). Shared by both so they cannot drift: nothing is served
+    /// at "/", so a post-logout redirect there resolves no route.
+    /// </summary>
+    private const string MeshUiPath = "/mesh-ui";
+
     public override IConfiguration GetConfiguration()
         => new ConfigurationBuilder().AddEnvironmentVariables().Build();
 
@@ -129,7 +136,7 @@ public class Startup : BenzeneStartUp
                 // Fleet landing view), rather than a disconnected second page.
                 // logoutUrl/refreshUrl are explicit opt-ins (see UseMeshUi's remarks): they light up the
                 // page's Sign-out and Refresh controls, which the vendored bundle feature-detects.
-                .UseMeshUi("/mesh-ui", "manifest.json", "/benzene/invoke",
+                .UseMeshUi(MeshUiPath, "manifest.json", "/benzene/invoke",
                     dispatchUrl: null,
                     logoutUrl: oidcOptions.BasePath + "/logout",
                     refreshUrl: refreshGuardOptions.Path)
@@ -212,6 +219,12 @@ public class Startup : BenzeneStartUp
             SigningKey = signingKey,
             AllowedEmails = allowedEmails,
             BasePath = "/mesh/auth",
+            // This mesh serves nothing at "/" — its landing page is the Mesh UI. Left at the default,
+            // signing out redirects to a route that doesn't exist: the gate bounces "/" back through
+            // login, Google silently re-authenticates the still-signed-in user, and the callback
+            // returns them to "/" again, rendering a bare not-found problem document with no sign
+            // they were ever signed out (they were).
+            HomePath = MeshUiPath,
         };
     }
 }

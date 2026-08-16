@@ -49,7 +49,9 @@ public class OidcLogoutMiddleware<TContext> : IMiddleware<TContext>, ITerminalMi
         _responseAdapter.SetResponseHeader(context, "Set-Cookie",
             CookieHeader.BuildExpired(OidcCookies.SessionCookieName, _options.CookiePath));
         _responseAdapter.SetStatusCode(context, "302");
-        _responseAdapter.SetResponseHeader(context, "Location", "/");
+        // MeshOidcOptions.HomePath, not a hardcoded "/": a host whose landing page isn't at the root
+        // would otherwise redirect the just-signed-out user to a route it doesn't serve.
+        _responseAdapter.SetResponseHeader(context, "Location", _options.HomePath);
         _responseAdapter.SetBody(context, string.Empty);
         await _responseAdapter.FinalizeAsync(context);
     }
