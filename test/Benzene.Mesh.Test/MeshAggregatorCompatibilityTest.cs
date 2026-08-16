@@ -103,6 +103,51 @@ public class MeshAggregatorCompatibilityTest : IDisposable
     }
 
     [Fact]
+    public async Task PropertyRemovedFromResponse_IsBreaking()
+    {
+        // The mirror of the request case above, and the reason direction is part of the taxonomy at
+        // all: the client READS a response, so deleting a field there breaks it.
+        var spec = """
+        {"requests":[
+          {"topic":"order:get","version":"1","response":{"$ref":"#/components/schemas/V1"}},
+          {"topic":"order:get","version":"2","response":{"$ref":"#/components/schemas/V2"}}],
+         "components":{"schemas":{
+           "V1":{"type":"object","properties":{"id":{"type":"string"},"total":{"type":"number"}}},
+           "V2":{"type":"object","properties":{"id":{"type":"string"}}}}}}
+        """;
+
+        var v2 = Assert.Single((await Aggregate(spec)).Topics, t => t.Topic == "order:get" && t.Version == "2");
+
+        Assert.Equal(MeshCompatibilityVerdict.Breaking, v2.Compatibility!.Overall);
+        var change = Assert.Single(v2.Compatibility.Changes);
+        Assert.Equal("response", change.Direction);
+        Assert.Equal("order:get.response.total", change.Path);
+    }
+
+    [Fact]
+    public async Task EventSideMapsToTheEventDirection_SoARemovalIsBreakingNotAWarning()
+    {
+        // A message schema is an EVENT, not a request. Getting this mapping wrong would classify a
+        // deleted event field as a mere warning — the "parcels to flats with no flat number" case,
+        // which the taxonomy does rank breaking precisely because a consumer reads it.
+        var spec = """
+        {"events":[
+          {"topic":"shipping:book","version":"1","message":{"$ref":"#/components/schemas/V1"}},
+          {"topic":"shipping:book","version":"2","message":{"$ref":"#/components/schemas/V2"}}],
+         "components":{"schemas":{
+           "V1":{"type":"object","properties":{"line1":{"type":"string"},"line2":{"type":"string"}}},
+           "V2":{"type":"object","properties":{"line1":{"type":"string"}}}}}}
+        """;
+
+        var v2 = Assert.Single((await Aggregate(spec)).Topics, t => t.Topic == "shipping:book" && t.Version == "2");
+
+        var change = Assert.Single(v2.Compatibility!.Changes);
+        Assert.Equal("event", change.Direction);
+        Assert.Equal(MeshCompatibilityVerdict.Breaking, change.Compatibility);
+        Assert.Equal("shipping:book.message.line2", change.Path);
+    }
+
+    [Fact]
     public async Task TypeChange_IsBreaking_AndRecordsThatTheWalkStopped()
     {
         var catalog = await Aggregate(Versioned(
