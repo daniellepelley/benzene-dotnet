@@ -1072,6 +1072,77 @@ public class MeshAggregatorTest : IDisposable
     }
 
     [Fact]
+    public async Task RunOnceAsync_SecondRun_ClassifiesTheDriftDownToTheField()
+    {
+        // The finding, not just the detection. "Payload schema changed (request)" tells a reader
+        // something moved and refuses to say what, or whether it breaks them - which is where triage
+        // stops and hand-diffing spec documents starts.
+        var store = new FileSystemMeshArtifactStore(_rootDirectory);
+        await CatalogDiffAggregator(
+            """{"requests":[{"topic":"order:create","request":{"type":"object","properties":{"id":{"type":"string"}}}}]}""",
+            store).RunOnceAsync(SingleServiceRegistry());
+        await CatalogDiffAggregator(
+            """{"requests":[{"topic":"order:create","request":{"type":"object","properties":{"id":{"type":"string"},"customerId":{"type":"string"}},"required":["customerId"]}}]}""",
+            store).RunOnceAsync(SingleServiceRegistry());
+
+        var catalog = await ReadCatalogAsync(store);
+
+        var change = Assert.Single(Assert.Single(catalog.Topics, t => t.Topic == "order:create").Changes);
+        Assert.Equal(MeshTopicChangeKind.SchemaChanged, change.Kind);
+        // A newly-required request property rejects a caller built against the previous catalogue.
+        Assert.Equal(MeshCompatibilityVerdict.Breaking, change.Compatibility);
+        var field = Assert.Single(change.SchemaChanges!);
+        Assert.Contains("customerId", field.Path);
+        Assert.Equal("request", field.Direction);
+        Assert.Equal(MeshCompatibilityVerdict.Breaking, field.Compatibility);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_SecondRun_DriftOutsideTheTaxonomyIsNotReportedAsCompatible()
+    {
+        // The schemas differ - that is why there is a change at all - but nothing the taxonomy is
+        // defined over moved. "compatible" would assert the rules looked at it and cleared it, which
+        // is the absence-as-good-news defect landing on a governance verdict.
+        var store = new FileSystemMeshArtifactStore(_rootDirectory);
+        await CatalogDiffAggregator(
+            """{"requests":[{"topic":"order:create","request":{"type":"object","properties":{"id":{"type":"string","description":"The id"}}}}]}""",
+            store).RunOnceAsync(SingleServiceRegistry());
+        await CatalogDiffAggregator(
+            """{"requests":[{"topic":"order:create","request":{"type":"object","properties":{"id":{"type":"string","description":"The order id"}}}}]}""",
+            store).RunOnceAsync(SingleServiceRegistry());
+
+        var catalog = await ReadCatalogAsync(store);
+
+        var change = Assert.Single(Assert.Single(catalog.Topics, t => t.Topic == "order:create").Changes);
+        Assert.Equal(MeshTopicChangeKind.SchemaChanged, change.Kind);
+        Assert.Empty(change.SchemaChanges!);
+        Assert.Null(change.Compatibility);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_SecondRun_ADriftedTopicKeepsItsCrossVersionVerdict()
+    {
+        // The catalogue is built with version-over-version verdicts and only then diffed against the
+        // previous run, so a rebuild that dropped `compatibility` stripped the verdict from exactly
+        // the topics that had just changed - the ones a reader opens the page to judge.
+        var store = new FileSystemMeshArtifactStore(_rootDirectory);
+        const string v1 = """{"topic":"order:create","version":"v1","request":{"type":"object","properties":{"id":{"type":"string"}}}}""";
+        const string v2Spec = """{"topic":"order:create","version":"v2","request":{"type":"object","properties":{"id":{"type":"string"},"customerId":{"type":"string"}},"required":["customerId"]}}""";
+        await CatalogDiffAggregator("""{"requests":[""" + v1 + "]}", store).RunOnceAsync(SingleServiceRegistry());
+        await CatalogDiffAggregator("""{"requests":[""" + v1 + "," + v2Spec + "]}", store)
+            .RunOnceAsync(SingleServiceRegistry());
+
+        var catalog = await ReadCatalogAsync(store);
+
+        var v2 = Assert.Single(catalog.Topics, t => t.Topic == "order:create" && t.Version == "v2");
+        Assert.NotEmpty(v2.Changes); // new this run, so the diff rewrote the entry
+        Assert.NotNull(v2.Compatibility);
+        Assert.Equal("v1", v2.Compatibility!.BaselineVersion);
+        // v2 requires a property v1 did not - breaking for a consumer still calling on v1's shape.
+        Assert.Equal(MeshCompatibilityVerdict.Breaking, v2.Compatibility.Overall);
+    }
+
+    [Fact]
     public async Task RunOnceAsync_SecondRun_FlagsAConsumerSetChange()
     {
         // The same topic handled by a differently-named service across runs (a rename, or a

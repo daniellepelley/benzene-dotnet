@@ -721,8 +721,19 @@ public class MeshAggregator
         if (Canonical(entry.MessageSchema) != Canonical(previous.MessageSchema)) changedSides.Add("message");
         if (changedSides.Count > 0)
         {
+            // The field-level breakdown, through the SAME classifier the version-over-version
+            // comparison uses. Announcing "payload schema changed (request)" and stopping is a
+            // detection dressed as a finding - it cannot tell a reader which field moved or whether
+            // anything breaks, and both schemas are already in hand here.
+            var schemaChanges = ClassifyDrift(previous, entry);
             changes.Add(new MeshTopicChange(MeshTopicChangeKind.SchemaChanged,
-                "Payload schema changed (" + string.Join(", ", changedSides) + ")"));
+                "Payload schema changed (" + string.Join(", ", changedSides) + ")",
+                schemaChanges,
+                // Null, not "compatible", when nothing classifiable moved. The schemas differ - that is
+                // why we are here - but the difference is outside the taxonomy (a description, an
+                // example, a `minimum`), and "compatible" would assert the rules looked at it and
+                // cleared it. Empty array + null verdict says what actually happened.
+                schemaChanges.Length == 0 ? null : Worst(schemaChanges.ToList())));
         }
 
         AddParticipantSetChange(changes, MeshTopicChangeKind.ProducersChanged, "Producers",
@@ -731,6 +742,56 @@ public class MeshAggregator
             previous.Consumers.Select(consumer => consumer.Service), entry.Consumers.Select(consumer => consumer.Service));
 
         return changes.Count > 0 ? WithChanges(entry, changes.ToArray()) : entry;
+    }
+
+    /// <summary>
+    /// Classifies what moved in one (topic, version)'s payload schemas between the previous run and
+    /// this one — the run-over-run axis, as opposed to <see cref="CompareVersions"/>'s
+    /// version-over-version axis. Same three sides, same <see cref="JsonSchemaComparer"/>, same
+    /// taxonomy, so a field named breaking here and breaking there means the same thing.
+    /// </summary>
+    /// <remarks>
+    /// The direction convention is worth stating, because it is what makes the verdict mean anything:
+    /// <paramref name="previous"/> is the baseline and <paramref name="current"/> the candidate, so a
+    /// required request property that appeared since the last run reads as breaking — a caller built
+    /// against yesterday's catalogue would now be rejected. Reversing them would silently invert every
+    /// verdict on this page.
+    /// <para>
+    /// A side published in only one of the two runs is skipped rather than compared against null.
+    /// Appearing or disappearing is a real event, but it is a <em>topic</em>-shaped one that the
+    /// side list in the change's description already carries; classifying it as "every property
+    /// removed" would bury the actual finding under a field-level diff of the whole schema.
+    /// </para>
+    /// </remarks>
+    private static MeshSchemaChange[] ClassifyDrift(MeshTopicEntry previous, MeshTopicEntry current)
+    {
+        var changes = new List<MeshSchemaChange>();
+
+        foreach (var side in new[]
+                 {
+                     (Direction: SchemaDirection.Request, Name: "request",
+                         Before: previous.RequestSchema, After: current.RequestSchema),
+                     (Direction: SchemaDirection.Response, Name: "response",
+                         Before: previous.ResponseSchema, After: current.ResponseSchema),
+                     (Direction: SchemaDirection.Event, Name: "message",
+                         Before: previous.MessageSchema, After: current.MessageSchema),
+                 })
+        {
+            if (side.Before == null || side.After == null)
+            {
+                continue;
+            }
+
+            foreach (var change in JsonSchemaComparer.Compare(
+                         side.Before, side.After, side.Direction, current.Topic, $"{current.Topic}.{side.Name}"))
+            {
+                changes.Add(new MeshSchemaChange(
+                    Camel(change.Kind.ToString()), Camel(change.Direction.ToString()),
+                    change.Path, change.Description, Camel(change.Compatibility.ToString())));
+            }
+        }
+
+        return changes.ToArray();
     }
 
     private static void AddParticipantSetChange(List<MeshTopicChange> changes, string kind, string label,
@@ -747,11 +808,26 @@ public class MeshAggregator
         }
     }
 
+    /// <summary>
+    /// Re-stamps <paramref name="entry"/> with its run-over-run <paramref name="changes"/>, carrying
+    /// every other field — <b>including <see cref="MeshTopicEntry.Compatibility"/></b> — through
+    /// untouched.
+    /// </summary>
+    /// <remarks>
+    /// That last word is load-bearing. The catalogue is built with version-over-version verdicts and
+    /// only then diffed against the previous run, so an entry that omitted `compatibility` here
+    /// dropped the verdict from precisely the topics that had just changed — the ones a reader opens
+    /// the page to judge. The result read as "this topic drifted, and we have no opinion on whether it
+    /// breaks anyone", while the same aggregator had computed exactly that opinion moments earlier and
+    /// thrown it away. A quiet field-dropping rebuild is an easy defect to reintroduce; hence the
+    /// comment rather than a silent constructor call.
+    /// </remarks>
     private static MeshTopicEntry WithChanges(MeshTopicEntry entry, MeshTopicChange[] changes)
     {
         return new MeshTopicEntry(
             entry.Topic, entry.Version, entry.Reserved, entry.Consumers, entry.Producers, entry.Status,
-            entry.RequestSchema, entry.ResponseSchema, entry.MessageSchema, entry.SchemaMismatch, changes);
+            entry.RequestSchema, entry.ResponseSchema, entry.MessageSchema, entry.SchemaMismatch, changes,
+            entry.Compatibility);
     }
 
     /// <summary>
