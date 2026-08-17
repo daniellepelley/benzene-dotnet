@@ -149,4 +149,87 @@ public class DescriptorEmitterTest
         var (_, descriptorPath) = DescriptorEmitter.ResolveOutputPaths(Options("descriptor", output: "/tmp/foo/custom.json"));
         Assert.Equal("/tmp/foo/custom.json", descriptorPath);
     }
+
+    // ── mesh.md §2.5: version order is declared, and declared wrong fails the build ───────────────
+    //
+    // The build that declares a version is the cheapest place in the system to catch a mismatch.
+    // After here the value travels: into a catalogue, into a comparison, and onto a screen where
+    // somebody decides a deployment from it. An upgrade shown as a rollback is the failure this
+    // guards, and it is silent without these checks.
+
+    private static EmitOptions Versioned(string? version, string? scheme) => new()
+    {
+        AssemblyPath = MinimalAssemblyPath,
+        ServiceName = "minimal",
+        ServiceVersion = version,
+        VersionScheme = scheme,
+    };
+
+    [Theory]
+    [InlineData("42", "integer")]
+    [InlineData("1.3.0", "semver")]
+    [InlineData("1.3.0-rc.1", "semver")]
+    [InlineData("2026-08-16T09-00", "lexicographic")]
+    public void ValidateVersion_AcceptsAValueThatParsesUnderItsDeclaredScheme(string version, string scheme)
+    {
+        Assert.Null(Versioned(version, scheme).ValidateVersion());
+    }
+
+    [Theory]
+    [InlineData("1.3.0", "integer")]
+    [InlineData("42", "semver")]
+    [InlineData("v1.3.0", "semver")]
+    [InlineData("-1", "integer")]
+    public void ValidateVersion_RejectsAValueThatDoesNotParseUnderItsDeclaredScheme(string version, string scheme)
+    {
+        Assert.NotNull(Versioned(version, scheme).ValidateVersion());
+    }
+
+    [Fact]
+    public void ValidateVersion_RequiresASchemeWheneverAVersionIsDeclared()
+    {
+        // §2.5 defines no default on purpose. A version with no declared comparison rule is an
+        // identity, not a position in an order, and picking a rule for it silently would be a guess
+        // wearing a specification's clothes.
+        var error = Versioned("42", null).ValidateVersion();
+
+        Assert.NotNull(error);
+        Assert.Contains("--version-scheme", error);
+    }
+
+    [Fact]
+    public void ValidateVersion_RejectsAnUnknownScheme()
+    {
+        // The set is closed. Falling back to string comparison would be indistinguishable from a
+        // correct answer, which is exactly what makes it dangerous.
+        var error = Versioned("2026.08", "calver").ValidateVersion();
+
+        Assert.NotNull(error);
+        Assert.Contains("closed", error);
+    }
+
+    [Fact]
+    public void ValidateVersion_RejectsASchemeWithNoVersion()
+    {
+        Assert.NotNull(Versioned(null, "integer").ValidateVersion());
+    }
+
+    [Fact]
+    public void ValidateVersion_IsSilentWhenNoVersionIsDeclaredAtAll()
+    {
+        // mesh.md §2.4 case 3: a service that declares no version has exactly one service version.
+        // That is not an error and must not be reported as one — including here.
+        Assert.Null(Versioned(null, null).ValidateVersion());
+    }
+
+    [Fact]
+    public void Parse_ReadsTheVersionSchemeFlag()
+    {
+        var opts = EmitOptions.Parse(["--assembly", "svc.dll", "--service-version", "42", "--version-scheme", "integer"]);
+
+        Assert.NotNull(opts);
+        Assert.Equal("42", opts.ServiceVersion);
+        Assert.Equal("integer", opts.VersionScheme);
+        Assert.Null(opts.ValidateVersion());
+    }
 }

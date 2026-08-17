@@ -121,7 +121,7 @@ it directly (`test/Benzene.Core.Test/Autogen/Descriptor/DescriptorEmitterTest.cs
 ```bash
 dotnet run --project src/Benzene.Descriptor -- \
   --assembly examples/AwsMesh/Payments/bin/Debug/net10.0/Benzene.Examples.AwsMesh.Payments.dll \
-  --service payments --service-version 1.0.0
+  --service payments --service-version 1.0.0 --version-scheme semver
 ```
 
 With no `--output`, both `Benzene.Examples.AwsMesh.Payments.spec.json` and `...service.json` are
@@ -130,12 +130,42 @@ written next to the assembly.
 Options: `--assembly <dll>` (required), `--emit spec|descriptor|both` (default `both`),
 `--output <path>` (single-artifact `--emit`: exact path; `--emit both`: the *descriptor* path, spec
 path derived from it; omit for both files next to the assembly), `--service <name>` (defaults to the
-assembly name), `--service-version <v>`, `--cloud <aws>`, `--region <r>`,
+assembly name), `--service-version <v>` with `--version-scheme <integer|semver|lexicographic>`
+(see below), `--cloud <aws>`, `--region <r>`,
 `--host <neutral|aws-lambda>` (force an adapter; auto-selected otherwise), `--startup <fullTypeName>`
 (pick the `BenzeneStartUp` type explicitly — needed only when the assembly defines more than one
 candidate).
 
-Exit codes: `0` success; `2` bad/unparseable arguments (usage printed to stderr); `1` any failure
+### The version and its ordering scheme
+
+`--service-version` is the immutable release identity for this build ([mesh.md §2.4][mesh]) — a build
+number, a tag, a run id. It comes from the pipeline and is never derived from the contract, because
+two builds can declare byte-identical contracts and still be different releases.
+
+`--version-scheme` says how those values are **compared** ([mesh.md §2.5][mesh]), and is **required
+whenever a version is declared**:
+
+| Scheme | Value form | Use it for |
+|---|---|---|
+| `integer` | ASCII digits | a bare build counter |
+| `semver` | Semantic Versioning 2.0.0 | a NuGet-style version |
+| `lexicographic` | any non-empty string | a sortable string, e.g. a timestamp |
+
+The scheme is declared rather than inferred, and there is no default. `"10"` and `"9"` order one way
+as integers and the opposite way as strings, so a tool that guessed would report a rollback as an
+upgrade — silently, in the surface somebody uses to decide a deployment.
+
+**A version that does not parse under its declared scheme fails the build.** That is the point: the
+build that declares a version is the cheapest place in the system to catch a mismatch, and after this
+point the value travels into a catalogue, a comparison, and a screen.
+
+Declaring no version at all remains legitimate — mesh.md §2.4 case 3 gives such a service exactly one
+service version, and that is not an error.
+
+[mesh]: https://github.com/daniellepelley/Benzene/blob/main/docs/specification/mesh.md
+
+Exit codes: `0` success; `2` bad/unparseable arguments, **including a version that does not parse
+under its declared scheme** (reason printed to stderr); `1` any failure
 during construction — assembly not found, no `BenzeneStartUp` found, ambiguous `BenzeneStartUp`
 without `--startup`, `Benzene.Core` version mismatch, or any exception the service's own
 registration throws — always with a one-line reason on stderr.
@@ -150,6 +180,11 @@ Install the tool, then either call it from a CI step, or import
   <BenzeneEmitDescriptor>true</BenzeneEmitDescriptor>
 </PropertyGroup>
 ```
+
+The version forwarded is MSBuild's `$(Version)`, ordered as `semver` — which is what `$(Version)`
+is, being the NuGet package version. Override `BenzeneDescriptorVersionScheme` when your pipeline
+stamps it with something else (`integer` for a build counter, `lexicographic` for a sortable string),
+or set it empty to declare no version at all.
 
 That runs `benzene-descriptor --emit both` after `Build`, writing
 `<AssemblyName>.spec.json` / `<AssemblyName>.service.json` next to the output — and **fails the

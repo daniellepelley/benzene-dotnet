@@ -24,6 +24,11 @@
          from source instead — `dotnet run` builds-then-runs it on demand, same-repo, no packaging or
          PATH dependency required. Anchored on $(MSBuildThisFileDirectory) rather than a per-project
          relative path so it stays correct no matter how deeply an opting-in example is nested. -->
+    <!-- Configuration is empty here: Directory.Build.props is imported BY Microsoft.Common.props,
+         before the SDK gives Configuration its Debug default, so the command below was expanding to
+         a bare `-c ` and every opted-in example build failed with MSB3073. A command-line
+         /p:Configuration=Release is a global property and still overrides this. -->
+    <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
     <BenzeneDescriptorCommand Condition="'$(BenzeneDescriptorCommand)' == ''">dotnet run --project "$(MSBuildThisFileDirectory)..\src\Benzene.Descriptor\Benzene.Descriptor.csproj" -c $(Configuration) --</BenzeneDescriptorCommand>
 
     <!-- Same reasoning as BenzeneDescriptorCommand above, for any example that adds a

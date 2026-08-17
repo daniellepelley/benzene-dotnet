@@ -34,6 +34,7 @@
     <ProjectReference Include="..\Benzene.Core.MessageHandlers.TestHelpers\Benzene.Core.MessageHandlers.TestHelpers.csproj" />
     <ProjectReference Include="..\Benzene.Testing\Benzene.Testing.csproj" />
     <ProjectReference Include="..\Benzene.Schema.OpenApi\Benzene.Schema.OpenApi.csproj" />
+    <ProjectReference Include="..\Benzene.Mesh.Contracts\Benzene.Mesh.Contracts.csproj" />
     <ProjectReference Include="..\Benzene.Mesh.Wire\Benzene.Mesh.Wire.csproj" />
     <!-- Cloud-neutral outbound routing model (for produces[].transportKind). -->
     <ProjectReference Include="..\Benzene.Clients\Benzene.Clients.csproj" />

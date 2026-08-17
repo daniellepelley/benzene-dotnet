@@ -15,6 +15,15 @@ if (opts is null)
     return 2;
 }
 
+// mesh.md §2.5: a version that does not parse under its declared scheme fails the build that emitted
+// it. This is the one place in the system where the error is cheap — after here the value travels.
+var versionError = opts.ValidateVersion();
+if (versionError is not null)
+{
+    Console.Error.WriteLine($"benzene-descriptor: {versionError}");
+    return 2;
+}
+
 try
 {
     var result = DescriptorEmitter.Emit(opts);

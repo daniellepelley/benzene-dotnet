@@ -14,13 +14,27 @@
     (e.g. `dotnet tool run benzene-descriptor`).
 
     A failing emit fails the build (no ContinueOnError) — that is the point: a service that can't
-    produce its own contract artifact should not report a green build.
+    produce its own contract artifact should not report a green build. That now includes a service
+    version that does not parse under its declared ordering scheme (mesh.md section 2.5): the build
+    that declares a version is the cheapest place in the system to catch it, and after that point the
+    value travels into a comparison somebody decides a deployment from.
   -->
   <PropertyGroup>
     <BenzeneEmitDescriptor Condition="'$(BenzeneEmitDescriptor)' == ''">false</BenzeneEmitDescriptor>
     <BenzeneDescriptorCommand Condition="'$(BenzeneDescriptorCommand)' == ''">benzene-descriptor</BenzeneDescriptorCommand>
     <BenzeneDescriptorEmit Condition="'$(BenzeneDescriptorEmit)' == ''">both</BenzeneDescriptorEmit>
     <BenzeneDescriptorServiceName Condition="'$(BenzeneDescriptorServiceName)' == ''">$(AssemblyName)</BenzeneDescriptorServiceName>
+    <!-- How this project's service version is ordered (mesh.md section 2.5). Defaults to semver
+         because the value forwarded below is MSBuild's Version property, which is semver by
+         definition - it is the NuGet package version. Override it when your pipeline stamps Version
+         with something else:
+             integer        a bare build counter
+             lexicographic  a sortable string such as a timestamp
+         Set it to an empty value to declare no version at all, which is section 2.4 case 3: the
+         service then has exactly one service version, and that is not an error.
+         There is deliberately no default in the SPEC - this default belongs to this integration,
+         which knows what it is forwarding. -->
+    <BenzeneDescriptorVersionScheme Condition="'$(BenzeneDescriptorVersionScheme)' == ''">semver</BenzeneDescriptorVersionScheme>
   </PropertyGroup>
 
   <Target Name="BenzeneEmitDescriptor"
@@ -40,12 +54,20 @@
            spec path is derived from it (.service.json to .spec.json) unless BenzeneDescriptorEmit is
            "spec", in which case this IS the spec path. -->
       <BenzeneDescriptorOutput Condition="'$(BenzeneDescriptorOutput)' == ''">$(TargetDir)$(AssemblyName).service.json</BenzeneDescriptorOutput>
+      <!-- Version is read HERE, inside the Target, for exactly the reason spelled out above for
+           TargetDir: the SDK sets it in targets imported after this file's body, so a top-level
+           PropertyGroup captures an empty string. It did, and the emit had been passing an empty
+           service-version on every build since this integration shipped - silently, because an
+           absent version is legitimate (mesh.md section 2.4 case 3) and looks like nothing is wrong.
+           Both flags travel together or neither does: a version with no scheme is rejected by the
+           tool (section 2.5 has no default), and a scheme with no version orders nothing. -->
+      <BenzeneDescriptorVersionArg Condition="'$(BenzeneDescriptorVersionScheme)' != '' AND '$(Version)' != ''">--service-version &quot;$(Version)&quot; --version-scheme &quot;$(BenzeneDescriptorVersionScheme)&quot;</BenzeneDescriptorVersionArg>
     </PropertyGroup>
     <!-- BenzeneDescriptorCommand is NOT quoted as a single token: it must also support a multi-word
          invocation (for example running the tool via "dotnet tool run", or building and running it
          from source with a "dotnet run" form when it isn't installed on PATH) — quoting it as one
          token would make a shell look for a single literal executable named after the whole phrase. -->
-    <Exec Command="$(BenzeneDescriptorCommand) --assembly &quot;$(TargetPath)&quot; --output &quot;$(BenzeneDescriptorOutput)&quot; --emit &quot;$(BenzeneDescriptorEmit)&quot; --service &quot;$(BenzeneDescriptorServiceName)&quot; --service-version &quot;$(Version)&quot; $(BenzeneDescriptorStartupArg)" />
+    <Exec Command="$(BenzeneDescriptorCommand) --assembly &quot;$(TargetPath)&quot; --output &quot;$(BenzeneDescriptorOutput)&quot; --emit &quot;$(BenzeneDescriptorEmit)&quot; --service &quot;$(BenzeneDescriptorServiceName)&quot; $(BenzeneDescriptorVersionArg) $(BenzeneDescriptorStartupArg)" />
   </Target>
 
   <!-- Set BenzeneDescriptorStartup (a full BenzeneStartUp type name) when the service assembly
