@@ -17,8 +17,6 @@ namespace Benzene.Examples.AwsMesh.Inventory;
 /// </summary>
 public class Startup : BenzeneStartUp
 {
-    public override IConfiguration GetConfiguration()
-        => new ConfigurationBuilder().AddEnvironmentVariables().Build();
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
         => MeshServiceWiring.ConfigureServices(services, "inventory", typeof(Startup).Assembly);

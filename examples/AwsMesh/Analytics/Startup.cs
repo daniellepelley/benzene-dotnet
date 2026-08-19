@@ -16,8 +16,6 @@ namespace Benzene.Examples.AwsMesh.Analytics;
 /// </summary>
 public class Startup : BenzeneStartUp
 {
-    public override IConfiguration GetConfiguration()
-        => new ConfigurationBuilder().AddEnvironmentVariables().Build();
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
         => MeshServiceWiring.ConfigureServices(services, "analytics", typeof(Startup).Assembly);

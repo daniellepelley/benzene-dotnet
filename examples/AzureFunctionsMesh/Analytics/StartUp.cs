@@ -19,8 +19,6 @@ public class StartUp : BenzeneStartUp
 {
     private static readonly Type[] Handlers = { typeof(RecordPaymentCapturedHandler), typeof(RecordShipmentDispatchedHandler) };
 
-    public override IConfiguration GetConfiguration()
-        => new ConfigurationBuilder().AddEnvironmentVariables().Build();
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
         => MeshServiceWiring.ConfigureServices(services, "analytics", Handlers);

@@ -32,8 +32,6 @@ namespace Benzene.Examples.AzureMesh.Mesh;
 /// </summary>
 public class Startup : BenzeneStartUp
 {
-    public override IConfiguration GetConfiguration()
-        => new ConfigurationBuilder().AddEnvironmentVariables().Build();
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {

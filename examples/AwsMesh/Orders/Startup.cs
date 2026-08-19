@@ -25,8 +25,6 @@ namespace Benzene.Examples.AwsMesh.Orders;
 /// </summary>
 public class Startup : BenzeneStartUp
 {
-    public override IConfiguration GetConfiguration()
-        => new ConfigurationBuilder().AddEnvironmentVariables().Build();
 
     /// <summary>
     /// The DynamoDB table names the outbox reads/writes — provisioned by <c>deploy/main.tf</c>

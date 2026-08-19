@@ -41,8 +41,6 @@ public class Startup : BenzeneStartUp
     /// </summary>
     private const string ClaimCheckBucketEnvVar = "CLAIM_CHECK_BUCKET";
 
-    public override IConfiguration GetConfiguration()
-        => new ConfigurationBuilder().AddEnvironmentVariables().Build();
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {

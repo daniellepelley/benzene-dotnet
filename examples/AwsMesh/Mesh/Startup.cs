@@ -40,8 +40,6 @@ public class Startup : BenzeneStartUp
     /// </summary>
     private const string MeshUiPath = "/mesh-ui";
 
-    public override IConfiguration GetConfiguration()
-        => new ConfigurationBuilder().AddEnvironmentVariables().Build();
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {

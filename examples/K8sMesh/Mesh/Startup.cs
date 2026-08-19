@@ -29,8 +29,6 @@ namespace Benzene.Examples.K8sMesh.Mesh;
 /// </summary>
 public class Startup : BenzeneStartUp
 {
-    public override IConfiguration GetConfiguration()
-        => new ConfigurationBuilder().AddEnvironmentVariables().Build();
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {

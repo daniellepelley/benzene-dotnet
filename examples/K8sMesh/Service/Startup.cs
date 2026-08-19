@@ -37,8 +37,6 @@ public class Startup : BenzeneStartUp
 {
     private static string ServiceName => Environment.GetEnvironmentVariable("MESH_SERVICE") ?? "orders";
 
-    public override IConfiguration GetConfiguration()
-        => new ConfigurationBuilder().AddEnvironmentVariables().Build();
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {

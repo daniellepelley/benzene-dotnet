@@ -15,8 +15,6 @@ public class Startup : BenzeneStartUp
         typeof(OrderPlacedHandler), typeof(PaymentCapturedHandler), typeof(ShipmentDispatchedHandler)
     };
 
-    public override IConfiguration GetConfiguration()
-        => new ConfigurationBuilder().AddEnvironmentVariables().Build();
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
         => MeshServiceWiring.ConfigureServices(services, "notifications", Handlers);
