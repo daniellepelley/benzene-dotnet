@@ -7,17 +7,25 @@ documentation errors; a later duplication sweep over `examples/` added two more 
 note collects them in one place so they can be triaged as a set; each one is also written up in the
 README of whichever example ran into it.
 
-Nothing here blocked an example — every one has a local workaround in the repo, which is exactly the
+Nothing here blocked an example — every one had a local workaround in the repo, which was exactly the
 problem: the workarounds are what a real adopter would also have to write, without knowing that the
 framework nearly does it for them.
 
-Status at time of writing: gaps 1-3 are present in **0.0.3-alpha.1**, the current release. Gap 4 and
-the `BenzeneHost` suggestion under 5b are done and shipped in that version; the pattern examples are
-all pinned to it.
+**Status: gaps 1, 2, 3 and 8 are fixed and released in `0.0.3-alpha.2`.** Gap 4 and the `BenzeneHost`
+suggestion under 5b shipped in alpha.1. benzene-patterns is pinned to alpha.2 and **every workaround
+is deleted** — nine files, 810 net lines: five copies of the HTTP outbound adapter, three of its
+RabbitMQ twin, four inbound-correlation blocks, and the local terminal-stream shim. The examples
+were run, not merely rebuilt, to confirm the shipped extensions behave like the code they replaced:
+the two-tier saga's four outcomes, the modular monolith answering identically in-process and over
+HTTP, the choreography fan-out carrying one correlation id across three reactions, the CQRS read
+model joining two write services, and the streaming pipeline's resume-from-failure fold.
+
+What remains open here is items 5, 6 and 7 — the documentation errors, the smaller notes, and the
+mesh aggregation seam.
 
 ---
 
-## 1. No `OutboundContext` overload for RabbitMQ, Kafka or HTTP — **seven copies** — **FIXED (unreleased)**
+## 1. No `OutboundContext` overload for RabbitMQ, Kafka or HTTP — **seven copies** — **FIXED, released in 0.0.3-alpha.2**
 
 **What's missing.** The outbound routing table's pipelines are
 `IMiddlewarePipelineBuilder<OutboundContext>`. Every cloud transport ships an extension against that
@@ -59,7 +67,7 @@ Documented in `docs/clients.md`. The seven downstream adapters can be deleted on
 
 ---
 
-## 2. `UseStream` is not marked terminal, so its own start-up check rejects it — **FIXED (unreleased)**
+## 2. `UseStream` is not marked terminal, so its own start-up check rejects it — **FIXED, released in 0.0.3-alpha.2**
 
 **What happens.** `StreamExtensions.UseStream` is documented as *"a terminal stream-processing
 step"* — and it is; nothing runs after it. But it is built on `Use(name, func)` rather than
@@ -88,7 +96,7 @@ rather than reimplementing it, so the one-word fix covers every one of them. Pin
 
 ---
 
-## 3. Nothing restores the correlation id inbound — **FIXED (unreleased)**
+## 3. Nothing restores the correlation id inbound — **FIXED, released in 0.0.3-alpha.2**
 
 **What's missing.** `Benzene.Clients` stamps the correlation id on the way **out**
 (`UseCorrelationId()`), and `ActivityMiddlewareDecorator` reads it back onto the inbound diagnostics
@@ -260,7 +268,7 @@ rather than something the ergonomics sweep should merge on its own.
 
 ---
 
-## 8. Eleven copies of the embedded ASP.NET entry point - **FIXED (unreleased)**
+## 8. Eleven copies of the embedded ASP.NET entry point - **FIXED, released in 0.0.3-alpha.2**
 
 The same duplication sweep found the `WebApplication.CreateBuilder` / `builder.UseBenzene<T>()` /
 `Build()` / `app.UseBenzene()` / `Run()` triangle written out in **eleven** example `Program.cs`
