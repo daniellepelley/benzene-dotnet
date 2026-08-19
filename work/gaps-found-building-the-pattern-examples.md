@@ -143,6 +143,47 @@ the interface itself.
 
 ---
 
+## 5b. `UseAspNet` is the right shape and nobody finds it
+
+Not a gap in the code — a gap in where it is signposted. `AspNetSelfHostExtensions.UseAspNet` runs
+Kestrel as a Benzene worker, so a service with no ASP.NET surface of its own declares HTTP in
+`Configure` alongside every other transport and `Program.cs` stays the plain generic host:
+
+```csharp
+// Program.cs, entire
+var host = Host.CreateDefaultBuilder(args).UseBenzene<StartUp>().Build();
+await host.RunAsync();
+
+// StartUp.Configure
+app.UseWorker(worker => worker
+    .UseAspNet(http => http.UseMessageHandlers(), o => o.Urls = $"http://0.0.0.0:{port}"));
+```
+
+**Four of the seven pattern examples were written in the embedded shape instead** — the
+`WebApplicationBuilder.UseBenzene<StartUp>()` / `app.UseBenzene()` / `app.UseHttp(...)` triangle —
+for services that have no controllers and no minimal APIs, i.e. exactly the case `UseAspNet`'s own
+doc comment says it is for. They have since been switched, and behave identically.
+
+The reason for the mistake is instructive: the embedded shape is what every getting-started path
+shows, so it is what gets copied, and `UseAspNet` is discoverable only by reading
+`Benzene.AspNet.Core`'s source or the `K8sTransports` example. The distinction is not a style
+preference — it decides whether adding a queue consumer later is *one line in `Configure`* or a
+rewrite of the host — which makes it exactly the kind of thing a newcomer should meet early rather
+than discover on their third service.
+
+**Suggested:** lead with the self-hosted shape in `docs/getting-started-aspnet.md` for a
+Benzene-only service and present the embedded one as the *embedding* case it is; and cross-reference
+`UseAspNet` from `UseBenzene<TStartUp>(WebApplicationBuilder)`'s remarks, which currently point one
+way only.
+
+**Also worth considering:** the residual `Program.cs` is still two lines of generic-host ceremony
+that says nothing about the application. A `BenzeneHost.Run<StartUp>(args)` (or
+`await BenzeneHost.RunAsync<StartUp>(args)`) would take it to one line, and would make the startup
+unambiguously the only place hosting is described. Small, and it would remove the last thing in a
+Benzene service's entry point that a reader has to skip past.
+
+---
+
 ## 6. Smaller notes
 
 - **`BenzeneResult.Set<T>(status, string[])` is obsolete** in alpha.6 in favour of `SetFailed<T>`,
