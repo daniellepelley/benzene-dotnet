@@ -176,11 +176,24 @@ Benzene-only service and present the embedded one as the *embedding* case it is;
 `UseAspNet` from `UseBenzene<TStartUp>(WebApplicationBuilder)`'s remarks, which currently point one
 way only.
 
-**Also worth considering:** the residual `Program.cs` is still two lines of generic-host ceremony
-that says nothing about the application. A `BenzeneHost.Run<StartUp>(args)` (or
-`await BenzeneHost.RunAsync<StartUp>(args)`) would take it to one line, and would make the startup
-unambiguously the only place hosting is described. Small, and it would remove the last thing in a
-Benzene service's entry point that a reader has to skip past.
+**Also worth considering — now done.** The residual `Program.cs` was still two lines of generic-host
+ceremony that said nothing about the application. `Benzene.HostedService.BenzeneHost` now provides
+`RunAsync<TStartUp>(args, configureHost, ct)`, `Run<TStartUp>(...)` and `Build<TStartUp>(...)`, so an
+entry point is:
+
+```csharp
+await BenzeneHost.RunAsync<StartUp>(args);
+```
+
+`configureHost` is applied before `UseBenzene<TStartUp>()` so a caller can replace a `TryAdd`ed
+Benzene default; `Build` returns the unstarted `IHost` for tests and manual lifecycles. Documented in
+`hosting.md` and led with in `getting-started-worker.md`; `examples/K8sTransports` uses it.
+
+One consequence worth a maintainer's eye: `Benzene.HostedService` now references
+`Microsoft.Extensions.Hosting` (not just Abstractions), because `Host.CreateDefaultBuilder` lives
+there. Floor 6.0.0 — the lowest with that API — and the Abstractions floor was raised from 2.1.1 to
+match, since Hosting 6.0.0 requires it anyway. Every consumer that ran a worker had to add that
+package themselves before, so this is a footprint shift rather than a new dependency in practice.
 
 ---
 

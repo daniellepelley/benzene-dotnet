@@ -303,6 +303,49 @@ Use `UseWorker(w => w.Add(resolverFactory => new MyWorker()))` in `Configure` to
 more `IBenzeneWorker`s (each with `StartAsync`/`StopAsync`) against the `WorkerApplicationBuilder`
 this host passes in.
 
+#### `BenzeneHost` — the one-line entry point
+
+When the host is Benzene's to own (a worker service, or an HTTP service using
+[`UseAspNet`](getting-started-kubernetes.md)), `Benzene.HostedService.BenzeneHost` builds and
+runs it for you, so `Program.cs` is one line:
+
+```csharp
+// Program.cs, entire
+await BenzeneHost.RunAsync<StartUp>(args);
+```
+
+The point is not brevity. It is that **the startup becomes the only place hosting is described** —
+transports are declared in `Configure` via `UseWorker(...)`, so adding an SQS consumer to an HTTP
+service later is one more line there and the entry point never changes. A `Program.cs` that names a
+specific transport is one that has to be rewritten when the service grows another.
+
+| Member | Use it for |
+|---|---|
+| `BenzeneHost.RunAsync<TStartUp>(args, configureHost, cancellationToken)` | The normal entry point |
+| `BenzeneHost.Run<TStartUp>(args, configureHost)` | The blocking form, mirroring `IHost.Run()` |
+| `BenzeneHost.Build<TStartUp>(args, configureHost)` | Returns the `IHost` unstarted — tests, or manual start/stop |
+
+The host is `Host.CreateDefaultBuilder(args)`, so a service gets the conventional content root,
+configuration sources and logging providers. (`BenzeneStartUp.GetConfiguration()` still builds its
+own configuration and is not handed the host's — that contract is unchanged.)
+
+`configureHost` is applied **before** `UseBenzene<TStartUp>()`, so a caller can substitute a Benzene
+baseline service — those are `TryAdd`, and `TryAdd` means first-registration-wins:
+
+```csharp
+await BenzeneHost.RunAsync<StartUp>(args,
+    configureHost: builder => builder.ConfigureServices(s => s.AddSingleton<ISerializer, MySerializer>()));
+```
+
+The corollary is worth knowing before it surprises you: it does **not** override what the startup
+itself registers with a plain `Add`, since that lands afterwards and Microsoft DI resolves the last
+registration. It is a hook for shaping the *host*, not for overruling the startup.
+
+**Don't use it** when the process is a larger ASP.NET Core application with its own controllers or
+minimal APIs — embed Benzene in that host instead (`WebApplicationBuilder.UseBenzene<TStartUp>()`
+plus `app.UseBenzene()`, below). Nothing here is load-bearing: `BenzeneHost` is a shorthand for the
+common case, and `UseBenzene<TStartUp>()` on a builder you own is always available.
+
 #### Worker concurrency
 
 The two dispatcher-based self-hosted workers - `Benzene.Kafka.Core.BenzeneKafkaWorker<TKey,TValue>`

@@ -1,11 +1,7 @@
 using Benzene.Examples.K8sTransports.App;
 using Benzene.HostedService;
-using Microsoft.Extensions.Hosting;
 
-// The plain generic host - nothing ASP.NET-shaped here. Startup wires all three transports (HTTP
-// via UseAspNet, SQS, Kafka) as workers; see Startup.cs.
-IHost host = Host.CreateDefaultBuilder(args)
-    .UseBenzene<Startup>()
-    .Build();
-
-await host.RunAsync();
+// The whole entry point. Startup wires all three transports (HTTP via UseAspNet, SQS, Kafka) as
+// workers - see Startup.cs - and this file would not change if a fourth were added, which is the
+// point of keeping hosting in the startup.
+await BenzeneHost.RunAsync<Startup>(args);

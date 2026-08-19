@@ -188,6 +188,36 @@ by a `CompositeBenzeneWorker` the host builds for you.
 
 ```csharp
 using Benzene.HostedService;
+
+await BenzeneHost.RunAsync<StartUp>(args);
+```
+
+That is the whole file. `BenzeneHost` builds a `Host.CreateDefaultBuilder(args)`, applies
+`UseBenzene<StartUp>()`, and runs it — so **the startup is the only place hosting is described**.
+Adding an SQS consumer or an HTTP endpoint to this worker later is one more line in `Configure`, and
+this file never changes.
+
+If you need to shape the host — extra configuration sources, a substituted Benzene service, your own
+hosted services — pass `configureHost`, which is applied *before* the startup runs so a `TryAdd`ed
+Benzene default can be replaced:
+
+```csharp
+await BenzeneHost.RunAsync<StartUp>(args,
+    configureHost: builder => builder.ConfigureServices(s => s.AddSingleton<ISerializer, MySerializer>()));
+```
+
+And `BenzeneHost.Build<StartUp>()` hands back the unstarted `IHost` when you want to drive its
+lifecycle yourself (see [Testing](#8-testing) below).
+
+<details>
+<summary>Building the host by hand</summary>
+
+`BenzeneHost` is a shorthand, not a requirement — the long form is always available, and is what you
+want when the host is not Benzene's to own (an ASP.NET Core app with its own controllers, an Azure
+Functions host, anything with its own builder):
+
+```csharp
+using Benzene.HostedService;
 using Microsoft.Extensions.Hosting;
 
 IHost host = new HostBuilder()
@@ -196,6 +226,8 @@ IHost host = new HostBuilder()
 
 await host.RunAsync();
 ```
+
+</details>
 
 Make sure this `UseBenzene<TStartUp>()` comes from `Benzene.HostedService` (`using Benzene.HostedService;`)
 — **`Benzene.Azure.Function.Core` declares an extension method with the exact same name and

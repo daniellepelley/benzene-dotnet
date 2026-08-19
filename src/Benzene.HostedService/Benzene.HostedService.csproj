@@ -9,7 +9,19 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="2.1.1" />
+    <!-- Raised from 2.1.1 alongside the reference below: Microsoft.Extensions.Hosting 6.0.0 requires
+         Abstractions >= 6.0.0, so 6.0.0 is the effective floor either way. Stated explicitly rather
+         than left to transitive resolution. -->
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="6.0.0" />
+    <!-- The generic host itself, for BenzeneHost.Run/RunAsync: Host.CreateDefaultBuilder lives here,
+         not in Abstractions. Every consumer that runs a worker had to add this package anyway - it is
+         the ceremony BenzeneHost removes - so it belongs on the package whose whole job is the
+         generic host.
+
+         6.0.0 rather than the 2.1.1 floor above, because Host.CreateDefaultBuilder does not exist in
+         2.1.1 (it arrived in 3.0). Still the lowest floor that carries the API, so a consumer already
+         on 8.x/9.x unifies upward and is not forced anywhere. -->
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="6.0.0" />
   </ItemGroup>
 
   <ItemGroup>

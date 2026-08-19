@@ -6,6 +6,11 @@ host's `IHostedService`, so a Benzene worker starts/stops with the host. This is
 `Benzene.SelfHost`'s worker model and `Microsoft.Extensions.Hosting`.
 
 ## Key types/interfaces
+- `BenzeneHost` - static entry point: `RunAsync<TStartUp>(args, configureHost, ct)`,
+  `Run<TStartUp>(...)`, `Build<TStartUp>(...)`. Builds `Host.CreateDefaultBuilder(args)`, applies
+  `UseBenzene<TStartUp>()` and runs it, so a service's `Program.cs` is one line and the STARTUP is the
+  only place hosting is described. `configureHost` is applied BEFORE `UseBenzene` so a caller can
+  replace a `TryAdd`ed Benzene default; it does not override what the startup itself plain-`Add`s.
 - `BenzeneHostedServiceAdapter : IHostedService` - wraps an `IBenzeneWorker`; `StartAsync`/`StopAsync`
   delegate straight to the worker's `StartAsync`/`StopAsync` (graceful shutdown is the worker's own
   drain logic — see `Benzene.SelfHost`).
@@ -26,8 +31,13 @@ host's `IHostedService`, so a Benzene worker starts/stops with the host. This is
 - **Benzene.Microsoft.Dependencies** - `MicrosoftBenzeneServiceContainer`/`MicrosoftServiceResolverFactory`, `BenzeneStartUp`
 - **Benzene.Core** / **Benzene.Core.Middleware**
 - **Microsoft.Extensions.Hosting.Abstractions** - `IHostedService`, `IHostBuilder`
+- **Microsoft.Extensions.Hosting** - `Host.CreateDefaultBuilder`, for `BenzeneHost`. Floor is 6.0.0
+  (the lowest with that API); the Abstractions floor was raised to match, since Hosting 6.0.0 requires
+  it anyway.
 
 ## Important conventions
+- `BenzeneHost` owns the host, so it is for services whose host is Benzene's to own. A larger ASP.NET
+  Core app embeds Benzene instead (`WebApplicationBuilder.UseBenzene<TStartUp>()` + `app.UseBenzene()`).
 - Registered as a singleton `IHostedService`, so it starts/stops with the generic host.
 - Graceful shutdown is delegated to the wrapped `IBenzeneWorker.StopAsync` (bounded drain).
 - Suitable for queue/stream consumers (e.g. `Benzene.Kafka.Core`) and self-hosted HTTP workers.
