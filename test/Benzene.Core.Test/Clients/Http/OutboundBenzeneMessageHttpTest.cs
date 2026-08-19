@@ -49,13 +49,13 @@ public class OutboundBenzeneMessageHttpTest
             Defaults.Topic, new ExampleRequestPayload { Id = 42, Name = "foo" },
             new Dictionary<string, string> { { "tenantId", "tenant-1" } });
 
-        Assert.Equal(HttpMethod.Post, handler.LastRequest!.Method);
-        Assert.Equal(Url, handler.LastRequest.RequestUri!.ToString());
+        Assert.Equal(HttpMethod.Post, handler.LastRequest.Method);
+        Assert.Equal(Url, handler.LastRequest.RequestUri.ToString());
 
-        using var doc = JsonDocument.Parse(handler.LastRequestBody!);
+        using var doc = JsonDocument.Parse(handler.LastRequestBody);
         Assert.Equal(Defaults.Topic, doc.RootElement.GetProperty("topic").GetString());
         Assert.Equal("tenant-1", doc.RootElement.GetProperty("headers").GetProperty("tenantId").GetString());
-        Assert.Contains("\"foo\"", doc.RootElement.GetProperty("body").GetString()!);
+        Assert.Contains("\"foo\"", doc.RootElement.GetProperty("body").GetString());
     }
 
     [Fact]
@@ -145,8 +145,8 @@ public class OutboundBenzeneMessageHttpTest
     {
         private readonly HttpStatusCode _status;
         private readonly string _body;
-        public HttpRequestMessage? LastRequest;
-        public string? LastRequestBody;
+        public HttpRequestMessage LastRequest;
+        public string LastRequestBody;
 
         public CapturingHandler(HttpStatusCode status, string body)
         {

@@ -19,7 +19,7 @@ namespace Benzene.Kafka.Core.Kafka;
 /// <remarks>
 /// The context's <c>Topic</c> is the Kafka topic produced to. Kafka has no request/response semantics
 /// beyond a produce acknowledgement, so the response this converter produces is always
-/// <see cref="IBenzeneResult{Void}"/> - a topic routed here must be sent via
+/// <c>IBenzeneResult&lt;Void&gt;</c> - a topic routed here must be sent via
 /// <c>IBenzeneMessageSender.SendAsync&lt;TRequest,Void&gt;</c>.
 /// </remarks>
 public class OutboundKafkaContextConverter : IContextConverter<OutboundContext, KafkaSendMessageContext>
@@ -84,7 +84,7 @@ public class OutboundKafkaContextConverter : IContextConverter<OutboundContext, 
             }));
     }
 
-    /// <summary>Maps the produce outcome back onto the outbound context as an <see cref="IBenzeneResult{Void}"/>.</summary>
+    /// <summary>Maps the produce outcome back onto the outbound context as an <c>IBenzeneResult&lt;Void&gt;</c>.</summary>
     /// <param name="contextIn">The outbound context to set the response on.</param>
     /// <param name="contextOut">The completed <see cref="KafkaSendMessageContext"/>.</param>
     /// <returns>A completed task.</returns>

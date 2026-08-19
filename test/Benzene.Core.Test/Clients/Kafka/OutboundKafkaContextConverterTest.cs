@@ -63,7 +63,7 @@ public class OutboundKafkaContextConverterTest
     [Fact]
     public async Task SendAsync_ForwardsHeadersOntoTheRecord()
     {
-        Message<string, string>? captured = null;
+        Message<string, string> captured = null;
         var producer = new Mock<IProducer<string, string>>();
         producer
             .Setup(x => x.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, string>>(), It.IsAny<CancellationToken>()))
@@ -78,13 +78,13 @@ public class OutboundKafkaContextConverterTest
             new Dictionary<string, string> { { "tenantId", "tenant-1" } });
 
         Assert.NotNull(captured);
-        Assert.Equal("tenant-1", Encoding.UTF8.GetString(captured!.Headers.GetLastBytes("tenantId")));
+        Assert.Equal("tenant-1", Encoding.UTF8.GetString(captured.Headers.GetLastBytes("tenantId")));
     }
 
     [Fact]
     public async Task SendAsync_WithAKeyHeader_UsesThatHeaderValueAsTheMessageKey()
     {
-        Message<string, string>? captured = null;
+        Message<string, string> captured = null;
         var producer = new Mock<IProducer<string, string>>();
         producer
             .Setup(x => x.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, string>>(), It.IsAny<CancellationToken>()))
@@ -99,7 +99,7 @@ public class OutboundKafkaContextConverterTest
             new Dictionary<string, string> { { "tenantId", "tenant-1" } });
 
         Assert.NotNull(captured);
-        Assert.Equal("tenant-1", captured!.Key);
+        Assert.Equal("tenant-1", captured.Key);
     }
 
     [Fact]

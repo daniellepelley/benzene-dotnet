@@ -66,7 +66,7 @@ public class OutboundRabbitMqContextConverterTest
     [Fact]
     public async Task SendAsync_ForwardsHeadersAndTheTopicOntoBasicProperties()
     {
-        BasicProperties? captured = null;
+        BasicProperties captured = null;
         var mockChannel = new Mock<IChannel>();
         mockChannel.Setup(x => x.BasicPublishAsync(
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(),
@@ -82,14 +82,14 @@ public class OutboundRabbitMqContextConverterTest
             new Dictionary<string, string> { { "tenantId", "tenant-1" } });
 
         Assert.NotNull(captured);
-        Assert.Equal("tenant-1", Encoding.UTF8.GetString((byte[])captured!.Headers!["tenantId"]!));
+        Assert.Equal("tenant-1", Encoding.UTF8.GetString((byte[])captured.Headers!["tenantId"]!));
         Assert.Equal(Defaults.Topic, Encoding.UTF8.GetString((byte[])captured.Headers!["topic"]!));
     }
 
     [Fact]
     public async Task SendAsync_WithCustomTopicHeaderKey_WritesTheTopicToThatHeader()
     {
-        BasicProperties? captured = null;
+        BasicProperties captured = null;
         var mockChannel = new Mock<IChannel>();
         mockChannel.Setup(x => x.BasicPublishAsync(
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(),
@@ -104,7 +104,7 @@ public class OutboundRabbitMqContextConverterTest
             Defaults.Topic, new ExampleRequestPayload { Id = 42, Name = "foo" });
 
         Assert.NotNull(captured);
-        Assert.Equal(Defaults.Topic, Encoding.UTF8.GetString((byte[])captured!.Headers!["x-my-topic"]!));
+        Assert.Equal(Defaults.Topic, Encoding.UTF8.GetString((byte[])captured.Headers!["x-my-topic"]!));
         Assert.False(captured.Headers!.ContainsKey("topic"));
     }
 

@@ -19,7 +19,7 @@ namespace Benzene.RabbitMq.RabbitMqSendMessage;
 /// The context's <c>Topic</c> becomes the AMQP routing key and is also carried as a header, so a
 /// <see cref="RabbitMqWorker"/> consuming the message routes by header (portable) with the routing key
 /// as the idiomatic fallback. RabbitMQ has no request/response semantics beyond a publish
-/// acknowledgement, so the response this converter produces is always <see cref="IBenzeneResult{Void}"/> -
+/// acknowledgement, so the response this converter produces is always <c>IBenzeneResult&lt;Void&gt;</c> -
 /// a topic routed here must be sent via <c>IBenzeneMessageSender.SendAsync&lt;TRequest,Void&gt;</c>.
 /// </remarks>
 public class OutboundRabbitMqContextConverter : IContextConverter<OutboundContext, RabbitMqSendMessageContext>
@@ -79,7 +79,7 @@ public class OutboundRabbitMqContextConverter : IContextConverter<OutboundContex
         return Task.FromResult(new RabbitMqSendMessageContext(_exchange, contextIn.Topic, body, headers));
     }
 
-    /// <summary>Maps the publish outcome back onto the outbound context as an <see cref="IBenzeneResult{Void}"/>.</summary>
+    /// <summary>Maps the publish outcome back onto the outbound context as an <c>IBenzeneResult&lt;Void&gt;</c>.</summary>
     /// <param name="contextIn">The outbound context to set the response on.</param>
     /// <param name="contextOut">The completed <see cref="RabbitMqSendMessageContext"/>.</param>
     /// <returns>A completed task.</returns>
