@@ -60,7 +60,19 @@ public class Startup : BenzeneStartUp
             .AddMeshAggregator(new MeshServiceRegistry(Array.Empty<MeshServiceRegistryEntry>()), artifactDir)
             .AddMeshKubernetesDiscovery());
 
-        services.AddSingleton<MeshAggregationService>();
+        // The one thing that differs between mesh hosts: where the registry for a pass comes from.
+        // This host used to hand-roll the pass WITHOUT the single-writer gate its three siblings
+        // had - the drift that made this seam worth extracting.
+        services.AddSingleton(provider => new MeshAggregationPass(
+            provider.GetRequiredService<IMeshArtifactStore>(),
+            provider.GetRequiredService<MeshAggregator>(),
+            cancellationToken =>
+            {
+                var ns = Environment.GetEnvironmentVariable("MESH_NAMESPACE");
+                var filter = new MeshDiscoveryFilter(@namespace: string.IsNullOrWhiteSpace(ns) ? null : ns);
+                return provider.GetRequiredService<MeshDiscoveryRunner>()
+                    .DiscoverAsync(filter, cancellationToken: cancellationToken);
+            }));
         services.AddHostedService<MeshAggregationBackgroundService>();
 
         // The live spec collector's in-memory state (Benzene.Mesh.Collector). A single always-on mesh

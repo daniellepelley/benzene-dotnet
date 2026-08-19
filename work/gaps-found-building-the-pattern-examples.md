@@ -240,7 +240,7 @@ package themselves before, so this is a footprint shift rather than a new depend
 
 ---
 
-## 7. The mesh aggregation pass is hand-rolled four times, and the fourth copy dropped the lock
+## 7. The mesh aggregation pass is hand-rolled four times, and the fourth copy dropped the lock — **FIXED**
 
 Found by the duplication sweep over `examples/`, not by the pattern examples.
 `MeshAggregationService.cs` + `MeshRefreshHandler.cs` exist as near-identical pairs in
@@ -261,10 +261,19 @@ artifact store and can interleave into a momentarily inconsistent catalog. `K8sM
 That is the copies diverging on a correctness property, which is what a missing seam looks like from
 the outside.
 
-**Suggested.** A `Benzene.Mesh.Aggregator` seam owning "run one pass, serialised" - the registry
-source (discovery runner vs static/environment) is the only genuine per-platform difference, so it is
-the parameter. New public surface on the mesh module, so it is a proposal for that module's owner
-rather than something the ergonomics sweep should merge on its own.
+**Done.** `Benzene.Mesh.Aggregator.MeshAggregationPass` owns "run one pass, serialised". The registry
+source is the constructor parameter, because it is the only genuine per-platform difference - a
+discovery call on Azure/AzureFunctions/K8s, `MeshServiceRegistry.FromEnvironment()` on GoogleCloud.
+All four copies are deleted and all four hosts now have the gate, K8sMesh included.
+
+Five tests cover it, and the one that matters - two overlapping passes never interleave - was checked
+against a gate-less build to confirm it fails there. Two more pin what a hand-rolled gate gets wrong
+even when it remembers the gate: the registry source is asked once per pass rather than cached, and
+the gate is released when a pass throws, so a failed discovery does not wedge every later pass.
+
+The ladder holds: the explicit form is still three lines a host can write itself (publish the
+registry, `RunOnceAsync`, count), which is what to drop to for a different write order, artifact key,
+or concurrency policy.
 
 ---
 

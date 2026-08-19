@@ -19,6 +19,8 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 
+using Benzene.Mesh.Aggregator;
+
 namespace Benzene.Examples.AzureMesh.Mesh;
 
 /// <summary>
@@ -90,7 +92,20 @@ public class Startup : BenzeneStartUp
             }
         });
 
-        services.AddSingleton<MeshAggregationService>();
+        // The one thing that differs between mesh hosts: where the registry for a pass comes from.
+        // Everything else about a pass - publish the driving registry, interrogate, write the
+        // catalog, and do it one at a time - is MeshAggregationPass's.
+        services.AddSingleton(provider => new MeshAggregationPass(
+            provider.GetRequiredService<IMeshArtifactStore>(),
+            provider.GetRequiredService<MeshAggregator>(),
+            cancellationToken =>
+            {
+                var region = Environment.GetEnvironmentVariable("MESH_REGION");
+                var filter = new MeshDiscoveryFilter(
+                    regions: string.IsNullOrWhiteSpace(region) ? null : new[] { region });
+                return provider.GetRequiredService<MeshDiscoveryRunner>()
+                    .DiscoverAsync(filter, cancellationToken: cancellationToken);
+            }));
         services.AddHostedService<MeshAggregationBackgroundService>();
     }
 

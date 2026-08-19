@@ -17,6 +17,8 @@ using Benzene.Microsoft.Dependencies;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
+using Benzene.Mesh.Aggregator;
+
 namespace Benzene.Examples.AzureFunctionsMesh.Mesh;
 
 /// <summary>
@@ -70,7 +72,18 @@ public class StartUp : BenzeneStartUp
             }
         });
 
-        services.AddSingleton<MeshAggregationService>();
+        // The one thing that differs between mesh hosts: where the registry for a pass comes from.
+        services.AddSingleton(provider => new MeshAggregationPass(
+            provider.GetRequiredService<IMeshArtifactStore>(),
+            provider.GetRequiredService<MeshAggregator>(),
+            cancellationToken =>
+            {
+                var region = Environment.GetEnvironmentVariable("MESH_REGION");
+                var filter = new MeshDiscoveryFilter(
+                    regions: string.IsNullOrWhiteSpace(region) ? null : new[] { region });
+                return provider.GetRequiredService<MeshDiscoveryRunner>()
+                    .DiscoverAsync(filter, cancellationToken: cancellationToken);
+            }));
     }
 
     public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration)
@@ -91,7 +104,7 @@ public class StartUp : BenzeneStartUp
         app.UseTimerTrigger(timer => timer
             .Use(resolver => new FuncWrapperMiddleware<TimerContext>("aggregate", async (context, next) =>
             {
-                await resolver.GetService<MeshAggregationService>().RunAsync();
+                await resolver.GetService<MeshAggregationPass>().RunAsync();
                 await next();
             })));
     }

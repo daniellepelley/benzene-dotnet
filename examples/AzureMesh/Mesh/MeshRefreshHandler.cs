@@ -5,6 +5,8 @@ using Benzene.Http;
 using Benzene.Results;
 using Void = Benzene.Abstractions.Results.Void;
 
+using Benzene.Mesh.Aggregator;
+
 namespace Benzene.Examples.AzureMesh.Mesh;
 
 /// <summary>
@@ -15,18 +17,18 @@ namespace Benzene.Examples.AzureMesh.Mesh;
 [HttpEndpoint("POST", "/mesh/refresh")]
 public class MeshRefreshHandler : IMessageHandler<Void, MeshRefreshResult>
 {
-    private readonly MeshAggregationService _aggregation;
+    private readonly MeshAggregationPass _pass;
 
-    public MeshRefreshHandler(MeshAggregationService aggregation)
+    public MeshRefreshHandler(MeshAggregationPass pass)
     {
-        _aggregation = aggregation;
+        _pass = pass;
     }
 
     public async Task<IBenzeneResult<MeshRefreshResult>> HandleAsync(Void request)
     {
         try
         {
-            var discovered = await _aggregation.RunAsync();
+            var discovered = await _pass.RunAsync();
             return BenzeneResult.Created(new MeshRefreshResult(discovered));
         }
         catch (Exception ex)

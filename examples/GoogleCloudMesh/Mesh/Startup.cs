@@ -13,6 +13,8 @@ using Benzene.Microsoft.Dependencies;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
+using Benzene.Mesh.Aggregator;
+
 namespace Benzene.Examples.GoogleCloudMesh.Mesh;
 
 /// <summary>
@@ -41,7 +43,11 @@ public class Startup : BenzeneStartUp
             // Discovery is supplied statically (MeshRegistry.FromEnvironment); catalog persists to GCS.
             .AddMeshAggregatorWithGcs(new MeshServiceRegistry(Array.Empty<MeshServiceRegistryEntry>()), bucket, prefix));
 
-        services.AddSingleton<MeshAggregationService>();
+        // No discovery on this host: the registry is read from configuration once per pass.
+        services.AddSingleton(provider => new MeshAggregationPass(
+            provider.GetRequiredService<IMeshArtifactStore>(),
+            provider.GetRequiredService<MeshAggregator>(),
+            _ => Task.FromResult(MeshServiceRegistry.FromEnvironment())));
     }
 
     public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration)

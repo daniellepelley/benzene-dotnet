@@ -5,29 +5,31 @@ using Benzene.Http;
 using Benzene.Results;
 using Void = Benzene.Abstractions.Results.Void;
 
+using Benzene.Mesh.Aggregator;
+
 namespace Benzene.Examples.AzureFunctionsMesh.Mesh;
 
 /// <summary>
 /// On-demand discovery + aggregation trigger: <c>POST /mesh/refresh</c> runs a pass and returns 201
-/// with the number of services discovered. The same <see cref="MeshAggregationService"/> is also driven
+/// with the number of services discovered. The same <see cref="MeshAggregationPass"/> is also driven
 /// on a schedule by <see cref="AggregateTimerFunction"/>.
 /// </summary>
 [Message("mesh:refresh")]
 [HttpEndpoint("POST", "/mesh/refresh")]
 public class MeshRefreshHandler : IMessageHandler<Void, MeshRefreshResult>
 {
-    private readonly MeshAggregationService _aggregation;
+    private readonly MeshAggregationPass _pass;
 
-    public MeshRefreshHandler(MeshAggregationService aggregation)
+    public MeshRefreshHandler(MeshAggregationPass pass)
     {
-        _aggregation = aggregation;
+        _pass = pass;
     }
 
     public async Task<IBenzeneResult<MeshRefreshResult>> HandleAsync(Void request)
     {
         try
         {
-            var discovered = await _aggregation.RunAsync();
+            var discovered = await _pass.RunAsync();
             return BenzeneResult.Created(new MeshRefreshResult(discovered));
         }
         catch (Exception ex)

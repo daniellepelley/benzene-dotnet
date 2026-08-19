@@ -1,4 +1,6 @@
 
+using Benzene.Mesh.Aggregator;
+
 namespace Benzene.Examples.K8sMesh.Mesh;
 
 /// <summary>
@@ -11,11 +13,11 @@ public class MeshAggregationBackgroundService : BackgroundService
 {
     private static readonly TimeSpan Interval = TimeSpan.FromSeconds(30);
 
-    private readonly MeshAggregationService _aggregation;
+    private readonly MeshAggregationPass _pass;
 
-    public MeshAggregationBackgroundService(MeshAggregationService aggregation)
+    public MeshAggregationBackgroundService(MeshAggregationPass pass)
     {
-        _aggregation = aggregation;
+        _pass = pass;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -24,7 +26,7 @@ public class MeshAggregationBackgroundService : BackgroundService
         {
             try
             {
-                await _aggregation.RunAsync(stoppingToken);
+                await _pass.RunAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
