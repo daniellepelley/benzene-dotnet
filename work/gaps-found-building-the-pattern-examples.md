@@ -10,7 +10,9 @@ Nothing here blocked an example — every one has a local workaround in the repo
 problem: the workarounds are what a real adopter would also have to write, without knowing that the
 framework nearly does it for them.
 
-Status at time of writing: all four gaps are present in **0.0.2-alpha.6**.
+Status at time of writing: gaps 1-3 are present in **0.0.3-alpha.1**, the current release. Gap 4 and
+the `BenzeneHost` suggestion under 5b are done and shipped in that version; the pattern examples are
+all pinned to it.
 
 ---
 
