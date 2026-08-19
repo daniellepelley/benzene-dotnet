@@ -12,6 +12,8 @@ namespace Benzene.Clients;
 /// </summary>
 internal class DefaultBenzeneMessageSender : IBenzeneMessageSender
 {
+    private static readonly ISerializer DefaultResponseSerializer = new JsonSerializer();
+
     private readonly IReadOnlyDictionary<string, IMiddlewarePipeline<OutboundContext>> _routes;
     private readonly IServiceResolver _serviceResolver;
 
@@ -48,7 +50,12 @@ internal class DefaultBenzeneMessageSender : IBenzeneMessageSender
         // transport to solve typed-response deserialization itself.
         if (context.Response is BenzeneMessageClientResponse rawResponse)
         {
-            return rawResponse.AsBenzeneResult<TResponse>(_serviceResolver.GetService<ISerializer>());
+            // TryGetService, with the same JSON default every outbound converter in this package uses
+            // when no serializer is supplied: an outbound-only container (no AddBenzene(), no message
+            // handlers) has nothing registering ISerializer, and the send side would still have
+            // serialized the request as JSON. Failing here would be a message-path failure for a
+            // registration the send direction never needed. Register your own ISerializer to override.
+            return rawResponse.AsBenzeneResult<TResponse>(_serviceResolver.TryGetService<ISerializer>() ?? DefaultResponseSerializer);
         }
 
         throw new OutboundResponseTypeMismatchException(topic, OutboundResponseTypeMismatchException.GetActualResponseType(context.Response), typeof(TResponse));

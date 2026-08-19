@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Benzene.Core.MessageHandlers.StartUpChecks;
 using Benzene.Core.Middleware;
 using Benzene.Microsoft.Dependencies;
 using Microsoft.Extensions.DependencyInjection;
@@ -36,6 +37,22 @@ public class StreamMiddlewareApplicationTest
         Assert.Equal(1, runs);
         // And the step saw every item, in order.
         Assert.Equal(new[] { 1, 2, 3, 4, 5 }, collected);
+    }
+
+    [Fact]
+    public void UseStream_IsMarkedTerminal_SoAPipelineEndingInItBoots()
+    {
+        // UseStream is documented as "a terminal stream-processing step" and nothing runs after it, so
+        // the terminal-middleware start-up check must be able to see that. Built on Use(...) it could
+        // not, and the check refused to boot a pipeline that ends in the framework's own stream step.
+        var services = new ServiceCollection();
+        new MiddlewarePipelineBuilder<StreamContext<int>>(new MicrosoftBenzeneServiceContainer(services))
+            .UseStream<int>(_ => Task.CompletedTask)
+            .Build();
+
+        using var scope = new MicrosoftServiceResolverFactory(services).CreateScope();
+
+        new TerminalMiddlewareStartUpCheck().Check(scope);
     }
 
     [Fact]

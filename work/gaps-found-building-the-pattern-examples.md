@@ -16,7 +16,7 @@ all pinned to it.
 
 ---
 
-## 1. No `OutboundContext` overload for RabbitMQ, Kafka or HTTP — **seven copies**
+## 1. No `OutboundContext` overload for RabbitMQ, Kafka or HTTP — **seven copies** — **FIXED (unreleased)**
 
 **What's missing.** The outbound routing table's pipelines are
 `IMiddlewarePipelineBuilder<OutboundContext>`. Every cloud transport ships an extension against that
@@ -51,9 +51,14 @@ route the way `UseSqs`/`UseServiceBus`/`UseInProcess` do.
 **Worth noting** that HTTP-between-services is the shape every one of these examples needs to run on
 a laptop, so this gap is on the path of anyone who tries Benzene locally before deploying it.
 
+**Done.** `.UseRabbitMq(...)`, `.UseKafka(...)` and `.UseBenzeneMessageOverHttp(...)` now exist on
+`IMiddlewarePipelineBuilder<OutboundContext>`, each over a public `Outbound*ContextConverter` mirroring
+`OutboundSqsContextConverter`, each with the `Action<...>` inner-pipeline overload as the rung below.
+Documented in `docs/clients.md`. The seven downstream adapters can be deleted once the examples repin.
+
 ---
 
-## 2. `UseStream` is not marked terminal, so its own start-up check rejects it
+## 2. `UseStream` is not marked terminal, so its own start-up check rejects it — **FIXED (unreleased)**
 
 **What happens.** `StreamExtensions.UseStream` is documented as *"a terminal stream-processing
 step"* — and it is; nothing runs after it. But it is built on `Use(name, func)` rather than
@@ -75,9 +80,14 @@ The check is doing exactly its job, on a false positive.
 to add something after the stream step — the report above came from a hand-built pipeline over
 `Benzene.Core.Middleware`, which is the transport-neutral path the operators are meant to support.
 
+**Done.** `UseStream` calls `UseTerminal("Stream", ...)`. Checked the other bindings while there: the
+Kinesis, Event Hubs, Cosmos change-feed and Blob Storage extensions all just *document* `UseStream`
+rather than reimplementing it, so the one-word fix covers every one of them. Pinned by
+`StreamMiddlewareApplicationTest.UseStream_IsMarkedTerminal_SoAPipelineEndingInItBoots`.
+
 ---
 
-## 3. Nothing restores the correlation id inbound
+## 3. Nothing restores the correlation id inbound — **FIXED (unreleased)**
 
 **What's missing.** `Benzene.Clients` stamps the correlation id on the way **out**
 (`UseCorrelationId()`), and `ActivityMiddlewareDecorator` reads it back onto the inbound diagnostics
@@ -97,6 +107,14 @@ if (headers.TryGetValue(WireHeaders.CorrelationId, out var correlationId))
 **The fix.** An inbound `UseCorrelationId()` counterpart, transport-generic over
 `IMessageHeadersGetter<TContext>` the way `UseW3CTraceContext()` already is. That would delete five
 copies.
+
+**Done.** `Benzene.Diagnostics.Correlation.Extensions.UseCorrelationId<TContext>(correlationKey = null)`,
+over the public `InboundCorrelationIdMiddleware<TContext>`. It resolves both `ICorrelationId` and the
+headers getter when the pipeline is built, so a pipeline missing either is named at start-up rather
+than mid-message. The non-generic outbound overload still wins on an `OutboundContext` builder when
+both namespaces are imported - pinned by a test, because that would otherwise have been a silent
+breaking change. `docs/correlation-ids.md` now leads with it and keeps the hand-written form as the
+rung below.
 
 **Related, and worth fixing together:** the default header key. `CorrelationHeaderDefaults` (added
 after alpha.4) settles this, but on alpha.4 the outbound middleware defaults to `correlationId` while

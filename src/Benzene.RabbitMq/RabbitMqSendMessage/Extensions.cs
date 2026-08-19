@@ -1,5 +1,6 @@
 using Benzene.Abstractions.Messages.BenzeneClient;
 using Benzene.Abstractions.Middleware;
+using Benzene.Clients;
 using Benzene.Core.Middleware;
 using RabbitMQ.Client;
 using Void = Benzene.Abstractions.Results.Void;
@@ -64,5 +65,60 @@ public static class Extensions
         string topicHeaderKey = RabbitMqConstants.DefaultTopicHeader)
     {
         return app.UseRabbitMq<T>(exchange, builder => builder.UseRabbitMqClient(channel), topicHeaderKey);
+    }
+
+    /// <summary>
+    /// Converts an outbound route pipeline (<c>OutboundRoutingBuilder.Route</c>) to publish via
+    /// RabbitMQ, using a custom middleware configuration - the <see cref="OutboundContext"/>
+    /// counterpart of <see cref="UseRabbitMq{T}(IMiddlewarePipelineBuilder{IBenzeneClientContext{T, Void}}, string, Action{IMiddlewarePipelineBuilder{RabbitMqSendMessageContext}}, string)"/>,
+    /// mirroring <c>UseSqs</c>/<c>UseServiceBus</c>/<c>UseInProcess</c>.
+    /// </summary>
+    /// <param name="app">The outbound pipeline builder to convert.</param>
+    /// <param name="exchange">The exchange to publish to (empty string for the default exchange, where the routing key is the target queue name).</param>
+    /// <param name="action">Configures the inner RabbitMQ publish pipeline.</param>
+    /// <param name="topicHeaderKey">
+    /// The message-property header the topic is written to. Defaults to
+    /// <see cref="RabbitMqConstants.DefaultTopicHeader"/>; pass a different key to publish for a
+    /// consumer that routes on another header.
+    /// </param>
+    /// <returns>The same builder, for chaining.</returns>
+    /// <remarks>
+    /// This is a shorthand over the explicit form, which you can write yourself from public API:
+    /// <c>app.Convert(new OutboundRabbitMqContextConverter(exchange, topicHeaderKey), action)</c>.
+    /// Drop to that when you want to supply your own <c>ISerializer</c>.
+    /// </remarks>
+    public static IMiddlewarePipelineBuilder<OutboundContext> UseRabbitMq(
+        this IMiddlewarePipelineBuilder<OutboundContext> app, string exchange,
+        Action<IMiddlewarePipelineBuilder<RabbitMqSendMessageContext>> action,
+        string topicHeaderKey = RabbitMqConstants.DefaultTopicHeader)
+    {
+        return app.Convert(new OutboundRabbitMqContextConverter(exchange, topicHeaderKey), action);
+    }
+
+    /// <summary>
+    /// Converts an outbound route pipeline (<c>OutboundRoutingBuilder.Route</c>) to publish via
+    /// RabbitMQ over the given channel, using the default <see cref="RabbitMqClientMiddleware"/>
+    /// configuration.
+    /// </summary>
+    /// <param name="app">The outbound pipeline builder to convert.</param>
+    /// <param name="channel">The RabbitMQ channel to publish on.</param>
+    /// <param name="exchange">The exchange to publish to (empty string, the default, for the default exchange).</param>
+    /// <param name="topicHeaderKey">
+    /// The message-property header the topic is written to. Defaults to
+    /// <see cref="RabbitMqConstants.DefaultTopicHeader"/>.
+    /// </param>
+    /// <returns>The same builder, for chaining.</returns>
+    /// <remarks>
+    /// One rung of shorthand over
+    /// <see cref="UseRabbitMq(IMiddlewarePipelineBuilder{OutboundContext}, string, Action{IMiddlewarePipelineBuilder{RabbitMqSendMessageContext}}, string)"/>:
+    /// it is exactly <c>app.UseRabbitMq(exchange, builder =&gt; builder.UseRabbitMqClient(channel), topicHeaderKey)</c>.
+    /// Drop one level to that when you need <c>mandatory</c>/<c>persistent</c> publish flags or extra
+    /// middleware around the publish.
+    /// </remarks>
+    public static IMiddlewarePipelineBuilder<OutboundContext> UseRabbitMq(
+        this IMiddlewarePipelineBuilder<OutboundContext> app, IChannel channel, string exchange = "",
+        string topicHeaderKey = RabbitMqConstants.DefaultTopicHeader)
+    {
+        return app.UseRabbitMq(exchange, builder => builder.UseRabbitMqClient(channel), topicHeaderKey);
     }
 }

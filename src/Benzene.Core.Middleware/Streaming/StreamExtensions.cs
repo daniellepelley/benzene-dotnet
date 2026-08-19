@@ -20,7 +20,12 @@ public static class StreamExtensions
         this IMiddlewarePipelineBuilder<StreamContext<TItem>> app,
         Func<StreamContext<TItem>, Task> process)
     {
-        return app.Use("Stream", async (StreamContext<TItem> context, Func<Task> next) =>
+        // UseTerminal, not Use: this step answers the message itself, so a pipeline ending here can
+        // handle a message. Built on the public IMiddlewarePipelineBuilder<T>.UseTerminal(name, func)
+        // - the explicit form a caller can write instead of this shorthand. Marking it terminal is what
+        // the terminal-middleware start-up check reads; on plain Use it saw a lambda it could not
+        // classify and rejected the pipeline at boot.
+        return app.UseTerminal("Stream", async (StreamContext<TItem> context, Func<Task> next) =>
         {
             await process(context);
             await next();

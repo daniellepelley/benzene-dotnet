@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`OutboundContext` route extensions for RabbitMQ, Kafka and BenzeneMessage-over-HTTP.** Every cloud
+  transport already had one; these three did not, so an outbound route could not reach them without a
+  hand-written terminal middleware (seven copies of the same ~50-line adapter across the pattern
+  examples). New: `.UseRabbitMq(channel, exchange, topicHeaderKey)` and
+  `.UseRabbitMq(exchange, configure, topicHeaderKey)` (`Benzene.RabbitMq`, over the new public
+  `OutboundRabbitMqContextConverter`); `.UseKafka(keyHeader)` and `.UseKafka(configure, keyHeader)`
+  (`Benzene.Kafka.Core`, over the new public `OutboundKafkaContextConverter`);
+  `.UseBenzeneMessageOverHttp(url, healthCheck)` and `.UseBenzeneMessageOverHttp(url, configure)`
+  (`Benzene.Clients.Http`, over the new public `OutboundBenzeneMessageHttpContextConverter`). Each
+  shorthand is composed from the public explicit form it names in its own docs. The HTTP one carries
+  the BenzeneMessage envelope, so unlike the fire-and-forget transports its route can return a typed
+  response, and it auto-registers the same dependency health check `AddHttpBenzeneMessageClient` does.
+- **Inbound `.UseCorrelationId()`** (`Benzene.Diagnostics.Correlation`), the counterpart of
+  `Benzene.Clients`' outbound one: reads the correlation header off the incoming message via the
+  transport's `IMessageHeadersGetter<TContext>` and seeds `ICorrelationId`, so a consumer continues the
+  caller's chain instead of generating a fresh GUID. Transport-generic exactly as `UseW3CTraceContext()`
+  is, resolves the same `CorrelationHeaderOptions`/`CorrelationHeaderDefaults.HeaderKey` the outbound
+  side writes, and is built on the new public `InboundCorrelationIdMiddleware<TContext>`. Both
+  dependencies resolve at pipeline-build time, so a misconfigured pipeline is named by the start-up
+  checks rather than failing on the message path.
+
+### Fixed
+- **`UseStream(...)` is now marked terminal.** It is documented as "a terminal stream-processing step"
+  and nothing runs after it, but it was built on `Use(...)` rather than `UseTerminal(...)`, so it was
+  not `ITerminalMiddleware` and the terminal-middleware start-up check refused to boot any pipeline
+  ending in the framework's own stream step.
+- **An outbound route returning a raw response envelope no longer requires an explicit `ISerializer`
+  registration.** `DefaultBenzeneMessageSender` now falls back to the same JSON default every outbound
+  converter uses when nothing is registered, instead of throwing on the message path in a container
+  that never called `AddBenzene()`. Register your own `ISerializer` to override, as before.
+
 ### Changed
 - **BREAKING (mesh.md's 2026-08 revision): the mesh producer/consumer graph is now declared, never
   trace-derived.** `MeshServiceDescriptor` gains a `Consumes` field (mesh.md §2), populated from a new

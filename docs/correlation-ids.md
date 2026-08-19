@@ -14,8 +14,36 @@
 ```
 
 With nothing populating it, `ICorrelationId` self-generates a GUID per scope — useful as a
-per-invocation marker in logs. To populate it from a custom source (e.g. a partner's proprietary
-header), register `AddCorrelationId()` and call `ICorrelationId.Set(...)` from your own middleware:
+per-invocation marker in logs, but it means an *inbound* correlation id from the caller is lost
+unless something puts it back.
+
+**Inbound: `.UseCorrelationId()`.** Add it near the top of any pipeline and the caller's correlation
+header is read off the incoming message and seeded into `ICorrelationId`, so this service's logs,
+traces, and its own outbound sends continue the caller's chain:
+
+```csharp
+app.UseCorrelationId();
+```
+
+It is transport-agnostic in exactly the way `UseW3CTraceContext()` is — it works on any pipeline
+whose context has an `IMessageHeadersGetter<TContext>` registered (HTTP, SQS, SNS, Kafka, RabbitMQ,
+Service Bus, Event Hubs, …). It reads the same key the outbound side writes
+(`CorrelationHeaderDefaults.HeaderKey`, `x-correlation-id`) unless you pass one, and registers
+`ICorrelationId` if nothing else has. Because it resolves both `ICorrelationId` and the headers
+getter when the pipeline is *built*, a pipeline missing either is named by the start-up checks
+rather than failing mid-message.
+
+**The rung below it**, if you want a different source (e.g. a partner's proprietary header) or your
+own `ICorrelationId`, is the middleware it composes — the same public types, written out:
+
+```csharp
+app.Use(resolver => new InboundCorrelationIdMiddleware<MyContext>(
+    resolver.GetService<ICorrelationId>(),
+    resolver.GetService<IMessageHeadersGetter<MyContext>>(),
+    "x-partner-request-id"));
+```
+
+and below that, an ordinary inline middleware doing it by hand:
 
 ```csharp
 app.Use("PartnerCorrelation", resolver => async (context, next) =>
@@ -26,7 +54,7 @@ app.Use("PartnerCorrelation", resolver => async (context, next) =>
 });
 ```
 
-Outbound clients can still forward the value: `.UseCorrelationId()` on an outbound route pipeline
+**Outbound: `.UseCorrelationId()` on an outbound route pipeline**
 (see [Clients — Outbound middleware](clients.md#outbound-middleware)) stamps the current
 `ICorrelationId` onto the outgoing request's headers under the **`x-correlation-id`** key by
 default (`CorrelationHeaderDefaults.HeaderKey`, matching wire-contracts.md's own example) — the

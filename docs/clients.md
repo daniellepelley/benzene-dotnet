@@ -25,9 +25,10 @@ Add the core client abstractions, plus whichever transport package(s) you need:
 | `Benzene.Clients` | `IBenzeneMessageSender`, `OutboundContext`, `OutboundRoutingBuilder`/`AddOutboundRouting(...)`, `ValidateOutboundRouting()`, and the cross-cutting middleware (correlation ID, W3C trace context). Pulled in transitively by every transport package below. |
 | `Benzene.Clients.Aws.Sqs` / `.Sns` / `.EventBridge` / `.Lambda` / `.StepFunctions` | The AWS outbound clients, segregated one package per transport so using SNS doesn't drag in SQS. Each gives the `.UseSqs(...)`/`.UseSns(...)`/`.UseEventBridge(...)`/`.UseAwsLambda(...)` route extensions and/or the standalone `SqsBenzeneMessageClient`/`SnsBenzeneMessageClient`/`EventBridgeBenzeneMessageClient`/`AwsLambdaBenzeneMessageClient` clients, plus the relevant health check. `Benzene.Clients.Aws` is a meta-package that references all five. |
 | `Benzene.Clients.Azure.ServiceBus` / `.EventHub` / `.EventGrid` / `.QueueStorage` | The Azure outbound clients, one package per transport, mirroring the AWS split. Each gives a `.Use<Transport>(...)` route extension and a standalone `IBenzeneMessageClient`. No egress exists for Blob Storage/Cosmos DB Change Feed/Timer — they aren't transports (see [Capability Matrix](capability-matrix.md)); "Kafka over Event Hubs" egress is `Benzene.Kafka.Core` unchanged (below), not a separate Azure package. |
-| `Benzene.Kafka.Core` | `KafkaBenzeneMessageClient` (Kafka transport — including Event Hubs' Kafka-protocol endpoint). |
+| `Benzene.Kafka.Core` | The `.UseKafka(...)` route extension and `KafkaBenzeneMessageClient` (Kafka transport — including Event Hubs' Kafka-protocol endpoint). |
+| `Benzene.RabbitMq` | The `.UseRabbitMq(...)` route extension and `RabbitMqBenzeneMessageClient`, alongside the self-hosted consumer worker. |
 | `Benzene.Grpc.Client` | `GrpcBenzeneMessageClient` (gRPC transport). |
-| `Benzene.Clients.Http` | `HttpContextConverter`/`HttpClientMiddleware` — the lower-level pipeline building blocks for sending over HTTP (see [HTTP](#http) below). |
+| `Benzene.Clients.Http` | The `.UseBenzeneMessageOverHttp(...)` route extension and `HttpBenzeneMessageClient` (the BenzeneMessage envelope over HTTP), plus `HttpContextConverter`/`HttpClientMiddleware` — the lower-level building blocks for a plain REST call (see [HTTP](#http-benzenemessage-envelope) below). |
 | `Benzene.Resilience` | `RetryMiddleware<TContext>`/`.UseRetry(...)` — works on `OutboundContext` unmodified. |
 
 ## Basic usage
@@ -235,13 +236,48 @@ services.UsingBenzene(x => x.AddOutboundRouting(routing => routing
 
 A Queue Storage message has no properties/attributes bag, so `.UseQueueStorage(queueClient)` serializes a `BenzeneMessageRequest` envelope (`Topic`/`Headers`/`Body`) as the message text — the same envelope `BenzeneMessageQueueStorageHandler` (`queue.UseBenzeneMessage(...)`) reads on the ingress side. **If the destination queue instead uses a fixed `UsePresetTopic(...)` route**, the body must be the raw payload, not this envelope — send via `QueueClient.SendMessageAsync(...)` directly instead of through this converter.
 
-### AWS Lambda, Kafka, EventBridge, gRPC
+### Kafka
 
-These transports don't have an `OutboundContext` route extension yet — `.UseAwsLambda(...)` and equivalents for Kafka/EventBridge/gRPC are not yet implemented on the outbound routing pipeline. Until they land, use the transport's `IBenzeneMessageClient` implementation directly (see [Using a transport client directly](#using-a-transport-client-directly) below) rather than through `AddOutboundRouting(...)`.
+Package: `Benzene.Kafka.Core`.
 
-### HTTP
+```csharp
+services.UsingBenzene(x => x.AddOutboundRouting(routing => routing
+    .Route("order:created", pipeline => pipeline.UseKafka())));
+```
 
-Package: `Benzene.Clients.Http`. HTTP has never had an `IBenzeneMessageClient` implementation or an outbound-routing route extension — see [Using a transport client directly — HTTP](#http-1) below for the lower-level pipeline you compose yourself.
+`.UseKafka()` converts the route via `OutboundKafkaContextConverter`, which serializes `OutboundContext.Request` as the record value, produces to the route's topic, and forwards every `Headers` entry onto `Message.Headers` (UTF-8 encoded). It resolves `IProducer<string,string>` from the container. `.UseKafka(keyHeader)` names the header whose value becomes the Kafka message key — records sharing a key land on the same partition and are ordered there; without it the record is keyless (round-robin). Fire-and-forget: send via `SendAsync<TRequest, Void>`.
+
+The rung below is `.UseKafka(configure, keyHeader)`, which lets you build the inner produce pipeline yourself (e.g. `builder => builder.UseKafkaClient(myProducer)`); below that is `.Convert(new OutboundKafkaContextConverter(serializer, keyHeader), configure)`.
+
+### RabbitMQ
+
+Package: `Benzene.RabbitMq`.
+
+```csharp
+services.UsingBenzene(x => x.AddOutboundRouting(routing => routing
+    .Route("order:created", pipeline => pipeline.UseRabbitMq(channel, exchange: "orders"))));
+```
+
+`.UseRabbitMq(channel, exchange)` converts the route via `OutboundRabbitMqContextConverter`, which serializes `OutboundContext.Request` as the body, uses the route's topic as the AMQP routing key, and forwards every `Headers` entry — plus a `topic` header — onto `BasicProperties.Headers` (UTF-8 encoded), so a consuming `RabbitMqWorker` routes by header (portable) with the routing key as the idiomatic fallback. `topicHeaderKey` overrides the header key for a consumer that routes on another one. Fire-and-forget: send via `SendAsync<TRequest, Void>`.
+
+The rung below is `.UseRabbitMq(exchange, configure, topicHeaderKey)`, which lets you build the inner publish pipeline yourself (e.g. `builder => builder.UseRabbitMqClient(channel, mandatory: true, persistent: false)`); below that is `.Convert(new OutboundRabbitMqContextConverter(serializer, exchange, topicHeaderKey), configure)`.
+
+### HTTP (BenzeneMessage envelope)
+
+Package: `Benzene.Clients.Http`.
+
+```csharp
+services.UsingBenzene(x => x.AddOutboundRouting(routing => routing
+    .Route("order:create", pipeline => pipeline.UseBenzeneMessageOverHttp("https://orders.internal/benzene-message"))));
+```
+
+`.UseBenzeneMessageOverHttp(url)` POSTs a BenzeneMessage envelope (`{ topic, headers, body }`) to another Benzene service's BenzeneMessage endpoint and maps the returned `{ statusCode, headers, body }` envelope back — the HTTP counterpart of `.UseInProcess()` and of the AWS Lambda invoke path, and the shape service-to-service calls take when both ends run on a laptop or in one cluster. Unlike the queue transports it **can return a typed response**: `SendAsync<TRequest, TResponse>` deserializes the envelope body once it knows `TResponse`. It resolves `HttpClient` from the container, and auto-registers a non-destructive reachability check for `url` on the deep `healthcheck` layer (`healthCheck: false` opts out).
+
+The rung below is `.UseBenzeneMessageOverHttp(url, configure)`, which lets you build the inner send pipeline yourself (e.g. `builder => builder.UseHttpClient(myHttpClient)`); below that is `.Convert(new OutboundBenzeneMessageHttpContextConverter(url, serializer), configure)`. For a plain REST call to a verb+path rather than the envelope, see [Using a transport client directly — HTTP](#http-1).
+
+### AWS Lambda, EventBridge, gRPC
+
+`.UseAwsLambda(...)` and the gRPC equivalent are not yet implemented on the outbound routing pipeline; EventBridge has `OutboundEventBridgeContextConverter` but is reached through `Benzene.Clients.Aws.EventBridge`'s own route extension. For the ones that are missing, use the transport's `IBenzeneMessageClient` implementation directly (see [Using a transport client directly](#using-a-transport-client-directly) below) rather than through `AddOutboundRouting(...)`.
 
 ## Generated clients (`Benzene.CodeGen.Client`)
 
@@ -420,7 +456,9 @@ Unlike the other transports, a non-OK gRPC status doesn't collapse to a single g
 
 Package: `Benzene.Clients.Http`.
 
-HTTP is the odd one out: there is no `HttpBenzeneMessageClient : IBenzeneMessageClient` shipped today. Instead, `Benzene.Clients.Http` gives you the lower-level pipeline building blocks to compose an outbound HTTP call yourself:
+There are two HTTP shapes, and they are not interchangeable. For the **BenzeneMessage envelope** shape — one endpoint serving every topic, the receiving side routing on the envelope's topic — use `HttpBenzeneMessageClient` (registered by `services.AddHttpBenzeneMessageClient(url)`) or, on an outbound route, [`.UseBenzeneMessageOverHttp(url)`](#http-benzenemessage-envelope) above.
+
+For a **plain REST call** to a verb+path, `Benzene.Clients.Http` gives you the lower-level pipeline building blocks to compose it yourself:
 
 ```csharp
 var pipeline = new MiddlewarePipelineBuilder<IBenzeneClientContext<CreateOrderRequest, OrderCreatedResponse>>(services)
@@ -446,7 +484,9 @@ Every transport puts `Headers` (from either `OutboundContext.Headers` on the out
 - **EventBridge** — embeds `Headers` into the event's `detail` under the reserved `_benzeneHeaders` key (EventBridge has no native per-message attributes); the inbound binding lifts them back out.
 - **gRPC** — copies `Headers` onto the outbound `CallOptions.Headers` (a `Metadata`).
 - **AWS Lambda** (`AwsLambdaBenzeneMessageClient`) — embeds `Headers` directly into its own `BenzeneMessageClientRequest` envelope, which is what actually gets invoked as the payload.
-- **HTTP** — `HttpContextConverter` copies `Headers` onto `HttpRequestMessage.Headers`.
+- **HTTP (REST)** — `HttpContextConverter` copies `Headers` onto `HttpRequestMessage.Headers`.
+- **HTTP (BenzeneMessage envelope)** — `OutboundBenzeneMessageHttpContextConverter`/`HttpBenzeneMessageClient` embed `Headers` into the posted envelope's own `headers` member, which is what the receiving side reads.
+- **RabbitMQ** — copies `Headers` onto `BasicProperties.Headers` (UTF-8 encoded, alongside `topic`).
 
 The one exception is the lower-level `UseAwsLambda()`/`LambdaContextConverter` pipeline style (see [The context-converter pipeline](#the-context-converter-pipeline) below): a raw `InvokeRequest` has no header-like concept comparable to HTTP/SQS/SNS/Kafka, so `LambdaContextConverter.CreateRequestAsync` does not forward headers — a middleware like `.UseW3CTraceContext()` would have no effect on a client pipeline built with `UseAwsLambda()` specifically. This doesn't affect `AwsLambdaBenzeneMessageClient`, which is unrelated and already forwards headers as described above.
 
