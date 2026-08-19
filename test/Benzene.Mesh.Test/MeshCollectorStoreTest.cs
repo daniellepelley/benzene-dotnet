@@ -85,30 +85,36 @@ public class MeshCollectorStoreTest
         Assert.Equal("topic", fleet.Traces[0].Topic); // the flow's entry topic (earliest event's)
     }
 
-    private static MeshServiceDescriptor Descriptor(string service, string[]? topics = null, string[]? consumes = null)
+    private static MeshServiceDescriptor Descriptor(string service, string[]? topics = null, string[]? produces = null)
     {
         return new MeshServiceDescriptor
         {
             Service = service,
             Topics = (topics ?? Array.Empty<string>()).Select(id => new MeshTopicDescriptor { Id = id }).ToList(),
-            Consumes = (consumes ?? Array.Empty<string>()).Select(id => new MeshTopicDescriptor { Id = id }).ToList()
+            Produces = (produces ?? Array.Empty<string>()).Select(id => new MeshTopicDescriptor { Id = id }).ToList()
         };
     }
 
-    // ---- declared graph (spec §4, 2026-08 revision): the SOLE source of producer/consumer edges ----
+    // ---- declared graph (spec §4): the SOLE source of producer/consumer edges ----
+    //
+    // Role assignment, since the 2026-08 inversion: `topics` (the topics a service HANDLES) makes it
+    // a CONSUMER of them; `produces` (its outbound registration) makes it a PROVIDER. That is the
+    // way every broker in the field uses the words, and the opposite of what this file asserted
+    // before the inversion.
 
     [Fact]
-    public void Consumers_AreDeclaredFromRegisteredConsumes_ZeroTrafficStillReportsTheFullGraph()
+    public void Graph_IsDeclaredFromTopicsAndProduces_ZeroTrafficStillReportsTheFullGraph()
     {
         var store = new MeshCollectorStore();
+        // payments HANDLES payments:capture, so it CONSUMES it. orders SENDS it, so it PROVIDES it.
         store.Register(Descriptor("payments", topics: new[] { "payments:capture" }));
-        store.Register(Descriptor("orders", topics: new[] { "order:create" }, consumes: new[] { "payments:capture" }));
+        store.Register(Descriptor("orders", topics: new[] { "order:create" }, produces: new[] { "payments:capture" }));
 
         var topic = store.Topic("payments:capture", null);
 
         Assert.NotNull(topic);
-        Assert.Equal(new List<string> { "payments" }, topic!.Providers);
-        Assert.Equal(new List<string> { "orders" }, topic.Consumers);
+        Assert.Equal(new List<string> { "orders" }, topic!.Providers);
+        Assert.Equal(new List<string> { "payments" }, topic.Consumers);
         Assert.Equal(0, topic.Invocations); // declared, not a summary of traffic
     }
 
@@ -126,10 +132,11 @@ public class MeshCollectorStoreTest
 
         var greet = store.Topic("greet", null);
         Assert.NotNull(greet);
-        Assert.Equal(new List<string> { "greeter" }, greet!.Providers);
-        // frontdoor called greeter but never registered a descriptor consuming "greet" - trace
-        // parentage does NOT admit it as a consumer (the 2026-08 revision's central rule).
-        Assert.Empty(greet.Consumers);
+        // greeter HANDLES greet, so it is the consumer.
+        Assert.Equal(new List<string> { "greeter" }, greet!.Consumers);
+        // frontdoor called greeter but never declared "greet" in its produces - trace parentage
+        // does NOT admit it as a provider (the central rule of the declared-graph revision).
+        Assert.Empty(greet.Providers);
         Assert.Equal(1, greet.Invocations); // stats still come from the trace feed, unaffected
     }
 
@@ -138,15 +145,15 @@ public class MeshCollectorStoreTest
     {
         var store = new MeshCollectorStore();
         store.Register(Descriptor("payments", topics: new[] { "payments:capture" }));
-        store.Register(Descriptor("orders", topics: new[] { "order:create" }, consumes: new[] { "payments:capture" }));
-        Assert.Equal(new List<string> { "orders" }, store.Topic("payments:capture", null)!.Consumers);
+        store.Register(Descriptor("orders", topics: new[] { "order:create" }, produces: new[] { "payments:capture" }));
+        Assert.Equal(new List<string> { "orders" }, store.Topic("payments:capture", null)!.Providers);
 
-        // orders redeploys and drops both the provided topic and the consumed one.
+        // orders redeploys and drops both the topic it handled and the one it produced.
         store.Register(Descriptor("orders", topics: new[] { "order:cancel" }));
 
-        Assert.Empty(store.Topic("order:create", null)!.Providers);
-        Assert.Empty(store.Topic("payments:capture", null)!.Consumers);
-        Assert.Equal(new List<string> { "orders" }, store.Topic("order:cancel", null)!.Providers);
+        Assert.Empty(store.Topic("order:create", null)!.Consumers);
+        Assert.Empty(store.Topic("payments:capture", null)!.Providers);
+        Assert.Equal(new List<string> { "orders" }, store.Topic("order:cancel", null)!.Consumers);
     }
 
     // ---- §4.2 declared vs. observed: liveness ("Unobserved") ----
@@ -156,14 +163,14 @@ public class MeshCollectorStoreTest
     {
         var store = new MeshCollectorStore();
         store.Register(Descriptor("payments", topics: new[] { "payments:capture" }));
-        store.Register(Descriptor("orders", topics: new[] { "order:create" }, consumes: new[] { "payments:capture" }));
+        store.Register(Descriptor("orders", topics: new[] { "order:create" }, produces: new[] { "payments:capture" }));
 
         var topic = store.Topic("payments:capture", null)!;
 
-        Assert.True(topic.ProviderActivity.ContainsKey("payments"));
-        Assert.Null(topic.ProviderActivity["payments"].LastObservedAt);
-        Assert.True(topic.ConsumerActivity.ContainsKey("orders"));
-        Assert.Null(topic.ConsumerActivity["orders"].LastObservedAt);
+        Assert.True(topic.ProviderActivity.ContainsKey("orders"));
+        Assert.Null(topic.ProviderActivity["orders"].LastObservedAt);
+        Assert.True(topic.ConsumerActivity.ContainsKey("payments"));
+        Assert.Null(topic.ConsumerActivity["payments"].LastObservedAt);
     }
 
     [Fact]
@@ -171,7 +178,7 @@ public class MeshCollectorStoreTest
     {
         var store = new MeshCollectorStore();
         store.Register(Descriptor("payments", topics: new[] { "payments:capture" }));
-        store.Register(Descriptor("orders", topics: new[] { "order:create" }, consumes: new[] { "payments:capture" }));
+        store.Register(Descriptor("orders", topics: new[] { "order:create" }, produces: new[] { "payments:capture" }));
         var now = DateTimeOffset.UtcNow;
         var caller = Event("trace-1", "span-parent", "orders", "order:create", now);
         var callee = Event("trace-1", "span-child", "payments", "payments:capture", now.AddMilliseconds(1));
@@ -179,18 +186,20 @@ public class MeshCollectorStoreTest
 
         store.AddEvents(new[] { caller, callee });
 
+        // The observed side follows the declared side: whoever SENT it provided it, whoever
+        // HANDLED it consumed it.
         var topic = store.Topic("payments:capture", null)!;
-        Assert.NotNull(topic.ProviderActivity["payments"].LastObservedAt);
-        Assert.NotNull(topic.ConsumerActivity["orders"].LastObservedAt);
+        Assert.NotNull(topic.ProviderActivity["orders"].LastObservedAt);
+        Assert.NotNull(topic.ConsumerActivity["payments"].LastObservedAt);
     }
 
     // ---- §4.2 declared vs. observed: drift ("Undeclared" → contract-drift) ----
 
     [Fact]
-    public void UndeclaredProviderEdge_FilesAContractDriftIssue()
+    public void UndeclaredConsumerEdge_FilesAContractDriftIssue()
     {
         var store = new MeshCollectorStore();
-        // "greeter" registers but never declares "greet" as a provided topic.
+        // "greeter" registers but never declares "greet" among the topics it handles.
         store.Register(Descriptor("greeter", topics: Array.Empty<string>()));
 
         store.AddEvents(new[] { Event("trace-1", "span-1", "greeter", "greet", DateTimeOffset.UtcNow) });
@@ -202,11 +211,11 @@ public class MeshCollectorStoreTest
     }
 
     [Fact]
-    public void UndeclaredConsumerEdge_FilesAContractDriftIssue()
+    public void UndeclaredProviderEdge_FilesAContractDriftIssue()
     {
         var store = new MeshCollectorStore();
         store.Register(Descriptor("payments", topics: new[] { "payments:capture" }));
-        // "orders" registers but never declares "payments:capture" in its consumes.
+        // "orders" registers but never declares "payments:capture" in its produces.
         store.Register(Descriptor("orders", topics: new[] { "order:create" }));
         var now = DateTimeOffset.UtcNow;
         var caller = Event("trace-1", "span-parent", "orders", "order:create", now);
@@ -249,7 +258,7 @@ public class MeshCollectorStoreTest
     public void DegradedDescriptor_IsNeverFlaggedAsDrift()
     {
         // A service that HAS registered but honestly marked its registry/outbound-registry as
-        // degraded doesn't know its own topics/consumes yet - flagging it would be a false positive.
+        // degraded doesn't know its own topics/produces yet - flagging it would be a false positive.
         var store = new MeshCollectorStore();
         store.Register(new MeshServiceDescriptor { Service = "greeter", Degraded = new List<string> { "registry" } });
 

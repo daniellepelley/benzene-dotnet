@@ -43,7 +43,7 @@ public class MeshDescriptorConformanceTest
         public bool InvariantToInstanceId { get; set; }
         public bool SensitiveToServiceVersion { get; set; }
         public bool SensitiveToTopics { get; set; }
-        public bool SensitiveToConsumes { get; set; }
+        public bool SensitiveToProduces { get; set; }
     }
 
     /// <summary>
@@ -150,9 +150,9 @@ public class MeshDescriptorConformanceTest
     }
 
     [Fact]
-    public void DescriptorHash_IsSensitiveToTheConsumedTopicSet()
+    public void DescriptorHash_IsSensitiveToTheProducedTopicSet()
     {
-        if (!Fixture.Value.Hash.SensitiveToConsumes) return; // not asserted by the fixture
+        if (!Fixture.Value.Hash.SensitiveToProduces) return; // not asserted by the fixture
 
         var baseline = MeshDescriptorFactory.Create(CanonicalLookUp(), Info(), CanonicalOutboundLookUp());
         var grown = MeshDescriptorFactory.Create(CanonicalLookUp(), Info(), CanonicalOutboundLookUp(withExtraTopic: true));
@@ -174,12 +174,12 @@ public class MeshDescriptorConformanceTest
     [Fact]
     public void MissingOutboundRegistry_DegradesTheFeedNotTheDescriptor()
     {
-        // spec §2/§2.3: a port that hasn't wired up outbound registration MUST mark `consumes`
-        // degraded rather than emit an empty array - an empty array asserts "consumes nothing", which
+        // spec §2/§2.3: a port that hasn't wired up outbound registration MUST mark `produces`
+        // degraded rather than emit an empty array - an empty array asserts "produces nothing", which
         // a port that cannot yet know that has no right to assert.
         var descriptor = MeshDescriptorFactory.Create(CanonicalLookUp(), Info(), outboundLookUp: null);
 
-        Assert.Empty(descriptor.Consumes);
+        Assert.Empty(descriptor.Produces);
         Assert.Equal(new List<string> { MeshDescriptorFactory.OutboundRegistryFeed }, descriptor.Degraded);
         Assert.NotNull(descriptor.DescriptorHash);
     }
@@ -190,7 +190,7 @@ public class MeshDescriptorConformanceTest
         var descriptor = MeshDescriptorFactory.Create(null, Info());
 
         Assert.Empty(descriptor.Topics);
-        Assert.Empty(descriptor.Consumes);
+        Assert.Empty(descriptor.Produces);
         Assert.Equal(
             new List<string> { MeshDescriptorFactory.RegistryFeed, MeshDescriptorFactory.OutboundRegistryFeed },
             descriptor.Degraded);

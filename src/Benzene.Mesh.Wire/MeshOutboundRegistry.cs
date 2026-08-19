@@ -8,7 +8,7 @@ namespace Benzene.Mesh.Wire;
 /// Looks up every outbound record an application has registered (docs/specification/mesh.md §2.3) -
 /// the concept that mirrors core-concepts.md §9's inbound handler discovery exactly, applied to what
 /// a service <b>sends</b> rather than what it serves. Consumed by <see cref="MeshDescriptorFactory"/>
-/// to project <see cref="MeshServiceDescriptor.Consumes"/>, the same way
+/// to project <see cref="MeshServiceDescriptor.Produces"/>, the same way
 /// <see cref="Benzene.Abstractions.MessageHandlers.IMessageHandlerDefinitionLookUp"/> is projected
 /// into <see cref="MeshServiceDescriptor.Topics"/>. A null lookup at the factory means this port
 /// (or this service) hasn't wired up outbound registration yet - the descriptor is built without a

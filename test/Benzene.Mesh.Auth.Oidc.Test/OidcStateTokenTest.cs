@@ -65,7 +65,17 @@ public class OidcStateTokenTest
     public void TamperedState_FailsValidation()
     {
         var state = OidcStateToken.Create(Key, "/mesh-ui");
-        var tampered = state[..^1] + (state[^1] == 'a' ? 'b' : 'a');
+
+        // Flip the FIRST character of the signature segment, not the last character of the token.
+        // The signature is 32 bytes = 43 base64url characters, and 43 * 6 = 258 bits, so the final
+        // character carries only 4 significant bits - two characters differing solely in the two
+        // dropped bits decode to an identical signature, leaving the "tampered" token byte-identical
+        // to the real one and correctly accepted. That made this test fail on roughly 7% of runs.
+        // Character 0 of either segment is always fully significant, which is the idiom the rest of
+        // these tamper tests already use (see SignedTokenTest).
+        var parts = state.Split('.');
+        var tampered = parts[0] + "." + (parts[1][0] == 'a' ? 'b' : 'a') + parts[1][1..];
+        Assert.NotEqual(state, tampered);
 
         var ok = OidcStateToken.TryValidate(Key, tampered, tampered, out _);
 

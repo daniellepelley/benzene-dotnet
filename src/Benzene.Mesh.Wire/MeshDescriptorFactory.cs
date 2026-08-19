@@ -63,7 +63,7 @@ public static class MeshDescriptorFactory
         }
         else
         {
-            descriptor.Consumes = outboundLookUp.GetAllDefinitions()
+            descriptor.Produces = outboundLookUp.GetAllDefinitions()
                 .OrderBy(x => x.Topic.Id, StringComparer.Ordinal)
                 .ThenBy(x => x.Topic.Version, StringComparer.Ordinal)
                 .Select(definition => new MeshTopicDescriptor
@@ -114,7 +114,7 @@ public static class MeshDescriptorHashing
             Binding = descriptor.Binding,
             Placement = descriptor.Placement,
             Topics = descriptor.Topics,
-            Consumes = descriptor.Consumes,
+            Produces = descriptor.Produces,
             DescriptorHash = null,
             Degraded = null,
             Profile = null

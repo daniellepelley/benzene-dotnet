@@ -88,11 +88,17 @@ public class MeshCollectorStore : IMeshFleetReadModel
     }
 
     /// <summary>Stores the descriptor as the service's current contract, replacing any previous
-    /// registration wholesale - a redeploy that drops a topic drops the provider claim with it, and
-    /// one that drops a consumed topic drops the consumer claim with it, symmetrically (spec §4).
-    /// This - <c>topics</c> for providers, <c>consumes</c> for consumers - is now the SOLE source of
-    /// the producer/consumer graph (2026-08 revision): trace parentage never admits or removes an
-    /// edge here, only feeds the separate observed signals in <see cref="RecordObservedActivityAndDrift"/>.</summary>
+    /// registration wholesale - a redeploy that drops a topic drops the consumer claim with it, and
+    /// one that drops a produced topic drops the provider claim with it, symmetrically (spec §4).
+    /// This - <c>topics</c> for CONSUMERS, <c>produces</c> for PROVIDERS - is the SOLE source of the
+    /// producer/consumer graph: trace parentage never admits or removes an edge here, only feeds the
+    /// separate observed signals in <see cref="RecordObservedActivityAndDrift"/>.</summary>
+    /// <remarks>
+    /// The role assignment inverted in the 2026-08 revision: registering a handler for a topic makes
+    /// a service that topic's consumer, not its provider, matching how every broker in the field
+    /// uses the words. Before that, <c>topics</c> fed Providers and a field named <c>consumes</c>
+    /// fed Consumers - exactly backwards.
+    /// </remarks>
     public void Register(MeshServiceDescriptor descriptor)
     {
         lock (_lock)
@@ -107,13 +113,14 @@ public class MeshCollectorStore : IMeshFleetReadModel
             state.Descriptor = descriptor;
             state.LastSeen = DateTimeOffset.UtcNow;
 
+            // topics -> Consumers, produces -> Providers. Handling a topic makes you its consumer.
             foreach (var topic in descriptor.Topics)
             {
-                EnsureTopic((topic.Id, topic.Version ?? string.Empty)).Providers.Add(descriptor.Service);
-            }
-            foreach (var topic in descriptor.Consumes)
-            {
                 EnsureTopic((topic.Id, topic.Version ?? string.Empty)).Consumers.Add(descriptor.Service);
+            }
+            foreach (var topic in descriptor.Produces)
+            {
+                EnsureTopic((topic.Id, topic.Version ?? string.Empty)).Providers.Add(descriptor.Service);
             }
         }
     }
@@ -456,11 +463,13 @@ public class MeshCollectorStore : IMeshFleetReadModel
     /// <see cref="TopicState.Providers"/>/<see cref="TopicState.Consumers"/>:
     /// <list type="bullet">
     /// <item><b>Activity</b> (feeds "Unobserved"): records that this topic/version was actually
-    /// exercised - as provider by the handling service (<see cref="MeshTraceEvent.Service"/>), and as
-    /// consumer by the calling service, found via <see cref="_spanService"/> off the parent span - so
-    /// <see cref="TopicSummaryLocked"/> can report a per-edge last-observed-at rather than a boolean.</item>
+    /// exercised - as CONSUMER by the handling service (<see cref="MeshTraceEvent.Service"/>), and as
+    /// PROVIDER by the calling service, found via <see cref="_spanService"/> off the parent span - so
+    /// <see cref="TopicSummaryLocked"/> can report a per-edge last-observed-at rather than a boolean.
+    /// The two sides follow the same 2026-08 inversion as the declared graph: whoever handles the
+    /// message consumes it, whoever sent it provides it.</item>
     /// <item><b>Undeclared → contract-drift</b>: when the handling/calling service HAS a registered,
-    /// non-degraded descriptor, but this topic isn't in its declared <c>topics</c>/<c>consumes</c>, the
+    /// non-degraded descriptor, but this topic isn't in its declared <c>topics</c>/<c>produces</c>, the
     /// running system disagrees with the declared contract - filed as a contract-drift issue (spec
     /// §4.1's classification vocabulary already reserves this bucket) via the same merged <see cref="_issues"/>
     /// map the emitter-reported feed uses. An anonymous/never-registered service (no descriptor at
@@ -480,7 +489,7 @@ public class MeshCollectorStore : IMeshFleetReadModel
         if (!string.IsNullOrEmpty(traceEvent.Service))
         {
             var handler = traceEvent.Service!;
-            EnsureActivity(_providerActivity, key)[handler] = observedAt;
+            EnsureActivity(_consumerActivity, key)[handler] = observedAt;
 
             if (_services.TryGetValue(handler, out var handlerState) &&
                 IsDeclared(handlerState.Descriptor, MeshDescriptorFactory.RegistryFeed) &&
@@ -494,11 +503,11 @@ public class MeshCollectorStore : IMeshFleetReadModel
             _spanService.TryGetValue(traceEvent.ParentSpanId!, out var caller) &&
             caller != traceEvent.Service)
         {
-            EnsureActivity(_consumerActivity, key)[caller] = observedAt;
+            EnsureActivity(_providerActivity, key)[caller] = observedAt;
 
             if (_services.TryGetValue(caller, out var callerState) &&
                 IsDeclared(callerState.Descriptor, MeshDescriptorFactory.OutboundRegistryFeed) &&
-                !ContainsTopic(callerState.Descriptor!.Consumes, key))
+                !ContainsTopic(callerState.Descriptor!.Produces, key))
             {
                 FileContractDrift(caller, traceEvent);
             }

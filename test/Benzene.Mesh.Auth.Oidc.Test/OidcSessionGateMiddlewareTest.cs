@@ -118,23 +118,79 @@ public class OidcSessionGateMiddlewareTest
     }
 
     [Fact]
-    public async Task TamperedSessionCookie_IsRejected()
+    public async Task TamperedSessionPayload_IsRejected()
+    {
+        // Flips a character INSIDE the payload segment - the half an attacker would actually edit,
+        // to change the email or push out the expiry. Every character there is fully significant,
+        // so the edit always changes the signed bytes.
+        var session = OidcSessionToken.Create(Key, "user@example.com", TimeSpan.FromHours(24));
+        var dot = session.IndexOf('.');
+        var at = dot / 2;
+        var tampered = session[..at] + (session[at] == 'A' ? 'B' : 'A') + session[(at + 1)..];
+        Assert.NotEqual(session, tampered);
+
+        Assert.False(await SessionCookieIsAccepted(tampered));
+    }
+
+    [Fact]
+    public async Task TamperedSessionSignature_IsRejected()
+    {
+        // The signature half, tampered at the BYTE level rather than by editing a base64 character.
+        //
+        // This test used to flip the token's last character, which is flaky by construction: the
+        // signature is 32 bytes, which is 43 base64url characters, and 43 * 6 = 258 bits - so the
+        // final character carries only 4 significant bits and its low 2 bits are dropped on decode.
+        // Characters differing only in those bits decode to identical signatures, so the "tampered"
+        // token was byte-identical to the real one and was correctly ACCEPTED, failing the test.
+        // Measured at roughly 7% of runs: often enough to redden CI now and then, rarely enough to
+        // be dismissed as noise - on a test whose whole job is to prove tamper-evidence.
+        var session = OidcSessionToken.Create(Key, "user@example.com", TimeSpan.FromHours(24));
+        var dot = session.IndexOf('.');
+        var payload = session[..dot];
+        var signature = Base64UrlDecodeForTest(session[(dot + 1)..]);
+
+        signature[0] ^= 0x01; // one bit, in a byte that is always significant
+        var tampered = payload + "." + Base64UrlEncodeForTest(signature);
+        Assert.NotEqual(session, tampered);
+
+        Assert.False(await SessionCookieIsAccepted(tampered));
+    }
+
+    [Fact]
+    public async Task SessionSignedWithADifferentKey_IsRejected()
+    {
+        // Same shape, valid signature - but under a key this gate does not hold.
+        var otherKey = Encoding.UTF8.GetBytes("ffffffffffffffffffffffffffffffff");
+        var session = OidcSessionToken.Create(otherKey, "user@example.com", TimeSpan.FromHours(24));
+
+        Assert.False(await SessionCookieIsAccepted(session));
+    }
+
+    /// <summary>Runs one cookie through the gate and reports whether it reached the next middleware.</summary>
+    private static async Task<bool> SessionCookieIsAccepted(string cookieValue)
     {
         var gate = CreateGate(Options());
-        var session = OidcSessionToken.Create(Key, "user@example.com", TimeSpan.FromHours(24));
-        var tampered = session[..^1] + (session[^1] == 'a' ? 'b' : 'a');
         var context = new FakeHttpContext
         {
             Method = "GET",
             Path = "/mesh-ui",
-            Headers = { ["cookie"] = $"benzene_mesh_session={tampered}", ["accept"] = "text/html" },
+            Headers = { ["cookie"] = $"benzene_mesh_session={cookieValue}", ["accept"] = "text/html" },
         };
 
         var nextCalled = false;
         await gate.HandleAsync(context, () => { nextCalled = true; return Task.CompletedTask; });
-
-        Assert.False(nextCalled);
+        return nextCalled;
     }
+
+    private static byte[] Base64UrlDecodeForTest(string value)
+    {
+        var padded = value.Replace('-', '+').Replace('_', '/');
+        padded += new string('=', (4 - padded.Length % 4) % 4);
+        return Convert.FromBase64String(padded);
+    }
+
+    private static string Base64UrlEncodeForTest(byte[] value) =>
+        Convert.ToBase64String(value).Replace('+', '-').Replace('/', '_').TrimEnd('=');
 
     [Fact]
     public async Task ValidSessionButEmailRemovedFromAllowlist_IsRejected()

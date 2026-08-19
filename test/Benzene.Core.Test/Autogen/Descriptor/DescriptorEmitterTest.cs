@@ -66,27 +66,34 @@ public class DescriptorEmitterTest
         using var doc = JsonDocument.Parse(result.DescriptorJson!);
         var root = doc.RootElement;
 
-        // Mesh §2 shape: service/serviceVersion/placement/topics[]/consumes[]/descriptorHash.
+        // Mesh §2 shape: service/serviceVersion/placement/topics[]/produces[]/descriptorHash.
         Assert.Equal("minimal", root.GetProperty("service").GetString());
         Assert.Equal("1.0.0", root.GetProperty("serviceVersion").GetString());
         Assert.True(root.TryGetProperty("topics", out var topics));
         Assert.True(topics.GetArrayLength() > 0);
         Assert.StartsWith("sha256:", root.GetProperty("descriptorHash").GetString());
 
-        // §2.3's `consumes` IS the mesh §2 shape (2026-08 revision) - present, but empty and honestly
-        // degraded: this offline, no-running-service tool has no outbound registration to read (spec
-        // §2.3 forbids inferring it from assembly reflection/call-site scanning), so it marks the gap
-        // rather than asserting "consumes nothing".
-        Assert.True(root.TryGetProperty("consumes", out var consumes));
-        Assert.Equal(0, consumes.GetArrayLength());
+        // §2.3's `produces` (renamed from `consumes` by the 2026-08 role inversion) IS part of the
+        // mesh §2 shape - present, but empty and honestly degraded: this offline, no-running-service
+        // tool has no outbound registration to read (§2.3 forbids inferring it from assembly
+        // reflection or call-site scanning), so it marks the gap rather than asserting "produces
+        // nothing".
+        Assert.True(root.TryGetProperty("produces", out var produces));
+        Assert.Equal(0, produces.GetArrayLength());
         Assert.True(root.TryGetProperty("degraded", out var degraded));
         Assert.Contains(degraded.EnumerateArray(), d => d.GetString() == "outbound-registry");
 
-        // NOT the OLD, unrelated distilled deployment projection (descriptorVersion/produces/
+        // NOT the OLD, unrelated distilled deployment projection (descriptorVersion/
         // transportsResolved - a completely different, now-deferred `--emit deploy` shape; see
         // DescriptorEmitter's own doc comment).
+        //
+        // That old shape also had a `produces` key, which is why this used to assert its absence.
+        // The 2026-08 role inversion took that name for the mesh §2 outbound field (previously
+        // `consumes`), so `produces` is now expected to be PRESENT and is asserted above - the two
+        // shapes are still told apart by descriptorVersion/transportsResolved, which the mesh
+        // descriptor has never carried.
         Assert.False(root.TryGetProperty("descriptorVersion", out _));
-        Assert.False(root.TryGetProperty("produces", out _));
+        Assert.False(root.TryGetProperty("transportsResolved", out _));
     }
 
     [Fact]

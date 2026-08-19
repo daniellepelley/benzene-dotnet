@@ -29,21 +29,28 @@ public class MeshServiceDescriptor
     public List<MeshTopicDescriptor> Topics { get; set; } = new();
 
     /// <summary>
-    /// Every registered outbound topic (spec §2, §2.3): what this service <b>consumes</b>, derived
+    /// Every registered outbound topic (spec §2, §2.3): what this service <b>produces</b>, derived
     /// from its outbound registration - never from scanning call sites. Same shape and
     /// schema-derivation rules as <see cref="Topics"/>. This is what a collector reads to build
-    /// consumer edges (spec §4) - a topic absent here is not consumed by this service, regardless of
-    /// what traffic has or hasn't flowed.
+    /// <b>provider</b> edges (spec §4) - a topic absent here is not produced by this service,
+    /// regardless of what traffic has or hasn't flowed.
     /// </summary>
-    public List<MeshTopicDescriptor> Consumes { get; set; } = new();
+    /// <remarks>
+    /// Named <c>produces</c>, and paired with <see cref="Topics"/> meaning what this service
+    /// consumes, since the 2026-08 role inversion (spec §4, mesh.md): a service that registers a
+    /// handler for a topic is that topic's CONSUMER, which is how every broker in the field
+    /// (Kafka, SQS/SNS, EventBridge, Pub/Sub) uses the word. Before that this field was
+    /// <c>consumes</c> and the roles were the other way round.
+    /// </remarks>
+    public List<MeshTopicDescriptor> Produces { get; set; } = new();
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? DescriptorHash { get; set; }
 
     /// <summary>
     /// Names the feeds that were unavailable when the descriptor was built (spec §2: "registry" for
-    /// <see cref="Topics"/>, "outbound-registry" for <see cref="Consumes"/>), so a reduced descriptor
-    /// is distinguishable from a service that provides/consumes nothing.
+    /// <see cref="Topics"/>, "outbound-registry" for <see cref="Produces"/>), so a reduced descriptor
+    /// is distinguishable from a service that produces/consumes nothing.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<string>? Degraded { get; set; }
