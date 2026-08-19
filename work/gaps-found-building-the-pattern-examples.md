@@ -234,9 +234,25 @@ package themselves before, so this is a footprint shift rather than a new depend
 - **The start-up checks earned their keep repeatedly.** Across seven examples they caught: a missing
   terminal middleware (three times, including gap 2 above), an unregistered `ICorrelationId` on an
   outbound pipeline, and an unresolvable serializer in a pure outbound worker. Every one was named
-  with the pipeline and the missing piece, before any message was handled. Worth saying out loud in
-  the docs — it is one of the better things about adopting the framework and it is currently
-  discovered by accident.
+  with the pipeline and the missing piece, before any message was handled.
+
+  This note previously said they were undiscovered and undocumented. **That was wrong**, and worth
+  correcting rather than deleting: `docs/diagnosing-failures.md` opens with "Wiring problems are
+  caught before any message arrives", tables every check with what it catches and whether it fails
+  or logs, explains the one false positive `terminal-middleware` can produce and how to say so, and
+  documents the single `BenzeneStartUpCheckMode` kill switch. They are on by default in every host,
+  including `BenzeneTestHost`. The gap, if there is one, is a link from the getting-started path to
+  that page — not the page.
+
+- **An outbound-registration check was considered and deliberately not built.** `outbound-routing`
+  covers topics a *generated client* requires, because `RequiredTopics` is contract-derived and
+  unambiguous. Extending it to `MeshOutboundRegistry`'s `produces` declarations looks like the same
+  idea and is not: `produces` is a mesh declaration of what a service may send, not a claim that it
+  sends it *through the routing table*. A service that declares `produces` and sends via a direct
+  client would trip the check while being correctly wired. `IStartUpCheck`'s own doc comment is the
+  argument against shipping it anyway — "a newcomer who hits a check they believe is wrong must be
+  able to turn the whole thing off, or they will abandon Benzene rather than debug the thing meant
+  to help them debug it". A false-positive-prone check spends exactly that credit.
 
 ---
 
