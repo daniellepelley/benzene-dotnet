@@ -20,6 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shorthand is composed from the public explicit form it names in its own docs. The HTTP one carries
   the BenzeneMessage envelope, so unlike the fire-and-forget transports its route can return a typed
   response, and it auto-registers the same dependency health check `AddHttpBenzeneMessageClient` does.
+- **`Benzene.AspNet.Core.BenzeneWebHost`** - the embedded-ASP.NET counterpart of
+  `Benzene.HostedService.BenzeneHost`. `Run<TStartUp>` / `RunAsync<TStartUp>` / `Build<TStartUp>`
+  compose the five-line embedded triangle (`WebApplication.CreateBuilder` →
+  `builder.UseBenzene<TStartUp>()` → `Build()` → `app.UseBenzene()` → `Run()`) into one line, with
+  `configureBuilder` (before the startup runs) and `configureApp` (before Benzene's terminal wiring)
+  as the two hooks. The explicit form is unchanged and still what this calls;
+  `examples/Asp/Benzene.Example.Asp.Minimal` keeps it written out on purpose. Ten duplicated
+  example entry points collapsed onto it, and two more onto the existing `BenzeneHost.RunAsync`.
 - **Inbound `.UseCorrelationId()`** (`Benzene.Diagnostics.Correlation`), the counterpart of
   `Benzene.Clients`' outbound one: reads the correlation header off the incoming message via the
   transport's `IMessageHeadersGetter<TContext>` and seeds `ICorrelationId`, so a consumer continues the
@@ -30,6 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checks rather than failing on the message path.
 
 ### Fixed
+- **`WebApplicationBuilder.UseBenzene<TStartUp>()`'s docs now name `UseAspNet`.** The cross-reference
+  ran one way only, so the embedded shape - the one every getting-started path shows - was the only
+  one a newcomer could find, and four pattern examples were written in it for services with no ASP.NET
+  surface of their own. The remarks now say which shape is which and why the choice matters.
 - **`UseStream(...)` is now marked terminal.** It is documented as "a terminal stream-processing step"
   and nothing runs after it, but it was built on `Use(...)` rather than `UseTerminal(...)`, so it was
   not `ITerminalMiddleware` and the terminal-middleware start-up check refused to boot any pipeline

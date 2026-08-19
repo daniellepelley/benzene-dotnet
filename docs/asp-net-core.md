@@ -161,6 +161,24 @@ Since Benzene's middleware only intercepts the response if a handler matched and
 `next()` otherwise, `app.UseBenzene()` can sit before `app.MapControllers()`/other endpoint
 middleware in the same pipeline — routes Benzene doesn't own fall straight through.
 
+**The one-line form.** Those five lines never vary, and `StartUp` is the only thing in them that says
+anything about the application, so `BenzeneWebHost` composes them:
+
+```csharp
+// Program.cs, entire
+await BenzeneWebHost.RunAsync<StartUp>(args);
+```
+
+The explicit form above stays supported and is what `BenzeneWebHost` calls — drop back to it, or use
+`BenzeneWebHost`'s `configureBuilder`/`configureApp` hooks, whenever you need to shape the host or put
+your own ASP.NET middleware in front. See [Hosting](hosting.md#benzenewebhost--the-one-line-entry-point-for-the-embedded-shape).
+
+**If ASP.NET Core is *only* the HTTP host** — no controllers, no minimal APIs of your own — neither
+form is the shape you want: `UseAspNet` runs Kestrel as a Benzene *worker* declared in `Configure`
+alongside every other transport, with `BenzeneHost.RunAsync<StartUp>(args)` as the whole entry point.
+That is what makes adding a queue consumer later one line in `Configure` instead of a rewrite of
+`Program.cs`. See [Getting Started: Kubernetes](getting-started-kubernetes.md).
+
 ## 5. Run it
 
 ```bash

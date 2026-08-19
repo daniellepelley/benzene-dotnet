@@ -1,13 +1,7 @@
 using Benzene.AspNet.Core;
 using Benzene.Examples.K8sMesh.Mesh;
 
-var builder = WebApplication.CreateBuilder(args);
-
-var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
-builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
-
-builder.UseBenzene<Startup>();
-
-var app = builder.Build();
-app.UseBenzene();
-app.Run();
+// Listen on the port the container is given (Kubernetes probes/Service target this); everything else
+// is BenzeneWebHost, the shorthand for the embedded ASP.NET triangle.
+await BenzeneWebHost.RunAsync<Startup>(args, builder => builder.WebHost.UseUrls(
+    $"http://0.0.0.0:{Environment.GetEnvironmentVariable("PORT") ?? "8080"}"));

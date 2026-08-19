@@ -131,6 +131,21 @@ public static class BenzeneExtensions
     /// <c>IHostedService</c>, a controller, ...) sees - see <see cref="AspApplicationBuilder"/>'s
     /// <see cref="Microsoft.Extensions.DependencyInjection.IServiceCollection"/> constructor and
     /// <see cref="AspApplicationBuilder.Finish"/> for the mechanics.
+    /// <para>
+    /// <b>Is this the shape you want?</b> This is the <em>embedding</em> case: the process is an
+    /// ASP.NET Core application that also runs Benzene. If ASP.NET is purely the HTTP host - no
+    /// controllers, no minimal APIs of your own - then <see cref="AspNetSelfHostExtensions.UseAspNet"/>
+    /// is the right shape instead: it runs Kestrel as a Benzene <em>worker</em>, declared in the
+    /// startup's <c>Configure</c> beside every other transport
+    /// (<c>UseWorker(worker =&gt; worker.UseAspNet(...).UseSqs(...))</c>), with
+    /// <c>BenzeneHost.RunAsync&lt;TStartUp&gt;(args)</c> as the whole entry point. The difference is not
+    /// stylistic: it decides whether adding a queue consumer later is one line in <c>Configure</c> or a
+    /// rewrite of <c>Program.cs</c>.
+    /// </para>
+    /// <para>
+    /// If the embedding case IS what you want, <see cref="BenzeneWebHost"/> is the one-line shorthand
+    /// for this call plus <see cref="UseBenzene(IApplicationBuilder)"/> and <c>Run()</c>.
+    /// </para>
     /// </remarks>
     public static WebApplicationBuilder UseBenzene<TStartUp>(this WebApplicationBuilder builder)
         where TStartUp : BenzeneStartUp, new()

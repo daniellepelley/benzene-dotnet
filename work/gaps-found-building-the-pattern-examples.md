@@ -3,8 +3,9 @@
 Seven runnable pattern examples now live in
 [benzene-patterns](https://github.com/daniellepelley/benzene-patterns), each consuming the published
 NuGet packages like any other downstream user. Building them surfaced four framework gaps and two
-documentation errors. This note collects them in one place so they can be triaged as a set; each one
-is also written up in the README of whichever example ran into it.
+documentation errors; a later duplication sweep over `examples/` added two more (7 and 8). This
+note collects them in one place so they can be triaged as a set; each one is also written up in the
+README of whichever example ran into it.
 
 Nothing here blocked an example — every one has a local workaround in the repo, which is exactly the
 problem: the workarounds are what a real adopter would also have to write, without knowing that the
@@ -228,3 +229,56 @@ package themselves before, so this is a footprint shift rather than a new depend
   with the pipeline and the missing piece, before any message was handled. Worth saying out loud in
   the docs — it is one of the better things about adopting the framework and it is currently
   discovered by accident.
+
+---
+
+## 7. The mesh aggregation pass is hand-rolled four times, and the fourth copy dropped the lock
+
+Found by the duplication sweep over `examples/`, not by the pattern examples.
+`MeshAggregationService.cs` + `MeshRefreshHandler.cs` exist as near-identical pairs in
+**four** mesh examples - `AzureMesh/Mesh`, `AzureFunctionsMesh/Mesh`, `K8sMesh/Mesh`,
+`GoogleCloudMesh/Mesh`. The body is always the same three calls:
+
+```csharp
+var registry = /* discovered, or MeshRegistry.FromEnvironment() */;
+await store.PublishAsync("registry.json", MeshRegistryJson.Serialize(registry));
+await aggregator.RunOnceAsync(registry);
+```
+
+plus a `POST /mesh/refresh` handler that calls it and returns the count.
+
+**The count is not the whole argument - the drift is.** Three of the four wrap the pass in a
+`SemaphoreSlim` single-writer gate, because an on-demand refresh and the periodic pass write the same
+artifact store and can interleave into a momentarily inconsistent catalog. `K8sMesh/Mesh` does not.
+That is the copies diverging on a correctness property, which is what a missing seam looks like from
+the outside.
+
+**Suggested.** A `Benzene.Mesh.Aggregator` seam owning "run one pass, serialised" - the registry
+source (discovery runner vs static/environment) is the only genuine per-platform difference, so it is
+the parameter. New public surface on the mesh module, so it is a proposal for that module's owner
+rather than something the ergonomics sweep should merge on its own.
+
+---
+
+## 8. Eleven copies of the embedded ASP.NET entry point - **FIXED (unreleased)**
+
+The same duplication sweep found the `WebApplication.CreateBuilder` / `builder.UseBenzene<T>()` /
+`Build()` / `app.UseBenzene()` / `Run()` triangle written out in **eleven** example `Program.cs`
+files, nine of which also repeated the same two-line `PORT`-env-var block. Nothing in any of them
+said anything about the application except the `Startup` type name.
+
+**Done.** `Benzene.AspNet.Core.BenzeneWebHost` (`Run`/`RunAsync`/`Build`) composes exactly those
+calls, with `configureBuilder` (before the startup runs) and `configureApp` (before Benzene's
+terminal wiring) as the hooks. Ten entry points collapsed onto it;
+`examples/Asp/Benzene.Example.Asp.Minimal` keeps the explicit form written out and now says in a
+comment that it does so deliberately. Two generic-host entry points collapsed onto the existing
+`BenzeneHost.RunAsync` at the same time.
+
+**Still open from 5b:** `AzureMesh/Mesh`, `K8sMesh/Mesh`, `K8sMesh/Service` and
+`Cloudflare` are single-host containers with no ASP.NET surface of their own, so by 5b's own rule
+they want `BenzeneHost.RunAsync<Startup>(args)` + `UseWorker(w => w.UseAspNet(...))` rather than the
+embedded shape at all. That is a change to each `Startup.Configure`, not just the entry point, and it
+was left alone. The `GoogleCloudMesh` five genuinely need the embedded shape - the same `Startup` also
+runs under a Cloud Functions host, where `UseAspNet` would start a second Kestrel.
+
+---

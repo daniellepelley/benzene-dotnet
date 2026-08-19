@@ -439,6 +439,46 @@ is a no-op `IBenzeneApplicationBuilder` extension on any platform other than ASP
 pattern as `UseAwsLambda`/`UseWorker`. See [ASP.NET Core Integration](asp-net-core.md) for more
 detail on request routing.
 
+#### `BenzeneWebHost` — the one-line entry point for the embedded shape
+
+The five lines above are always the same five lines, and the only thing in them that says anything
+about the application is `StartUp`. `Benzene.AspNet.Core.BenzeneWebHost` composes exactly those calls
+so the entry point is one line:
+
+```csharp
+// Program.cs, entire
+await BenzeneWebHost.RunAsync<StartUp>(args);
+```
+
+| Call | What it's for |
+|---|---|
+| `BenzeneWebHost.RunAsync<TStartUp>(args, configureBuilder, configureApp, cancellationToken)` | The normal entry point |
+| `BenzeneWebHost.Run<TStartUp>(args, configureBuilder, configureApp)` | The blocking form |
+| `BenzeneWebHost.Build<TStartUp>(args, configureBuilder, configureApp)` | Returns the `WebApplication` unstarted — tests, or manual start/stop |
+
+`configureBuilder` runs against the `WebApplicationBuilder` *before* `UseBenzene<TStartUp>()` — the
+hook for listening addresses, configuration sources, and any registration that must land before the
+startup's own (Benzene's baseline services are `TryAdd`, so a substitution has to be first to win):
+
+```csharp
+await BenzeneWebHost.RunAsync<StartUp>(args, builder => builder.WebHost.UseUrls(
+    $"http://0.0.0.0:{Environment.GetEnvironmentVariable("PORT") ?? "8080"}"));
+```
+
+`configureApp` runs against the built `WebApplication` *before* `app.UseBenzene()` — where the app's
+own ASP.NET middleware goes, since it has to sit in front of Benzene's terminal wiring.
+
+Nothing here is load-bearing: it is a shorthand for the five lines above, and they remain the
+supported explicit form ([`examples/Asp/Benzene.Example.Asp.Minimal`](../examples/Asp/Benzene.Example.Asp.Minimal/Program.cs)
+keeps them written out on purpose).
+
+**Which shape should you actually use?** If the process has no ASP.NET surface of its own — no
+controllers, no minimal APIs — and no second host running the same startup, then *neither* of these is
+the right answer: use `BenzeneHost.RunAsync<StartUp>(args)` and declare HTTP in `Configure` beside
+every other transport, `app.UseWorker(worker => worker.UseAspNet(http => …))`. That decides whether
+adding a queue consumer later is one line in `Configure` or a rewrite of `Program.cs`. See
+[`UseAspNet`](getting-started-kubernetes.md) and [Getting started: ASP.NET Core](getting-started-aspnet.md).
+
 **Lean Kestrel (no MVC/routing baggage).** Swap `WebApplication.CreateBuilder(args)` for
 `WebApplication.CreateSlimBuilder(args)` — the slim builder starts from just Kestrel + configuration
 + logging and opts you into nothing else (it's the trim/AOT-friendly host Microsoft ships for exactly
