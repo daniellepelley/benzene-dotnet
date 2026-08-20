@@ -1,6 +1,8 @@
 # Benzene.Saga — Design
 
-**Status:** DRAFT for review — plan-first; no code yet, decisions needed (see §7)
+**Status:** **SHIPPED** (verified against source 2026-08-20) — `src/Benzene.Saga/` exists and its `CLAUDE.md` cites this document as
+its design of record; the §7 decisions were taken in the course of building it. Kept here rather than
+archived for that citation; read it as the rationale behind the package, not as work outstanding.
 **Last Updated:** 2026-07-17
 **Purpose:** Design a general, sustainable saga/orchestration package for Benzene, using the
 original commercial implementation as the design basis.

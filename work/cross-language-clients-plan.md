@@ -1,7 +1,11 @@
 # Cross-Language Generated Clients — Implementation Plan
 
-**Status:** Planned, ready to dispatch (owner product decision made 2026-08-13; architecture
-recommendation below adopted by this plan)
+**Status:** **Phases 1 and 2 are DONE** (2026-08-20): the contract document is promoted in the
+specification repo and .NET adopts it as the reference implementation. **Phases 3-7 remain open**, and
+they are work for the *other* language repos — `benzene-typescript`, `benzene-python`, `benzene-go` —
+not for this one; nothing further is dispatchable from `benzene-dotnet`. (Original status: planned,
+ready to dispatch; owner product decision made 2026-08-13, architecture recommendation below adopted by
+this plan.)
 **Date:** 2026-08-13
 **Owner direction (the product decision, already made):** client generation extends to
 **TypeScript, Python, and Go** — a Node/Python/Go consumer of any Benzene service gets the same

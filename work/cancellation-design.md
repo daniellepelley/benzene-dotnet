@@ -1,7 +1,12 @@
 # Cancellation for Message Handlers — Design
 
-**Status:** Design complete, ready to implement (owner ruling recorded below; no further product
-decisions needed)
+**Status:** **SHIPPED** (verified against source 2026-08-20) — all five phases below are implemented: the token overloads on
+`IMiddlewareApplication`/`MiddlewareApplication` and `ICancellationTokenAccessor`, the SQS consumer, the
+Google Cloud Functions and Azure Functions non-HTTP triggers, `UseTimeout` (`Benzene.Resilience`'s
+`TimeoutMiddleware`), and the documentation/example adoption. Regression tests:
+`SqsConsumerCancellationTest`, `AzureFunctionCancellationTest`, `PubSubCancellationTest`,
+`TimeoutMiddlewareTest`. Kept here rather than archived because shipped source cites this path as the
+design of record.
 **Date:** 2026-08-13
 **Source:** the pending task "Design: CancellationToken for message handlers"
 (`work/1.0-release-plan.md`, Tier-1 list — *"(Not go-live critical) `CancellationToken` design …

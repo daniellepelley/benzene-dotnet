@@ -1,6 +1,11 @@
 # Transactional Outbox — Implementation Plan
 
-**Status:** Approved direction (owner, 2026-08-13); plan ready to implement. No code accompanies this document.
+**Status:** **SHIPPED** (verified against source 2026-08-20). Every phase below has been implemented: `src/Benzene.Outbox/`
+(`OutboxMiddleware`, `IOutboxStore`, `OutboxDispatcher`/`OutboxDispatcherWorker`), `src/Benzene.Outbox.DynamoDb/` and
+`src/Benzene.Outbox.EntityFramework/`, exercised by `test/Benzene.Core.Test/Outbox/` and demonstrated in
+`examples/AwsMesh/Orders/Handlers/OutboxHandlers.cs`. The document is kept here, rather than archived,
+because the shipped code and package `CLAUDE.md`s cite this path as the design of record - read it as
+the rationale behind what exists, not as work outstanding.
 **Date:** 2026-08-13
 **Audience:** implementation agents. Each phase below is written to be picked up as a
 self-contained task by an agent without further product decisions. Do the phases in order unless a

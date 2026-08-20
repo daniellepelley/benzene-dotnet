@@ -1,6 +1,8 @@
 # In-process transport — remaining scope for the modular-monolith pattern
 
-**Status: Gaps 1 and 2 shipped; Gap 3 is a design proposal, not yet built; Gap 4 remains open.**
+**Status: Gaps 1, 2 and 3 shipped; only Gap 4 (cross-language) remains open.** (Corrected 2026-08-20 —
+this header still said Gap 3 was "a design proposal, not yet built" while §Gap 3 below already recorded
+it as SHIPPED and `src/Benzene.Clients.InProcess/InProcessFanOutClientMiddleware.cs` confirms it.)
 Companion to `work/internal-transport-design.md` (the original `Benzene.Clients.InProcess`) and to
 the cross-language pattern page
 [`docs/patterns/modular-monolith.md`](https://github.com/daniellepelley/Benzene/blob/main/docs/patterns/modular-monolith.md)

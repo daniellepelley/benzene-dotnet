@@ -1,7 +1,10 @@
 # Auto-generating Azure Functions trigger functions — design
 
-**Status:** Design proposal (plan-first). Generalizes the HTTP-trigger investigation to **every**
-Azure Functions transport Benzene supports. No code yet — this is the thing to review before building.
+**Status:** **SHIPPED** (verified against source 2026-08-20) — built as
+`src/Benzene.Azure.Function.SourceGenerators/AzureFunctionTriggerGenerator.cs` (plus `Transports/`,
+`AttributeReading.cs`, `TriggerInfo.cs`), which cites this document as its design of record. Kept here
+rather than archived for that citation; read it as the rationale behind the generator, not as work
+outstanding.
 
 **Problem.** Today, hosting Benzene on Azure Functions makes the user hand-write a boilerplate
 trigger class per transport — inject `IAzureFunctionApp`, add a `[Function]`/`[XTrigger]` method,

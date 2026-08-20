@@ -1,6 +1,10 @@
 # Kinesis Per-Record Failure Containment — Design Proposal (2026-07-17)
 
-**Status:** Design proposal only — no code changes accompany this document.
+**Status:** **SHIPPED** (verified against source 2026-08-20) — `KinesisStreamCheckpointer`, `KinesisBatchResponse` and
+`KinesisStreamOptions.AutoCheckpointOnSuccess` all ship in `src/Benzene.Aws.Lambda.Kinesis/`, which cites
+this document as its design of record. Kept here rather than archived for that citation. (The
+swallowed-exception item tracked separately in `outstanding-bugs.md` is a different concern and is still
+open.)
 
 ## 1. Correcting the prior scope estimate
 

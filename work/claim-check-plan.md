@@ -1,8 +1,13 @@
 # Claim-Check Pattern for Large Payloads — Implementation Plan
 
-**Status:** Planned — the owner approved the feature direction 2026-08-13 ("offload the payload to
+**Status:** **SHIPPED** (verified against source 2026-08-20). The direction the owner approved 2026-08-13 ("offload the payload to
 something like S3, or Blob Storage for Azure; carry a claim reference on the message; hydrate on
-receive"). This document turns that direction into implementable phases.
+receive") is built: `src/Benzene.ClaimCheck/` (the offload/hydrate middleware pair),
+`src/Benzene.ClaimCheck.Aws.S3/`, `src/Benzene.ClaimCheck.Azure.Blob/`, user documentation in
+`docs/claim-check.md`, and `benzene-claim-check` is now a canonical Tier C header in the
+language-neutral specification. The document is kept here, rather than archived, because the shipped
+code and ~20 package `CLAUDE.md`s cite this path as the design of record - read it as the rationale
+behind what exists, not as work outstanding.
 **Date:** 2026-08-13
 **Motivation:** transport size limits (SQS/SNS/EventBridge 256 KB, Service Bus standard 256 KB,
 Azure Queue Storage 64 KB) force people to hand-roll payload offloading today. Benzene should ship

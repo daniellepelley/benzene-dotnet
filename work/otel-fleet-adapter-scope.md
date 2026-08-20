@@ -1,7 +1,11 @@
 # Scope: OTel-backed Fleet read-model adapter (2026-07-23)
 
-**Status:** SCOPED, not yet built. Owner: `mesh-product-owner` (product) + `observability-product-owner`
-(the two span-attribute data requirements in §6).
+**Status:** **BUILT** (verified against source 2026-08-20) — the trace-source seam and its three adapters ship:
+`src/Benzene.Mesh.Fleet.Aws.XRay/`, `src/Benzene.Mesh.Fleet.Jaeger/`, `src/Benzene.Mesh.Fleet.Tempo/`,
+composed per-signal through `Benzene.Mesh.Collector`'s `IMeshTraceSource`/`CompositeMeshFleetReadModel`.
+Kept here rather than archived because those packages cite this path as their design of record. Owner:
+`mesh-product-owner` (product) + `observability-product-owner` (the two span-attribute data requirements
+in §6).
 
 ## Goal
 Let the **Fleet UI** (`mesh-fleet-ui.html`, the collector/live plane — traces, waterfall, correlation
