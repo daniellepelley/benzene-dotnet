@@ -40,10 +40,33 @@ public class MeshDescriptorConformanceTest
     {
         public string Prefix { get; set; } = string.Empty;
         public int HexLength { get; set; }
-        public bool InvariantToInstanceId { get; set; }
-        public bool SensitiveToServiceVersion { get; set; }
-        public bool SensitiveToTopics { get; set; }
-        public bool SensitiveToProduces { get; set; }
+
+        // Nullable, not bool. A key the fixture does not carry must be distinguishable from a key
+        // set to false - see <see cref="Asserted"/> for why that distinction is load-bearing.
+        public bool? InvariantToInstanceId { get; set; }
+        public bool? SensitiveToServiceVersion { get; set; }
+        public bool? SensitiveToTopics { get; set; }
+        public bool? SensitiveToProduces { get; set; }
+    }
+
+    /// <summary>
+    /// Whether the fixture asks for a hash property, failing the test if the fixture does not
+    /// mention it at all.
+    /// </summary>
+    /// <remarks>
+    /// The Go and TypeScript runners each spent the whole producer/consumer role inversion reading
+    /// <c>sensitiveToConsumes</c> after the fixture had renamed the key to <c>sensitiveToProduces</c>.
+    /// Bound to a non-nullable bool that was simply <c>false</c>, the early return turned each test
+    /// into a no-op that passed, so a green suite said nothing about whether the hash covered
+    /// produced topics. A key the fixture does not carry is drift between runner and fixture - never
+    /// permission to stop checking. This port read the right key; it gets the same guard so the next
+    /// rename is caught here too.
+    /// </remarks>
+    private static bool Asserted(bool? flag, string key)
+    {
+        Assert.True(flag.HasValue,
+            $"fixture hash section has no \"{key}\" - the runner and the fixture have drifted");
+        return flag!.Value;
     }
 
     /// <summary>
@@ -118,7 +141,7 @@ public class MeshDescriptorConformanceTest
     [Fact]
     public void DescriptorHash_IsInvariantToInstanceId()
     {
-        if (!Fixture.Value.Hash.InvariantToInstanceId) return; // not asserted by the fixture
+        if (!Asserted(Fixture.Value.Hash.InvariantToInstanceId, "invariantToInstanceId")) return; // not asserted by the fixture
 
         var first = MeshDescriptorFactory.Create(CanonicalLookUp(), Info(instanceId: "instance-1"), CanonicalOutboundLookUp());
         var second = MeshDescriptorFactory.Create(CanonicalLookUp(), Info(instanceId: "instance-2"), CanonicalOutboundLookUp());
@@ -129,7 +152,7 @@ public class MeshDescriptorConformanceTest
     [Fact]
     public void DescriptorHash_IsSensitiveToServiceVersion()
     {
-        if (!Fixture.Value.Hash.SensitiveToServiceVersion) return; // not asserted by the fixture
+        if (!Asserted(Fixture.Value.Hash.SensitiveToServiceVersion, "sensitiveToServiceVersion")) return; // not asserted by the fixture
 
         var baseline = MeshDescriptorFactory.Create(CanonicalLookUp(), Info(), CanonicalOutboundLookUp());
         var bumped = MeshDescriptorFactory.Create(CanonicalLookUp(),
@@ -141,7 +164,7 @@ public class MeshDescriptorConformanceTest
     [Fact]
     public void DescriptorHash_IsSensitiveToTheTopicSet()
     {
-        if (!Fixture.Value.Hash.SensitiveToTopics) return; // not asserted by the fixture
+        if (!Asserted(Fixture.Value.Hash.SensitiveToTopics, "sensitiveToTopics")) return; // not asserted by the fixture
 
         var baseline = MeshDescriptorFactory.Create(CanonicalLookUp(), Info(), CanonicalOutboundLookUp());
         var grown = MeshDescriptorFactory.Create(CanonicalLookUp(typeof(PanicConformanceHandler)), Info(), CanonicalOutboundLookUp());
@@ -152,7 +175,7 @@ public class MeshDescriptorConformanceTest
     [Fact]
     public void DescriptorHash_IsSensitiveToTheProducedTopicSet()
     {
-        if (!Fixture.Value.Hash.SensitiveToProduces) return; // not asserted by the fixture
+        if (!Asserted(Fixture.Value.Hash.SensitiveToProduces, "sensitiveToProduces")) return; // not asserted by the fixture
 
         var baseline = MeshDescriptorFactory.Create(CanonicalLookUp(), Info(), CanonicalOutboundLookUp());
         var grown = MeshDescriptorFactory.Create(CanonicalLookUp(), Info(), CanonicalOutboundLookUp(withExtraTopic: true));
