@@ -49,7 +49,7 @@ instead of hard-failing.
   bytes + set `APIGatewayProxyResponse.IsBase64Encoded = true` and base64-encode the body at
   finalize. The default interface overload makes this a localized change. Add an
   `IsBase64Encoded`-aware finalize.
-- This same widening benefits the self-host HTTP server (#28) — do it once in the shared
+- This same widening benefited the self-host HTTP server (#28), which has since been removed — do it once in the shared
   `Benzene.Http`/response-adapter contracts.
 
 ### Backward-compat
@@ -128,7 +128,15 @@ needs care to not change single-registration resolution.
 
 ## #28 — Self-host HTTP: binary/streaming bodies, request size limit, startup errors
 
-### Current state (verified)
+> **OBSOLETE (2026-08-20) — do not implement this section.** The subsystem it designs no longer exists:
+> `Benzene.SelfHost.Http` (the `HttpListener` host, `BenzeneHttpWorker`, `BenzeneHttpConfig`,
+> `HttpListenerMessageBodyGetter`, `HttpContextResponseAdapter`) was deprecated and then **removed from
+> the repo**, replaced by Kestrel via `Benzene.AspNet.Core`, which brings its own bind-error reporting,
+> request size limits and binary-body support. The removal and its migration are recorded in
+> `docs/deprecations.md`. The shared binary-HTTP-body work item this section co-owned with #25(B) stands
+> on #25's own merits; the rest of #28 (a, b, c) has nothing left to apply to.
+
+### Current state (verified at the time — the types below have since been deleted)
 - `BenzeneHttpWorker.StartAsync`: `new HttpListener()` + `Prefixes.Add(Url)` + **`Start()` run inside a
   detached `Task.Run` above the try/catch**; `StartAsync` returns `Task.CompletedTask` immediately, so
   a bind failure faults an unobserved `_runTask` and only surfaces at `StopAsync` (`await _runTask`) —
@@ -279,6 +287,9 @@ composition of the DynamoDB and Kinesis patterns already in the repo.
 ---
 
 ## Cross-cutting note
+*(Sequencing note, 2026-08-20: every #28 item below is obsolete — see the banner on #28. Only the #25
+halves of the shared items remain.)*
+
 Two of these share a **binary-HTTP-body** work item (#25(B) + #28(c)): widen `HttpRequestBodyBuffer` /
 `IHttpRequestBodyReader` / `BufferRequestBodyMiddleware` and the response adapter's already-present
 `SetBody(ReadOnlyMemory<byte>)` overload once, in `Benzene.Http`, and consume it from both API Gateway

@@ -63,8 +63,33 @@ See [`archive/README.md`](archive/README.md).
 
 ## What is deliberately still live
 
+*(Reconciled 2026-08-20 against source. The rule this file exists to enforce applies to this file too.)*
+
 - `outstanding-bugs.md` — its "Resolved" half is history, but its **"Open — maintainer decisions"**
-  half is a real backlog. Rule 2 applies: it stays until those decisions are made, then it archives.
+  half is still a real backlog. Four of those decisions have since been made and implemented (the
+  split-brain `RaiseOnFailureStatus` defaults, the `AddMessageHandlers` finder lock-in,
+  `BenzeneResultExtensions.IsSuccess()`, and the now-removed `BenzeneHttpWorker` entry) and are recorded
+  as such; the rest are open. Rule 2 applies: it stays until those decisions are made, then it archives.
 - `1.0-release-plan.md` — ACTIVE, and the successor to everything archived from the readiness set.
 - `service-mesh-roadmap-1.0.md` — the one `*-roadmap-1.0.md` that is genuinely a living document,
-  updated 2026-07-25, owned by the mesh product owner, and cited from public documentation.
+  owned by the mesh product owner and cited from public documentation.
+- `settlement-default-alignment-proposal.md` — Tier A is done, but **Tier B** (the cross-transport
+  null/unrouted `!= true` vs `== false` policy) is an undecided maintainer call and **Tier C** is an
+  outstanding docs task. It stays live for those two.
+- `enterprise/` — slices 0, 1, 2, 3 and 5 have shipped; **slice 4** and the "Deferred — deliberately in
+  no slice yet" list are the live part.
+
+## Delivered designs that stay here rather than archiving
+
+These read as history — the thing they design is built — but each is cited **by path** from shipped
+`src/` code, package `CLAUDE.md`s, or `CHANGELOG.md` as its design of record, so moving them would break
+the trail rule 4 exists to preserve. Each carries a **SHIPPED** status header naming the code that
+implements it, so no reader can mistake it for outstanding work:
+
+- `outbox-plan.md` · `claim-check-plan.md` · `saga-design.md` · `cancellation-design.md` ·
+  `kinesis-batch-failure-handling-design.md` · `azure-functions-trigger-codegen-design.md` ·
+  `otel-fleet-adapter-scope.md` · `topic-prefix-migration.md`
+
+If a future pass removes those citations, these archive. `designs/high-fixes-design.md` is a related
+case: its #28 (self-host HTTP) is **obsolete**, because the subsystem was removed rather than fixed
+(`docs/deprecations.md`), and the section says so — the rest of that document still applies.

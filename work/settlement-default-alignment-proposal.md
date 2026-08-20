@@ -1,9 +1,16 @@
 # Settlement default alignment — proposal for review (1.0)
 
 > **Ask.** Align how every inbound transport settles a message under its **default** config, so
-> "a handler that fails does not silently lose the message" holds uniformly. This is a plan-first
-> proposal — nothing here is implemented yet. Ordered by value; each item states the change, the
-> breaking-ness, and the effort.
+> "a handler that fails does not silently lose the message" holds uniformly. Ordered by value; each item
+> states the change, the breaking-ness, and the effort.
+>
+> **Status (2026-08-20): Tier A is done; Tier B and Tier C are still live.** **A1** (the Kafka
+> self-hosted worker) shipped as `BenzeneKafkaConfig.RaiseOnFailureStatus` (default `true`), covered by
+> `test/Benzene.Core.Test/Kafka/KafkaWorkerFailureResultSettlementTest.cs`. **A2** (the Event Hub
+> Functions trigger) shipped too. **Tier B** — the cross-transport `!= true` vs `== false` policy for a
+> null/unrouted outcome — is unchanged and still needs the maintainer's sign-off before any guard is
+> flipped; **Tier C** (the fan-in documentation clarification) is likewise outstanding. Do not archive
+> this document while B and C are open.
 
 ## Context — where we actually are (verified 2026-07-21 against source)
 
@@ -32,8 +39,8 @@ Two distinct handler outcomes drive settlement — keep them separate:
 | Kafka (Lambda) | retain | retain (`== false`) | **ack** | null-ack deliberate (no per-record DLQ) |
 | Kafka (Functions) | retain | retain (escalate) | ack (`== false`) | offset not committed on throw |
 | RabbitMQ (worker) | nack | nack (`== false`) | **ack** | null-ack documented/tested |
-| **Kafka (worker)** | see below | **ack — always committed** | ack | **GAP 1** |
-| **Event Hub (Functions)** | retain (batch) | **ack — flag inert on default path** | ack | **GAP 2** |
+| Kafka (worker) | see below | retain/dead-letter (`== false`) | ack | ~~GAP 1~~ **fixed** (A1) |
+| Event Hub (Functions) | retain (batch) | retain (escalate, `== false`) | ack | ~~GAP 2~~ **fixed** (A2) |
 | Event Hub (worker) | see note | retain (escalate, `== false`) | ack | flag=true; `CatchHandlerExceptions=true` caveat |
 | Kinesis (Lambda) | retain (resume) | **ack — results never inspected** | ack | fan-in streaming |
 | Cosmos (Functions) | retain (lease) | **ack — no per-doc result** | ack | fan-in streaming |
@@ -42,8 +49,16 @@ Two distinct handler outcomes drive settlement — keep them separate:
 
 ## Tier A — genuine silent-loss gaps to fix (safe-by-default already the stated intent)
 
-### A1. Kafka self-hosted worker never escalates a non-throwing failure result
-`Benzene.Kafka.Core/BenzeneKafkaWorker.cs`. There is **no `RaiseOnFailureStatus`** (unlike the Kafka
+### A1. Kafka self-hosted worker never escalates a non-throwing failure result — **FIXED**
+
+> **Status (2026-08-20): done, as recommended below.** `BenzeneKafkaConfig.RaiseOnFailureStatus`
+> (default `true`) now routes a returned failure through `BenzeneKafkaWorker.HandleRecordAsync`, which
+> throws `KafkaMessageProcessingException`: dead-lettering retries then re-produces it,
+> `CommitOnlyOnSuccess` withholds `StoreOffset` (redelivery), and the default auto-store config logs a
+> warning because the offset was stored before the handler ran. Tests:
+> `KafkaWorkerFailureResultSettlementTest`. The original write-up follows.
+
+`Benzene.Kafka.Core/BenzeneKafkaWorker.cs`. There was **no `RaiseOnFailureStatus`** (unlike the Kafka
 Lambda handler and the Azure Functions Kafka trigger, which both have it defaulting `true`).
 - Default `CommitOnlyOnSuccess=false`: Confluent auto-stores the offset when `Consume` returns,
   before the handler runs — any non-success is committed (at-most-once).
@@ -61,7 +76,13 @@ limitation the docs already state, so surface it). This makes the three Kafka ad
 **Breaking:** none (additive, safe default). **Effort:** small–medium (worker + config + a unit test;
 respects the existing `CommitOnlyOnSuccess`/`CatchHandlerExceptions` startup-validation interactions).
 
-### A2. Azure Functions Event Hub `RaiseOnFailureStatus` is inert on the default path
+### A2. Azure Functions Event Hub `RaiseOnFailureStatus` is inert on the default path — **FIXED**
+
+> **Status (2026-08-20): done.** `BenzeneMessageEventHubHandler.HandleFunction` now assigns the inner
+> application's result to `EventHubContext.MessageResult`, so the escalation guard fires on the envelope
+> path. `EventHubOptions.RaiseOnFailureStatus` and `EventHubContext.MessageResult` both document the
+> wiring. The original write-up follows.
+
 `Benzene.Azure.Function.EventHub/EventHubApplication.cs:84`. The escalation guard reads
 `EventHubContext.MessageResult`, but on the documented default `UseBenzeneMessage` envelope path the
 handler runs on the **inner** `BenzeneMessageContext` with its response suppressed, so
@@ -114,8 +135,9 @@ checkpoint, not by returning a failure result.
 
 ## Suggested cut
 
-- **Do now (bugs, non-breaking, safe default):** **A1** (Kafka worker `RaiseOnFailureStatus`) and
-  **A2** (Functions Event Hub inert flag). These are the only two genuine silent-loss defaults left.
+- ~~**Do now (bugs, non-breaking, safe default):** **A1** (Kafka worker `RaiseOnFailureStatus`) and
+  **A2** (Functions Event Hub inert flag). These are the only two genuine silent-loss defaults left.~~
+  **Both done (2026-08-20).**
 - **Decide, then do (behavioural, needs sign-off):** **B** — unify null/unrouted handling to
   `!= true` on the DLQ-backed adapters, keeping the documented Kafka/streaming carve-out.
 - **Docs only:** **C** — clarify the fan-in "throw to fail" contract for Kinesis/Cosmos.

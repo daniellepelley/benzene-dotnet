@@ -329,8 +329,9 @@ Phases ship independently; each slice moves one job. Sizes: S < half-day, M ≈ 
 >
 > **3.1 SHIPPED 2026-07-25.** `benzene.exception.type` on the topic-bearing span (decorator catch for
 > propagating exceptions; `ActivityExceptionTag` walk-up for handler-converted ones — the common case),
-> `MeshTraceEvent.ExceptionType` as a spec-§3 **optional/additive** field (flagged: additive wire
-> change; push-plane `UseMeshTrace` doesn't populate it yet — absence is spec-legal), read by all three
+> `MeshTraceEvent.ExceptionType` as a spec-§3 **optional/additive** field (flagged at the time as an
+> additive wire change the push plane didn't yet populate; **it does now** — `UseMeshTrace` reads the
+> type back off the scoped `MessageErrorState`, `src/Benzene.Mesh.Wire/Extensions.cs`), read by all three
 > trace-store mappers, rendered on failed waterfall legs ("service-unavailable ·
 > System.Net.Http.HttpRequestException"). Type name only, never message/stack; span-only, never a
 > metric tag. 3.2 (issue feed) and 3.3 (issue detail page) remain.

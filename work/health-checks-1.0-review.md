@@ -23,14 +23,23 @@ API decisions to make before the freeze, two verified integration bugs, and prov
 > Tier 2 COMPLETE (the gRPC per-service-name **code** split is now DONE too:
 > `BenzeneGrpcOptions.LivenessCheckTypes`/`ReadinessCheckTypes` publish named grpc.health.v1
 > `"liveness"`/`"readiness"` services via a filterable `BenzeneHealthCheckBridge`; docs updated).
-> Transport token-seeding: DONE for ASP.NET (`UseHttp` prepends a seeding middleware that sets
-> `ICancellationTokenAccessor` from `HttpContext.RequestAborted`); other transports (workers, Lambda,
-> gRPC) can seed the same accessor as follow-ups.
+> Transport token-seeding: DONE for ASP.NET (`Benzene.AspNet.Core` prepends a seeding middleware that
+> sets `ICancellationTokenAccessor` from `HttpContext.RequestAborted`). **The follow-ups have since
+> landed** (2026-08-20): Azure Functions ASP.NET, gRPC (`GrpcMethodHandler`), RabbitMQ, the SQS
+> consumer, the Service Bus consumer, Google Pub/Sub, and every Azure Functions trigger application
+> (Kafka, Queue Storage, Service Bus, Event Grid, Event Hub) all seed the same accessor — as does
+> `MiddlewareApplication`/`MiddlewareMultiApplication` itself, which covers the remaining
+> `MiddlewareApplication`-based hosts.
 > Tier 3 IN PROGRESS: DONE — T3.1 providers TCP (`Benzene.HealthChecks.Tcp`), Disk
 > (`Benzene.HealthChecks.Disk`), AWS SNS (`SnsHealthCheck` in `Benzene.Clients.Aws.Sns`), DynamoDB
 > (`Benzene.HealthChecks.DynamoDb`), and the first Azure provider — Service Bus
 > (`Benzene.HealthChecks.Azure.ServiceBus`, read-only `PeekMessage` on a queue/subscription).
-> Remaining T3.1 gaps: Azure Event Hub / Queue Storage / Event Grid, Kafka. (Host memory DONE —
+> **T3.1 gaps now all resolved** (2026-08-20): Event Hub (`Benzene.Clients.Azure.EventHub/
+> EventHubHealthCheck.cs`), Queue Storage (`Benzene.Clients.Azure.QueueStorage/QueueStorageHealthCheck.cs`)
+> and Kafka (`Benzene.Kafka.Core/KafkaHealthCheck.cs`, auto-wired by `UseKafka(healthCheck: true)`) all
+> ship; **Event Grid was ruled out on purpose** — there is no cheap non-destructive reachability read, and
+> that decision is documented in `src/Benzene.Clients.Azure.EventGrid/CLAUDE.md` ("No health check —
+> deliberately") with the reasoning in `work/client-health-checks-remaining-designs.md` §4. (Host memory DONE —
 > `MemoryHealthCheck`/`AddMemoryCheck` in `Benzene.HealthChecks`, working-set ceiling with optional
 > warning, no external dependency; `test/Benzene.Core.Test/HealthChecks/MemoryHealthCheckTest.cs`.)
 > T3.2 drain-on-SIGTERM DONE — `ShutdownState` (a one-way latch, `LinkTo(CancellationToken)` trips it

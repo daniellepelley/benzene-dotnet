@@ -275,7 +275,10 @@
 >   (`MeshHashing`, deliberately reimplementing rather than depending on
 >   `Benzene.CodeGen.Core.CodeGenHelpers.GenerateHash`'s identical algorithm, to keep a runtime
 >   aggregator's dependency graph clean — a cross-check test keeps the two in sync).
-> - `topology.json`/edge derivation is **not built** — deliberately deferred, since the
+> - `topology.json`/edge derivation: **the observed half is built** (2026-08) —
+>   `src/Benzene.Mesh.Tracing.Tempo/` derives the edge set from Tempo's service graph
+>   (`TempoServiceGraphTopologyBuilder`, exposed as a Benzene handler by
+>   `TempoTopologyMessageHandler`). What remains unbuilt is the **structural** half described here: the
 >   "structural edges from generated `CodeGen.Client`s" idea in §4.6 isn't observable at runtime
 >   by an HTTP-polling aggregator (it's a compile-time/source fact); a workable alternative
 >   (matching `HealthCheckDependency` entries against other registered services' identifiers)
@@ -386,8 +389,10 @@
 > maintainer request. Self-reporting is opportunistic only (piggybacks on real invocations) - no
 > scheduled/cron reporting in v1, since that would defeat serverless on-demand billing; a cron
 > option is parked, not built. A new config-driven, Docker/Compose-deployable host
-> (`deploy/Mesh/Benzene.Mesh.Host`) is also planned, for running the Aggregator + Mesh UI against a
-> developer's own real services during local development. Full design and phasing in
+> (`deploy/Mesh/Benzene.Mesh.Host`) — **shipped since this was written** (2026-08-20: config schema +
+> `--validate-config`, auth, a Helm chart under `deploy/Mesh/helm/benzene-mesh/`, `CONFIG.md` and a test
+> project; see `work/enterprise/`) — for running the Aggregator + Mesh UI against a developer's own real
+> services during local development. The parked cron reporter above is unaffected and still parked. Full design and phasing in
 > `/root/.claude/plans/the-benzene-grpc-package-serialized-pond.md` (Phases A-D) - **Phase A**
 > (the `IMeshServiceSource` seam, additive `MeshServiceRegistryEntry.Source`/`SourceOptions`) is
 > landed; **Phase B** (`Benzene.Mesh.Aws.Lambda`, wrapping the already-existing
