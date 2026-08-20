@@ -171,6 +171,36 @@ variable "mesh_api_throttling_burst_limit" {
   default     = 20
 }
 
+variable "mesh_environment" {
+  description = "The environment label the mesh Lambda runs as (DOTNET_ENVIRONMENT), and the one thing that decides whether dispatch works at all. MeshDispatchGate treats an UNSET environment as Production and refuses to dispatch, which is the safe default and is why this must be set explicitly for a demo estate. Leave it non-production unless you have read work/mesh-environments-and-access.md: opening dispatch in production needs roles on the session and a way to tell a read-shaped topic from a write-shaped one, neither of which exists yet — and the mesh will refuse regardless until AllowInProduction is deliberately set in code."
+  type        = string
+  default     = "Development"
+}
+
+variable "mesh_dispatch_throttling_rate_limit" {
+  description = "Steady-state requests/second API Gateway allows on the dispatch route specifically, before returning 429 at the edge. Much tighter than the API-wide limit because this is the one route that fires a payload into a real service handler, and because nobody legitimately sustains more than a couple of sends a second from a test console. This is the HARD guarantee: the app-level per-identity limiter in the mesh counts in memory, so on a multi-instance Lambda host it bounds one warm instance rather than the fleet — only the edge counts atomically across all of them."
+  type        = number
+  default     = 2
+}
+
+variable "mesh_dispatch_throttling_burst_limit" {
+  description = "Maximum burst API Gateway allows on the dispatch route. A send is one request, so this needs far less headroom than the API-wide burst (which has to absorb a page load firing several artifacts at once)."
+  type        = number
+  default     = 5
+}
+
+variable "mesh_dispatch_max_per_minute" {
+  description = "App-level dispatches per minute per signed-in identity (MeshDispatchGuardOptions.MaxPerMinutePerIdentity). Bounds a stuck retry loop or one compromised session; 0 disables it, which is an explicit operator choice and not a default."
+  type        = number
+  default     = 10
+}
+
+variable "mesh_dispatch_max_per_target_per_minute" {
+  description = "App-level dispatches per minute aimed at any ONE target service, summed across every identity. Ten people each dispatching politely still add up at the service, and the service is what this protects."
+  type        = number
+  default     = 30
+}
+
 variable "usage_window_hours" {
   description = "Lookback window (hours) the mesh's CloudWatch usage source counts topic requests over, and the window the Mesh UI shows. Coarse usage only — fine-grained analysis belongs in CloudWatch/Grafana."
   type        = number

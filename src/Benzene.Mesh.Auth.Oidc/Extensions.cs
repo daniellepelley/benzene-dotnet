@@ -95,7 +95,8 @@ public static class Extensions
                 options, signingKey,
                 resolver.GetService<IHttpRequestAdapter<TContext>>(),
                 resolver.GetService<IBenzeneResponseAdapter<TContext>>(),
-                resolver.GetService<IOidcQueryStringReader<TContext>>()));
+                resolver.GetService<IOidcQueryStringReader<TContext>>(),
+                resolver.TryGetService<IOidcSessionSink>()));
         });
 
         return app

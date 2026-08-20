@@ -365,6 +365,116 @@ public class MeshAggregatorTest : IDisposable
         Assert.Equal(2, submitted.Consumers.Length);
         Assert.True(submitted.SchemaMismatch);
         Assert.NotNull(submitted.RequestSchema); // one consumer's schema is still shown for reference
+
+        // THE SUBSTANCE BEHIND THE FLAG. Saying two services disagree and declining to say how left
+        // a reader opening each service's spec by hand - a detection with no finding under it.
+        Assert.NotNull(submitted.DeclaredSchemas);
+        var declared = submitted.DeclaredSchemas!;
+        Assert.Equal(2, declared.Length);
+        var orders = Assert.Single(declared, d => d.Service == "orders-api");
+        var fulfilment = Assert.Single(declared, d => d.Service == "fulfilment-api");
+        Assert.Equal(MeshDeclaredSchemaRole.Consumer, orders.Role);
+        // Each service's OWN declaration, verbatim and attributed - not a diff against a chosen
+        // reference, because choosing one would say that service is the correct one.
+        Assert.False(orders.RequestSchema!["properties"]!.AsObject().ContainsKey("warehouse"));
+        Assert.True(fulfilment.RequestSchema!["properties"]!.AsObject().ContainsKey("warehouse"));
+        // The representative schema the entry publishes is one of the declarations, not a synthesis.
+        Assert.Contains(declared, d => Canonicalise(d.RequestSchema) == Canonicalise(submitted.RequestSchema));
+    }
+
+    /// <summary>Key-order-insensitive comparison, mirroring the aggregator's own `Canonical`.</summary>
+    private static string Canonicalise(System.Text.Json.Nodes.JsonObject? schema)
+        => schema == null ? "" : JsonSerializer.Serialize(
+            JsonSerializer.Deserialize<System.Collections.Generic.SortedDictionary<string, JsonElement>>(
+                schema.ToJsonString())!);
+
+    [Fact]
+    public async Task RunOnceAsync_ConsumersAgree_PublishesNoDeclaredSchemas()
+    {
+        // On a topic whose services agree there is nothing to attribute, and the representative
+        // schemas are the whole story. Publishing declarations anyway would be noise on every topic
+        // in the catalogue.
+        var spec = """{"requests":[{"topic":"order:submitted","request":{"type":"object","properties":{"id":{"type":"string"}}}}]}""";
+        var catalog = await AggregateTwoServices(spec, spec);
+
+        var submitted = Assert.Single(catalog.Topics, t => t.Topic == "order:submitted");
+        Assert.False(submitted.SchemaMismatch);
+        Assert.Null(submitted.DeclaredSchemas);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_ResponseOnlyMismatch_StillAttributesEveryDeclaration()
+    {
+        // Request and response are flagged independently, and the attribution must cover both sides:
+        // a reader looking at a response-side disagreement still needs to see what each service
+        // declares it ACCEPTS, or they cannot tell whether the two sides are related.
+        var a = """{"requests":[{"topic":"order:submitted","request":{"type":"object","properties":{"id":{"type":"string"}}},"response":{"type":"object","properties":{"ok":{"type":"boolean"}}}}]}""";
+        var b = """{"requests":[{"topic":"order:submitted","request":{"type":"object","properties":{"id":{"type":"string"}}},"response":{"type":"object","properties":{"accepted":{"type":"boolean"}}}}]}""";
+        var catalog = await AggregateTwoServices(a, b);
+
+        var submitted = Assert.Single(catalog.Topics, t => t.Topic == "order:submitted");
+        Assert.True(submitted.SchemaMismatch);
+        Assert.NotNull(submitted.DeclaredSchemas);
+        var declared = submitted.DeclaredSchemas!;
+        Assert.Equal(2, declared.Length);
+        Assert.All(declared, d => Assert.NotNull(d.RequestSchema));
+        Assert.All(declared, d => Assert.NotNull(d.ResponseSchema));
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_MismatchOutsideTheClassifiableKeywords_StillAttributesIt()
+    {
+        // The .NET comparer classifies only type/format/properties/required/items, so a difference in
+        // `maxLength` would publish as an empty diff - "they differ, we cannot say where". Raw
+        // declarations carry it, which is the argument for publishing declarations over diffs.
+        var a = """{"requests":[{"topic":"order:submitted","request":{"type":"object","properties":{"ref":{"type":"string","maxLength":12}}}}]}""";
+        var b = """{"requests":[{"topic":"order:submitted","request":{"type":"object","properties":{"ref":{"type":"string","maxLength":64}}}}]}""";
+        var catalog = await AggregateTwoServices(a, b);
+
+        var submitted = Assert.Single(catalog.Topics, t => t.Topic == "order:submitted");
+        Assert.True(submitted.SchemaMismatch);
+        Assert.NotNull(submitted.DeclaredSchemas);
+        var declared = submitted.DeclaredSchemas!;
+        var lengths = declared
+            .Select(d => d.RequestSchema!["properties"]!["ref"]!["maxLength"]!.GetValue<int>())
+            .OrderBy(x => x)
+            .ToArray();
+        Assert.Equal(new[] { 12, 64 }, lengths);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_ReservedTopic_NeverPublishesDeclaredSchemas()
+    {
+        var a = """{"requests":[{"topic":"benzene:spec","reserved":true,"request":{"type":"object","properties":{"a":{"type":"string"}}}}]}""";
+        var b = """{"requests":[{"topic":"benzene:spec","reserved":true,"request":{"type":"object","properties":{"b":{"type":"string"}}}}]}""";
+        var catalog = await AggregateTwoServices(a, b);
+
+        var spec = Assert.Single(catalog.Topics, t => t.Topic == "benzene:spec");
+        Assert.False(spec.SchemaMismatch);
+        Assert.Null(spec.DeclaredSchemas);
+    }
+
+    /// <summary>Two services with the given specs, aggregated once. Shared by the mismatch cases.</summary>
+    private async Task<MeshTopicCatalog> AggregateTwoServices(string firstSpec, string secondSpec)
+    {
+        const string secondSpecUrl = "https://second-api.example/spec?type=benzene";
+        const string secondHealthUrl = "https://second-api.example/healthcheck";
+        var handler = new RoutingHttpMessageHandler()
+            .MapGet(SpecUrl, HttpStatusCode.OK, firstSpec)
+            .MapGet(HealthUrl, HttpStatusCode.OK, SerializeHealth(true))
+            .MapGet(secondSpecUrl, HttpStatusCode.OK, secondSpec)
+            .MapGet(secondHealthUrl, HttpStatusCode.OK, SerializeHealth(true));
+        var store = new FileSystemMeshArtifactStore(_rootDirectory);
+        var aggregator = new MeshAggregator(
+            new IMeshServiceSource[] { new HttpMeshServiceSource(new HttpClient(handler)) }, store);
+
+        await aggregator.RunOnceAsync(new MeshServiceRegistry(new[]
+        {
+            new MeshServiceRegistryEntry("orders-api", SpecUrl, HealthUrl),
+            new MeshServiceRegistryEntry("second-api", secondSpecUrl, secondHealthUrl),
+        }));
+
+        return JsonSerializer.Deserialize<MeshTopicCatalog>((await store.TryReadAsync("topics.json"))!, JsonOptions)!;
     }
 
     [Fact]

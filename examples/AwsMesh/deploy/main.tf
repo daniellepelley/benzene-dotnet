@@ -684,6 +684,15 @@ resource "aws_lambda_function" "mesh" {
       # the API Gateway rate/burst limits on the stage below: those cap requests before a Lambda
       # invocation is billed, this caps how often the expensive pass behind one actually runs.
       MESH_REFRESH_MIN_INTERVAL_SECONDS = tostring(var.refresh_min_interval_seconds)
+      # THE GATE. MeshDispatchGate reads this and refuses to dispatch when it is unset or Production -
+      # deliberately, because a dispatch runs a real handler with real side-effects. Setting it is what
+      # turns the Test Console's Send button from decoration into a working control on this estate.
+      DOTNET_ENVIRONMENT = var.mesh_environment
+      # App-level bounds on POST /mesh/dispatch (UseMeshDispatchGuard). Second layer, not the first:
+      # these count in this process, so they bound a warm instance rather than the fleet. The edge
+      # throttle on the dispatch route below is what holds across every instance.
+      MESH_DISPATCH_MAX_PER_MINUTE            = tostring(var.mesh_dispatch_max_per_minute)
+      MESH_DISPATCH_MAX_PER_TARGET_PER_MINUTE = tostring(var.mesh_dispatch_max_per_target_per_minute)
     }, local.otlp_env)
   }
 
@@ -746,6 +755,17 @@ resource "aws_apigatewayv2_integration" "mesh" {
   payload_format_version = "1.0"
 }
 
+# THE SEND ROUTE, DECLARED EXPLICITLY. Everything else on this API is served by the $default
+# catch-all below, and dispatch could have been too - but a stage's `route_settings` can only attach
+# to a route that exists, and this is the one route that needs a ceiling of its own. Declaring it
+# changes no behaviour (it points at the same Lambda integration); it exists so the throttle has
+# something to hold on to.
+resource "aws_apigatewayv2_route" "mesh_dispatch" {
+  api_id    = aws_apigatewayv2_api.mesh.id
+  route_key = "POST /mesh/dispatch"
+  target    = "integrations/${aws_apigatewayv2_integration.mesh.id}"
+}
+
 resource "aws_apigatewayv2_route" "mesh" {
   api_id    = aws_apigatewayv2_api.mesh.id
   route_key = "$default"
@@ -767,6 +787,23 @@ resource "aws_apigatewayv2_stage" "mesh" {
   default_route_settings {
     throttling_rate_limit  = var.mesh_api_throttling_rate_limit
     throttling_burst_limit = var.mesh_api_throttling_burst_limit
+  }
+
+  # THE SEND ROUTE, HELD TIGHTER THAN THE REST. Everything else on this API reads; this one route
+  # fires a caller's payload into a real service handler, so it gets its own, much lower ceiling.
+  #
+  # It is a separate route from the fleet poll for exactly this reason. While dispatch and the
+  # catalogue queries shared /benzene/invoke there was no way to throttle sending without also
+  # throttling reading the estate - and a limit that makes the dashboard stutter is a limit somebody
+  # turns off.
+  #
+  # This is also the layer that carries the real guarantee. The mesh's own per-identity limiter counts
+  # in memory, so on a host that scales to N instances it bounds one warm instance; API Gateway counts
+  # across all of them, and refuses before the invoke is billed.
+  route_settings {
+    route_key              = "POST /mesh/dispatch"
+    throttling_rate_limit  = var.mesh_dispatch_throttling_rate_limit
+    throttling_burst_limit = var.mesh_dispatch_throttling_burst_limit
   }
 }
 

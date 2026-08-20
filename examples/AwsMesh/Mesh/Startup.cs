@@ -8,12 +8,14 @@ using Benzene.Diagnostics;
 using Benzene.Http;
 using Benzene.Http.Cors;
 using Benzene.Http.BenzeneMessage;
+using Benzene.Mesh.Aggregator;
 using Benzene.Mesh.Artifacts;
 using Benzene.Mesh.Auth.Oidc;
 using Benzene.Mesh.Aws.Lambda;
 using Benzene.Mesh.Aws.S3;
 using Benzene.Mesh.Collector;
 using Benzene.Mesh.Contracts;
+using Benzene.Mesh.Dispatch;
 using Benzene.Mesh.Discovery.Aws;
 using Benzene.Mesh.Fleet.Aws.XRay;
 using Benzene.Mesh.Ui;
@@ -39,6 +41,13 @@ public class Startup : BenzeneStartUp
     /// at "/", so a post-logout redirect there resolves no route.
     /// </summary>
     private const string MeshUiPath = "/mesh-ui";
+
+    /// <summary>
+    /// Where a composed message is sent. Its own path, not the read endpoint's — see the pipeline
+    /// below for why, and note that the guard, the UI and the edge throttle all key off this one
+    /// value.
+    /// </summary>
+    private const string DispatchPath = "/mesh/dispatch";
 
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
@@ -73,6 +82,33 @@ public class Startup : BenzeneStartUp
             // Discovery starts with an empty registry — discovery replaces it at runtime; artifacts live in S3.
             benzene.AddMeshAggregatorWithS3(new MeshServiceRegistry(Array.Empty<MeshServiceRegistryEntry>()), bucket, prefix);
             benzene.AddMeshLambdaSource();          // LambdaMeshServiceSource: interrogate a service by Invoke
+            // The SEND leg. Dispatch reuses the interrogation path's access — same Invoke permission,
+            // different payload — so nothing new is granted by turning it on.
+            benzene.AddMeshLambdaDispatcher();
+
+            // THE REGISTRY THE DISPATCH HANDLER TARGETS.
+            //
+            // Discovery produces the real registry per run and writes it to S3; the singleton
+            // registered above is permanently empty, because nothing ever puts the discovered one
+            // back into the container. The aggregation path never noticed — it passes its registry as
+            // a method argument — but a dispatch resolves its target from DI, so every dispatch would
+            // have answered "no service named X is registered" while the UI listed X two clicks away.
+            //
+            // Scoped, and read per request: the registry changes when discovery runs, and a singleton
+            // captured at cold start would go stale without ever saying so.
+            benzene.AddScoped<MeshServiceRegistry>(resolver =>
+            {
+                var json = resolver.GetService<IMeshArtifactStore>().TryReadAsync("registry.json")
+                    .GetAwaiter().GetResult();
+                return json == null
+                    ? new MeshServiceRegistry(Array.Empty<MeshServiceRegistryEntry>())
+                    : MeshRegistryJson.Deserialize(json);
+            });
+
+            // Carries the signed-in caller from the login gate to the dispatch audit record.
+            benzene.AddScoped(_ => new MeshDispatchIdentity());
+            benzene.AddScoped<IOidcSessionSink>(resolver =>
+                new OidcDispatchIdentitySink(resolver.GetService<MeshDispatchIdentity>()));
             benzene.AddMeshAwsLambdaDiscovery();    // AwsLambdaDiscoveryProvider + MeshDiscoveryRunner
             // Usage feed: read the benzene.messages.processed counter (exported to CloudWatch by the ADOT
             // collector's EMF exporter — see collector.yaml) back as per-topic request counts over a
@@ -127,6 +163,17 @@ public class Startup : BenzeneStartUp
                 // and refused), then a manifest-age throttle. Deliberately NOT on the EventBridge
                 // sub-pipeline above: the schedule is not a browser and has no header to send.
                 .UseMeshRefreshGuard(refreshGuardOptions)
+                // The same treatment for the one surface that fires a caller's payload into a real
+                // handler: a required X-Benzene-Dispatch header (CSRF), an identity it fails closed
+                // without, a payload bound, and a per-identity rate limit. The per-target limit and
+                // the audit record are applied by the handler, where the parsed target exists.
+                // NOTE what is NOT here: MeshDispatchOptions.AllowInProduction. Dispatch is off in
+                // production by default and stays off — opening it needs roles on the session and a
+                // way to tell a read-shaped topic from a write-shaped one, neither of which exists
+                // yet (work/mesh-environments-and-access.md E4/E5). This estate gets dispatch by
+                // being a non-production environment, which Terraform declares explicitly.
+                .UseMeshDispatchGuard(BuildDispatchGuardOptions())
+                .UseMeshDispatch()
                 // The Mesh UI: the service catalog (what services declare, from manifest.json) enriched
                 // in-page with the live fleet — what's actually running (X-Ray traces + CloudWatch usage) —
                 // polled from the /benzene/invoke envelope below. One page: the catalog is the spine and
@@ -135,7 +182,9 @@ public class Startup : BenzeneStartUp
                 // logoutUrl/refreshUrl are explicit opt-ins (see UseMeshUi's remarks): they light up the
                 // page's Sign-out and Refresh controls, which the vendored bundle feature-detects.
                 .UseMeshUi(MeshUiPath, "manifest.json", "/benzene/invoke",
-                    dispatchUrl: null,
+                    // The Test Console's Send button exists only when this is set — a deliberate,
+                    // separate opt-in from the read plane above, even though both ride one endpoint.
+                    dispatchUrl: DispatchPath,
                     logoutUrl: oidcOptions.BasePath + "/logout",
                     refreshUrl: refreshGuardOptions.Path)
                 // The mesh-hosted per-service Spec UI (mesh-ui's "benzene:spec" link). Renders each service's
@@ -163,6 +212,22 @@ public class Startup : BenzeneStartUp
                         TopicFilter = topic => topic.StartsWith("benzene:mesh:query:", StringComparison.OrdinalIgnoreCase),
                     },
                     fleet => fleet.UseMessageHandlers(MeshCollectorHandlers.Queries))
+                // DISPATCH GETS ITS OWN DOOR, deliberately, rather than widening the read endpoint's
+                // filter to admit it. Three things fall out of that, all of them wanted:
+                //   - the read plane's filter stays exactly as narrow as it was, so nothing about
+                //     the fleet poll changes and benzene:mesh:aggregate stays as far away as ever;
+                //   - the guard above matches one path that does one thing, so a refusal here can
+                //     never accidentally refuse a catalogue read;
+                //   - API Gateway can throttle the send route separately from the poll route, which
+                //     it cannot do while both ride one path — and a rate limit that also throttles
+                //     reading the estate is a rate limit nobody will leave switched on.
+                .UseBenzeneMessage(new BenzeneMessageHttpOptions
+                    {
+                        Path = DispatchPath,
+                        TopicFilter = topic => string.Equals(
+                            topic, Benzene.Mesh.Dispatch.Extensions.DispatchTopic, StringComparison.OrdinalIgnoreCase),
+                    },
+                    dispatch => dispatch.UseMessageHandlers(typeof(MeshDispatchMessageHandler)))
                 .UseMessageHandlers(handlers));
         });
     }
@@ -175,6 +240,33 @@ public class Startup : BenzeneStartUp
     /// Unlike the OIDC values this one does NOT throw when unset - a missing throttle window is not a
     /// security hole (the guard's own 30s default applies), whereas a missing client secret is.
     /// </summary>
+    /// <summary>
+    /// The dispatch endpoint's guard. Only the per-minute limits are configurable
+    /// (<c>MESH_DISPATCH_MAX_PER_MINUTE</c>, <c>MESH_DISPATCH_MAX_PER_TARGET_PER_MINUTE</c>); the path
+    /// and the <c>X-Benzene-Dispatch</c> header are fixed contracts shared with the mesh UI, so they
+    /// stay as the guard's own defaults rather than becoming another thing that can drift.
+    /// </summary>
+    private static MeshDispatchGuardOptions BuildDispatchGuardOptions()
+    {
+        var options = new MeshDispatchGuardOptions { Path = DispatchPath };
+
+        // A negative value would disable a limit by accident, so only a non-negative parse wins.
+        // 0 is honoured as an explicit "no limit" escape hatch, as it is for the refresh throttle.
+        if (int.TryParse(Environment.GetEnvironmentVariable("MESH_DISPATCH_MAX_PER_MINUTE"), out var perIdentity)
+            && perIdentity >= 0)
+        {
+            options.MaxPerMinutePerIdentity = perIdentity;
+        }
+
+        if (int.TryParse(Environment.GetEnvironmentVariable("MESH_DISPATCH_MAX_PER_TARGET_PER_MINUTE"), out var perTarget)
+            && perTarget >= 0)
+        {
+            options.MaxPerMinutePerTarget = perTarget;
+        }
+
+        return options;
+    }
+
     private static MeshRefreshGuardOptions BuildRefreshGuardOptions()
     {
         var options = new MeshRefreshGuardOptions();

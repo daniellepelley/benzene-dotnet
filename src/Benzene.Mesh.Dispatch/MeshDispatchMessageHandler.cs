@@ -9,6 +9,7 @@ using Benzene.Abstractions.Results;
 using Benzene.Core.Messages;
 using Benzene.Mesh.Contracts;
 using Benzene.Results;
+using Microsoft.Extensions.Logging;
 
 namespace Benzene.Mesh.Dispatch;
 
@@ -27,31 +28,77 @@ public class MeshDispatchMessageHandler : IMessageHandler<MeshDispatchRequest, R
     private readonly MeshDispatchGate _gate;
     private readonly MeshServiceRegistry _registry;
     private readonly IReadOnlyList<IMeshServiceDispatcher> _dispatchers;
+    private readonly MeshDispatchGuardOptions _guardOptions;
+    private readonly MeshDispatchRateLimiter _limiter;
+    private readonly MeshDispatchIdentity _identity;
+    private readonly ILogger? _logger;
 
     /// <summary>Initializes a new instance of the <see cref="MeshDispatchMessageHandler"/> class.</summary>
-    public MeshDispatchMessageHandler(MeshDispatchGate gate, MeshServiceRegistry registry, IEnumerable<IMeshServiceDispatcher> dispatchers)
+    /// <remarks>
+    /// The guard collaborators are optional so the handler still works when only
+    /// <c>UseMeshDispatch()</c> is wired (no HTTP surface, no guard): with no limiter there is no
+    /// per-target bound and with no identity the audit record says the caller was unattributed —
+    /// both stated rather than silently skipped.
+    /// </remarks>
+    public MeshDispatchMessageHandler(
+        MeshDispatchGate gate, MeshServiceRegistry registry, IEnumerable<IMeshServiceDispatcher> dispatchers,
+        MeshDispatchGuardOptions? guardOptions = null, MeshDispatchRateLimiter? limiter = null,
+        MeshDispatchIdentity? identity = null, ILogger<MeshDispatchMessageHandler>? logger = null)
     {
         _gate = gate;
         _registry = registry;
         _dispatchers = dispatchers.ToArray();
+        _guardOptions = guardOptions ?? new MeshDispatchGuardOptions();
+        _limiter = limiter ?? new MeshDispatchRateLimiter();
+        _identity = identity ?? new MeshDispatchIdentity();
+        _logger = logger;
     }
+
+    /// <summary>
+    /// The audit record for one dispatch attempt, allowed or refused.
+    /// </summary>
+    /// <remarks>
+    /// This is what makes "safer than handing someone a database credential" a property rather than an
+    /// assertion: a scoped, attributable, single-topic call that leaves a record. It deliberately
+    /// carries no payload and no response body — an audit trail that copies the data is a second copy
+    /// of the thing being protected.
+    /// </remarks>
+    private void Audit(string outcome, string? service, string? topic)
+        => _logger?.LogInformation(
+            "benzene.mesh.dispatch.audit outcome={outcome} email={email} service={service} topic={topic} environment={environment}",
+            outcome, _identity.Email ?? "(unattributed)", service ?? "(none)", topic ?? "(none)",
+            _identity.Environment ?? "(unstated)");
 
     /// <inheritdoc />
     public async Task<IBenzeneResult<RawStringMessage>> HandleAsync(MeshDispatchRequest request)
     {
         if (!_gate.IsAllowed)
         {
+            Audit("gate-blocked", request?.Service, request?.Topic);
             return BenzeneResult.SetFailed<RawStringMessage>(BenzeneResultStatus.Forbidden, _gate.BlockedReason);
         }
 
         if (request == null || string.IsNullOrWhiteSpace(request.Service) || string.IsNullOrWhiteSpace(request.Topic))
         {
+            Audit("bad-request", request?.Service, request?.Topic);
             return BenzeneResult.BadRequest<RawStringMessage>("A dispatch request needs both a 'service' and a 'topic'.");
+        }
+
+        // THE PER-TARGET BOUND, applied here rather than in the HTTP guard because the target service
+        // is inside the body and that layer deliberately does not parse it. Ten people each dispatching
+        // politely still add up at one service, and the service is what this protects.
+        if (!_limiter.TryAcquire($"target:{request.Service}", _guardOptions.MaxPerMinutePerTarget, out var retryAfter))
+        {
+            Audit("rate-limited", request.Service, request.Topic);
+            return BenzeneResult.SetFailed<RawStringMessage>(BenzeneResultStatus.TooManyRequests,
+                $"This mesh limits dispatches to '{request.Service}' to {_guardOptions.MaxPerMinutePerTarget} a minute, "
+                + $"across everyone. Try again in {retryAfter}s.");
         }
 
         var entry = _registry.Services.FirstOrDefault(s => string.Equals(s.Name, request.Service, StringComparison.OrdinalIgnoreCase));
         if (entry == null)
         {
+            Audit("not-found", request.Service, request.Topic);
             return BenzeneResult.NotFound<RawStringMessage>($"No service named '{request.Service}' is registered in the mesh.");
         }
 
@@ -69,6 +116,7 @@ public class MeshDispatchMessageHandler : IMessageHandler<MeshDispatchRequest, R
             request.Body ?? string.Empty);
 
         var result = await dispatcher.DispatchAsync(entry, envelope, CancellationToken.None);
+        Audit("dispatched", request.Service, request.Topic);
         var json = JsonSerializer.Serialize(result, ResultJsonOptions);
         return BenzeneResult.Ok(new RawStringMessage(json));
     }

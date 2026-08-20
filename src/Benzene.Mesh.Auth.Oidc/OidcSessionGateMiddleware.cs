@@ -19,6 +19,7 @@ namespace Benzene.Mesh.Auth.Oidc;
 /// <typeparam name="TContext">The HTTP context type.</typeparam>
 public class OidcSessionGateMiddleware<TContext> : IMiddleware<TContext> where TContext : IHttpContext
 {
+    private readonly IOidcSessionSink? _sessionSink;
     private readonly MeshOidcOptions _options;
     private readonly byte[] _signingKey;
     private readonly IHttpRequestAdapter<TContext> _httpRequestAdapter;
@@ -36,8 +37,10 @@ public class OidcSessionGateMiddleware<TContext> : IMiddleware<TContext> where T
     /// <param name="queryStringReader">Reads the query string to preserve it in the login redirect's <c>returnTo</c>.</param>
     public OidcSessionGateMiddleware(
         MeshOidcOptions options, byte[] signingKey, IHttpRequestAdapter<TContext> httpRequestAdapter,
-        IBenzeneResponseAdapter<TContext> responseAdapter, IOidcQueryStringReader<TContext> queryStringReader)
+        IBenzeneResponseAdapter<TContext> responseAdapter, IOidcQueryStringReader<TContext> queryStringReader,
+        IOidcSessionSink? sessionSink = null)
     {
+        _sessionSink = sessionSink;
         _options = options;
         _signingKey = signingKey;
         _httpRequestAdapter = httpRequestAdapter;
@@ -56,6 +59,10 @@ public class OidcSessionGateMiddleware<TContext> : IMiddleware<TContext> where T
         if (OidcSessionToken.TryValidate(_signingKey, sessionCookie, out var email) &&
             EmailAllowlist.IsAllowed(_options.AllowedEmails, email))
         {
+            // Hand the identity on, for anything below that has to attribute what it does. Optional by
+            // design: with no sink registered this is a null check, and the gate behaves exactly as
+            // before. See IOidcSessionSink.
+            _sessionSink?.Authenticated(email);
             await next();
             return;
         }

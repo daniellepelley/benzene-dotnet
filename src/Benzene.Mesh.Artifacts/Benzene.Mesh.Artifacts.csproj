@@ -13,6 +13,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Benzene.Mesh.Aggregator\Benzene.Mesh.Aggregator.csproj" />
     <ProjectReference Include="..\Benzene.Http\Benzene.Http.csproj" />
+    <ProjectReference Include="..\Benzene.Mesh.Dispatch\Benzene.Mesh.Dispatch.csproj" />
   </ItemGroup>
 
   <!-- So MeshRefreshRoutingTest can assert that MeshRefreshGuardMiddleware's internal path

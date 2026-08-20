@@ -23,11 +23,13 @@ public class MeshTopicEntry
     /// <param name="schemaMismatch">True when the topic's consumers do not all declare the same inbound payload — likely a contract error. See <see cref="SchemaMismatch"/>.</param>
     /// <param name="changes">What changed for this (topic, version) since the previous aggregator run — see <see cref="Changes"/>. Empty when nothing did (or on a first run).</param>
     /// <param name="compatibility">How this version compares against the version published before it — see <see cref="Compatibility"/>.</param>
+    /// <param name="declaredSchemas">What each service on this topic declares, attributed by name — see <see cref="DeclaredSchemas"/>. Only where <paramref name="schemaMismatch"/> is true.</param>
     public MeshTopicEntry(string topic, string version, bool reserved,
         MeshTopicService[] consumers, MeshTopicProducer[] producers, string? status,
         JsonObject? requestSchema = null, JsonObject? responseSchema = null, JsonObject? messageSchema = null,
         bool schemaMismatch = false, MeshTopicChange[]? changes = null,
-        MeshTopicCompatibility? compatibility = null)
+        MeshTopicCompatibility? compatibility = null,
+        MeshDeclaredSchema[]? declaredSchemas = null)
     {
         Topic = topic;
         Version = version;
@@ -41,7 +43,24 @@ public class MeshTopicEntry
         SchemaMismatch = schemaMismatch;
         Changes = changes ?? Array.Empty<MeshTopicChange>();
         Compatibility = compatibility;
+        DeclaredSchemas = declaredSchemas;
     }
+
+    /// <summary>
+    /// What each service on this topic declares its payload looks like, attributed by name — the
+    /// substance behind <see cref="SchemaMismatch"/>.
+    /// <para>
+    /// Published <b>only</b> where <see cref="SchemaMismatch"/> is true: on a topic whose services
+    /// agree there is nothing to attribute, and the representative schemas above are the whole story.
+    /// </para>
+    /// <para>
+    /// <c>null</c> means this build does not publish the substance, which is <b>not</b> the same as
+    /// "nothing differs" — a reader must render it as unknown, exactly as with
+    /// <see cref="MeshTopicChange.SchemaChanges"/>. See <see cref="MeshDeclaredSchema"/> for why these
+    /// are raw declarations rather than a computed diff.
+    /// </para>
+    /// </summary>
+    public MeshDeclaredSchema[]? DeclaredSchemas { get; }
 
     /// <summary>
     /// How this version's payload contract compares against the version published before it, in this

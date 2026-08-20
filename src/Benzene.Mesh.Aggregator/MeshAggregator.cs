@@ -443,7 +443,7 @@ public class MeshAggregator
 
                 aggregate.Reserved |= topic.Reserved;
                 aggregate.Consumers.Add(new MeshTopicService(entries[i].Name, topic.HttpMappings));
-                aggregate.ConsumerSchemas.Add((topic.RequestSchema, topic.ResponseSchema));
+                aggregate.ConsumerSchemas.Add((entries[i].Name, topic.RequestSchema, topic.ResponseSchema));
             }
 
             foreach (var outbound in results[i].OutboundTopics)
@@ -457,6 +457,7 @@ public class MeshAggregator
 
                 aggregate.Producers.Add(new MeshTopicProducer(entries[i].Name));
                 aggregate.MessageSchema ??= outbound.MessageSchema;
+                aggregate.ProducerSchemas.Add((entries[i].Name, outbound.MessageSchema));
             }
         }
 
@@ -601,7 +602,7 @@ public class MeshAggregator
         return new MeshTopicEntry(
             entry.Topic, entry.Version, entry.Reserved, entry.Consumers, entry.Producers, entry.Status,
             entry.RequestSchema, entry.ResponseSchema, entry.MessageSchema, entry.SchemaMismatch, entry.Changes,
-            compatibility);
+            compatibility, entry.DeclaredSchemas);
     }
 
     /// <summary>
@@ -827,7 +828,7 @@ public class MeshAggregator
         return new MeshTopicEntry(
             entry.Topic, entry.Version, entry.Reserved, entry.Consumers, entry.Producers, entry.Status,
             entry.RequestSchema, entry.ResponseSchema, entry.MessageSchema, entry.SchemaMismatch, changes,
-            entry.Compatibility);
+            entry.Compatibility, entry.DeclaredSchemas);
     }
 
     /// <summary>
@@ -896,7 +897,42 @@ public class MeshAggregator
             topic, version, aggregate.Reserved,
             aggregate.Consumers.ToArray(), aggregate.Producers.ToArray(),
             DetermineTopicStatus(aggregate),
-            requestSchema, responseSchema, aggregate.MessageSchema, mismatch);
+            requestSchema, responseSchema, aggregate.MessageSchema, mismatch,
+            declaredSchemas: mismatch ? DeclaredSchemasOf(aggregate) : null);
+    }
+
+    /// <summary>
+    /// Every declaration on a topic, attributed by service — the substance behind the mismatch flag.
+    /// </summary>
+    /// <remarks>
+    /// Raw declarations, deliberately, rather than a diff: a diff needs a baseline, and choosing one
+    /// says that service is the correct one, which is precisely the judgement the reader has context
+    /// for and this aggregator does not. See <see cref="MeshDeclaredSchema"/>.
+    /// <para>
+    /// A service that declared nothing at all on either side contributes no row — it is absent from
+    /// the disagreement rather than a party to it. A service that declared one side and not the other
+    /// keeps its row with a null for the side it was silent on, because "declared no response" is a
+    /// fact about that service and is exactly the kind of asymmetry the flag exists to surface.
+    /// </para>
+    /// </remarks>
+    private static MeshDeclaredSchema[] DeclaredSchemasOf(TopicAggregate aggregate)
+    {
+        var declared = aggregate.ConsumerSchemas
+            .Where(consumer => consumer.Request != null || consumer.Response != null)
+            .Select(consumer => new MeshDeclaredSchema(
+                consumer.Service, MeshDeclaredSchemaRole.Consumer, consumer.Request, consumer.Response))
+            .ToList();
+
+        // Producers join on the same terms. The mismatch flag is defined over consumers' inbound
+        // shapes, so a producer never trips it - but when a topic IS in disagreement, what the sending
+        // side declares it sends is the other half of the picture, and withholding it would leave a
+        // reader comparing consumers against each other with the actual message shape off-screen.
+        declared.AddRange(aggregate.ProducerSchemas
+            .Where(producer => producer.Message != null)
+            .Select(producer => new MeshDeclaredSchema(
+                producer.Service, MeshDeclaredSchemaRole.Producer, messageSchema: producer.Message)));
+
+        return declared.ToArray();
     }
 
     private sealed class TopicAggregate
@@ -904,7 +940,12 @@ public class MeshAggregator
         public bool Reserved;
         public readonly List<MeshTopicService> Consumers = new();
         public readonly List<MeshTopicProducer> Producers = new();
-        public readonly List<(JsonObject? Request, JsonObject? Response)> ConsumerSchemas = new();
+        // KEYED BY SERVICE. These were a bare tuple list whose attribution existed only positionally
+        // against `Consumers` — index i here meant index i there, an invariant nothing enforced and
+        // nothing stated. The mismatch detail needs the name, and a parallel-list coupling is a poor
+        // thing to build it on.
+        public readonly List<(string Service, JsonObject? Request, JsonObject? Response)> ConsumerSchemas = new();
+        public readonly List<(string Service, JsonObject? Message)> ProducerSchemas = new();
         public JsonObject? MessageSchema;
     }
 
