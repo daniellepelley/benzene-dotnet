@@ -68,7 +68,7 @@ These were previously listed as open. They are now confirmed fixed — do **not*
 - **Split-brain `RaiseOnFailureStatus` defaults** — **DECIDED: align on `true`.** Every transport that
   has the flag now defaults it `true` (SNS, S3, EventBridge, Azure Functions Kafka/QueueStorage/
   ServiceBus/EventGrid/EventHub, the Event Hub worker, Google Pub/Sub) — see
-  `work/settlement-contract-1.0.md` for the flip, and `BenzeneKafkaConfig.RaiseOnFailureStatus` for the
+  `work/archive/settlement-contract-1.0-2026-07.md` for the flip, and `BenzeneKafkaConfig.RaiseOnFailureStatus` for the
   self-hosted Kafka worker, which had no such flag at all until the
   `work/settlement-default-alignment-proposal.md` item A1 fix. A returned failure result is no longer
   silently settled anywhere by default. *(Tier B of that proposal — the `!= true` vs `== false`
