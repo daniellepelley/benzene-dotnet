@@ -7,22 +7,19 @@ but are three independent implementations, not one library reused three times �
 packages do **not** depend on `Benzene.Kafka.Core`, and each maps a Kafka record onto the pipeline
 in its own way. Pick the section below that matches how you're hosting the service.
 
-> **Worth using even if Kafka is the only transport this service ever has.** Unlike HTTP, where
-> ASP.NET Core already gives you routing and a middleware pipeline for free, `Confluent.Kafka` on its
-> own hands you a `ConsumeResult` and stops — deserializing the payload, dispatching on whatever
-> identifies the message type, and every cross-cutting concern (validation, correlation, retries,
-> structured logging) is code you write yourself, and it tends to end up inline in the consume loop.
-> `[Message]` + the middleware pipeline is that missing layer: the same routing-to-a-handler-plus-
-> cross-cutting-concerns story ASP.NET Core tells for HTTP, just for Kafka instead. That's a reason to
-> reach for this even in a service that will only ever speak Kafka — see
-> [Getting Started: ASP.NET Core](getting-started-aspnet.md#why-not-just-a-minimal-api) for the
-> opposite case (HTTP alone doesn't need Benzene the way Kafka alone does).
+> **Worth using even if Kafka is your only transport.** `Confluent.Kafka` on its own hands you a
+> `ConsumeResult` and stops. Deserializing the payload, dispatching on the message type, and every
+> cross-cutting concern — validation, correlation, retries, structured logging — is code you write
+> yourself, and it tends to end up inline in the consume loop. `[Message]` plus the middleware
+> pipeline is that missing layer: the routing-and-middleware story ASP.NET Core tells for HTTP,
+> told for Kafka. (The reverse doesn't hold — HTTP alone already has that layer built in; see
+> [Why not just a minimal API?](getting-started-aspnet.md#why-not-just-a-minimal-api).)
 
 ## Prerequisites
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
 - A Kafka broker to develop against. The examples below use the
-  [`examples/Kafka/docker-compose.yaml`](../examples/Kafka/docker-compose.yaml) file, which brings
+  [`examples/Kafka/docker-compose.yaml`](https://github.com/daniellepelley/benzene-dotnet/blob/main/examples/Kafka/docker-compose.yaml) file, which brings
   up a single-broker Confluent Kafka cluster (`localhost:9092`) plus
   [Kafdrop](https://github.com/obsidiandynamics/kafdrop) at `http://localhost:19000` for inspecting
   topics

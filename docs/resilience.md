@@ -1,13 +1,13 @@
 # Resilience
 
 
-> **Boundary:** `Benzene.Resilience` ships retry-with-backoff only (zero third-party dependencies). Circuit breaker, timeout, hedging, fallback, and rate limiting come from the sibling `Benzene.Resilience.Polly` package, which runs *your* Polly `ResiliencePipeline` as middleware — see [Polly Resilience Pipelines](cookbooks/polly-resilience.md) and the [Capability Matrix](capability-matrix.md).
+> **Boundary:** `Benzene.Resilience` ships two policies with zero third-party dependencies: **retry with exponential backoff** (`.UseRetry`) and a **deadline-based timeout** (`.UseTimeout`). Circuit breaker, hedging, fallback, rate limiting, and richer timeout policies come from the sibling `Benzene.Resilience.Polly` package, which runs *your* Polly `ResiliencePipeline` as middleware — see [Polly Resilience Pipelines](cookbooks/polly-resilience.md) and the [Capability Matrix](capability-matrix.md).
 
-Benzene's built-in resilience support is a single, custom (not Polly-based) middleware — `RetryMiddleware<TContext>` — added to a pipeline via the `.UseRetry(...)` extension from `Benzene.Resilience`. For the full resilience toolkit, add `Benzene.Resilience.Polly` (see [Beyond retry](#beyond-retry-the-full-polly-toolkit) below).
+Benzene's built-in resilience support is two custom (not Polly-based) middlewares from `Benzene.Resilience`: `RetryMiddleware<TContext>` (`.UseRetry(...)`, this page) and `TimeoutMiddleware<TContext>` (`.UseTimeout(...)` — see [Timeout](#timeout-usetimeout) below). For the full resilience toolkit, add `Benzene.Resilience.Polly` (see [Beyond retry](#beyond-retry-and-timeout-the-full-polly-toolkit) below).
 
 ## Overview
 
-`Benzene.Resilience` currently implements exactly one resilience pattern: **retry with exponential backoff**. There is no circuit breaker, timeout, or bulkhead middleware in the package today, and it does not depend on [Polly](https://github.com/App-vNext/Polly) — `RetryMiddleware<TContext>` is a small, hand-rolled loop over `Func<Task> next()`. (If you've seen references elsewhere describing this package as Polly-backed with circuit-breaker/timeout/bulkhead support, that describes aspirational scope, not the current source — verified against `src/Benzene.Resilience/*.cs`, which contains only `RetryMiddleware.cs` and `Extensions.cs`.)
+`Benzene.Resilience` implements two resilience patterns — **retry with exponential backoff** and a **timeout**. There is no circuit breaker, bulkhead, hedging, or fallback middleware in the package, and it does not depend on [Polly](https://github.com/App-vNext/Polly) — `RetryMiddleware<TContext>` is a small, hand-rolled loop over `Func<Task> next()`.
 
 Because it's a normal Benzene middleware (`IMiddleware<TContext>`), `UseRetry(...)` slots into a pipeline like any other `.Use*()` call and wraps everything *after* it in the chain — including message handlers, validation, or nested middleware — re-running that entire sub-pipeline on failure.
 
@@ -43,7 +43,7 @@ failed attempt retries the whole send beneath it, including any header-stamping 
 dotnet add package Benzene.Resilience
 ```
 
-`Benzene.Resilience` depends only on `Benzene.Abstractions.Middleware` and `Benzene.Core.Middleware` — no third-party packages (in particular, no Polly).
+`Benzene.Resilience` depends only on `Benzene.Abstractions.Middleware`, `Benzene.Core`, and `Benzene.Core.Middleware` — no third-party packages (in particular, no Polly).
 
 ## Basic Usage
 
@@ -136,6 +136,27 @@ Pass a no-op `delay` function to avoid real waits in tests, as `RetryMiddlewareT
 var middleware = new RetryMiddleware<object>(numberOfRetries: 3, delay: _ => Task.CompletedTask);
 ```
 
+## Timeout: `UseTimeout`
+
+The package's second middleware wraps everything after it in the chain in a deadline:
+
+```csharp
+app.UseBenzeneMessage(benzeneMessageApp => benzeneMessageApp
+    .UseTimeout(TimeSpan.FromSeconds(5))
+    .UseMessageHandlers());
+```
+
+If the downstream work hasn't completed when the deadline fires, the middleware turns that into a
+`timeout` failure result (never a raw `OperationCanceledException`); a genuine host cancellation
+(shutdown, client disconnect) still propagates untouched, so queue transports redeliver interrupted
+work. The deadline is delivered through the ambient cancellation token, so downstream code has to
+observe that token for the timeout to interrupt work mid-flight.
+
+[Common Middleware — UseTimeout](common-middleware.md#usetimeout) is the full reference (semantics,
+nesting, composition with `UseRetry`), and
+[Message Handlers — Cancellation](message-handlers.md#cancellation) covers the ambient-token model
+handlers use to observe it.
+
 ## Examples
 
 See [Advanced Usage](#advanced-usage) above for context-based retry, exception filtering, and backoff tuning examples. `test/Benzene.Core.Test/Resilience/RetryMiddlewareTest.cs` has additional worked examples covering exhausted retries, `OperationCanceledException` handling, and backoff timing assertions.
@@ -151,15 +172,18 @@ This is the default `shouldRetry` behavior — cancellation is treated as intent
 **Retries seem to keep happening even though my handler "succeeded."**
 Check whether you passed a `shouldRetryContext` predicate — if your context always satisfies it (e.g. a bug in the predicate, or a result field that's never populated the way you expect), the middleware will keep retrying successful, non-throwing calls until `numberOfRetries` is exhausted, then return normally without an exception (so the failure may not be obvious from a stack trace).
 
-**I need a circuit breaker / timeout / bulkhead, not just retry.**
+**I need a timeout.**
+That's `.UseTimeout(...)`, in this same package — see [Timeout](#timeout-usetimeout) above.
+
+**I need a circuit breaker / bulkhead / hedging / fallback, not just retry and timeout.**
 Not implemented in `Benzene.Resilience` — deliberately (see the boundary note at the top of this
 page). Use the sibling `Benzene.Resilience.Polly` package, which runs a Polly `ResiliencePipeline`
-as middleware — see [Beyond retry](#beyond-retry-the-full-polly-toolkit) below and the
-[Polly Resilience Pipelines](cookbooks/polly-resilience.md) cookbook.
+as middleware — see [Beyond retry and timeout](#beyond-retry-and-timeout-the-full-polly-toolkit)
+below and the [Polly Resilience Pipelines](cookbooks/polly-resilience.md) cookbook.
 
-## Beyond retry: the full Polly toolkit
+## Beyond retry and timeout: the full Polly toolkit
 
-For circuit breaker, timeout, hedging, fallback, or rate limiting, add the sibling
+For circuit breaker, hedging, fallback, rate limiting, or a more configurable timeout policy, add the sibling
 `Benzene.Resilience.Polly` package. It wraps the rest of the pipeline in a
 [Polly v8](https://www.pollydocs.org/) `ResiliencePipeline` — so the full Polly strategy set applies
 to whatever `next` wraps (a handler dispatch on an inbound pipeline, or a port/service call on an

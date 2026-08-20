@@ -175,7 +175,17 @@ The `envelopeUrl` can be a same-origin path (the common case: the mesh host also
 or an absolute URL to a collector reachable elsewhere. Omit it (the default is `null`) and the page is
 the static explorer with the Fleet plane dormant. The endpoint the page polls is the same wire-envelope
 endpoint (`/benzene/invoke` by default, `MeshUiExtensions.DefaultEnvelopeUrl`) that services use to
-register, heartbeat, and export traces. See [`examples/Mesh/README.md`](../examples/Mesh/README.md) for a
+register, heartbeat, and export traces.
+
+`UseMeshUi` takes four more optional parameters, each defaulting to `null` = the feature stays off —
+every one is a separate opt-in precisely so wiring one capability never silently switches on another:
+
+| Parameter | What passing it turns on |
+|---|---|
+| `dispatchUrl` | The Test Console's **send** button — the wire-envelope endpoint it POSTs `mesh:dispatch` messages to (pair with `Benzene.Mesh.Dispatch`'s `UseMeshDispatch()` on the host; that package additionally refuses dispatch in Production unless `AllowInProduction` is set). Without it the console is compose-and-copy only. |
+| `logoutUrl` | A **Sign-out** control, pointing at the host's OIDC logout route (e.g. `Benzene.Mesh.Auth.Oidc`'s `{BasePath}/logout`). An ungated page has nothing to sign out of, so there's no default. |
+| `refreshUrl` | A **Refresh** control that POSTs to trigger a discovery/aggregation pass. Passing it is a statement the host also guards that endpoint — `Benzene.Mesh.Artifacts`' `UseMeshRefreshGuard()` is the matching server side (the page's POST carries the `X-Benzene-Refresh` header it requires). |
+| `environment` | A free-text estate label (`production`, `staging`, `dev-pr-412`) rendered in the page chrome on every screen, so a dev mesh and a production mesh aren't identical on screen. Configured at deploy time, never inferred from a hostname; unset, the page says the environment is unpublished rather than guessing. | See [`examples/Mesh/README.md`](../examples/Mesh/README.md) for a
 runnable end-to-end demo (`./run.sh`) with real services registering, heartbeating, and tracing into the
 live Fleet plane, and `examples/AwsMesh/Mesh/Startup.cs` for the AWS wiring (X-Ray + CloudWatch behind
 the envelope).

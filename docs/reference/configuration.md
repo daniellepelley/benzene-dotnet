@@ -14,7 +14,8 @@ Functions, ASP.NET Core, a self-hosted worker — because it knows nothing about
 ```csharp
 public abstract class BenzeneStartUp
 {
-    public abstract IConfiguration GetConfiguration();
+    public virtual IConfiguration GetConfiguration()
+        => new ConfigurationBuilder().AddEnvironmentVariables().Build();
     public abstract void ConfigureServices(IServiceCollection services, IConfiguration configuration);
     public abstract void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration);
 }
@@ -24,18 +25,15 @@ The three members run in order, once, on start-up (cold start on serverless host
 
 | Member | Runs | Responsibility |
 |---|---|---|
-| `GetConfiguration()` | first | Build and return the `IConfiguration` for the service. Its result is passed into both methods below. |
+| `GetConfiguration()` | first | Build and return the `IConfiguration` for the service. Its result is passed into both methods below. Virtual: the default reads environment variables, so override it only when you need a different source. |
 | `ConfigureServices(services, configuration)` | second | Register services and handlers with DI — `services.UsingBenzene(x => x.AddMessageHandlers(...))`, your repositories, validators, etc. |
 | `Configure(app, configuration)` | third | Build the middleware pipeline — `app.UseAwsLambda(...)`, `app.UseHttp(...)`, and the steps inside them. |
 
 ```csharp
 public class StartUp : BenzeneStartUp
 {
-    public override IConfiguration GetConfiguration() =>
-        new ConfigurationBuilder()
-            .SetBasePath(Directory.GetCurrentDirectory())
-            .AddEnvironmentVariables()
-            .Build();
+    // GetConfiguration() not overridden: the default reads environment variables —
+    // what a container, a Lambda, a Function and a Cloud Run revision all inject.
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration) =>
         services.UsingBenzene(x => x
@@ -51,7 +49,8 @@ public class StartUp : BenzeneStartUp
 
 `GetConfiguration()` returns a plain `IConfiguration`, so **any** configuration provider works —
 environment variables, JSON files, AWS Systems Manager Parameter Store, AWS Secrets Manager,
-Azure App Configuration, and so on:
+Azure App Configuration, and so on. An override *replaces* the default (it does not merge with
+it), so include `.AddEnvironmentVariables()` yourself if you still want them:
 
 ```csharp
 public override IConfiguration GetConfiguration() =>
@@ -62,9 +61,11 @@ public override IConfiguration GetConfiguration() =>
         .Build();
 ```
 
-Reference `Microsoft.Extensions.Configuration` and the specific provider packages you use; only
-the abstractions come in transitively. Read values in `ConfigureServices`/`Configure` with
-`configuration["Key"]` or bind sections with `configuration.GetSection(...).Get<T>()`.
+`Microsoft.Extensions.Configuration` and its environment-variables provider are referenced by
+`Benzene.Microsoft.Dependencies` (they back the default), so they're already available; add the
+specific provider packages beyond that yourself (`.Json`, `.FileExtensions` for `SetBasePath`,
+cloud providers). Read values in `ConfigureServices`/`Configure` with `configuration["Key"]` or
+bind sections with `configuration.GetSection(...).Get<T>()`.
 
 ## Where configuration comes from per host
 

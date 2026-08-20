@@ -1,13 +1,14 @@
 # Spec
 
-The spec topic allows a Hex service to serve up schemas such as OpenApi, AsyncApi and a custom format used to generate code.
-
-This functionality can be added to a Benzene message pipeline using the UseSpec middleware extensions. The topic for this should be set to “spec”.
-
+The spec topic lets a Benzene service serve its own schema — as OpenAPI, AsyncAPI, or the
+`benzene` format code generators consume. Add it to a message pipeline with the `UseSpec`
+middleware extension (`Benzene.Schema.OpenApi`), reserving a topic — conventionally `"spec"` —
+for it:
 
 ```csharp
-  app.UseBenzeneMessage(benzeneMessageApp => benzeneMessageApp
-      .UseSpec("spec")
+app.UseBenzeneMessage(benzeneMessageApp => benzeneMessageApp
+    .UseSpec("spec")
+    .UseMessageHandlers());
 ```
 
 ## Making a Spec Request

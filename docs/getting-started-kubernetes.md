@@ -7,7 +7,7 @@ That's deliberately more than "deploy ASP.NET Core to a pod": see
 [Why not just ASP.NET Core?](#why-not-just-aspnet-core) below for why a single-transport example
 wouldn't actually show what Benzene is for here.
 
-> **Runnable version:** this guide follows [`examples/K8sTransports`](../examples/K8sTransports) —
+> **Runnable version:** this guide follows [`examples/K8sTransports`](https://github.com/daniellepelley/benzene-dotnet/tree/main/examples/K8sTransports) —
 > a Dockerfile, a Kubernetes manifest, and a `docker-compose.yml` that runs all three legs locally
 > against LocalStack + a throwaway Kafka broker, no cloud account needed.
 
@@ -29,7 +29,7 @@ a Kafka consumer together — one container image, one Kubernetes Deployment.
   (`kind create cluster`).
 - To follow along with real messages rather than just reading: an SQS queue and a Kafka topic
   somewhere reachable (LocalStack and a throwaway broker via `docker compose` cover both with no
-  account at all — see the [runnable example](../examples/K8sTransports)).
+  account at all — see the [runnable example](https://github.com/daniellepelley/benzene-dotnet/tree/main/examples/K8sTransports)).
 
 ## 1. The shared handler
 
@@ -132,8 +132,8 @@ using Confluent.Kafka;
 
 public class Startup : BenzeneStartUp
 {
-    public override IConfiguration GetConfiguration()
-        => new ConfigurationBuilder().AddEnvironmentVariables().Build();
+    // Configuration defaults to environment variables (what the container injects) -
+    // override GetConfiguration() only if you need more.
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
@@ -306,7 +306,7 @@ kubectl logs deploy/orders-app | tail -1
 ```
 
 Send a message to the SQS queue or the Kafka topic directly (from your own producer, `aws sqs
-send-message`, `kafka-console-producer` — see [the runnable example](../examples/K8sTransports) for
+send-message`, `kafka-console-producer` — see [the runnable example](https://github.com/daniellepelley/benzene-dotnet/tree/main/examples/K8sTransports) for
 exact commands against a local LocalStack/Kafka pair) and the **same log line** appears in the exact
 same pod's logs, for a request that never touched HTTP. That's the proof: one handler, one container,
 three transports.
@@ -357,7 +357,7 @@ is worth more than that independence.
   [Cookbooks](cookbooks/README.md).
 - **More built-in workers** — [Worker Service Setup](getting-started-worker.md) covers RabbitMQ, Azure
   Service Bus, Event Hubs, and Cosmos DB Change Feed the same way SQS and Kafka are covered above.
-- **A full mesh on Kubernetes** — [`examples/K8sMesh`](../examples/K8sMesh) deploys three
+- **A full mesh on Kubernetes** — [`examples/K8sMesh`](https://github.com/daniellepelley/benzene-dotnet/tree/main/examples/K8sMesh) deploys three
   *discovering* services plus the Mesh UI, credential-free on kind and on real EKS — a different
   demonstration (service-to-service discovery and calls) from this guide's (one handler, several
   inbound transports).

@@ -105,12 +105,14 @@ discovered by reflection, so there is nothing further to register per-handler.
 
 `BenzeneStartUp` (from `Benzene.Microsoft.Dependencies`) is the platform-neutral application
 definition shared by every Benzene host — the same class shape you'd write for AWS Lambda or
-ASP.NET Core. It has three members to implement:
+ASP.NET Core. There are two members to implement, plus an optional configuration override:
 
 ```csharp
 public abstract class BenzeneStartUp
 {
-    public abstract IConfiguration GetConfiguration();
+    // Virtual - the default reads environment variables; override for more (JSON files, Key Vault, ...)
+    public virtual IConfiguration GetConfiguration()
+        => new ConfigurationBuilder().AddEnvironmentVariables().Build();
     public abstract void ConfigureServices(IServiceCollection services, IConfiguration configuration);
     public abstract void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration);
 }
@@ -129,13 +131,8 @@ using Microsoft.Extensions.DependencyInjection;
 
 public class StartUp : BenzeneStartUp
 {
-    public override IConfiguration GetConfiguration()
-    {
-        return new ConfigurationBuilder()
-            .SetBasePath(Directory.GetCurrentDirectory())
-            .AddEnvironmentVariables()
-            .Build();
-    }
+    // Configuration defaults to environment variables - which is how Function App
+    // application settings arrive - so there's no GetConfiguration() override to write.
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
@@ -245,10 +242,12 @@ pairing (here, the one `UseHttp` added). The declaration above generates exactly
 ## 6. Configuration
 
 `GetConfiguration()` runs once on cold start, before any services are registered, and its result
-is passed into both `ConfigureServices` and `Configure`. Anything built on top of
-`Microsoft.Extensions.Configuration` works here — the example above reads environment variables
-(which map to Application Settings once deployed), but `AddJsonFile(...)`, Azure App Configuration,
-or Azure Key Vault configuration providers all work the same way.
+is passed into both `ConfigureServices` and `Configure`. It's virtual: the default reads
+environment variables (which is how Application Settings arrive once deployed), so the `StartUp`
+above doesn't override it. When you need more, override it — anything built on
+`Microsoft.Extensions.Configuration` works: `AddJsonFile(...)`, Azure App Configuration, or Azure
+Key Vault configuration providers (include `.AddEnvironmentVariables()` in your override if you
+still want those — an override replaces the default, it doesn't merge with it).
 
 For local development, add a `local.settings.json` (not checked into source control — it holds
 secrets and machine-specific values; Benzene's own example project `.gitignore`s it too):
@@ -297,7 +296,7 @@ your `routePrefix` setting) to confirm the handler responds.
 ### Deploying with Bicep
 
 For a repeatable, declarative deployment instead of the `az` commands above, see
-[`examples/Azure/Benzene.Example.Azure/main.bicep`](../examples/Azure/Benzene.Example.Azure/main.bicep) -
+[`examples/Azure/Benzene.Example.Azure/main.bicep`](https://github.com/daniellepelley/benzene-dotnet/blob/main/examples/Azure/Benzene.Example.Azure/main.bicep) -
 it provisions the Storage Account, workspace-based Application Insights resource, Consumption
 hosting plan, and Function App an HTTP-triggered example like this one needs:
 
@@ -314,7 +313,7 @@ Bus, Cosmos DB, Storage, or Event Grid if you wire up those triggers too (see th
 ### Deploying with Terraform
 
 The same infrastructure is also available as Terraform, in
-[`examples/Azure/Benzene.Example.Azure/main.tf`](../examples/Azure/Benzene.Example.Azure/main.tf) -
+[`examples/Azure/Benzene.Example.Azure/main.tf`](https://github.com/daniellepelley/benzene-dotnet/blob/main/examples/Azure/Benzene.Example.Azure/main.tf) -
 resource-for-resource equivalent to the Bicep template (Storage Account, workspace-based
 Application Insights, Consumption plan, Linux isolated-worker Function App with a
 system-assigned managed identity), plus a sketched `azurerm_role_assignment` for when you add
@@ -1024,4 +1023,4 @@ These require a working Docker daemon and aren't run as part of the main `Benzen
 - [Testing Benzene](testing-benzene.md) — `BenzeneTestHost`, including AWS Lambda and ASP.NET Core patterns
 - [Monitoring & Diagnostics](monitoring.md) — tracing, metrics, and W3C trace context propagation
 - [Correlation Ids](correlation-ids.md) — the legacy header-based correlation ID middleware
-- [`examples/Azure`](../examples/Azure) — a complete, runnable project covering HTTP routing, validation, OpenAPI spec generation, and Service Bus + Queue Storage triggers dispatching into the same handlers
+- [`examples/Azure`](https://github.com/daniellepelley/benzene-dotnet/tree/main/examples/Azure) — a complete, runnable project covering HTTP routing, validation, OpenAPI spec generation, and Service Bus + Queue Storage triggers dispatching into the same handlers

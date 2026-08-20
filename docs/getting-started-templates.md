@@ -140,4 +140,4 @@ plugin:
 - [Getting Started](getting-started.md) — the hand-written walkthrough each template automates
 - [AWS Lambda Setup](getting-started-aws.md) / [Azure Functions Setup](azure-functions.md) /
   [Kafka Setup](getting-started-kafka.md) — the full picture beyond what a starter template covers
-- [`templates/`](../templates) in the repository — the template pack's source, and how to build/pack/test it locally
+- [`templates/`](https://github.com/daniellepelley/benzene-dotnet/tree/main/templates) in the repository — the template pack's source, and how to build/pack/test it locally

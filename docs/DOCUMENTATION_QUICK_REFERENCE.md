@@ -17,7 +17,7 @@ Quick reference for creating and maintaining Benzene documentation.
 // StartUp pattern
 public class StartUp : BenzeneStartUp
 {
-    public override IConfiguration GetConfiguration() { }
+    // GetConfiguration() is virtual — default reads environment variables; override only for more
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration) { }
     public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration) { }
 }

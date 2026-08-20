@@ -7,7 +7,7 @@ of hand-written service method bodies, wired into the same platform-neutral
 [Unified Hosting Model](hosting.md)). This guide walks through the whole surface: routing, both
 handler styles (protobuf-direct and POCO), all four RPC shapes, metadata, status codes,
 cancellation, health checks/reflection, and the outbound client — matching
-[`examples/Grpc`](../examples/Grpc), the fully worked reference for this package.
+[`examples/Grpc`](https://github.com/daniellepelley/benzene-dotnet/tree/main/examples/Grpc), the fully worked reference for this package.
 
 ## Prerequisites
 

@@ -110,13 +110,8 @@ using Microsoft.Extensions.DependencyInjection;
 
 public class StartUp : BenzeneStartUp
 {
-    public override IConfiguration GetConfiguration()
-    {
-        return new ConfigurationBuilder()
-            .SetBasePath(Directory.GetCurrentDirectory())
-            .AddEnvironmentVariables()
-            .Build();
-    }
+    // Configuration defaults to environment variables - override GetConfiguration()
+    // only when you need more (appsettings.json, a base path, ...).
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
@@ -192,9 +187,10 @@ dotnet run
 ### `GetConfiguration()` / `ConfigureServices` / `Configure`
 
 `GetConfiguration()` runs once, before any services are registered, and its result is passed into
-both `ConfigureServices` and `Configure`. Anything built on top of `Microsoft.Extensions.Configuration`
-works here — environment variables, `appsettings.json` via `AddJsonFile(...)`, Azure App
-Configuration, and so on.
+both `ConfigureServices` and `Configure`. It's virtual, defaulting to environment variables. When
+you override it, anything built on top of `Microsoft.Extensions.Configuration` works —
+`appsettings.json` via `AddJsonFile(...)`, Azure App Configuration, and so on; an override
+replaces the default, so add `.AddEnvironmentVariables()` back yourself if you still want them.
 
 ### Routing
 

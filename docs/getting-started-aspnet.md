@@ -6,7 +6,7 @@ running in a container that speaks HTTP. Deploying to Lambda or Functions instea
 [AWS Lambda](getting-started-aws.md) or [Azure Functions](azure-functions.md) — the handler you write is
 identical, only the host wiring differs.
 
-> **Runnable version:** this guide is [`examples/Asp/Benzene.Example.Asp.Minimal`](../examples/Asp/Benzene.Example.Asp.Minimal)
+> **Runnable version:** this guide is [`examples/Asp/Benzene.Example.Asp.Minimal`](https://github.com/daniellepelley/benzene-dotnet/tree/main/examples/Asp/Benzene.Example.Asp.Minimal)
 > — the smallest thing that works, ready to `dotnet run`.
 
 ## What you'll build
@@ -203,7 +203,7 @@ message. `MapGet` has no answer for that; you'd write a second, separate handler
 hand. With Benzene the handler above doesn't change at all: [`Benzene.Aws.Sqs`](getting-started-worker.md)
 or [`Benzene.Kafka.Core`](getting-started-kafka.md) point a worker at the *same*
 `HelloWorldMessageHandler`, because it was never written against `HttpContext` in the first place — see
-[`examples/K8sTransports`](../examples/K8sTransports) for that running, all three transports hosted
+[`examples/K8sTransports`](https://github.com/daniellepelley/benzene-dotnet/tree/main/examples/K8sTransports) for that running, all three transports hosted
 together in one container. (And once ASP.NET Core is *only* the HTTP host — no controllers, no other
 ASP.NET middleware — `UseAspNet` hosts Kestrel as a worker inside a single Worker-platform startup,
 lighter than this guide's embedded shape: see

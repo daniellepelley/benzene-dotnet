@@ -2,6 +2,9 @@
 
 Benzene is a hexagonal framework designed for services running in serverless environments, containers, or on physical servers. It supports multiple cloud providers and provides a unified programming model for message-based architectures.
 
+> **New here?** [Getting Started](getting-started.md) helps you pick your platform and build a first
+> service in minutes. Everything else on this page is reference you can come back to.
+
 ### Main Themes
 
 - **General**
@@ -67,14 +70,14 @@ Benzene is a hexagonal framework designed for services running in serverless env
 - **Clients & Resilience**
   - [Clients](clients.md)
   - [Caching](caching.md)
-  - [Resilience](resilience.md) — retry-with-backoff, plus the full Polly toolkit via `Benzene.Resilience.Polly`
+  - [Resilience](resilience.md) — retry-with-backoff and pipeline deadlines (`UseTimeout`), plus the full Polly toolkit via `Benzene.Resilience.Polly`
   - [Polly Resilience Pipelines](cookbooks/polly-resilience.md) — circuit breaker, timeout, hedging, fallback
   - [Rate Limiting](rate-limiting.md) — best-effort, per-instance protection for public endpoints (health checks, spec); authoritative limits belong at the gateway
   - [Claim Check](claim-check.md) — offload an oversized payload past a transport's size limit (SQS/SNS/EventBridge, Service Bus, Queue Storage, Kafka) via a middleware pair, backed by `Benzene.ClaimCheck.Aws.S3` / `Benzene.ClaimCheck.Azure.Blob`
 
 - **Code Generation**
   - [Contract Artifacts](contract-artifacts.md) — the `benzene-descriptor` build tool: emit `spec.json` / `service.json` from a built, non-deployed service, no network required
-  - **CLI Reference** (TODO, Phase 4 — `docs/cli.md` not written yet): the `benzene` CLI (`build`, `spec`, `healthcheck`, `lambda-test-tool`, `profile-check`, and, as of Phase 2, `diff`). `benzene diff --baseline <file> --current <file> [--fail-on breaking|warning|none] [--warn-only] [--format text|json]` compares two spec JSON files for backward compatibility and exits non-zero when the report trips `--fail-on`; wraps `Benzene.Schema.OpenApi.Compatibility.SchemaCompatibility`. Every CLI command now returns a real exit code (0 success / 1 failure) instead of always exiting 0. As of Phase 3, `build`/`spec` no longer require a deployed AWS Lambda: pass exactly one of `--file <spec.json>` (Phase 1's build artifact, fully offline), `--url <baseUrl>` (fetches `{url}/benzene/spec`), `--mesh <manifest-url> --service <name>` (resolves the service's cached spec from a mesh manifest, relative-path-resolved the same way the Mesh UI does), or the original `--lambda-name`. `build` also takes `--service-name` to control the generated service name/namespace when there's no `--lambda-name` to derive it from (defaults: `--mesh` → the mesh service name; `--file` → the spec document's own title, else the file's stem; `--url` → the host's first label). Giving more than one source (or none) fails loud with a non-zero exit before anything is fetched. As of Phase 3b, `build` also takes `--namespace <ns>` (used exactly, no magic suffix, across the client class/interface/DTOs — see [Client SDKs](client-sdks.md#controlling-the-generated-namespace-with---namespace)) and `--topics <a,b,c>` (an include-list scoping generation to exactly those topics across methods/interface/`RequiredTopics` — see [Client SDKs](client-sdks.md#scoping-generation-with---topics)); an unrecognized `--output` value now fails loud too, naming the valid ones (`client`, `topic-client`, `message-handlers`, `readme`), instead of silently falling back to the whole-service client.
+  - **CLI Reference** — a dedicated page for the `benzene` CLI (`build`, `spec`, `diff`, `healthcheck`, `lambda-test-tool`, `profile-check`) isn't written yet. Until it is, [Client SDKs](client-sdks.md) covers the generation commands and their flags (`--namespace`, `--topics`, spec sources), and [Contract Artifacts](contract-artifacts.md) covers producing `spec.json` offline and gating CI with `benzene diff`.
   - [Terraform](terraform.md)
   - [Client SDKs](client-sdks.md)
   - [Spec Endpoint (OpenAPI / AsyncAPI / Benzene format)](spec.md) — a runtime feature of a Benzene service, not to be confused with the [Benzene Specification](https://benzene.app/docs/specification/index.html) above: this is a `UseSpec` middleware that serves *your* service's own schema
@@ -89,7 +92,7 @@ Benzene is a hexagonal framework designed for services running in serverless env
 
 - **Cookbooks**
   - [Cookbook Index](cookbooks/README.md)
-  - [Message Payload Versioning](cookbooks/message-versioning.md) — evolve a topic's payload without breaking existing producers: version-specific handlers, or one handler with transparent up/down-casting (multi-step version chains composed for you); built around the runnable [`examples/Versioning`](../examples/Versioning)
+  - [Message Payload Versioning](cookbooks/message-versioning.md) — evolve a topic's payload without breaking existing producers: version-specific handlers, or one handler with transparent up/down-casting (multi-step version chains composed for you); built around the runnable [`examples/Versioning`](https://github.com/daniellepelley/benzene-dotnet/tree/main/examples/Versioning)
   - [Transactional Outbox](cookbooks/transactional-outbox.md) — publish a route's sends durably, or atomically with a DB write, via `Benzene.Outbox` plus a store package (`Benzene.Outbox.DynamoDb`, `Benzene.Outbox.EntityFramework`); pairs with `Benzene.Idempotency` on the consuming side
   - [Logging to Application Insights](cookbooks/logging-application-insights.md)
   - [Authentication Patterns](cookbooks/auth-patterns.md) — OAuth2 bearer token (JWT) validation, Basic auth, and scope-based authorization for services with no security-terminating gateway in front of them
@@ -99,4 +102,4 @@ Benzene is a hexagonal framework designed for services running in serverless env
   - [Spec UI](https://benzene.app/demos/spec/index.html) — browse a sample Benzene message spec, Swagger-UI style
   - Fleet view has no static demo here — it only ever renders what it polls live from a running
     `Benzene.Mesh.Collector`, so there's nothing to show without one. See [Mesh UI](mesh-ui.md#the-live-fleet-plane)
-    for what it looks like, or run [`examples/Mesh`](../examples/Mesh)'s `./run.sh` for the real thing.
+    for what it looks like, or run [`examples/Mesh`](https://github.com/daniellepelley/benzene-dotnet/tree/main/examples/Mesh)'s `./run.sh` for the real thing.

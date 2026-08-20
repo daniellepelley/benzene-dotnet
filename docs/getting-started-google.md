@@ -5,7 +5,7 @@ This guide takes you from an empty folder to a Benzene service running on **Goog
 are Google-specific. Deploying somewhere else? See [AWS Lambda](getting-started-aws.md),
 [Azure Functions](azure-functions.md), or the [platform picker](getting-started.md).
 
-> **Runnable version:** this guide follows [`examples/Google`](../examples/Google) — the same `Startup`
+> **Runnable version:** this guide follows [`examples/Google`](https://github.com/daniellepelley/benzene-dotnet/tree/main/examples/Google) — the same `Startup`
 > hosted on both Cloud Functions Gen2 (`Function.cs`) and Cloud Run (`Program.cs`).
 
 ## What you'll build
@@ -82,8 +82,8 @@ namespace OrdersFunction;
 
 public class Startup : BenzeneStartUp
 {
-    public override IConfiguration GetConfiguration()
-        => new ConfigurationBuilder().AddEnvironmentVariables().Build();
+    // Configuration defaults to environment variables (what Cloud Run/Functions inject) -
+    // override GetConfiguration() only if you need more.
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
@@ -136,13 +136,13 @@ curl -X POST "$(gcloud functions describe orders --gen2 --region europe-west2 --
 
 The same `Startup` and handlers are reachable over **Pub/Sub** as well — a Pub/Sub-triggered function binds
 an inbox topic and routes by the Benzene topic carried in the message. The
-[Google Cloud Mesh example](../examples/GoogleCloudMesh) wires HTTP and Pub/Sub functions side by side over
+[Google Cloud Mesh example](https://github.com/daniellepelley/benzene-dotnet/tree/main/examples/GoogleCloudMesh) wires HTTP and Pub/Sub functions side by side over
 one shared domain; see its README for the `gcloud functions deploy --trigger-topic` form.
 
 ## Next steps
 
 - **Add validation** — [FluentValidation](fluent-validation.md) or [Data Annotations](data-annotations.md).
 - **Test it** — boot the real `Startup` in-memory and push a request through the front door; see
-  [Testing Benzene](testing-benzene.md) and the tests in [`examples/Google`](../examples/Google).
+  [Testing Benzene](testing-benzene.md) and the tests in [`examples/Google`](https://github.com/daniellepelley/benzene-dotnet/tree/main/examples/Google).
 - **Run the same handler elsewhere** — [AWS Lambda](getting-started-aws.md),
   [Azure Functions](azure-functions.md), [Kubernetes](getting-started-kubernetes.md).
