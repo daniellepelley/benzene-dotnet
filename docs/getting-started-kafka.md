@@ -22,7 +22,7 @@ in its own way. Pick the section below that matches how you're hosting the servi
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
 - A Kafka broker to develop against. The examples below use the
-  [`examples/Kafka/docker-compose.yaml`](../examples/Kafka/docker-compose.yaml) file, which brings
+  [`examples/Kafka/docker-compose.yaml`](https://github.com/daniellepelley/benzene-dotnet/blob/main/examples/Kafka/docker-compose.yaml) file, which brings
   up a single-broker Confluent Kafka cluster (`localhost:9092`) plus
   [Kafdrop](https://github.com/obsidiandynamics/kafdrop) at `http://localhost:19000` for inspecting
   topics

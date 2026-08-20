@@ -10,7 +10,7 @@ is reached over API Gateway (HTTP) and SQS in this guide, and over SNS, EventBri
 one more line each — adding a transport is wiring, never a change to your logic. See
 [Supported Event Sources](#supported-event-sources) for the rest.
 
-> **Runnable version:** [`examples/Aws/Benzene.Examples.Aws.Minimal`](../examples/Aws/Benzene.Examples.Aws.Minimal)
+> **Runnable version:** [`examples/Aws/Benzene.Examples.Aws.Minimal`](https://github.com/daniellepelley/benzene-dotnet/tree/main/examples/Aws/Benzene.Examples.Aws.Minimal)
 > is the smallest form of this guide — one handler over API Gateway + SNS + SQS + EventBridge, with a test
 > that boots the real `StartUp` in-memory (no AWS account needed) and pushes a native event through each
 > source. Read it alongside this page.
@@ -150,7 +150,7 @@ handlers by reflection and — since the router depends on them — pulls in the
 explicitly. Either way, `ConfigureServices` is now just for *your* services.
 
 > This is the platform-neutral pattern used by every Benzene host — the
-> [`examples/Aws`](../examples/Aws) project follows exactly this shape. Only the AWS-specific event
+> [`examples/Aws`](https://github.com/daniellepelley/benzene-dotnet/tree/main/examples/Aws) project follows exactly this shape. Only the AWS-specific event
 > wiring lives inside `UseAwsLambda(...)`; the same `StartUp` runs unchanged on other Benzene hosts
 > (see [Azure Functions Setup](azure-functions.md)).
 
@@ -302,7 +302,7 @@ aws sqs send-message \
 Both reach the same `HelloWorldMessageHandler`. `CloudWatch Logs` for the function shows one
 invocation per call, regardless of which transport triggered it.
 
-See [`examples/Aws/Benzene.Examples.Aws/template.yaml`](../examples/Aws/Benzene.Examples.Aws/template.yaml)
+See [`examples/Aws/Benzene.Examples.Aws/template.yaml`](https://github.com/daniellepelley/benzene-dotnet/blob/main/examples/Aws/Benzene.Examples.Aws/template.yaml)
 for a fuller example covering SQS, SNS, and an optional MSK/Kafka event source.
 
 ## Supported Event Sources
@@ -617,5 +617,5 @@ override temporarily to confirm.
 - [AWS IAM Permissions Reference](aws-iam-permissions.md) — minimum IAM policy per AWS package
 - [Testing Benzene](testing-benzene.md) — the full `BenzeneTestHost` pattern, including
   configuration/service overrides and Azure/ASP.NET Core equivalents
-- [`examples/Aws`](../examples/Aws) — a complete, runnable project covering API Gateway, SQS,
+- [`examples/Aws`](https://github.com/daniellepelley/benzene-dotnet/tree/main/examples/Aws) — a complete, runnable project covering API Gateway, SQS,
   SNS, Kafka, health checks, and validation

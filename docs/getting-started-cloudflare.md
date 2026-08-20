@@ -23,7 +23,7 @@ Kestrel/ASP.NET Core process, this needs **no Cloudflare-specific Benzene packag
 guide starts from an empty folder and ends with a containerized Benzene app fronted by a
 Cloudflare Worker.
 
-See [`examples/Cloudflare`](../examples/Cloudflare) for the complete runnable version of
+See [`examples/Cloudflare`](https://github.com/daniellepelley/benzene-dotnet/tree/main/examples/Cloudflare) for the complete runnable version of
 everything below.
 
 ## Prerequisites
@@ -240,7 +240,7 @@ HTTP-based health check, Cloudflare's included.
 
 **`docker build` fails to find project files** — if your Benzene project references other
 projects via relative `ProjectReference` paths (e.g. a shared domain project, as in
-[`examples/Cloudflare`](../examples/Cloudflare)), the build context must include all of them —
+[`examples/Cloudflare`](https://github.com/daniellepelley/benzene-dotnet/tree/main/examples/Cloudflare)), the build context must include all of them —
 build from the repository root (`docker build -f path/to/Dockerfile .`), not the project's own
 folder.
 
@@ -254,6 +254,6 @@ match the exported class name in `src/index.ts` exactly, and that a `[[migration
 - [ASP.NET Core Integration](asp-net-core.md) — the full `Benzene.AspNet.Core` wiring this builds on
 - [Kubernetes Health Checks](kubernetes-health-checks.md) — the liveness/readiness pattern used above
 - [Message Handlers](message-handlers.md)
-- [`examples/Cloudflare`](../examples/Cloudflare) — the complete runnable project, Dockerfile, and
+- [`examples/Cloudflare`](https://github.com/daniellepelley/benzene-dotnet/tree/main/examples/Cloudflare) — the complete runnable project, Dockerfile, and
   Worker config this guide is drawn from (hand-checked against current Cloudflare Containers docs,
   but not independently deployed or verified against a live account — review before production use)

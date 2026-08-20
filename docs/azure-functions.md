@@ -297,7 +297,7 @@ your `routePrefix` setting) to confirm the handler responds.
 ### Deploying with Bicep
 
 For a repeatable, declarative deployment instead of the `az` commands above, see
-[`examples/Azure/Benzene.Example.Azure/main.bicep`](../examples/Azure/Benzene.Example.Azure/main.bicep) -
+[`examples/Azure/Benzene.Example.Azure/main.bicep`](https://github.com/daniellepelley/benzene-dotnet/blob/main/examples/Azure/Benzene.Example.Azure/main.bicep) -
 it provisions the Storage Account, workspace-based Application Insights resource, Consumption
 hosting plan, and Function App an HTTP-triggered example like this one needs:
 
@@ -314,7 +314,7 @@ Bus, Cosmos DB, Storage, or Event Grid if you wire up those triggers too (see th
 ### Deploying with Terraform
 
 The same infrastructure is also available as Terraform, in
-[`examples/Azure/Benzene.Example.Azure/main.tf`](../examples/Azure/Benzene.Example.Azure/main.tf) -
+[`examples/Azure/Benzene.Example.Azure/main.tf`](https://github.com/daniellepelley/benzene-dotnet/blob/main/examples/Azure/Benzene.Example.Azure/main.tf) -
 resource-for-resource equivalent to the Bicep template (Storage Account, workspace-based
 Application Insights, Consumption plan, Linux isolated-worker Function App with a
 system-assigned managed identity), plus a sketched `azurerm_role_assignment` for when you add
@@ -1024,4 +1024,4 @@ These require a working Docker daemon and aren't run as part of the main `Benzen
 - [Testing Benzene](testing-benzene.md) — `BenzeneTestHost`, including AWS Lambda and ASP.NET Core patterns
 - [Monitoring & Diagnostics](monitoring.md) — tracing, metrics, and W3C trace context propagation
 - [Correlation Ids](correlation-ids.md) — the legacy header-based correlation ID middleware
-- [`examples/Azure`](../examples/Azure) — a complete, runnable project covering HTTP routing, validation, OpenAPI spec generation, and Service Bus + Queue Storage triggers dispatching into the same handlers
+- [`examples/Azure`](https://github.com/daniellepelley/benzene-dotnet/tree/main/examples/Azure) — a complete, runnable project covering HTTP routing, validation, OpenAPI spec generation, and Service Bus + Queue Storage triggers dispatching into the same handlers
