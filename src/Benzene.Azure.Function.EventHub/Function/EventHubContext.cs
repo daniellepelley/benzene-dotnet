@@ -33,9 +33,12 @@ public class EventHubContext : IHasMessageResult
     /// Gets or sets the result of handling this event. The Event Hubs trigger has no per-event
     /// settlement (the host checkpoints the whole batch when the invocation returns successfully and
     /// re-delivers the whole batch when it throws), so this is recorded for middleware/diagnostics
-    /// and for <see cref="EventHubOptions.RaiseOnFailureStatus"/> only. Note that this package routes
-    /// via <c>UseBenzeneMessage</c> (whose response is suppressed), so nothing populates this in the
-    /// default envelope path today - see the package CLAUDE.md "Failure handling" section.
+    /// and for <see cref="EventHubOptions.RaiseOnFailureStatus"/> only. On the default envelope routing
+    /// path (<c>UseBenzeneMessage</c>) the handler runs on the inner <c>BenzeneMessageContext</c> with its
+    /// response suppressed, so <c>BenzeneMessageEventHubHandler</c> assigns the inner handler's result
+    /// here - meaning the escalation guard does see a real outcome on that path. A middleware or
+    /// <c>IMessageHandlerResultSetter</c> may also record a result directly on this context. See the
+    /// package CLAUDE.md "Failure handling" section.
     /// </summary>
     public IBenzeneResult MessageResult { get; set; } = null!;
 }
