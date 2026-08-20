@@ -194,6 +194,15 @@ public class BenzeneKafkaWorker<TKey, TValue> : IBenzeneWorker, IDisposable
     /// poison record neither wedges the partition nor trips the worker-stopping onFault path; only a
     /// failure to <em>produce</em> the dead-letter propagates.
     /// </summary>
+    /// <remarks>
+    /// Every path here runs the record through <see cref="HandleRecordAsync"/>, which turns a
+    /// non-throwing failure result into a <see cref="KafkaMessageProcessingException"/> when
+    /// <see cref="BenzeneKafkaConfig.RaiseOnFailureStatus"/> is on - so a returned failure settles
+    /// exactly like a thrown one (dead-lettered, or its offset withheld) instead of being committed as
+    /// if it had succeeded. The one exception is the default auto-store configuration, where
+    /// Confluent.Kafka stored the offset before the handler even ran: nothing can hold the record back,
+    /// so the failure is logged rather than escalated.
+    /// </remarks>
     private Func<ConsumeResult<TKey, TValue>, CancellationToken, Task> BuildHandle(CancellationToken runToken)
     {
         var commitOnSuccess = _benzeneKafkaConfig.CommitOnlyOnSuccess;
@@ -204,10 +213,28 @@ public class BenzeneKafkaWorker<TKey, TValue> : IBenzeneWorker, IDisposable
             return commitOnSuccess
                 ? async (consumeResult, _) =>
                 {
-                    await _kafkaApplication.HandleAsync(consumeResult, _serviceResolverFactory, runToken);
+                    // A failure result throws out of HandleRecordAsync, so StoreOffset is skipped and the
+                    // record is redelivered - the same settlement a thrown exception already gets here.
+                    await HandleRecordAsync(consumeResult, runToken);
                     _consumer!.StoreOffset(consumeResult);
                 }
-                : (consumeResult, _) => _kafkaApplication.HandleAsync(consumeResult, _serviceResolverFactory, runToken);
+                : async (consumeResult, _) =>
+                {
+                    var messageResult = await _kafkaApplication.HandleAsync(consumeResult, _serviceResolverFactory, runToken);
+
+                    if (_benzeneKafkaConfig.RaiseOnFailureStatus && messageResult?.IsSuccessful == false)
+                    {
+                        // Auto-offset-store is on, so this record's offset was already stored when
+                        // Consume returned it - there is nothing left to withhold. Surface the loss
+                        // rather than escalating a failure nothing can act on.
+                        _logger.LogWarning(
+                            "Kafka handler reported an unsuccessful result ({Status}) for {TopicPartitionOffset}, but the " +
+                            "offset was auto-stored before the handler ran so the record cannot be redelivered. Enable " +
+                            "{CommitOnlyOnSuccess} or dead-lettering to retain a failed record.",
+                            messageResult.Status, consumeResult.TopicPartitionOffset,
+                            nameof(BenzeneKafkaConfig.CommitOnlyOnSuccess));
+                    }
+                };
         }
 
         // With dead-lettering on, auto-offset-store is off (see StartAsync), so the worker must store
@@ -222,7 +249,7 @@ public class BenzeneKafkaWorker<TKey, TValue> : IBenzeneWorker, IDisposable
             {
                 try
                 {
-                    await _kafkaApplication.HandleAsync(consumeResult, _serviceResolverFactory, runToken);
+                    await HandleRecordAsync(consumeResult, runToken);
                     _consumer!.StoreOffset(consumeResult);
                     return;
                 }
@@ -238,6 +265,25 @@ public class BenzeneKafkaWorker<TKey, TValue> : IBenzeneWorker, IDisposable
             // Advance past the poison record now that it's safely re-produced to the dead-letter topic.
             _consumer!.StoreOffset(consumeResult);
         };
+    }
+
+    /// <summary>
+    /// Runs one record through the message pipeline and, when
+    /// <see cref="BenzeneKafkaConfig.RaiseOnFailureStatus"/> is enabled, escalates a non-throwing
+    /// failure result into a <see cref="KafkaMessageProcessingException"/> so the caller settles it on
+    /// the same path as a fault. A <c>null</c> result (nothing established an outcome - most commonly
+    /// an unrouted record) is deliberately not escalated: Kafka has no per-record dead-letter backstop
+    /// of its own, so retaining an unrouted record would replay the partition forever.
+    /// </summary>
+    private async Task HandleRecordAsync(ConsumeResult<TKey, TValue> consumeResult, CancellationToken runToken)
+    {
+        var messageResult = await _kafkaApplication.HandleAsync(consumeResult, _serviceResolverFactory, runToken);
+
+        if (_benzeneKafkaConfig.RaiseOnFailureStatus && messageResult?.IsSuccessful == false)
+        {
+            throw new KafkaMessageProcessingException(consumeResult.Topic, consumeResult.Partition.Value,
+                consumeResult.Offset.Value, messageResult.Status);
+        }
     }
 
     /// <summary>

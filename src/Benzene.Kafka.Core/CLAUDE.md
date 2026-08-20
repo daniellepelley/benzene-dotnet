@@ -76,6 +76,22 @@ producer support. This is one of the "self-hosted worker" startup modes document
   message on the same partition advance the watermark past the failed one before its offset was
   ever stored, and out-of-order handling (`PreserveOrderPerPartition = false`) has the same failure
   mode even without any exception involved.
+  - **`RaiseOnFailureStatus`** (default `true`, 2026-08) - settles a handler that returned an
+    unsuccessful `IBenzeneResult` **without throwing** on the same path as one that threw. Before this,
+    `StoreOffset` was called straight after `HandleAsync` with no `IsSuccessful` check, so a throw was
+    protected but a *returned* failure was committed and the record lost (`work/settlement-default-
+    alignment-proposal.md` item A1 - the last silent-loss default in the repo). The worker now runs every
+    record through `HandleRecordAsync`, which throws `KafkaMessageProcessingException` (carrying
+    topic/partition/offset/status) on a failure result, so: dead-lettering retries then re-produces it
+    (`x-dlt-reason: KafkaMessageProcessingException`); `CommitOnlyOnSuccess` withholds `StoreOffset` and
+    the worker stops via the usual `onFault` path, so a restart redelivers; and the default auto-store
+    config - where librdkafka already stored the offset before the handler ran, so nothing can hold the
+    record back - **logs a warning** instead of escalating something no one can act on. A `null` result
+    (unrouted record) is deliberately *not* escalated: Kafka has no per-record DLQ, so retaining an
+    unrouted record would replay the partition forever (the documented carve-out in
+    `work/settlement-default-alignment-proposal.md` Tier B). Tests:
+    `KafkaWorkerFailureResultSettlementTest` (all three settlement configurations, plus the
+    `RaiseOnFailureStatus = false` opt-out and the default).
   - **`DrainOnRevoke`** (`bool?`, 2026-07-20) - on a consumer-group rebalance, drains in-flight
     handlers for the *revoked* partitions and commits their stored offsets before releasing them, so
     no record is committed as done while still in flight and none is needlessly reprocessed by the
@@ -116,8 +132,10 @@ producer support. This is one of the "self-hosted worker" startup modes document
   `DeadLetter_WhenProduceFails_StopsWorkerWithoutStoringTheOffset`,
   `DeadLetter_WithoutPreserveOrderPerPartition_ThrowsAtStartAsync`).
 - `KafkaApplication<TKey,TValue>` - wraps the built middleware pipeline; `HandleAsync` is what the
-  dispatcher calls per message, via its base `MiddlewareApplication<TEvent,TContext>` (`Benzene.Core.Middleware`),
-  which creates a new DI scope per message and disposes it once the pipeline finishes - previously a
+  dispatcher calls per message, via its base `MiddlewareApplication<TEvent,TContext,TResult>`
+  (`Benzene.Core.Middleware`), returning the handler's `IBenzeneResult` (`null` when nothing established
+  one - most commonly an unrouted record) so the worker can settle the record on its outcome. That
+  base creates a new DI scope per message and disposes it once the pipeline finishes - previously a
   real per-message resource leak (not specific to Kafka; every `MiddlewareApplication<...>`-based
   adapter had the same gap), fixed in `Benzene.Core.Middleware` itself - see that package's
   `CLAUDE.md` and `work/performance-roadmap-1.0.md`'s 2026-07-15 follow-up entry.

@@ -38,6 +38,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checks rather than failing on the message path.
 
 ### Fixed
+- **The self-hosted Kafka worker no longer commits a record whose handler returned a failure.**
+  `BenzeneKafkaWorker` called `StoreOffset` straight after `KafkaApplication.HandleAsync` without ever
+  inspecting `IsSuccessful`, so a *thrown* exception was retained but a **returned** failure result was
+  committed and the record was gone - the last silent-loss default in the repo. New
+  `BenzeneKafkaConfig.RaiseOnFailureStatus` (default `true`, matching every other transport) settles a
+  returned failure on the same path as a fault: under dead-lettering it is retried and re-produced to
+  the dead-letter topic (`x-dlt-reason: KafkaMessageProcessingException`); under `CommitOnlyOnSuccess`
+  its offset is not stored, so it is redelivered; under the default auto-store config - where
+  Confluent.Kafka stored the offset before the handler even ran - it is logged as a warning, the same
+  inherent at-most-once limitation a throw already has there. `KafkaApplication<TKey,TValue>` now
+  surfaces the handler's `IBenzeneResult` from `HandleAsync` (it previously returned a bare `Task`), and
+  the new `KafkaMessageProcessingException` carries the failing record's topic/partition/offset/status.
+  Set `RaiseOnFailureStatus = false` for the old behaviour.
 - **`WebApplicationBuilder.UseBenzene<TStartUp>()`'s docs now name `UseAspNet`.** The cross-reference
   ran one way only, so the embedded shape - the one every getting-started path shows - was the only
   one a newcomer could find, and four pattern examples were written in it for services with no ASP.NET

@@ -79,6 +79,35 @@ public class BenzeneKafkaConfig
     /// </summary>
     public bool? DrainOnRevoke { get; set; }
 
+    /// <summary>
+    /// Gets or sets whether a handler that reports an unsuccessful <c>IBenzeneResult</c> <em>without
+    /// throwing</em> is settled the same way as one that threw. Defaults to <c>true</c> - the same
+    /// safe default every other Benzene transport uses. With it off, a returned failure result is
+    /// indistinguishable from a success and the record is committed regardless.
+    /// </summary>
+    /// <remarks>
+    /// What "the same way as a throw" means depends on how this worker settles offsets:
+    /// <list type="bullet">
+    /// <item><description>
+    /// Dead-lettering on: the record is retried up to <c>MaxAttempts</c> and then re-produced to the
+    /// dead-letter topic, exactly as a persistently throwing record is.
+    /// </description></item>
+    /// <item><description>
+    /// <see cref="CommitOnlyOnSuccess"/> on: the offset is <b>not</b> stored, so the record is
+    /// redelivered; as with a throw, the worker stops (<see cref="CatchHandlerExceptions"/> must be
+    /// <c>false</c> in this configuration) rather than letting a later record on the same partition
+    /// advance the commit watermark past it.
+    /// </description></item>
+    /// <item><description>
+    /// The default auto-store configuration: Confluent.Kafka has already stored the offset before the
+    /// handler ran, so nothing can hold the record back - the failure is logged as a warning so it is
+    /// at least visible. This is the same inherent at-most-once limitation a throw has here; use
+    /// <see cref="CommitOnlyOnSuccess"/> or dead-lettering if a failed record must survive.
+    /// </description></item>
+    /// </list>
+    /// </remarks>
+    public bool RaiseOnFailureStatus { get; set; } = true;
+
     /// <summary>Resolves <see cref="DrainOnRevoke"/> to its effective value (defaults to <see cref="CommitOnlyOnSuccess"/>).</summary>
     public bool ShouldDrainOnRevoke => DrainOnRevoke ?? CommitOnlyOnSuccess;
 }

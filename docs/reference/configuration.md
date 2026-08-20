@@ -131,6 +131,8 @@ Configures the Kafka consumer/client.
 | `ConsumeExceptionRetryDelay` | `1s` | Backoff between retries after a `ConsumeException`. |
 | `CatchHandlerExceptions` | `true` | Whether an unhandled handler exception is caught and logged (that lane keeps consuming) or left to stop the whole worker. |
 | `CommitOnlyOnSuccess` | `false` | Whether an offset is only stored after its handler succeeds (at-least-once, redelivers on failure/crash) instead of being auto-stored as soon as it's consumed. Requires `CatchHandlerExceptions = false` and `PreserveOrderPerPartition = true`. |
+| `RaiseOnFailureStatus` | `true` | Whether a handler that returns an unsuccessful result *without* throwing is settled like one that threw — dead-lettered under `KafkaDeadLetterOptions`, its offset withheld under `CommitOnlyOnSuccess`, and (under the default auto-store config, where the offset was stored before the handler ran) logged as a warning. |
+| `DrainOnRevoke` | `null` (→ `CommitOnlyOnSuccess`) | Whether a consumer-group rebalance drains in-flight handlers for the revoked partitions and commits their stored offsets before releasing them. |
 
 ### Retry options — `Benzene.Resilience`
 
