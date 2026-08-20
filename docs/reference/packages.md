@@ -4,7 +4,8 @@ Benzene ships as a set of small, focused NuGet packages. You compose the ones yo
 than taking a single monolithic dependency: a core, one host/transport, and whatever
 cross-cutting packages (validation, observability, health checks, …) your service uses.
 
-This page is the map of every published package — what it gives you and when to install it.
+This page maps the packages you'll reach for most — what each gives you and when to install it —
+with a [round-up of the more specialised families](#more-packages) at the end.
 
 > **All packages are prerelease (`-alpha`) until 1.0**, so every `dotnet add package` command
 > needs `--prerelease`:
@@ -249,6 +250,29 @@ See [Testing Benzene](../testing-benzene.md).
 |---|---|
 | `Benzene.Testing` | The in-memory test host (`BenzeneTestHost`) and message/HTTP builders for driving handlers and pipelines in unit/integration tests. |
 | `*.TestHelpers` | Per-transport test helpers (message builders and test-host extensions) that make it easy to feed transport-shaped events into the test host. One exists per transport: `Benzene.Aws.Lambda.ApiGateway.TestHelpers`, `Benzene.Aws.Lambda.Sqs.TestHelpers`, `Benzene.Aws.Lambda.Sns.TestHelpers`, `Benzene.Aws.Lambda.Kafka.TestHelpers`, `Benzene.Aws.Sqs.TestHelpers`, `Benzene.Azure.Function.AspNet.TestHelpers`, `Benzene.Azure.Function.EventHub.TestHelpers`, `Benzene.Azure.Function.Kafka.TestHelpers`, `Benzene.Core.MessageHandlers.TestHelpers`, `Benzene.Core.Messages.TestHelpers`. |
+
+## More packages
+
+The estate is larger than the tables above. The more specialised families, each with the doc page
+that covers it:
+
+| Family | Packages | Covered in |
+|---|---|---|
+| **Google Cloud Functions** | `Benzene.GoogleCloud.Functions.Core` / `.Http` / `.PubSub` — Cloud Functions Gen2 host for HTTP and Pub/Sub triggers; `Benzene.Clients.GoogleCloud.PubSub` — outbound Pub/Sub client | [Google Cloud Setup](../getting-started-google.md) |
+| **RabbitMQ** | `Benzene.RabbitMq` — self-hosted consumer worker (per-message ack/nack) + outbound publish client | [RabbitMQ Setup](../getting-started-rabbitmq.md) |
+| **gRPC** | `Benzene.Grpc.AspNet` — hosts `Benzene.Grpc` on ASP.NET Core (the package a gRPC server actually references); `Benzene.Grpc.Client` — outbound unary client; `Benzene.Grpc.Versioning` | [gRPC Setup](../getting-started-grpc.md) |
+| **AWS Lambda extras** | `Benzene.Aws.Lambda.Hosting` — one-line custom-runtime bootstrap; `Benzene.Aws.Lambda.AspNet` / `.HttpBridge` — serve HTTP through ASP.NET Core while Benzene consumes queues on the same function; `Benzene.Aws.Lambda.XRay` — per-middleware X-Ray subsegments | [ASP.NET Core + SQS + SNS in one Lambda](../cookbooks/aspnet-with-sqs-and-sns.md), [Common Middleware](../common-middleware.md) |
+| **AuthN / AuthZ** | `Benzene.Auth.Core` (contracts), `Benzene.Auth.Basic` (`UseBasicAuth`), `Benzene.Auth.OAuth2` (`UseOAuth2Bearer`, `RequireScope`) | [Authentication Patterns](../cookbooks/auth-patterns.md) |
+| **Serialization extras** | `Benzene.Avro`, `Benzene.MessagePack` — binary `IMediaFormat` integrations alongside JSON/XML | [Schema Registry](../cookbooks/schema-registry.md) |
+| **Sagas** | `Benzene.Saga` — in-process, compensation-based orchestration with LIFO rollback | [Sagas](../cookbooks/sagas.md) |
+| **Payload versioning** | `Benzene.Core.Versioning` — up/down-casting between payload schema versions, multi-step chains composed for you | [Message Payload Versioning](../cookbooks/message-versioning.md) |
+| **Schema & contracts** | `Benzene.SchemaRegistry.Core` — central schema registration + Confluent wire framing; `Benzene.Schema.Compatibility` — structural spec-compatibility comparison; `Benzene.HealthChecks.Schema` — publishes the service's contract hash as a health check | [Schema Registry](../cookbooks/schema-registry.md), [Contract Artifacts](../contract-artifacts.md) |
+| **Health-check add-ons** | `Benzene.HealthChecks.Tcp` (L4 reachability), `.Disk` (free space), `.DynamoDb` (`DescribeTable`), `.Azure.ServiceBus` (`PeekMessage`) | [Health Checks](../health-checks.md) |
+| **Secrets & configuration** | `Benzene.Configuration.Core` — the provider-agnostic `ISecretStore` seam | [Secrets & Configuration](../cookbooks/secrets-configuration.md) |
+| **In-process client** | `Benzene.Clients.InProcess` — outbound sends dispatched straight to a handler in the same runtime (modular monolith), no wire | [Clients](../clients.md) |
+| **Cloud Service Profile** | `Benzene.CloudService` — `UseBenzeneCloudService(...)` wires the profile's operational surfaces in one call; `Benzene.CloudService.Probe` — external black-box conformance probe | [The specification](https://benzene.app/docs/specification/cloud-service-profile.html) |
+| **Service mesh** | The `Benzene.Mesh.*` family — contracts, collector, aggregator, discovery, artifact stores, dashboards | [Mesh UI](../mesh-ui.md), [Mesh Usage Feed](../mesh-usage-feed.md) |
+| **Spec browsing** | `Benzene.Spec.Ui` — the Swagger-UI-style viewer for the spec endpoint | [Spec UI](../spec-ui.md) |
 
 ## See also
 
