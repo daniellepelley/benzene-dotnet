@@ -1,6 +1,6 @@
 # Migration: Alpha to 1.0
 
-Benzene is pre-1.0 (`version.txt` is currently `0.0.2`) and everything published so far is alpha.
+Benzene is pre-1.0 (`version.txt` is currently `0.0.3`) and everything published so far is alpha.
 The project's compatibility posture during this period is a **clean break, no dual-accept shim**:
 when a wire shape or a public API needs to change to get the design right before 1.0, it changes
 outright rather than carrying a deprecated old path alongside the new one. `CHANGELOG.md` is the

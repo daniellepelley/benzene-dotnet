@@ -14,6 +14,12 @@
 > been updated to match. Two earlier characterisations here were corrected against source: the Kinesis
 > "partition checkpoint model" (inherent to Kinesis's single-resume-point contract, not a bug — now
 > RESOLVED/doc) and the Avro OOM ("library-limited" was wrong — a bounded decoder fixed it).
+>
+> **Re-check note (2026-08-20).** Four `[DECISION]` items have since been decided and implemented, and
+> are moved to the resolved half below: the split-brain `RaiseOnFailureStatus` defaults, the
+> `AddMessageHandlers` finder lock-in, `BenzeneResultExtensions.IsSuccess()`, and (as a removal rather
+> than a fix) the `BenzeneHttpWorker` entry. The excluded "missing features" list was also trimmed of
+> two things that shipped. Everything still listed under **Open** was re-confirmed open on that date.
 
 Legend: **[DECISION]** real issue, fix is a behaviour/API/policy call (needs a maintainer's decision
 first). **[PERF]** performance hygiene, not a correctness bug. **[RESOLVED]** verified fixed in source.
@@ -32,7 +38,10 @@ These were previously listed as open. They are now confirmed fixed — do **not*
 - **gRPC `[EnumeratorCancellation]`** — present on `ReadAll`/`Convert`; OK-unary-no-payload correctly maps to `OK` (only a genuinely null result → `Unknown`).
 - **`AwsLambdaBenzeneTestHost` X-Ray segment leak** — `BeginSegment`/`EndSegment` now in try/finally.
 - **`SqsMessageTopicMapper` null `MessageAttributes`** — guarded (`SqsConsumerMessageTopicGetter`).
-- **`BenzeneHttpWorker` accept loop** — now has the catch-all + `finally` (drain/stop/close), matching Kafka.
+- **`BenzeneHttpWorker` accept loop** — **moot: the subsystem was removed.** `Benzene.SelfHost.Http`
+  (the `HttpListener` host this worker belonged to) was deprecated and then deleted in favour of Kestrel
+  via `Benzene.AspNet.Core` — see `docs/deprecations.md`. There is no `BenzeneHttpWorker` to fix or
+  regress. (It had received the catch-all + `finally` before the removal.)
 - **Dead reflection code + stray `Debug.WriteLine`** — `MessageClientSdkBuilder` reflection removed; `Debug.WriteLine` removed from `MessageHandler`/`ReflectionMessageHandlersFinder`/`HandlerPipelineBuilder` (this pass); `AsRawHttpRequest` now emits CRLF.
 
 ### Tier 2 (done)
@@ -54,6 +63,25 @@ These were previously listed as open. They are now confirmed fixed — do **not*
 - **SQS/DynamoDB adapter convergence** — onto `IHasMessageResult` (`92f4c459`) + `TransportNames` tags (`ee342f7e`).
 - **Overlapping result abstractions** — legacy `IMessageResult` deleted, settlement routed through `IBenzeneResult` (`6424cde9`).
 - **Kinesis "partition checkpoint model"** — inherent to Kinesis's single-resume-point contract (design doc §2); checkpointer already correct, shard-order guidance added to CLAUDE.md (`822cabf4`).
+
+### Decided and implemented since (2026-08-20)
+- **Split-brain `RaiseOnFailureStatus` defaults** — **DECIDED: align on `true`.** Every transport that
+  has the flag now defaults it `true` (SNS, S3, EventBridge, Azure Functions Kafka/QueueStorage/
+  ServiceBus/EventGrid/EventHub, the Event Hub worker, Google Pub/Sub) — see
+  `work/settlement-contract-1.0.md` for the flip, and `BenzeneKafkaConfig.RaiseOnFailureStatus` for the
+  self-hosted Kafka worker, which had no such flag at all until the
+  `work/settlement-default-alignment-proposal.md` item A1 fix. A returned failure result is no longer
+  silently settled anywhere by default. *(Tier B of that proposal — the `!= true` vs `== false`
+  null/unrouted policy — is a separate, still-open decision; see below.)*
+- **`AddMessageHandlers` finder lock-in** — **FIXED.** `IMessageHandlersFinder` is now registered once,
+  built **lazily** over the **deduped union** of every registered `MessageHandlerCandidateTypes`, so a
+  no-arg-then-typed call sequence discovers both and overlapping scans don't double-register (the
+  dedup-semantics decision the earlier revert was blocked on).
+  (`Benzene.Core.MessageHandlers/DI/Extensions.cs`, `RegisterHandlerFinderInfrastructure`.)
+- **`BenzeneResultExtensions.IsSuccess()` true only for `Ok`** — **FIXED.** It now delegates to
+  `BenzeneResultStatus.IsSuccess(status)`, so it covers all six success statuses and agrees with
+  `IBenzeneResult.IsSuccessful`; `IsOk()` remains the narrower "exactly `Ok`" check.
+  (`Benzene.Results/BenzeneResultExtensions.cs`.)
 
 ### Security/concurrency (fresh-hunt series, done)
 Native AMQP batch leak; XML entity-expansion DoS; MessagePack `TrustedData` DoS; Redis faulted-connection
@@ -81,17 +109,10 @@ None of these is a clean self-contained bug; each changes behaviour, a public AP
 - **[DECISION] Kinesis & DynamoDB streams swallow the pipeline exception** — both return a batch
   response and rely on the ESM having `ReportBatchItemFailures`, which Benzene can't see. Consider a
   thrown-exception fallback or a startup warning. (`KinesisStreamApplication.cs:101`, `DynamoDbApplication.cs:57`.)
-- **[DECISION] Split-brain `RaiseOnFailureStatus` defaults** — SQS-consumer/ServiceBus-worker/RabbitMQ
-  retain a failure result by default; S3/EventBridge/QueueStorage/EventGrid/EventHub-trigger discard it
-  by default (all `false`). The per-source opt-ins now exist; aligning the *defaults* is the decision.
 - **[DECISION] RabbitMQ null-result → ack** — documented/tested deliberate, diverges from
   ServiceBus/DynamoDb (null → redeliver). Cross-transport-consistency call only.
 
 ### DI / mesh
-- **[DECISION] `AddMessageHandlers` finder lock-in** — both overloads `TryAddSingleton` a pre-composed
-  `IMessageHandlersFinder`, so a no-arg-then-typed call sequence drops the typed reflection finder →
-  404s. `DI/Extensions.cs:152,189`. **A naive aggregation was already tried and reverted** over
-  duplicate-topic dedup, so the fix is a real dedup-semantics decision, not a mechanical change.
 - **[DECISION] `MeshSelfReportMiddleware` fire-and-forget on Lambda** — `_ = PublishBestEffortAsync()`
   after `await next()`; the runtime freezes on return so the report often never completes on the very
   on-demand host it targets. The package documents opportunistic-only as deliberate; a Lambda-reliable
@@ -128,8 +149,6 @@ None of these is a clean self-contained bug; each changes behaviour, a public AP
 - **[RESOLVED] SQS/DynamoDb two-generation adapter + magic-string transport tags** — both converged
   onto `IHasMessageResult` (`92f4c459`, the `bool?` fork gone) and the tags now use
   `TransportNames.Sqs`/`.DynamoDb` (`ee342f7e`). (proposal items 2a + 2b)
-- **[DECISION] `BenzeneResultExtensions.IsSuccess()` true only for `Ok`** — identical to `IsOk()`,
-  disagrees with `IBenzeneResult.IsSuccessful` (all six success statuses). Intended semantics is the call.
 - **[DECISION] CR/LF response-header injection (defence-in-depth)** — API-Gateway/self-host/AspNet
   response adapters pass header values through without stripping CR/LF. Not a confirmed live vector
   (values are Benzene-/handler-sourced today); whether to strip centrally is the call.
@@ -158,8 +177,11 @@ None of these is a clean self-contained bug; each changes behaviour, a public AP
 ---
 
 ## Excluded (unchanged from prior triage)
-- **Missing features / roadmap** (not bugs): SQS-FIFO-consume, gRPC streaming, Service Bus
+- **Missing features / roadmap** (not bugs): SQS-FIFO-consume, Service Bus
   transactions/deferral/filters, Kafka EOS/schema-registry, Kinesis tumbling windows, BlobStorage
   `Stream` binding, Queue-Storage size guard, SNS Extended-Client, etc. — see the roadmap docs.
+  *(gRPC streaming and Service Bus sessions were on this list and have since shipped —
+  `Benzene.Grpc` routes all four RPC shapes; `BenzeneServiceBusConfig.SessionsEnabled` drives the
+  session processor.)*
 - **Verified FALSE**: "gRPC client discards caller deadline/cancellation"; "outbound SQS/SNS return
   `Ok` not `Accepted`".
