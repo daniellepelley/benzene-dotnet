@@ -105,12 +105,14 @@ discovered by reflection, so there is nothing further to register per-handler.
 
 `BenzeneStartUp` (from `Benzene.Microsoft.Dependencies`) is the platform-neutral application
 definition shared by every Benzene host — the same class shape you'd write for AWS Lambda or
-ASP.NET Core. It has three members to implement:
+ASP.NET Core. There are two members to implement, plus an optional configuration override:
 
 ```csharp
 public abstract class BenzeneStartUp
 {
-    public abstract IConfiguration GetConfiguration();
+    // Virtual - the default reads environment variables; override for more (JSON files, Key Vault, ...)
+    public virtual IConfiguration GetConfiguration()
+        => new ConfigurationBuilder().AddEnvironmentVariables().Build();
     public abstract void ConfigureServices(IServiceCollection services, IConfiguration configuration);
     public abstract void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration);
 }
@@ -129,13 +131,8 @@ using Microsoft.Extensions.DependencyInjection;
 
 public class StartUp : BenzeneStartUp
 {
-    public override IConfiguration GetConfiguration()
-    {
-        return new ConfigurationBuilder()
-            .SetBasePath(Directory.GetCurrentDirectory())
-            .AddEnvironmentVariables()
-            .Build();
-    }
+    // Configuration defaults to environment variables - which is how Function App
+    // application settings arrive - so there's no GetConfiguration() override to write.
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
@@ -245,10 +242,12 @@ pairing (here, the one `UseHttp` added). The declaration above generates exactly
 ## 6. Configuration
 
 `GetConfiguration()` runs once on cold start, before any services are registered, and its result
-is passed into both `ConfigureServices` and `Configure`. Anything built on top of
-`Microsoft.Extensions.Configuration` works here — the example above reads environment variables
-(which map to Application Settings once deployed), but `AddJsonFile(...)`, Azure App Configuration,
-or Azure Key Vault configuration providers all work the same way.
+is passed into both `ConfigureServices` and `Configure`. It's virtual: the default reads
+environment variables (which is how Application Settings arrive once deployed), so the `StartUp`
+above doesn't override it. When you need more, override it — anything built on
+`Microsoft.Extensions.Configuration` works: `AddJsonFile(...)`, Azure App Configuration, or Azure
+Key Vault configuration providers (include `.AddEnvironmentVariables()` in your override if you
+still want those — an override replaces the default, it doesn't merge with it).
 
 For local development, add a `local.settings.json` (not checked into source control — it holds
 secrets and machine-specific values; Benzene's own example project `.gitignore`s it too):
