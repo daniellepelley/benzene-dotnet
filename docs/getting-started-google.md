@@ -82,8 +82,8 @@ namespace OrdersFunction;
 
 public class Startup : BenzeneStartUp
 {
-    public override IConfiguration GetConfiguration()
-        => new ConfigurationBuilder().AddEnvironmentVariables().Build();
+    // Configuration defaults to environment variables (what Cloud Run/Functions inject) -
+    // override GetConfiguration() only if you need more.
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {

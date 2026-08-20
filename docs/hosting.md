@@ -75,7 +75,10 @@ referenced transitively by every platform package) is:
 ```csharp
 public abstract class BenzeneStartUp : IStartUp<IServiceCollection, IConfiguration, IBenzeneApplicationBuilder>
 {
-    public abstract IConfiguration GetConfiguration();
+    // Virtual, with a default: environment variables — what a container, a Lambda,
+    // a Function and a Cloud Run revision all actually inject.
+    public virtual IConfiguration GetConfiguration()
+        => new ConfigurationBuilder().AddEnvironmentVariables().Build();
     public abstract void ConfigureServices(IServiceCollection services, IConfiguration configuration);
     public abstract void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration);
 }
@@ -100,8 +103,8 @@ start for Lambda; process start for everything else):
 
 1. **`GetConfiguration()`** — builds and returns the `IConfiguration` used for both of the
    following steps. Runs before any services are registered, so it cannot resolve anything from
-   DI. Typically builds a `ConfigurationBuilder` from environment variables, JSON files, or a
-   cloud configuration provider.
+   DI. The default (it's `virtual`, not abstract) reads environment variables; override it when
+   you need more — JSON files, a base path, or a cloud configuration provider.
 2. **`ConfigureServices(IServiceCollection services, IConfiguration configuration)`** — registers
    services with Microsoft's DI container. Almost always starts with
    `services.UsingBenzene(x => x.AddMessageHandlers(...))` to register Benzene's own
@@ -200,8 +203,7 @@ separate handler class to write:
 ```csharp
 public class StartUp : BenzeneStartUp
 {
-    public override IConfiguration GetConfiguration() => new ConfigurationBuilder()
-        .AddEnvironmentVariables().Build();
+    // GetConfiguration() not overridden: the default reads environment variables.
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
         => services.UsingBenzene(x => x.AddMessageHandlers(typeof(HelloWorldMessageHandler).Assembly));
