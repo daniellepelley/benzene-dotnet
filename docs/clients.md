@@ -273,7 +273,7 @@ services.UsingBenzene(x => x.AddOutboundRouting(routing => routing
 
 `.UseBenzeneMessageOverHttp(url)` POSTs a BenzeneMessage envelope (`{ topic, headers, body }`) to another Benzene service's BenzeneMessage endpoint and maps the returned `{ statusCode, headers, body }` envelope back — the HTTP counterpart of `.UseInProcess()` and of the AWS Lambda invoke path, and the shape service-to-service calls take when both ends run on a laptop or in one cluster. Unlike the queue transports it **can return a typed response**: `SendAsync<TRequest, TResponse>` deserializes the envelope body once it knows `TResponse`. It resolves `HttpClient` from the container, and auto-registers a non-destructive reachability check for `url` on the deep `healthcheck` layer (`healthCheck: false` opts out).
 
-The rung below is `.UseBenzeneMessageOverHttp(url, configure)`, which lets you build the inner send pipeline yourself (e.g. `builder => builder.UseHttpClient(myHttpClient)`); below that is `.Convert(new OutboundBenzeneMessageHttpContextConverter(url, serializer), configure)`. For a plain REST call to a verb+path rather than the envelope, see [Using a transport client directly — HTTP](#http-1).
+The rung below is `.UseBenzeneMessageOverHttp(url, configure)`, which lets you build the inner send pipeline yourself (e.g. `builder => builder.UseHttpClient(myHttpClient)`); below that is `.Convert(new OutboundBenzeneMessageHttpContextConverter(url, serializer), configure)`. For a plain REST call to a verb+path rather than the envelope, see [Using a transport client directly — HTTP](#http).
 
 ### AWS Lambda, EventBridge, gRPC
 
