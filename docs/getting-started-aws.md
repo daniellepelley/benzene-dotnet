@@ -15,6 +15,10 @@ one more line each — adding a transport is wiring, never a change to your logi
 > that boots the real `StartUp` in-memory (no AWS account needed) and pushes a native event through each
 > source. Read it alongside this page.
 
+> **No AWS account yet? Keep going anyway.** Steps 1–6 build and test the whole service **in-memory,
+> with no AWS account** — [step 6](#6-test-locally-with-benzenetesthost) sends both an HTTP request and
+> an SQS message through your real pipeline locally. An account is only needed for deployment, in step 7.
+
 ## Prerequisites
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
@@ -42,18 +46,12 @@ dotnet add package Benzene.Aws.Lambda --prerelease
 middleware pipeline and message-handler infrastructure (transitively via
 `Benzene.Microsoft.Dependencies`), the `BenzeneStartUp` base class, `UseApiGateway`, and **every**
 event-source middleware — `UseSqs`, `UseSns`, `UseKafka`, `UseS3`, and the rest — so you don't add a
-package per event source (see [Supported Event Sources](#supported-event-sources) below). Prefer a
-narrower dependency? Reference `Benzene.Aws.Lambda.Core` plus just the transport package(s) you need
-(`Benzene.Aws.Lambda.Sqs`, `.Sns`, `.Kafka`, `.S3`, …) instead of the umbrella.
+package per event source (see [Supported Event Sources](#supported-event-sources) below).
 
-You'll also need the concrete `Microsoft.Extensions.Configuration` implementation for
-`GetConfiguration()` below (only its abstractions are referenced transitively):
-
-```bash
-dotnet add package Microsoft.Extensions.Configuration
-dotnet add package Microsoft.Extensions.Configuration.EnvironmentVariables
-dotnet add package Microsoft.Extensions.Configuration.FileExtensions
-```
+> Once you know which event sources your service actually uses, you can swap the umbrella for a
+> narrower dependency: `Benzene.Aws.Lambda.Core` plus just the transport package(s) you need
+> (`Benzene.Aws.Lambda.Sqs`, `.Sns`, `.Kafka`, `.S3`, …). For this guide, the one command above is all
+> you need.
 
 ## 3. Define a message handler
 
@@ -116,13 +114,8 @@ using Microsoft.Extensions.DependencyInjection;
 
 public class StartUp : BenzeneStartUp
 {
-    public override IConfiguration GetConfiguration()
-    {
-        return new ConfigurationBuilder()
-            .SetBasePath(Directory.GetCurrentDirectory())
-            .AddEnvironmentVariables()
-            .Build();
-    }
+    // Configuration defaults to environment variables - exactly what Lambda injects -
+    // so there's no GetConfiguration() override to write. See "Configuration" below.
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
@@ -487,12 +480,14 @@ package, with the specific SDK call in Benzene's source that drives each require
 ## Configuration
 
 `GetConfiguration()` runs once on cold start, before any services are registered, and its
-result is passed into both `ConfigureServices` and `Configure`. Anything built on top of
-`Microsoft.Extensions.Configuration` works here — the example above reads environment
-variables (the natural fit for Lambda, where you set configuration via the function's
-environment variables in the console, SAM template, or CDK/Terraform), but `AddJsonFile(...)`,
-AWS Systems Manager Parameter Store providers, or AWS Secrets Manager providers all work the
-same way.
+result is passed into both `ConfigureServices` and `Configure`. It's virtual: the default reads
+environment variables — the natural fit for Lambda, where you set configuration via the
+function's environment variables in the console, SAM template, or CDK/Terraform — which is why
+the `StartUp` in step 4 doesn't override it. When you need more, override it: anything built on
+`Microsoft.Extensions.Configuration` works — `AddJsonFile(...)`, AWS Systems Manager Parameter
+Store providers, or AWS Secrets Manager providers (add the provider package, and include
+`.AddEnvironmentVariables()` in your override if you still want those — an override replaces the
+default, it doesn't merge with it).
 
 ## Health Checks
 
