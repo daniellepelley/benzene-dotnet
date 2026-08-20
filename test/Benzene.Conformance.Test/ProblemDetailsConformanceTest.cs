@@ -29,7 +29,7 @@ namespace Benzene.Conformance.Test;
 
 /// <summary>
 /// Runs docs/specification/conformance/problem-details-cases.json (wire-contracts.md §1.3, §3.1,
-/// §4.1) - the gate that Phases 3-5 of work/problem-details-plan.md actually implemented what
+/// §4.1) - the gate that Phases 3-5 of work/archive/problem-details-plan-2026-08.md actually implemented what
 /// Phase 1 pinned. Mirrors <see cref="StatusMappingConformanceTest"/>'s and
 /// <see cref="EnvelopeConformanceTest"/>'s patterns: <c>registry</c> is asserted directly against
 /// <see cref="Benzene.Results.ProblemTypes"/>, <c>envelopeCases</c> run through the real

@@ -162,7 +162,7 @@
 > evidence pivot round-trip, undetected-bookmark state).
 
 > **2026-07-25 DRAINS-UP PHASE 2 SHIPPED — one front door, one traffic picture, evidence-first.**
-> Second phase of `work/mesh-drains-up-review.md` (slices 2.1–2.5):
+> Second phase of `work/archive/mesh-drains-up-review-2026-07.md` (slices 2.1–2.5):
 > - **Front door (2.2):** the separate `#fleet-page` is GONE — the live plane lives on the landing page
 >   as `#traffic-section` (between the issue inbox and the catalog), ordered per the three jobs:
 >   needs-you strip → live traffic (range picker, feed health, tiles) → traffic map → recent flows →
@@ -193,7 +193,7 @@
 >   declared-route traffic map, single Traffic column, static floor) — ad-hoc, not in CI.
 
 > **2026-07-25 DRAINS-UP PHASE 1 SHIPPED — the inbox watches the system, and knows when it's blind.**
-> First implementation phase of `work/mesh-drains-up-review.md` (slices 1.1–1.5), closing the review's
+> First implementation phase of `work/archive/mesh-drains-up-review-2026-07.md` (slices 1.1–1.5), closing the review's
 > headline defect: a failing system could say "All clear" because every inbox class was catalog paperwork.
 > - **Failing-traffic issue class (1.1):** `collectLiveIssues()` now files a high-severity "Failing
 >   traffic" row per topic with `errors > 0` — count, total, the failing-status mix

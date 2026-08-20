@@ -1,7 +1,7 @@
 <Project>
   <!--
     Build integration for one-line client generation from a committed spec JSON file. See README.md
-    for the consumer-facing guide and work/spec-mesh-tooling-implementation-plan.md's Phase 6/6b for
+    for the consumer-facing guide and work/archive/spec-mesh-tooling-implementation-plan-2026-08.md's Phase 6/6b for
     the design.
 
     Usage: add one item per contract this project consumes -

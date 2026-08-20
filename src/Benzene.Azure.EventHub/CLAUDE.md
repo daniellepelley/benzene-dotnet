@@ -11,7 +11,7 @@ Functions trigger, use `Benzene.Azure.Function.EventHub` instead.
 
 ## A handler failure result is escalated like an exception (`RaiseOnFailureStatus`); redelivery depends on `CatchHandlerExceptions`
 **`BenzeneEventHubConfig.RaiseOnFailureStatus` defaults to `true`** (flipped 2026-07-21 — see
-`work/settlement-contract-1.0.md`). A handler that returns a failure result (e.g.
+`work/archive/settlement-contract-1.0-2026-07.md`). A handler that returns a failure result (e.g.
 `BenzeneResult.ServiceUnavailable(...)`) without throwing is escalated into a thrown
 `EventHubMessageProcessingException`, which takes the same path as an unhandled exception (see
 `CatchHandlerExceptions` below) — the failed event is never itself checkpointed. **The redelivery

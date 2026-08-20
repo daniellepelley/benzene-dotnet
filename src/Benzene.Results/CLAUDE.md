@@ -47,7 +47,7 @@ status string rather than thrown exceptions. Transport adapters map the status t
   - that's an HTTP-binding concern for a later phase). `DefaultResponsePayloadMapper`
   (`Benzene.Core.MessageHandlers`) calls this on every failed result.
   - **`ErrorPayload` (retired):** the pre-RFC-9457 `{ status, detail }` shape this type used to be is
-    gone (Phase 3 of `work/problem-details-plan.md`, clean break, no shim) - `ProblemDetails` /
+    gone (Phase 3 of `work/archive/problem-details-plan-2026-08.md`, clean break, no shim) - `ProblemDetails` /
     `ProblemTypes.From` took over both of its jobs (join-`detail` construction; client-side
     deserialization target).
 

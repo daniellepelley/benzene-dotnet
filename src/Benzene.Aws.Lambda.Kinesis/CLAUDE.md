@@ -63,7 +63,7 @@ app.UseKinesisStream(kinesis => kinesis
 - **Checkpoint in shard order — the resume point is a single sequence number.** Kinesis's retry
   contract is not "skip the bad records" — the event source mapping reads only the *first* reported
   failure and retries **every** record from that sequence number to the end of the batch (see
-  `work/kinesis-batch-failure-handling-design.md` §2). So `CheckpointAsync(record)` means
+  `work/archive/kinesis-batch-failure-handling-design-2026-07.md` §2). So `CheckpointAsync(record)` means
   "everything up to this record **in shard/batch order** is safe", and the checkpointer keeps a
   single monotonic watermark (it never rewinds; an out-of-shard-order or projected-copy checkpoint
   that would move the resume point backward is ignored). **Consequence for a `PartitionBy` handler:**
@@ -83,7 +83,7 @@ app.UseKinesisStream(kinesis => kinesis
   naming the sequence number *after* the last checkpointed record, so AWS resumes the batch from
   there on retry instead of redelivering the whole thing (Kinesis's shard-ordered
   `ReportBatchItemFailures` contract only reads the *first* reported failure — see
-  `work/kinesis-batch-failure-handling-design.md` §2). **One real behavior change**: a handler that
+  `work/archive/kinesis-batch-failure-handling-design-2026-07.md` §2). **One real behavior change**: a handler that
   never calls `CheckpointAsync` at all now gets a response naming the *first* record's sequence
   number on any exception — i.e. AWS retries the entire batch from the start — instead of the
   previous silent no-op via `NullStreamCheckpointer`. This is purely additive/more-correct (no code
@@ -101,7 +101,7 @@ app.UseKinesisStream(kinesis => kinesis
   (`UseKinesisStream(action, new KinesisStreamOptions { AutoCheckpointOnSuccess = false })`) for full
   manual control. Covered by `KinesisStreamApplicationTest`.
 - No automatic `UseCheckpointAfterEach()` operator exists yet (streaming Phase 2, see
-  `docs/plans/streaming-plan.md`) — a handler that wants per-record (rather than whole-batch-on-success)
+  `work/archive/streaming-plan-2026-08.md`) — a handler that wants per-record (rather than whole-batch-on-success)
   checkpointing must still checkpoint explicitly at the right point in its own stream-processing logic.
 
 ## Tests

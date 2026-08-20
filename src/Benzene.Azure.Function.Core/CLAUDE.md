@@ -18,7 +18,7 @@ package depends on Core, referencing any of them brings both automatically. The 
 package defines its own attribute); the worker-indexing prop is required so the generated `[Function]`
 is picked up by the reflection metadata/executor rather than the SDK's worker-indexing generators
 (which can't see another generator's output). See `Benzene.Azure.Function.SourceGenerators`'s
-`CLAUDE.md`, `docs/azure-functions.md`, and `work/azure-functions-trigger-codegen-design.md`.
+`CLAUDE.md`, `docs/azure-functions.md`, and `work/archive/azure-functions-trigger-codegen-design-2026-08.md`.
 
 ## Key types/interfaces
 - `IAzureFunctionApp` / `AzureFunctionApp` — the built app the trigger function methods dispatch

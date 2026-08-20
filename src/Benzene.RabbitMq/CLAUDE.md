@@ -124,7 +124,7 @@ lacking the configured header still routes by its AMQP routing key.
   offset model, closer to Kafka); topology *management* (declaring exchanges/queues/bindings, or
   generating them from `[Message]` topics) - the worker assumes the queue and any DLX exist, as the
   Kafka worker assumes topics do; quorum-queue-specific features. **NATS.Net** is the next
-  self-hosted broker candidate and is deferred. See `docs/plans/rabbitmq-plan.md`.
+  self-hosted broker candidate and is deferred. See `work/archive/rabbitmq-plan-2026-08.md`.
 
 ## Dependencies on other Benzene packages
 - **Benzene.Clients** - `IBenzeneMessageClient`, outbound seam.
@@ -148,4 +148,4 @@ lacking the configured header still routes by its AMQP routing key.
 ## Claim-check hydration
 Not wired here yet: `Benzene.ClaimCheck`'s hydrate middleware needs an
 `IMessageBodySetter<RabbitMqContext>` registered — the same 5-line pattern as
-`Benzene.Aws.Lambda.Sqs`/`.Sns`/`.EventBridge` ship (see `work/claim-check-plan.md` Phase 2 step 4).
+`Benzene.Aws.Lambda.Sqs`/`.Sns`/`.EventBridge` ship (see `work/archive/claim-check-plan-2026-08.md` Phase 2 step 4).

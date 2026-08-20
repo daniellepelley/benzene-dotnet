@@ -5,7 +5,7 @@ namespace Benzene.Clients;
 /// settable slot for the response - the outbound mirror of how inbound transport contexts carry a
 /// request and a result. Deliberately non-generic (matching every other <c>IMiddleware&lt;TContext&gt;</c>
 /// in this codebase, e.g. <c>SqsClientMiddleware</c>/<c>SnsClientMiddleware</c>) rather than
-/// <c>OutboundContext&lt;TRequest&gt;</c> - see <c>work/benzene-clients-redesign-plan.md</c> §2.2/§5.
+/// <c>OutboundContext&lt;TRequest&gt;</c> - see <c>work/archive/benzene-clients-redesign-plan-2026-07.md</c> §2.2/§5.
 /// </summary>
 public class OutboundContext
 {

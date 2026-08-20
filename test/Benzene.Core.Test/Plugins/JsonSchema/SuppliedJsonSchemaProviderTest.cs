@@ -83,7 +83,7 @@ public class SuppliedJsonSchemaProviderTest
         // IBenzeneResult.Errors[].Field/.Code, not folded into the message text (see
         // work/benzene-result-errors-ruling.md §5.1: "Benzene.JsonSchema should stop prefixing the
         // pointer into the message string once Field exists") - so "detail" (the joined message
-        // text) never contains the pointer, even though (since work/problem-details-plan.md Phase 3)
+        // text) never contains the pointer, even though (since work/archive/problem-details-plan-2026-08.md Phase 3)
         // the wire body's "errors" member carries that same pointer verbatim in "field".
         var catalog = new SuppliedJsonSchemaCatalog()
             .AddJson(typeof(ExampleRequestPayload), StrictSchemaJson);

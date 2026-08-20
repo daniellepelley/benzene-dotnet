@@ -69,7 +69,7 @@ public class BenzeneMessageHttpPipelineTest
     [Fact]
     public async Task PostEnvelope_UnknownTopic_InnerProblemBodyHasNoNumericStatus_OuterContentTypeStaysApplicationJson()
     {
-        // work/problem-details-plan.md §2.3: the envelope's inner problem body is transport-neutral
+        // work/archive/problem-details-plan-2026-08.md §2.3: the envelope's inner problem body is transport-neutral
         // (no numeric HTTP `status` member, even though this envelope traveled over HTTP), and the
         // OUTER transport content-type is always application/json - the outer body is the envelope,
         // not the problem document. The outer transport is ApiGatewayContext here, which Phase 4

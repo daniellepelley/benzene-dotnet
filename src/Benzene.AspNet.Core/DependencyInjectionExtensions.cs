@@ -70,7 +70,7 @@ public static class DependencyInjectionExtensions
         services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.Asp));
         services.AddHttpMessageHandlers();
         // A failed result's problem document carries the numeric HTTP `status` member, filled in from
-        // the same IHttpStatusCodeMapper the response status line uses - work/problem-details-plan.md
+        // the same IHttpStatusCodeMapper the response status line uses - work/archive/problem-details-plan-2026-08.md
         // Phase 4. Covers this package's own self-host ASP.NET Core AND every host that reuses this
         // exact AspNetContext under the hood (Benzene.GoogleCloud.Functions.Http's Cloud Functions Gen2
         // adapter, Benzene.Aws.Lambda.AspNet's mixed-Lambda HTTP path) - neither registers its own copy.

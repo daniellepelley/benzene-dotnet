@@ -26,7 +26,7 @@ using Xunit;
 namespace Benzene.Test.Azure;
 
 /// <summary>
-/// Phase 3 of the cancellation initiative (<c>work/cancellation-design.md</c>): each Azure Functions
+/// Phase 3 of the cancellation initiative (<c>work/archive/cancellation-design-2026-08.md</c>): each Azure Functions
 /// isolated-worker non-HTTP transport's <c>Handle*</c> extension now takes a cancellation token and
 /// seeds it into the per-invocation scope, so a handler that resolves
 /// <see cref="ICancellationTokenAccessor"/> observes whatever token the trigger method forwards - the

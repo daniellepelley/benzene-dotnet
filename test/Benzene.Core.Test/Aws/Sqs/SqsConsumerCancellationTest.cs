@@ -19,7 +19,7 @@ using Xunit;
 namespace Benzene.Test.Aws.Sqs;
 
 /// <summary>
-/// Phase 2 of the cancellation initiative (<c>work/cancellation-design.md</c>): the SQS consumer's
+/// Phase 2 of the cancellation initiative (<c>work/archive/cancellation-design-2026-08.md</c>): the SQS consumer's
 /// run/shutdown token now reaches each message's per-message scope, so a handler that observes it can
 /// abort in-flight work instead of finishing (and being deleted) after the host asked it to stop.
 /// </summary>

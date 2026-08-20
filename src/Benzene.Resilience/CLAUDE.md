@@ -35,7 +35,7 @@ where retry/timeout fit and when to reach for `Benzene.Resilience.Polly` (circui
   with the same parameters.
 - **`TimeoutMiddleware<TContext>`** — wraps the downstream pipeline (`next`) in a deadline. Composes
   with the ambient `Benzene.Abstractions.DI.ICancellationTokenAccessor` (see
-  `work/cancellation-design.md` §2.2/§2.4 for the full design): saves the accessor's current token,
+  `work/archive/cancellation-design-2026-08.md` §2.2/§2.4 for the full design): saves the accessor's current token,
   links a new `CancellationTokenSource` to it, arms it with `CancelAfter(timeout)`, sets the linked
   token as ambient for the duration of `next()`, and restores the original token in a `finally`
   (`using` on the linked source, so it — and its timer, and its registration on the original token —

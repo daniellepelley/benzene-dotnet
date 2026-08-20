@@ -11,7 +11,7 @@ public class CodeBuilderFactory
     /// <summary>
     /// The documented, supported <c>--output</c> values. Deliberately excludes <c>api-gateway</c>:
     /// its switch case still works (the 2026-08-12 plan amendment froze deprecation/removal for a
-    /// later decision - see work/spec-mesh-tooling-implementation-plan.md Amendment B), but it stays
+    /// later decision - see work/archive/spec-mesh-tooling-implementation-plan-2026-08.md Amendment B), but it stays
     /// out of this advertised list and out of the unknown-value error below.
     /// </summary>
     private static readonly string[] ValidOutputs = { "client", "topic-client", "message-handlers", "readme" };

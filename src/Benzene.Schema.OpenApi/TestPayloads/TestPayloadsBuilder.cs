@@ -18,7 +18,7 @@ namespace Benzene.Schema.OpenApi.TestPayloads;
 /// AWS coupling. It reports the transports each topic is reachable on (the host's wired
 /// <see cref="EventServiceDocument.Transports"/> plus the topic's own HTTP mappings) but dresses only
 /// the portable BenzeneMessage payload; per-transport AWS event envelopes (SNS/SQS/API Gateway) are a
-/// separate opt-in concern (see <c>work/runtime-test-payloads-plan.md</c>).
+/// separate opt-in concern (see <c>work/archive/runtime-test-payloads-plan-2026-08.md</c>).
 /// </remarks>
 public class TestPayloadsBuilder
 {

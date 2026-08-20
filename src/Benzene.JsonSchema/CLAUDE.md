@@ -47,7 +47,7 @@ OpenAPI feature (that is `Benzene.Schema.OpenApi`).
   is mapped in the catalog validate against the hand-authored schema; everything else falls back
   to the default generated one. Feed it from the same documents as `Benzene.Schema.OpenApi`'s
   `SuppliedSchemaCatalog` to keep the published contract and runtime validation aligned - see
-  `work/complex-payloads-byo-schema-plan.md`. Tests: `SuppliedJsonSchemaProviderTest`.
+  `work/archive/complex-payloads-byo-schema-plan-2026-08.md`. Tests: `SuppliedJsonSchemaProviderTest`.
 
 ## When to use this package
 - To reject non-conforming request bodies early with a JSON Schema check, without hand-writing

@@ -5,7 +5,7 @@ Inbound DynamoDB Streams adapter: routes change-data-capture records delivered t
 function into Benzene message handlers. The topic is `"{tableName}:{eventName}"` (e.g.
 `orders:INSERT`) and the body is the record's image unmarshalled from DynamoDB AttributeValue
 format into plain JSON, so handlers receive ordinary POCOs. See
-`docs/plans/dynamodb-streams-plan.md` for the design decisions (DS1–DS8).
+`work/archive/dynamodb-streams-plan-2026-08.md` for the design decisions (DS1–DS8).
 
 ## Key types/interfaces
 - `DynamoDbEvent` / `DynamoDbStreamRecord` / `DynamoDbStreamData` — Benzene's own model of the

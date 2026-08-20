@@ -8,7 +8,7 @@ namespace Benzene.Http;
 /// <summary>
 /// Decorates a transport's <see cref="IResponsePayloadMapper{TContext}"/> so a failed result's
 /// problem document carries the numeric RFC 9457 <see cref="ProblemDetails.Status"/> - HTTP-facing
-/// transports only (docs/specification/wire-contracts.md §2.1/§2.3; work/problem-details-plan.md
+/// transports only (docs/specification/wire-contracts.md §2.1/§2.3; work/archive/problem-details-plan-2026-08.md
 /// Phase 4). <see cref="ProblemDetails.Status"/> is filled in via the <b>same</b>
 /// <see cref="IHttpStatusCodeMapper"/> instance <see cref="HttpStatusCodeResponseHandler{TContext}"/>
 /// uses to set the actual HTTP response status line, so the body's <c>status</c> member and the real

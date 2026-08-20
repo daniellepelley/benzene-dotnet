@@ -207,5 +207,5 @@ only the safe rule was shipped (opt-in, advisory, mirroring F1's `LogUnmappedRes
   would warn on exactly the transports where `invocationId` is correctly populated. A correct
   version needs a pipeline-introspection seam that spans the sub-pipeline boundary (the outer app
   would have to expose the sub-builder it constructs), which is the larger design this item was
-  always flagged as. Until then the [Diagnosing Failures](../docs/diagnosing-failures.md) doc's
+  always flagged as. Until then the [Diagnosing Failures](../../docs/diagnosing-failures.md) doc's
   "Ordering footguns" section is the mitigation.

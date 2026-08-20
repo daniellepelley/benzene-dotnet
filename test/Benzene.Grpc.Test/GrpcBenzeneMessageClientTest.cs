@@ -48,7 +48,7 @@ public class GrpcBenzeneMessageClientTest
         Assert.Contains(result.Errors, e => e.Message == "no such thing");
     }
 
-    // Phase 5 of work/problem-details-plan.md: the reverse read of GrpcMethodHandler.AddRichErrorDetails'
+    // Phase 5 of work/archive/problem-details-plan-2026-08.md: the reverse read of GrpcMethodHandler.AddRichErrorDetails'
     // grpc-status-details-bin google.rpc.BadRequest, mirroring the HTTP client's ProblemDetails.Errors fix.
     [Fact]
     public async Task SendMessageAsync_FailureWithBadRequestDetails_PopulatesStructuredErrorsFromFieldViolations()

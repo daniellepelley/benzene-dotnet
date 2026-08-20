@@ -14,7 +14,7 @@ using Xunit;
 
 namespace Benzene.Test.ClaimCheck.Blob;
 
-// No Azurite integration test in this pass, deliberately (see work/claim-check-plan.md, Phase 5): the
+// No Azurite integration test in this pass, deliberately (see work/archive/claim-check-plan-2026-08.md, Phase 5): the
 // emulator fixtures are heavy, and Benzene.ClaimCheck.Aws.S3's LocalStack integration test already
 // proves the offload/hydrate middleware pair end to end against a real object store - a second
 // emulator-backed test here would exercise the same middleware behavior against a different SDK, not

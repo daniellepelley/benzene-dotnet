@@ -9,7 +9,7 @@ namespace Benzene.Clients.InProcess;
 /// so an outbound route (<c>OutboundRoutingBuilder.Route</c>) can dispatch straight to an in-process
 /// handler registered via <c>AddInProcessMessaging</c>, without going over any wire transport. The
 /// <see cref="OutboundContext"/> counterpart of the same pattern every other transport follows (see
-/// <c>work/benzene-clients-redesign-plan.md</c> §3).
+/// <c>work/archive/benzene-clients-redesign-plan-2026-07.md</c> §3).
 /// </summary>
 /// <remarks>
 /// Response mapping is deliberately untyped: the dispatched handler's <see cref="IBenzeneMessageResponse"/>

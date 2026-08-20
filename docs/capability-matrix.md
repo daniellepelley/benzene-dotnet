@@ -81,10 +81,19 @@ surprising case because nothing crashed.
 | Azure Cosmos DB Change Feed (`Benzene.Azure.Function.CosmosDb`) | N/A as a "failure result" concern — like Kinesis, this is a fan-in `StreamContext<TDocument>` with no `IBenzeneResult`/message-handler routing; the trigger's lease checkpoints the whole batch on any non-throwing return, and unlike Kinesis there's no per-document checkpoint API to opt out of that with (see the package's own `CLAUDE.md`) | Have the handler throw for anything that must redeliver the whole batch |
 | HTTP / API Gateway | N/A — a failure result maps straight to an HTTP status code the caller sees synchronously; there's no async "retry" concept to opt into | N/A |
 
-As of the 1.0 settlement contract (see `work/settlement-contract-1.0.md`), every **queue-shaped**
-transport is **safe by default**: a returned failure result is redelivered (at-least-once), not
-silently settled, and each exposes an explicit opt-out (the "Opt-in fix" column shows the reverse) for
-the at-most-once cases where you deliberately want a returned failure accepted.
+**The 1.0 settlement contract** (maintainer-approved 2026-07-21): every **queue-shaped** transport is
+**safe by default** — a handler that *returns* a failure `IBenzeneResult` (rather than throwing) is
+**not settled by default**; it is escalated as that transport's `*MessageProcessingException` so the
+platform redelivers it (at-least-once), instead of being silently acked/completed/checkpointed past
+(at-most-once). Mechanically, `RaiseOnFailureStatus` defaults `true` on every queue-shaped options
+type (AWS Lambda SNS/S3/EventBridge; the Azure Functions Kafka, Queue Storage, Event Grid, Event Hub
+and Service Bus triggers; the self-hosted Event Hub worker; Google Cloud Pub/Sub), while
+`Benzene.Aws.Sqs` (`AckMode = PerMessage`), `Benzene.Azure.ServiceBus` and `Benzene.RabbitMq`
+(`AckMode = Explicit`) were already safe, and Kinesis / DynamoDB Streams settle via
+`ReportBatchItemFailures` instead. Each transport exposes an explicit opt-out (the "Opt-in fix" column
+shows the reverse) for the at-most-once cases where you deliberately want a returned failure accepted.
+`SettlementContractDefaultsTest` guards these defaults against drift; the migration record behind this
+contract is archived at `work/archive/settlement-contract-1.0-2026-07.md`.
 
 **The two self-hosted *stream* workers are the deliberate exception — they default to at-most-once.**
 A stream (a Kafka partition, an Event Hub partition) has no per-message ack/abandon: the only way to

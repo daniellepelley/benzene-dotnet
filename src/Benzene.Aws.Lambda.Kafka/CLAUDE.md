@@ -117,4 +117,4 @@ code changes needed for either fix.
 ## Claim-check hydration
 Not wired here yet: `Benzene.ClaimCheck`'s hydrate middleware needs an
 `IMessageBodySetter<KafkaContext>` registered — the same 5-line pattern as
-`Benzene.Aws.Lambda.Sqs`/`.Sns`/`.EventBridge` ship (see `work/claim-check-plan.md` Phase 2 step 4).
+`Benzene.Aws.Lambda.Sqs`/`.Sns`/`.EventBridge` ship (see `work/archive/claim-check-plan-2026-08.md` Phase 2 step 4).

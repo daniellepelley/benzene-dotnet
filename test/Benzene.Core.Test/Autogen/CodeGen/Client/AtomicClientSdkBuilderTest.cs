@@ -97,7 +97,7 @@ public class AtomicClientSdkBuilderTest
     }
 
     // Phase 3b: ClientSdkOptions-driven topic scoping/namespace configuration. See
-    // work/spec-mesh-tooling-implementation-plan.md Phase 3b step 7.
+    // work/archive/spec-mesh-tooling-implementation-plan-2026-08.md Phase 3b step 7.
 
     [Fact]
     public void Topics_ScopesWhichPerTopicClientsExist()

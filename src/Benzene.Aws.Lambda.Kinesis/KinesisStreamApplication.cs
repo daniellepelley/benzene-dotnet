@@ -26,7 +26,7 @@ namespace Benzene.Aws.Lambda.Kinesis;
 /// the pipeline throws, the exception is caught (logged, not rethrown) so the response still carries
 /// whatever the handler had checkpointed before failing — the checkpointer's resume point is itself
 /// the correct failure signal for Kinesis's shard-ordered retry contract, so there's nothing to gain
-/// by cascading the exception instead. See <c>work/kinesis-batch-failure-handling-design.md</c>.
+/// by cascading the exception instead. See <c>work/archive/kinesis-batch-failure-handling-design-2026-07.md</c>.
 /// </remarks>
 public class KinesisStreamApplication : StreamMiddlewareApplication<KinesisEvent, KinesisEventRecord, KinesisBatchResponse>
 {

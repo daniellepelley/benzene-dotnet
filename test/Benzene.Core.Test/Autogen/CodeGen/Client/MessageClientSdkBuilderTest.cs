@@ -136,7 +136,7 @@ public class MessageClientSdkBuilderTest
     }
 
     // Phase 3b: ClientSdkOptions-driven topic scoping/namespace configuration. See
-    // work/spec-mesh-tooling-implementation-plan.md Phase 3b step 7.
+    // work/archive/spec-mesh-tooling-implementation-plan-2026-08.md Phase 3b step 7.
 
     private static readonly Dictionary<string, (Type, Type, Type)> TwoTopics = new()
     {
@@ -257,7 +257,7 @@ public class MessageClientSdkBuilderTest
         Assert.Contains("public string HashCode =>", classSource);
     }
 
-    // The generated DI registration. See work/spec-mesh-tooling-implementation-plan.md's dogfooding
+    // The generated DI registration. See work/archive/spec-mesh-tooling-implementation-plan-2026-08.md's dogfooding
     // finding 7c: every consumer used to hand-write the registration and had to know to use Scoped.
 
     [Fact]

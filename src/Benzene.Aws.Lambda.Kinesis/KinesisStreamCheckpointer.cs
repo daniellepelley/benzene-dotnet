@@ -7,7 +7,7 @@ namespace Benzene.Aws.Lambda.Kinesis;
 /// <summary>
 /// An <see cref="IStreamCheckpointer{TItem}"/> for a Kinesis batch: tracks the last record a stream
 /// handler has checkpointed and computes the sequence number AWS should resume from if the batch
-/// didn't finish - see <c>work/kinesis-batch-failure-handling-design.md</c> §3.2.
+/// didn't finish - see <c>work/archive/kinesis-batch-failure-handling-design-2026-07.md</c> §3.2.
 /// </summary>
 internal class KinesisStreamCheckpointer : IStreamCheckpointer<KinesisEventRecord>
 {

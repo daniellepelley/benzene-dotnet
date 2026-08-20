@@ -102,10 +102,10 @@ scope) - the same pattern `MiddlewareApplication`/`MiddlewareMultiApplication` u
 `Benzene.Core.Middleware/CLAUDE.md`). Any component resolving `ICancellationTokenAccessor` during a
 message's pipeline run observes it. A handler that reads the token and throws once it has fired is
 caught like any other exception and reported as failed (not deleted), so the message is redelivered
-under `PerMessage` instead of lost - see `work/cancellation-design.md` for the full design.
+under `PerMessage` instead of lost - see `work/archive/cancellation-design-2026-08.md` for the full design.
 
 ## Claim-check hydration
 Not wired here yet: `Benzene.ClaimCheck`'s hydrate middleware needs an
 `IMessageBodySetter<SqsConsumerMessageContext>` registered — the same 5-line pattern as
-`Benzene.Aws.Lambda.Sqs`/`.Sns`/`.EventBridge` ship (see `work/claim-check-plan.md` Phase 2 step 4,
+`Benzene.Aws.Lambda.Sqs`/`.Sns`/`.EventBridge` ship (see `work/archive/claim-check-plan-2026-08.md` Phase 2 step 4,
 and Phase 4's integration test, which is expected to add it if still missing by then).

@@ -2,7 +2,7 @@
 
   <!--
     Proves Benzene.CodeGen.Build's MSBuild one-liner (implementation plan Phase 6/6b,
-    work/spec-mesh-tooling-implementation-plan.md) end to end: contracts/payments.spec.json is a
+    work/archive/spec-mesh-tooling-implementation-plan-2026-08.md) end to end: contracts/payments.spec.json is a
     committed fixture - what a producer team ("payments-api") would have published, generated once
     via Benzene.Descriptor against the real examples/AwsMesh/Payments service and committed here as a
     static file, exactly the way a consumer team would commit a copy of a producer's contract into

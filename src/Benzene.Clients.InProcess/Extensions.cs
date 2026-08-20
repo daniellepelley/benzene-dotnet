@@ -61,7 +61,7 @@ public static class Extensions
     /// <c>IBenzeneMessageSender.SendAsync&lt;TRequest,Void&gt;</c>; requesting any other
     /// <c>TResponse</c> throws <c>OutboundResponseTypeMismatchException</c>, the same runtime check
     /// that already applies to every other fire-and-forget-only transport (SQS, SNS) - see
-    /// <c>work/inprocess-fanout-design.md</c> for why no separate compile-time or start-up mechanism
+    /// <c>work/archive/inprocess-fanout-design-2026-08.md</c> for why no separate compile-time or start-up mechanism
     /// was built for this: there is no existing precedent for one, and this follows the established
     /// pattern instead of inventing a new one. Also registers one
     /// <see cref="InProcessRouteReference"/> per target's pipeline name (so

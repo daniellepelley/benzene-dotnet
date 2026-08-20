@@ -20,7 +20,7 @@ namespace Benzene.HealthChecks.Schema;
 /// alignment, a default-generated client's hash (already domain-scoped by
 /// <c>Benzene.CodeGen.Client.TopicScope</c> before hashing) could never match this provider-side hash
 /// of the full, reserved-topics-included handler set - see
-/// work/cross-language-clients-plan.md Phase 2 step 3. The consumer side of the loop is
+/// work/archive/cross-language-clients-plan-2026-08.md Phase 2 step 3. The consumer side of the loop is
 /// <c>Benzene.Clients.HealthChecks.ClientHealthCheckProcessor</c>.
 /// </remarks>
 public class SchemaHealthCheck : IHealthCheck

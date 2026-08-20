@@ -9,7 +9,7 @@ schemas Event Grid can deliver: the Event Grid schema (`eventType`/`topic`) and 
 
 ## Failure handling: a returned failure result is retried by default (safe-by-default)
 `EventGridOptions.RaiseOnFailureStatus` defaults to `true` (flipped 2026-07-21 — see
-`work/settlement-contract-1.0.md`): if a handler returns a non-exception failure result (e.g.
+`work/archive/settlement-contract-1.0-2026-07.md`): if a handler returns a non-exception failure result (e.g.
 `BenzeneResult.ServiceUnavailable(...)`), it is escalated into a thrown
 `EventGridMessageProcessingException` so the invocation fails and Event Grid's own delivery retry
 (backoff, up to 24h) + optional dead-letter destination take over — the same treatment an unhandled
@@ -76,4 +76,4 @@ buildTransitive). The hand-written form still works. See `docs/azure-functions.m
 ## Claim-check hydration
 Not wired here yet: `Benzene.ClaimCheck`'s hydrate middleware needs an
 `IMessageBodySetter<EventGridContext>` registered — the same 5-line pattern as
-`Benzene.Aws.Lambda.Sqs`/`.Sns`/`.EventBridge` ship (see `work/claim-check-plan.md` Phase 2 step 4).
+`Benzene.Aws.Lambda.Sqs`/`.Sns`/`.EventBridge` ship (see `work/archive/claim-check-plan-2026-08.md` Phase 2 step 4).

@@ -15,7 +15,7 @@ namespace Benzene.Clients.Aws.Sns;
 /// Converts between an outbound <see cref="OutboundContext"/> and an <see cref="SnsSendMessageContext"/>,
 /// so an outbound route (<c>OutboundRoutingBuilder.Route</c>) can publish via SNS. The
 /// <see cref="OutboundContext"/> counterpart of <see cref="SnsContextConverter{T}"/> - see
-/// <c>work/benzene-clients-redesign-plan.md</c> §3.
+/// <c>work/archive/benzene-clients-redesign-plan-2026-07.md</c> §3.
 /// </summary>
 /// <remarks>
 /// SNS has no request/response semantics beyond a publish acknowledgement, so the response this

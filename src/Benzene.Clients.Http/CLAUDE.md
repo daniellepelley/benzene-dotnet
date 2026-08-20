@@ -12,7 +12,7 @@ Outbound HTTP for the Benzene client, in **two flavours**:
    `{ statusCode, headers, body }` envelope back to `IBenzeneResult<TResponse>`. This is the HTTP counterpart
    of the AWS Lambda invoke path (`AwsLambdaBenzeneMessageClient`) — **the topic travels inside the JSON body,
    so one endpoint serves every topic**, letting two Benzene containers exchange lightweight messages over
-   ordinary HTTP without a per-route REST contract. See `work/lightweight-non-http-transport-design.md`
+   ordinary HTTP without a per-route REST contract. See `work/archive/lightweight-non-http-transport-design-2026-07.md`
    (Option A / Phase 1).
 
 You supply the `HttpClient` — see the [Capability Matrix](../../docs/capability-matrix.md)'s *Outbound HTTP*

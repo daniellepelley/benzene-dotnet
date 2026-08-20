@@ -8,7 +8,7 @@
     work/deployment-descriptor-design.md.
 
     Packaged as a dotnet tool (command: benzene-descriptor). sln-approved (implementation plan
-    Phase 1, work/spec-mesh-tooling-implementation-plan.md).
+    Phase 1, work/archive/spec-mesh-tooling-implementation-plan-2026-08.md).
 
     In-repo it uses ProjectReferences so it builds and tests against local source; the shipped package
     would use PackageReferences pinned to the consuming service's Benzene version.

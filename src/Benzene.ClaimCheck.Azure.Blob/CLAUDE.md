@@ -2,11 +2,11 @@
 
 ## What this package does
 The Azure production store for `Benzene.ClaimCheck` ("or Blob Storage for Azure" — the owner's own
-words approving the feature, `work/claim-check-plan.md` line 4). `BlobClaimCheckStore` implements
+words approving the feature, `work/archive/claim-check-plan-2026-08.md` line 4). `BlobClaimCheckStore` implements
 `IClaimCheckStore` over an `Azure.Storage.Blobs.BlobContainerClient`: `PutAsync` writes the serialized
 wire body that was too large to send inline as a blob and returns an opaque `azblob://{container}/{key}`
 reference; `GetAsync` resolves that reference back to the body, or `null` if it is not found/expired.
-See `work/claim-check-plan.md` §2 for why this is a **separate** store from
+See `work/archive/claim-check-plan-2026-08.md` §2 for why this is a **separate** store from
 `Benzene.Mesh.Azure.Blob.BlobMeshArtifactStore` (different lifecycle — a durable catalog vs. an
 expiring transient — and pulling the mesh aggregator into every message-sending service would be the
 wrong dependency), and §3 for the retention/failure posture this package's store honors verbatim (no
@@ -47,7 +47,7 @@ delete-on-consume, TTL-based expiry owned by infrastructure, fail loud on a miss
 - **Retention = a Blob lifecycle-management delete rule** scoped to the container/prefix this store
   writes under (`prefix` defaults to `claim-checks/`). This package does not create that policy —
   provision it in Bicep/Terraform, same as the S3 store's bucket lifecycle rule.
-- **TTL sizing rule (verbatim from `work/claim-check-plan.md` §3)**: the TTL must exceed the longest
+- **TTL sizing rule (verbatim from `work/archive/claim-check-plan-2026-08.md` §3)**: the TTL must exceed the longest
   path from send to last possible consumption — queue/topic retention plus the DLQ (dead-letter)
   redrive window. Size the delete rule's `daysAfterCreationGreaterThan` (or
   `daysAfterModificationGreaterThan`) accordingly for whichever Azure entity feeds the pipeline this
@@ -77,7 +77,7 @@ transports motivate the same middleware pair, at two very different thresholds:
 
 **Hydration is not wired for any Azure transport in this package.** `UseClaimCheck<TContext>()`
 (hydrate) needs an `IMessageBodySetter<TContext>` for the receiving transport's context type — see
-`Benzene.ClaimCheck`'s `CLAUDE.md` and `work/claim-check-plan.md` Phase 2. The AWS Lambda transports
+`Benzene.ClaimCheck`'s `CLAUDE.md` and `work/archive/claim-check-plan-2026-08.md` Phase 2. The AWS Lambda transports
 (`Benzene.Aws.Lambda.Sqs`/`.Sns`/`.EventBridge`) already ship theirs because their event POCOs are
 plain mutable objects (`context.SqsMessage.Body = body` is the whole implementation). Azure Service
 Bus's inbound context is not that simple: `Benzene.Azure.Function.ServiceBus.ServiceBusContext` wraps
@@ -104,7 +104,7 @@ setter.
   (`RequestFailedException.Status == 404`) maps to `null`; a foreign container, foreign scheme, and a
   key outside the configured prefix each throw `ClaimCheckStoreMismatchException`; the caller's
   `CancellationToken` is forwarded to both the upload and download calls.
-- **No Azurite integration test in this pass, deliberately** — `work/claim-check-plan.md` Phase 5
+- **No Azurite integration test in this pass, deliberately** — `work/archive/claim-check-plan-2026-08.md` Phase 5
   says so explicitly: the emulator fixtures are heavy, and
   `Benzene.ClaimCheck.Aws.S3`'s LocalStack integration test already proves the offload→hydrate
   middleware pair end to end against a real object store; a second emulator-backed integration test

@@ -10,7 +10,7 @@ namespace Benzene.ClaimCheck;
 /// Outbound middleware that offloads an oversized <see cref="OutboundContext.Request"/> to an
 /// <see cref="IClaimCheckStore"/> and replaces it with a tiny <see cref="ClaimCheckPlaceholder"/>,
 /// carrying the store-issued reference on the wire header named by
-/// <see cref="ClaimCheckOptions.HeaderName"/>. See <c>work/claim-check-plan.md</c> §1 for the full
+/// <see cref="ClaimCheckOptions.HeaderName"/>. See <c>work/archive/claim-check-plan-2026-08.md</c> §1 for the full
 /// design reasoning.
 /// </summary>
 /// <remarks>
@@ -38,7 +38,7 @@ namespace Benzene.ClaimCheck;
 /// Transactional honesty: the store <c>PutAsync</c> happens before <c>next()</c> continues to the
 /// transport send. If the put fails, this middleware throws and the send never happens - fail loud.
 /// If the put succeeds but the subsequent send then fails, the stored payload is orphaned; the
-/// store's own time-to-live is the cleanup mechanism (see <c>work/claim-check-plan.md</c> §3), not a
+/// store's own time-to-live is the cleanup mechanism (see <c>work/archive/claim-check-plan-2026-08.md</c> §3), not a
 /// two-phase commit.
 /// </para>
 /// </remarks>

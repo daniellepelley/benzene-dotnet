@@ -17,7 +17,7 @@ namespace Benzene.Clients.Common
         /// structured errors are populated from it directly - field/code and all, and in order -
         /// closing the defect where a multi-error failure used to round-trip as a single joined
         /// <see cref="ProblemDetails.Detail"/> string (work/benzene-result-errors-ruling.md §5.2,
-        /// Phase 5 of work/problem-details-plan.md). When <c>Errors</c> is absent (an older producer
+        /// Phase 5 of work/archive/problem-details-plan-2026-08.md). When <c>Errors</c> is absent (an older producer
         /// still emitting only <c>{ status, detail }</c>), this falls back to a single message-only
         /// error built from <see cref="ProblemDetails.Detail"/> - unchanged behavior. Either way the
         /// received document is attached to the result (via <see cref="BenzeneResult.AttachReceivedProblem{T}"/>)

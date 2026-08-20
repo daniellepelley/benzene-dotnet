@@ -7,8 +7,8 @@ Mesh UI — all fronted by API Gateway so you can open the UIs in a browser.
 
 The six services dogfood Benzene's transports by using **each one for what it's actually good at**
 (commands vs fan-out events vs routed integration events), so the Mesh UI's topology renders a real,
-non-trivial graph. See `work/aws-mesh-multi-transport-plan.md` for the plan and
-`work/mesh-self-discovery-design.md` for the discovery design this example exercises.
+non-trivial graph. See `work/archive/aws-mesh-multi-transport-plan-2026-08.md` for the plan and
+`work/archive/mesh-self-discovery-design-2026-07.md` for the discovery design this example exercises.
 
 ## Architecture
 
@@ -272,7 +272,7 @@ correlation id.
 wrapped in its own swallow-and-log try/catch (`CreateOrderMessageHandler`, before this change) — a
 transport hiccup silently lost the send while the order still "succeeded". This example now dogfoods
 `Benzene.Outbox` + `Benzene.Outbox.DynamoDb` on that exact hop, the shipped fix for that hole
-(`work/outbox-plan.md`; the cross-language spec at `docs/specification/` is unaffected — the outbox is
+(`work/archive/outbox-plan-2026-08.md`; the cross-language spec at `docs/specification/` is unaffected — the outbox is
 .NET-internal plumbing, not a wire-level change).
 
 **Produce side (`orders-api`).**
@@ -312,12 +312,12 @@ zero extra configuration — the two packages are designed to click together.
   fails and reschedules with backoff; `terraform apply` it back, or wait for the next
   `orders:outbox-sweep` run, and watch the envelope go `Pending` → `Dispatched`. Leave the permission
   broken and the envelope reschedules with exponential backoff until `MaxAttempts` is reached, at which
-  point the sweep parks it (`Parked`, kept for operator inspection — see `work/outbox-plan.md` §2.7);
+  point the sweep parks it (`Parked`, kept for operator inspection — see `work/archive/outbox-plan-2026-08.md` §2.7);
   `OutboxSweepMessageHandler`'s log line reports the dispatched/rescheduled/parked/retired tally each run.
 - Inspect the `orders-outbox` table directly (`terraform output orders_outbox_table_name`) to see
   envelope status/attemptCount/lastError first-hand.
 
-**Honest limits, stated the way `work/outbox-plan.md` states them:** delivery is **at-least-once**, never
+**Honest limits, stated the way `work/archive/outbox-plan-2026-08.md` states them:** delivery is **at-least-once**, never
 exactly-once — that's exactly why the consume side dedups. There's no ordering guarantee across
 envelopes. `Immediate` mode (the default when a route omits `Transactional`) is store-and-forward, not
 atomic with a state write — `orders-api` deliberately opts into `Transactional` because it has a state
@@ -330,7 +330,7 @@ Real transports cap message size — SQS/SNS/EventBridge at 256 KB (SQS raised i
 256 KB, Azure Queue Storage at 64 KB. `Benzene.ClaimCheck` ships the pattern as a middleware pair —
 offload on the outbound route, hydrate on the inbound transport pipeline — rather than making it a
 transport or client-generation concern. This example dogfoods it on the same hop the outbox dogfoods:
-`orders-api → payments-api`'s `payments:capture` (`work/claim-check-plan.md` Phase 6).
+`orders-api → payments-api`'s `payments:capture` (`work/archive/claim-check-plan-2026-08.md` Phase 6).
 
 **Send side (`orders-api`).** `Startup` marks the `payments:capture` route `claimChecked: true`
 (`OutboundSend.ClaimChecked`) and registers `AddS3ClaimCheckStore(bucket)` against the dedicated
@@ -399,7 +399,7 @@ point: the middleware only does work when a payload actually needs it.
   (`S3ClaimCheckStore`'s key shape; the topic name travels into the key verbatim).
 - **The lifecycle rule.** `aws_s3_bucket_lifecycle_configuration.claim_checks` expires objects under that
   prefix after **14 days** — sized to exceed SQS's own maximum retention (14 days) plus any DLQ redrive
-  window, per `work/claim-check-plan.md` §3's sizing rule, so the rule can never expire an object while a
+  window, per `work/archive/claim-check-plan-2026-08.md` §3's sizing rule, so the rule can never expire an object while a
   redelivery could still need it.
 
 **Honest limits.** There is **no delete-on-consume** — a redelivered offloaded message must still be able
@@ -846,7 +846,7 @@ regressions are still caught before a release.
 
 Adopting the generated client turned up four things worth fixing in the tooling, recorded as
 requirements in
-[`work/spec-mesh-tooling-implementation-plan.md`](../../work/spec-mesh-tooling-implementation-plan.md).
+[`work/archive/spec-mesh-tooling-implementation-plan-2026-08.md`](../../work/archive/spec-mesh-tooling-implementation-plan-2026-08.md).
 The first three are now fixed; the fourth is a deliberately parked known limitation.
 
 1. ~~**`benzene:healthcheck` was required unconditionally.**~~ **Fixed.** Every generated client used

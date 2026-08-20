@@ -23,7 +23,7 @@ using Void = Benzene.Abstractions.Results.Void;
 namespace Benzene.Test.Customization;
 
 // Regression tests for the customization-robustness fixes (see
-// work/customization-robustness-review.md): each of these was a silent failure or a hard-coded
+// work/archive/customization-robustness-review-2026-08.md): each of these was a silent failure or a hard-coded
 // customization point found by probing the framework the way an adopter would.
 public class RobustnessFixesTest
 {

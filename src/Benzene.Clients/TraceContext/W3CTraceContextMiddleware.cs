@@ -8,7 +8,7 @@ namespace Benzene.Clients.TraceContext;
 /// <c>traceparent</c>/<c>tracestate</c> onto <see cref="OutboundContext.Headers"/>, so the receiving
 /// service can continue the same distributed trace. The middleware-pipeline replacement for
 /// <see cref="TraceContextBenzeneMessageClient"/> - see
-/// <c>work/benzene-clients-redesign-plan.md</c> §2.4.
+/// <c>work/archive/benzene-clients-redesign-plan-2026-07.md</c> §2.4.
 /// </summary>
 public class W3CTraceContextMiddleware : IMiddleware<OutboundContext>
 {

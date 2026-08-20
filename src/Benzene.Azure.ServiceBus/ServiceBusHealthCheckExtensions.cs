@@ -9,7 +9,7 @@ namespace Benzene.Azure.ServiceBus;
 /// worker's config + client factory. Auto-wiring lives on the <b>consumer</b> (not the sender): the
 /// peek-based check needs the <c>Listen</c> claim the consumer holds, and it knows the exact entity
 /// (queue, or topic + subscription) it consumes — the sender has neither (see
-/// <c>work/client-health-checks-remaining-designs.md</c> §7).
+/// <c>work/archive/client-health-checks-remaining-designs-2026-08.md</c> §7).
 /// </summary>
 public static class ServiceBusHealthCheckExtensions
 {

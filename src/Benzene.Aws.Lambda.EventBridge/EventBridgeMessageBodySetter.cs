@@ -18,7 +18,7 @@ namespace Benzene.Aws.Lambda.EventBridge;
 /// reverse - only when the original event actually carried the object AND the hydrated body is
 /// itself a JSON object - or later pipeline steps that read headers via
 /// <see cref="EventBridgeMessageHeadersGetter"/> (e.g. the version getter at request-mapping time)
-/// would silently lose them. See <c>work/claim-check-plan.md</c> §1 "EventBridge subtlety".
+/// would silently lose them. See <c>work/archive/claim-check-plan-2026-08.md</c> §1 "EventBridge subtlety".
 /// </remarks>
 public class EventBridgeMessageBodySetter : IMessageBodySetter<EventBridgeContext>
 {

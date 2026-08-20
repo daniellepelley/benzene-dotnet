@@ -12,7 +12,7 @@
 >   bootstrap shape for the CloudEvent trigger type instead of HTTP), `PubSubContext`/getters/setter
 >   wired through `UseMessageHandlers()`, and `PubSubOptions` (`CatchExceptions`/
 >   `RaiseOnFailureStatus`) reusing the same containment/escalation vocabulary
->   `work/batch-failure-handling.md` established for Kafka/ServiceBus. Cloud Functions delivers
+>   `work/archive/batch-failure-handling-2026-07.md` established for Kafka/ServiceBus. Cloud Functions delivers
 >   exactly one Pub/Sub message per invocation (not a batch), so there's no fan-out loop here at
 >   all - structurally closer to a single HTTP request than to the batch-oriented AWS/Azure
 >   triggers.
@@ -93,7 +93,7 @@
 Benzene has mature, production-shaped native adapters for AWS (`Benzene.Aws.*`, 9 production
 packages across Lambda event sources + outbound clients) and Azure (`Benzene.Azure.*`, isolated-worker
 Functions + AspNet/EventHub/Kafka/ServiceBus). Google Cloud has **none** — despite `docs/Overview.md`
-listing "Google Cloud → Function" as a supported host, and `work/cross-platform-design-review.md`
+listing "Google Cloud → Function" as a supported host, and `work/archive/cross-platform-design-review-2026-07.md`
 already flagging this gap explicitly ("gRPC / Google Cloud | none | manual | Everything hand-wired in
 `Program.cs` / the function class"). This document plans closing that gap to the same standard as AWS
 and Azure: a real `src/Benzene.Google.*` package family, `BenzeneStartUp`-based hosting, matching

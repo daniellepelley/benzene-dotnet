@@ -3,7 +3,7 @@
 **Status: Gaps 1, 2 and 3 shipped; only Gap 4 (cross-language) remains open.** (Corrected 2026-08-20 —
 this header still said Gap 3 was "a design proposal, not yet built" while §Gap 3 below already recorded
 it as SHIPPED and `src/Benzene.Clients.InProcess/InProcessFanOutClientMiddleware.cs` confirms it.)
-Companion to `work/internal-transport-design.md` (the original `Benzene.Clients.InProcess`) and to
+Companion to `work/archive/internal-transport-design-2026-08.md` (the original `Benzene.Clients.InProcess`) and to
 the cross-language pattern page
 [`docs/patterns/modular-monolith.md`](https://github.com/daniellepelley/Benzene/blob/main/docs/patterns/modular-monolith.md)
 in the benzene repo, which is the consumer of this scope: that pattern describes building a system
@@ -107,8 +107,8 @@ modules react. Over the wire that's SNS fan-out; in process there is no equivale
 only starts *after* extraction.
 
 **What shipped, and the correction found while implementing.** A full design proposal existed
-before any code (`work/inprocess-fanout-design.md`), the same discipline
-`internal-transport-design.md` followed for the single-target transport. Most of it shipped
+before any code (`work/archive/inprocess-fanout-design-2026-08.md`), the same discipline
+`archive/internal-transport-design-2026-08.md` followed for the single-target transport. Most of it shipped
 unchanged: `Task.WhenAll` concurrent dispatch, per-consumer try/catch + `Warning`-level logging,
 unconditional `Void` success response, no in-process DLQ (documented, not solved). One part of the
 proposal was wrong and had to be corrected during implementation, caught by the *first* test written
@@ -134,7 +134,7 @@ the same mismatch check `DefaultBenzeneMessageSender` already applies to SQS/SNS
 new mechanism at all.
 
 Tests: `test/Benzene.Core.Test/Clients/InProcess/InProcessFanOutTest.cs`. Full detail (including the
-"what this does not solve" list, unchanged from the proposal) in `work/inprocess-fanout-design.md`'s
+"what this does not solve" list, unchanged from the proposal) in `work/archive/inprocess-fanout-design-2026-08.md`'s
 "What shipped, and where it diverges" section and `src/Benzene.Clients.InProcess/CLAUDE.md`.
 
 ## Gap 4 — .NET-only; the pattern is cross-language — investigated, in progress
@@ -164,7 +164,7 @@ runner exists in TS at all.
 
 ## Housekeeping — DONE
 
-- `internal-transport-design.md`'s stale "no `ITransportInfo`... held as originally proposed"
+- `archive/internal-transport-design-2026-08.md`'s stale "no `ITransportInfo`... held as originally proposed"
   paragraph (the shipped code registers one) has been corrected, with a note on why the original
   reasoning didn't actually hold once checked against what `ITransportInfo` documents itself as.
 - Its "Startup-time fail-fast validation... dropped" section has a follow-up note explaining what

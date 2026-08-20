@@ -116,7 +116,7 @@ public class ApiGatewayMessagePipelineTest
     [Fact]
     public async Task Send_ValidationError_MapsToTheHttpStatusLineAndCarriesTheSameStatusInTheBody()
     {
-        // Phase 4 of work/problem-details-plan.md: on a failure the response is 422 +
+        // Phase 4 of work/archive/problem-details-plan-2026-08.md: on a failure the response is 422 +
         // application/problem+json, and the problem document's numeric `status` member equals the
         // response line - both are derived from the one IHttpStatusCodeMapper.
         var host = new InlineAwsLambdaStartUp()

@@ -8,7 +8,7 @@ namespace Benzene.Test.Core.Core.Results;
 
 /// <summary>
 /// Round-trip coverage for <see cref="ProblemDetails"/> across the two serializers exercised at
-/// merge time by work/problem-details-plan.md Phase 3 (System.Text.Json - the process default -
+/// merge time by work/archive/problem-details-plan-2026-08.md Phase 3 (System.Text.Json - the process default -
 /// and Newtonsoft.Json), plus the <c>[JsonIgnore(Condition = WhenWritingNull)]</c> omission
 /// contract on every optional member - load-bearing for <see cref="ProblemDetails.Status"/>
 /// specifically: a future conformance fixture pins that it is *absent* from the wire, not <c>null</c>,

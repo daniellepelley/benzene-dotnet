@@ -6,7 +6,7 @@ same runtime, in the shared `BenzeneMessage` envelope every transport uses, with
 wire (no SQS/SNS/HTTP/socket - not even loopback). It exists for the case where functionality that used
 to live in a different service has been moved into the caller's own service, and the topic that used to
 be sent over a real transport now has no reason to leave the process - see
-`work/internal-transport-design.md` for the rationale, and the [modular monolith
+`work/archive/internal-transport-design-2026-08.md` for the rationale, and the [modular monolith
 pattern](https://github.com/daniellepelley/Benzene/blob/main/docs/patterns/modular-monolith.md) for
 the shape this is written toward: many in-process modules, each with its own pipeline, extracted to
 real services one route at a time.
@@ -66,7 +66,7 @@ real services one route at a time.
   `InProcessRouteReference`'s name against `InProcessDispatcherRegistry.Names` and throws
   `MissingInProcessPipelineException` (listing the missing names and what *is* registered) if a route
   names a pipeline nothing registered. **Deliberately narrower than per-topic handler validation** -
-  see its own doc comment and `work/internal-transport-design.md`'s follow-up note for why threading
+  see its own doc comment and `work/archive/internal-transport-design-2026-08.md`'s follow-up note for why threading
   the topic through would require changing `OutboundRoutingBuilder.Route`'s signature, out of scope
   here.
 - `InProcessFanOutTarget(PipelineName, Topic)` / `Extensions.UseInProcessFanOut(params
@@ -83,7 +83,7 @@ real services one route at a time.
   is unconditionally `IBenzeneResult<Void>` once accepted - matching what a real SNS publish returns,
   no visibility into subscriber outcomes; requesting a non-`Void` response throws
   `OutboundResponseTypeMismatchException`, the same mismatch check SQS/SNS routes already rely on
-  (no bespoke Void-enforcement mechanism needed - see `work/inprocess-fanout-design.md`'s "shipped"
+  (no bespoke Void-enforcement mechanism needed - see `work/archive/inprocess-fanout-design-2026-08.md`'s "shipped"
   section for why). Each target's failure (thrown exception or a non-success status) is isolated -
   logged at `Warning` via `ILogger<InProcessFanOutClientMiddleware>`, but does not fail the other
   targets or the caller. **No in-process DLQ**: a failed target's message is genuinely lost unless

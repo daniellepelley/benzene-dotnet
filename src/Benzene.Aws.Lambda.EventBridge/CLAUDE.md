@@ -4,11 +4,11 @@
 Inbound Amazon EventBridge adapter: routes EventBridge events delivered to a Lambda target into
 Benzene message handlers. The event's `detail-type` is the message topic — EventBridge's native
 routing key, so no `topic` attribute needs bolting on the way SQS/SNS require — and `detail` is
-the message body. See `docs/plans/eventbridge-plan.md` for the design decisions (E1–E7).
+the message body. See `work/archive/eventbridge-plan-2026-08.md` for the design decisions (E1–E7).
 
 ## Failure handling: a returned failure result is escalated (safe by default; opt out via `EventBridgeOptions`)
 Safe-by-default (`RaiseOnFailureStatus` defaults to `true`, flipped 2026-07-21 — see
-`work/settlement-contract-1.0.md`): if your handler returns a non-exception failure result (e.g.
+`work/archive/settlement-contract-1.0-2026-07.md`): if your handler returns a non-exception failure result (e.g.
 `BenzeneResult.ServiceUnavailable(...)`), it is escalated into a thrown
 `EventBridgeMessageProcessingException` so the invocation fails and the rule target's Lambda
 destination/DLQ (`MaximumRetryAttempts`, `OnFailure` destination) retries it — the same treatment an

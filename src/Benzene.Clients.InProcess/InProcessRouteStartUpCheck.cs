@@ -22,7 +22,7 @@ namespace Benzene.Clients.InProcess;
 /// <para>
 /// Per-topic handler existence (does the named pipeline actually handle the specific topic a route
 /// is registered for) remains an honest <c>not-found</c> result at first send, exactly as any other
-/// transport's unrouted-or-unhandled topic already is - see <c>work/internal-transport-design.md</c>
+/// transport's unrouted-or-unhandled topic already is - see <c>work/archive/internal-transport-design-2026-08.md</c>
 /// for why that trade-off was made deliberately, not dropped for lack of trying.
 /// </para>
 /// </remarks>

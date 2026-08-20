@@ -10,7 +10,7 @@ using Xunit;
 namespace Benzene.Test.Autogen.CodeGen.Cli;
 
 // Phase 3b: the first tests CodeBuilderFactory has ever had - see
-// work/spec-mesh-tooling-implementation-plan.md Phase 3b steps 4/5/7. Covers the --output mode
+// work/archive/spec-mesh-tooling-implementation-plan-2026-08.md Phase 3b steps 4/5/7. Covers the --output mode
 // validation (an unknown value used to silently fall through to the service client) and the new
 // --namespace/--topics wiring into ClientSdkOptions.
 public class CodeBuilderFactoryTest

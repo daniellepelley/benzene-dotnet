@@ -5,7 +5,7 @@ using Xunit;
 
 namespace Benzene.Test.Contract;
 
-// Guards the 1.0 settlement contract (work/settlement-contract-1.0.md) against silent drift between
+// Guards the 1.0 settlement contract (work/archive/settlement-contract-1.0-2026-07.md) against silent drift between
 // the code and docs/capability-matrix.md. The contract is NOT uniform - and the guard encodes that:
 //
 //  * Queue-shaped transports are safe-by-default: a returned failure result is redelivered
@@ -120,7 +120,7 @@ public class SettlementContractDefaultsTest
 
         Assert.True(rows.Count == 1,
             $"Expected exactly one capability-matrix.md table row mentioning {token}, found {rows.Count}. " +
-            "Add/deduplicate its row (see work/settlement-contract-1.0.md).");
+            "Add/deduplicate its row (see work/archive/settlement-contract-1.0-2026-07.md).");
         Assert.True(rows[0].Contains(expectedMarker),
             $"The capability-matrix.md row for {token} must say \"{expectedMarker}\" - it has drifted " +
             $"from the code default the settlement contract guarantees. Row:\n{rows[0]}");

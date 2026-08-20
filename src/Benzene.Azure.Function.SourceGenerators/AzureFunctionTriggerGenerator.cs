@@ -13,7 +13,7 @@ namespace Benzene.Azure.Function.SourceGenerators
     /// <c>[assembly: BenzeneHttpTrigger(Name = "orders", Route = "…")]</c>), forwarding each trigger
     /// invocation into the built <c>IAzureFunctionApp</c>. The user declares <em>what</em> triggers
     /// they want (and their bindings — route, queue, hub, …); the generator writes the ceremony.
-    /// See <c>work/azure-functions-trigger-codegen-design.md</c>.
+    /// See <c>work/archive/azure-functions-trigger-codegen-design-2026-08.md</c>.
     /// </summary>
     [Generator]
     public class AzureFunctionTriggerGenerator : IIncrementalGenerator

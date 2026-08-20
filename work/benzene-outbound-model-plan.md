@@ -1,7 +1,7 @@
 # Benzene outbound model — making it introspectable and symbolic (plan)
 
 **Status:** design proposal / plan — no code changes accompany this. Follow-on from
-`work/benzene-clients-redesign-plan.md` (whose 4 steps shipped) and `work/deployment-descriptor-design.md`.
+`work/archive/benzene-clients-redesign-plan-2026-07.md` (whose 4 steps shipped) and `work/deployment-descriptor-design.md`.
 This solves the thing the clients redesign explicitly deferred in its §3: *"the topic → transport
 binding is external configuration … stays explicitly authored,"* with no introspectable record of it.
 

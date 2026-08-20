@@ -62,7 +62,7 @@ side-effecting (it fans out to real subscribers), so it could only ever be an op
 never the non-destructive default; a bare TCP/DNS reach of the endpoint proves almost nothing (shared
 Azure front-end). If a real need appears, the right shape is an explicit opt-in `Active`
 synthetic-publish check pointed at a dedicated no-subscriber probe topic, with the ⚠️ side-effecting
-treatment — not an auto-wired default. See `work/client-health-checks-remaining-designs.md` §4.
+treatment — not an auto-wired default. See `work/archive/client-health-checks-remaining-designs-2026-08.md` §4.
 
 ## Dependencies
 `Azure.Messaging.EventGrid`; Benzene `Clients`, `Core.Middleware`, `Results`.

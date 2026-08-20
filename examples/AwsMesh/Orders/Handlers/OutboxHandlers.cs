@@ -11,7 +11,7 @@ namespace Benzene.Examples.AwsMesh.Orders.Handlers;
 
 /// <summary>
 /// The Lambda relay pair the outbox plan documents as the recommended default for AWS Lambda
-/// (<c>work/outbox-plan.md</c> §2.5): streams dispatch for latency, a low-frequency scheduled sweep
+/// (<c>work/archive/outbox-plan-2026-08.md</c> §2.5): streams dispatch for latency, a low-frequency scheduled sweep
 /// for retry/park/cleanup. Both handlers are intentionally a few lines — <see cref="IOutboxDispatcher"/>
 /// (registered by <c>AddOutbox</c> in <c>Startup</c>) is the whole engine; these just call in.
 /// </summary>
@@ -55,7 +55,7 @@ public class OutboxStreamDispatchMessageHandler : IMessageHandler<OutboxStreamIm
 /// this Lambda directly, detail-type-routed" shape <c>examples/AwsMesh/Mesh</c>'s <c>mesh:aggregate</c>
 /// already uses, handled here by the ordinary <c>UseEventBridge</c> ingress every service already
 /// mounts. <b>Deliberately an app-chosen topic, never <c>benzene:*</c></b> — reserved topics are spec
-/// surface (<c>work/outbox-plan.md</c> §2.5/§3). Redrives whatever
+/// surface (<c>work/archive/outbox-plan-2026-08.md</c> §2.5/§3). Redrives whatever
 /// <see cref="OutboxStreamDispatchMessageHandler"/> missed (a permission blip, a cold start that
 /// outran the stream, a crash between claim and send), retries with backoff, and parks anything past
 /// <c>OutboxOptions.MaxAttempts</c>.

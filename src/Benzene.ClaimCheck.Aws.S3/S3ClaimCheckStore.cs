@@ -17,7 +17,7 @@ namespace Benzene.ClaimCheck.Aws.S3;
 /// <para>
 /// This store does not create the bucket, and it does not create or manage a lifecycle rule -
 /// retention is the caller's infrastructure responsibility (see
-/// <see cref="Extensions.AddS3ClaimCheckStore"/>'s remarks and <c>work/claim-check-plan.md</c> §3).
+/// <see cref="Extensions.AddS3ClaimCheckStore"/>'s remarks and <c>work/archive/claim-check-plan-2026-08.md</c> §3).
 /// </para>
 /// </remarks>
 public class S3ClaimCheckStore : IClaimCheckStore

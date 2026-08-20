@@ -10,7 +10,7 @@ dependency, so referencing any `Benzene.Azure.Function.*` package brings the gen
 `FunctionsEnableWorkerIndexing=false` prop it needs) automatically — no separate reference. The developer declares *what* triggers they want and their
 bindings (route, queue, hub, container, schedule, …); the generator writes the ceremony that forwards
 each trigger invocation into the built `IAzureFunctionApp`. Mirrors `Benzene.CodeGen.SourceGenerators`'
-packaging. Design: `work/azure-functions-trigger-codegen-design.md`.
+packaging. Design: `work/archive/azure-functions-trigger-codegen-design-2026-08.md`.
 
 ## Key types
 - `AzureFunctionTriggerGenerator` (`[Generator]`, `IIncrementalGenerator`) - registers one

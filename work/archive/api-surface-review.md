@@ -2,7 +2,7 @@
 > code-verified release assessment found the pre-2026-07-18 readiness docs (including this one)
 > systematically stale — mixing resolved, stale, and aspirational claims. **Do not cite this
 > for release status.** The authoritative, code-driven release driver is
-> [`work/1.0-release-plan.md`](1.0-release-plan.md).
+> [`work/1.0-release-plan.md`](../1.0-release-plan.md).
 
 # Benzene 1.0.0 API Surface Review
 

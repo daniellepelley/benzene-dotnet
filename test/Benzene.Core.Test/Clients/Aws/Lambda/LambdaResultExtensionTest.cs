@@ -185,7 +185,7 @@ public class LambdaResultExtensionTest
         Assert.Equal("some-error", lambdaBenzeneResult.Errors[0].Message);
     }
 
-    // Phase 5 of work/problem-details-plan.md: a multi-error problem body's "errors" member is
+    // Phase 5 of work/archive/problem-details-plan-2026-08.md: a multi-error problem body's "errors" member is
     // authoritative and round-trips as structured BenzeneErrors (field/code/order intact) rather than
     // collapsing into a single joined-string message (ruling §5.2's defect).
     [Fact]

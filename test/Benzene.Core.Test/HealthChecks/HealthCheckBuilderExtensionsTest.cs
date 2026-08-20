@@ -13,7 +13,7 @@ namespace Benzene.Test.HealthChecks;
 /// <summary>
 /// Coverage for the "bring your own check" lambda helpers: a non-destructive probe delegate becomes a
 /// full <see cref="IHealthCheck"/> that reports Ok/Failed and carries a <see cref="HealthCheckDependency"/>,
-/// without the caller writing a class. See <c>work/client-health-checks-design.md</c> §3.8.
+/// without the caller writing a class. See <c>work/archive/client-health-checks-design-2026-08.md</c> §3.8.
 /// </summary>
 public class HealthCheckBuilderExtensionsTest
 {

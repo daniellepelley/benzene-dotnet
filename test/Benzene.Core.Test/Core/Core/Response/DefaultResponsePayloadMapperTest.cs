@@ -11,7 +11,7 @@ namespace Benzene.Test.Core.Core.Response;
 
 /// <summary>
 /// Coverage for <see cref="DefaultResponsePayloadMapper{TContext}"/>'s failure-branch emission
-/// (Phase 3 of work/problem-details-plan.md): a failed result serializes to the RFC 9457 problem
+/// (Phase 3 of work/archive/problem-details-plan-2026-08.md): a failed result serializes to the RFC 9457 problem
 /// document <see cref="ProblemTypes.From"/> builds, not the retired <c>ErrorPayload</c> shape.
 /// </summary>
 public class DefaultResponsePayloadMapperTest

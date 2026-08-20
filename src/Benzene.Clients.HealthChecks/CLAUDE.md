@@ -58,7 +58,7 @@ Register these checks on the dedicated **`contracts`** diagnostic topic via
 This topic is deliberately kept off the Kubernetes liveness/readiness probes: the check calls a
 downstream service and reports drift, so putting it in a probe would let one struggling dependency (or
 a compatible-but-changed contract) restart or de-route otherwise-healthy pods. Feed it to monitoring /
-the mesh instead. See `docs/kubernetes-health-checks.md` and `work/client-health-checks-design.md`.
+the mesh instead. See `docs/kubernetes-health-checks.md` and `work/archive/client-health-checks-design-2026-08.md`.
 
 ## When to use this package
 - On a consumer service that wants to report a downstream provider's reachability, and optionally

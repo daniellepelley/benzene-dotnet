@@ -62,7 +62,7 @@ individually (batch = one invocation per message per the spec's scope rule).
 carry the token overload too, as default interface methods delegating to the tokenless overload, so a
 pre-existing implementor of either interface (including user-written ones) still compiles and runs
 unchanged with no override required; the concrete classes here override them to forward to the real
-seeding path. See `work/cancellation-design.md` for the full design and `ICancellationTokenAccessor`'s
+seeding path. See `work/archive/cancellation-design-2026-08.md` for the full design and `ICancellationTokenAccessor`'s
 XML docs for the read/write-at-point-of-use guarantee.
 Transports seed it where they have a signal: **per-message/-call** - `Benzene.AspNet.Core` +
 `Benzene.Azure.Function.AspNet` (`HttpContext.RequestAborted`, via a `SeedCancellationToken`

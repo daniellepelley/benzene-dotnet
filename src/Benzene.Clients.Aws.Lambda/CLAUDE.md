@@ -25,7 +25,7 @@ fixed during the Tier 2.1 split).
     **dynamic-target invoker**: `.UseAwsLambda<T>()` carries no function name (the target is supplied
     per-invocation), so there is no fixed dependency to auto-register a check for at config time. Register
     it yourself with `AddLambdaHealthCheck(name)` where you know the function. If a fixed-target Lambda
-    client is ever introduced, auto-wire it there. See `work/client-health-checks-remaining-designs.md` §5.
+    client is ever introduced, auto-wire it there. See `work/archive/client-health-checks-remaining-designs-2026-08.md` §5.
 - `LocalAwsLambdaClientFactory` — builds an `IAmazonLambda` from a local AWS profile for dev/test.
 - `Extensions` — `UseAwsLambdaClient`, `UseAwsLambda<T>`, and **`AddLambdaHealthCheck`**.
 

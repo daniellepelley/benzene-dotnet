@@ -8,7 +8,7 @@ namespace Benzene.Clients;
 
 /// <summary>
 /// The default <see cref="IBenzeneMessageSender"/>: resolves a topic to its registered outbound
-/// pipeline and runs it. See <c>work/benzene-clients-redesign-plan.md</c> §2.3.
+/// pipeline and runs it. See <c>work/archive/benzene-clients-redesign-plan-2026-07.md</c> §2.3.
 /// </summary>
 internal class DefaultBenzeneMessageSender : IBenzeneMessageSender
 {

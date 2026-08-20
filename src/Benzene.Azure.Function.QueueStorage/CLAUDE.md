@@ -8,7 +8,7 @@ see "Routing" below for why.
 
 ## Failure handling: a returned failure result is retried by default (opt out via `QueueStorageOptions`)
 Safe-by-default (`QueueStorageOptions.RaiseOnFailureStatus` defaults to `true`, flipped 2026-07-21 —
-see `work/settlement-contract-1.0.md`): if a handler returns a non-exception failure result (e.g.
+see `work/archive/settlement-contract-1.0-2026-07.md`): if a handler returns a non-exception failure result (e.g.
 `BenzeneResult.ServiceUnavailable(...)`), it is escalated into a thrown
 `QueueStorageMessageProcessingException` so the host's `maxDequeueCount` retry/poison-queue handling
 takes over — the same treatment an unhandled exception already got. Set
@@ -94,6 +94,6 @@ already the whole helper — a `.TestHelpers` package would be an identity funct
 ## Claim-check hydration
 Not wired here yet: `Benzene.ClaimCheck`'s hydrate middleware needs an
 `IMessageBodySetter<QueueStorageContext>` registered — the same 5-line pattern as
-`Benzene.Aws.Lambda.Sqs`/`.Sns`/`.EventBridge` ship (see `work/claim-check-plan.md` Phase 2 step 4).
+`Benzene.Aws.Lambda.Sqs`/`.Sns`/`.EventBridge` ship (see `work/archive/claim-check-plan-2026-08.md` Phase 2 step 4).
 Note Azure Queue Storage's 64 KB message limit makes this transport the most likely to actually need
 the pattern.

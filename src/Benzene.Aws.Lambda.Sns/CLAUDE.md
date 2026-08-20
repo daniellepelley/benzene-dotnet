@@ -5,7 +5,7 @@ AWS SNS Lambda integration for Benzene. Processes SNS events from Lambda trigger
 
 ## Settlement: safe-by-default (a handler failure result is retried, not dropped)
 **`SnsOptions.RaiseOnFailureStatus` defaults to `true`** (flipped from `false`, 2026-07-21 — see
-`work/settlement-contract-1.0.md`). A handler that returns a non-exception failure result (e.g.
+`work/archive/settlement-contract-1.0-2026-07.md`). A handler that returns a non-exception failure result (e.g.
 `BenzeneResult.ServiceUnavailable(...)`) is escalated into a thrown `SnsMessageProcessingException`,
 so the Lambda invocation fails and SNS's subscription-level retry/redrive policy redelivers it (and
 eventually dead-letters it) — the same at-least-once treatment a thrown exception already got. This

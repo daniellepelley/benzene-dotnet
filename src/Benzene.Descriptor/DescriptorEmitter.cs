@@ -25,7 +25,7 @@ public sealed record DescriptorEmitResult(string? SpecJson, string? DescriptorJs
 ///
 /// (The older distilled deployment projection — consumes/produces/transportKind — is deferred as a
 /// future <c>--emit deploy</c>; see the 2026-08-12 owner design review, Amendment A, in
-/// <c>work/spec-mesh-tooling-implementation-plan.md</c>. <see cref="OutboundRouteInspector"/> is kept,
+/// <c>work/archive/spec-mesh-tooling-implementation-plan-2026-08.md</c>. <see cref="OutboundRouteInspector"/> is kept,
 /// unused for now, for when that lands.)
 /// </summary>
 public static class DescriptorEmitter

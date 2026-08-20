@@ -1,7 +1,7 @@
 # Benzene.Auth.Core
 
 ## What this package does
-The pure-contracts half of `work/auth-middleware-design.md`'s authentication feature: the scoped
+The pure-contracts half of `work/archive/auth-middleware-design-2026-07.md`'s authentication feature: the scoped
 DI seam a concrete authentication middleware (`Benzene.Auth.Basic`, `Benzene.Auth.OAuth2`) uses to
 hand a validated caller identity to later pipeline steps, plus the shared
 `Unauthorized`/`Forbidden` result-building helper both packages short-circuit with. No third-party
@@ -33,7 +33,7 @@ auth or OAuth2/JWT lives in its own concrete package.
   message through this helper.
 
 ## Authorization layer (A.4 — RBAC/policies over the principal)
-The mechanism-agnostic authorization primitives the auth design (`work/auth-middleware-design.md`
+The mechanism-agnostic authorization primitives the auth design (`work/archive/auth-middleware-design-2026-07.md`
 §4) deliberately left as "an app concern layered on top of the `ClaimsPrincipal`". They read the
 scoped `AuthenticationHolder.Principal` an authentication middleware set, and short-circuit via
 `AuthResults` — `Unauthorized` when there's no caller, `Forbidden` when the caller lacks

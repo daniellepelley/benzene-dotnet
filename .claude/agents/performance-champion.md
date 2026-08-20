@@ -89,7 +89,7 @@ Read the actual hot path before opinining — don't guess at costs:
 BenchmarkDotNet suite in this repo, covering `MiddlewarePipeline<TContext>.HandleAsync`
 and `MultiSerializerOptionsRequestMapper<TContext>.GetBody<T>`. Before this,
 perf claims were "hot-path fixes" reasoned from code inspection (see
-`docs/plans/request-response-improvements-plan.md` Phase 1), not measured —
+`work/archive/request-response-improvements-plan-2026-07.md` Phase 1), not measured —
 that gap is now partially closed, not fully: this suite has no recorded
 baseline numbers yet (see its README), and it covers exactly two hot paths,
 not every package. Treat expanding benchmark coverage to other hot paths

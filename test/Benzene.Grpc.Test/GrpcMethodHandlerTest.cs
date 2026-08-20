@@ -100,7 +100,7 @@ public class GrpcMethodHandlerTest
         Assert.Equal("Name is required", badRequest.FieldViolations[0].Description);
     }
 
-    // Phase 5 of work/problem-details-plan.md ("gRPC gets a free correctness win", ruling §5.3):
+    // Phase 5 of work/archive/problem-details-plan-2026-08.md ("gRPC gets a free correctness win", ruling §5.3):
     // FieldViolation.Field is filled from BenzeneError.Field when the producer supplied one.
     [Fact]
     public async Task HandleAsync_ValidationErrorWithStructuredErrors_FillsFieldViolationFieldFromBenzeneErrorField()

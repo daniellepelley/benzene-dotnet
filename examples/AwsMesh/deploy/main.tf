@@ -90,7 +90,7 @@ resource "aws_s3_bucket" "artifacts" {
 }
 
 # ---------------------------------------------------------------------------------------------------
-# S3 bucket for the claim-check dogfood (work/claim-check-plan.md Phase 6): orders-api offloads an
+# S3 bucket for the claim-check dogfood (work/archive/claim-check-plan-2026-08.md Phase 6): orders-api offloads an
 # oversized payments:capture payload here (Benzene.ClaimCheck's UseClaimCheck() on that route,
 # OutboundSend.ClaimChecked), payments-api hydrates it back on receive (UseClaimCheck<SqsMessageContext>(),
 # enableClaimCheckHydration). DEDICATED from aws_s3_bucket.artifacts above — see claim_check_bucket_name's
@@ -117,7 +117,7 @@ resource "aws_s3_bucket_public_access_block" "claim_checks" {
 
 # Retention is TTL-based expiry, owned by infrastructure — Benzene.ClaimCheck.Aws.S3 never deletes an
 # object itself (see IClaimCheckStore's remarks: SNS-style fan-out and at-least-once redelivery both make
-# delete-on-consume unsafe). 14 days matches work/claim-check-plan.md §3's sizing rule: the TTL must
+# delete-on-consume unsafe). 14 days matches work/archive/claim-check-plan-2026-08.md §3's sizing rule: the TTL must
 # exceed the longest possible path from send to last possible consumption — queue retention plus any DLQ
 # redrive window — and SQS's own retention maxes out at 14 days, so this rule can never expire an object
 # while a redelivery could still need it. Scoped to claim_check_prefix, the exact prefix the store writes
@@ -328,11 +328,11 @@ locals {
     orders = {
       PAYMENTS_QUEUE_URL       = aws_sqs_queue.payments.url
       ORDER_PLACED_TOPIC_ARN   = aws_sns_topic.order_placed.arn
-      # The outbox pair (work/outbox-plan.md Phase 3): the order row + the atomically-committed
+      # The outbox pair (work/archive/outbox-plan-2026-08.md Phase 3): the order row + the atomically-committed
       # captured envelopes for payments:capture/order:placed.
       ORDERS_TABLE_NAME        = aws_dynamodb_table.orders.name
       ORDERS_OUTBOX_TABLE_NAME = aws_dynamodb_table.orders_outbox.name
-      # The claim-check dogfood's sending side (work/claim-check-plan.md Phase 6): offloads an
+      # The claim-check dogfood's sending side (work/archive/claim-check-plan-2026-08.md Phase 6): offloads an
       # oversized payments:capture send here instead of inlining it on the SQS message.
       CLAIM_CHECK_BUCKET       = aws_s3_bucket.claim_checks.id
     }
@@ -444,7 +444,7 @@ resource "aws_lambda_permission" "eventbridge_invoke" {
   source_arn    = aws_cloudwatch_event_rule.integration[each.value.rule_key].arn
 }
 
-# --- DynamoDB: the outbox pair (work/outbox-plan.md Phase 3) + the consume-side idempotency table ----
+# --- DynamoDB: the outbox pair (work/archive/outbox-plan-2026-08.md Phase 3) + the consume-side idempotency table ----
 # orders-api dogfoods the transactional outbox: `orders` is its own state table, `orders-outbox` is the
 # captured-envelope table Benzene.Outbox.DynamoDb writes to and streams from. payments-api is the
 # consume side of the pair: `payments-idempotency` dedups the at-least-once redeliveries the outbox
@@ -514,7 +514,7 @@ resource "aws_dynamodb_table" "payments_idempotency" {
   }
 }
 
-# Streams dispatch: near-real-time half of the relay pair (work/outbox-plan.md §2.5 option 1). The
+# Streams dispatch: near-real-time half of the relay pair (work/archive/outbox-plan-2026-08.md §2.5 option 1). The
 # event-source mapping polls with the orders Lambda's OWN execution role (aws_iam_role.service) — see
 # the service_dynamodb IAM policy below for the stream-read grant. maximum_retry_attempts bounds how
 # long a persistently-failing dispatch can block this shard before the mapping gives up on that batch
@@ -527,7 +527,7 @@ resource "aws_lambda_event_source_mapping" "orders_outbox_stream" {
   maximum_retry_attempts  = 3
 }
 
-# Scheduled sweep: the required backstop (work/outbox-plan.md §2.5 option 2) — retries what the stream
+# Scheduled sweep: the required backstop (work/archive/outbox-plan-2026-08.md §2.5 option 2) — retries what the stream
 # missed, parks anything past MaxAttempts, and (on a store with no native TTL) would own retention. Same
 # shape as the mesh's own `aggregate` schedule below: an EventBridge rule invoking the Lambda directly,
 # routed by detail-type to the app-chosen `orders:outbox-sweep` topic (never `benzene:*` — reserved

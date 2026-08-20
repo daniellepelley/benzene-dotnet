@@ -40,7 +40,7 @@ variable "artifact_bucket_name" {
 }
 
 variable "claim_check_bucket_name" {
-  description = "S3 bucket Benzene.ClaimCheck.Aws.S3 offloads/hydrates oversized payments:capture payloads to/from (work/claim-check-plan.md Phase 6). DEDICATED — kept separate from artifact_bucket_name: the mesh catalog is a durable registry read by the mesh's IAM role/audience, claim-checked payloads are expiring transients read by orders-api/payments-api's own role, and the two should never share a bucket policy. Must be globally unique; defaults to <project>-claim-checks-<account-id>."
+  description = "S3 bucket Benzene.ClaimCheck.Aws.S3 offloads/hydrates oversized payments:capture payloads to/from (work/archive/claim-check-plan-2026-08.md Phase 6). DEDICATED — kept separate from artifact_bucket_name: the mesh catalog is a durable registry read by the mesh's IAM role/audience, claim-checked payloads are expiring transients read by orders-api/payments-api's own role, and the two should never share a bucket policy. Must be globally unique; defaults to <project>-claim-checks-<account-id>."
   type        = string
   default     = ""
 }
@@ -75,7 +75,7 @@ variable "aggregate_schedule" {
 }
 
 variable "orders_outbox_sweep_schedule" {
-  description = "EventBridge schedule expression for orders-api's outbox sweep (work/outbox-plan.md §2.5) — the backstop that retries/parks/cleans up whatever the DynamoDB-Streams dispatch path (near-real-time) missed. Defaults to every 5 minutes: frequent enough that a parked envelope is discovered promptly in a demo, infrequent enough to stay cheap alongside the mesh's own aggregate schedule."
+  description = "EventBridge schedule expression for orders-api's outbox sweep (work/archive/outbox-plan-2026-08.md §2.5) — the backstop that retries/parks/cleans up whatever the DynamoDB-Streams dispatch path (near-real-time) missed. Defaults to every 5 minutes: frequent enough that a parked envelope is discovered promptly in a demo, infrequent enough to stay cheap alongside the mesh's own aggregate schedule."
   type        = string
   default     = "rate(5 minutes)"
 }

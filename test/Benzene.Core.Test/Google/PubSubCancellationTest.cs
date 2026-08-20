@@ -18,7 +18,7 @@ using Xunit;
 namespace Benzene.Test.Google;
 
 /// <summary>
-/// Phase 3 of the cancellation initiative (<c>work/cancellation-design.md</c>): the Cloud Functions
+/// Phase 3 of the cancellation initiative (<c>work/archive/cancellation-design-2026-08.md</c>): the Cloud Functions
 /// Framework's invocation token, previously discarded by <c>GooglePubSubFunctionHost.HandleAsync</c>
 /// and (independently) by <see cref="PubSubMiddlewareApplication"/> never seeding the scope, now
 /// reaches the handler via <see cref="ICancellationTokenAccessor"/>.

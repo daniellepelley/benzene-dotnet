@@ -43,7 +43,7 @@ evolving quickly, so please read this file — and `AGENTS.md` — before sendin
   change (see `CHANGELOG.md`'s `**BREAKING:**`-prefixed entries for the expected style).
 - Do not skip or disable existing tests to make a build pass.
 - Prefer editing existing files/patterns over introducing new abstractions — see AGENTS.md's "no
-  premature abstraction" convention, illustrated in `work/batch-failure-handling.md`'s "Why this
+  premature abstraction" convention, illustrated in `work/archive/batch-failure-handling-2026-07.md`'s "Why this
   wasn't built as one shared abstraction" section.
 
 ## Submitting

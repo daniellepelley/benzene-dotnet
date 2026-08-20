@@ -2,7 +2,7 @@
 
 ## What this package does
 RFC 7617 HTTP Basic authentication as opt-in Benzene middleware (`UseBasicAuth`). The simplest of
-the `Benzene.Auth.*` family (see `work/auth-middleware-design.md`) - validates this against
+the `Benzene.Auth.*` family (see `work/archive/auth-middleware-design-2026-07.md`) - validates this against
 `Benzene.Auth.Core`'s contracts end-to-end before `Benzene.Auth.OAuth2` takes on the JWT
 dependency. No third-party dependency beyond the BCL.
 

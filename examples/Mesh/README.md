@@ -45,7 +45,7 @@ check calls a downstream service, so wiring it into a liveness/readiness probe
 would let a drifted or slow payments-api de-route or restart otherwise-healthy
 orders-api pods (`UseContractsCheck` + `AddContractCheck`, see
 [docs/kubernetes-health-checks.md](../../docs/kubernetes-health-checks.md) and
-`work/client-health-checks-design.md`). Compare `GET /contracts` (has the
+`work/archive/client-health-checks-design-2026-08.md`). Compare `GET /contracts` (has the
 `payments-api` check) with `GET /healthcheck` (only the DB/cache/queue checks) -
 that split is the whole point.
 

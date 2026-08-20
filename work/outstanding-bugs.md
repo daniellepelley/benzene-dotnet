@@ -4,7 +4,7 @@
 > source** (four parallel review passes, cross-checked with git history). The large majority are now
 > **RESOLVED** — either by the #29/#30 review series, the overnight-fixes series, the fresh
 > security/concurrency hunt, this reconciliation pass, or the API-shape track
-> (`work/api-shape-proposal-1.0.md`, items 2a/2b/4a shipped). What genuinely remains is almost entirely
+> (`work/archive/api-shape-proposal-1.0-2026-07.md`, items 2a/2b/4a shipped). What genuinely remains is almost entirely
 > **maintainer decisions** (behaviour/API/policy calls) plus **perf hygiene** — there are effectively
 > **no clean-cut correctness bugs left unfixed**. Items are cited with `file:line` where useful.
 >
@@ -129,7 +129,7 @@ None of these is a clean self-contained bug; each changes behaviour, a public AP
   (My earlier "library-limited, wire-cap only partial" note was wrong — the bounded-decoder approach
   closes it properly.) **[DECISION, post-1.0] Avro `Dictionary`/map round-trip** still unsupported
   (`KeyValuePair` is read-only → empty record) — a bidirectional map-schema feature, per
-  `work/api-shape-proposal-1.0.md` item 4b.
+  `work/archive/api-shape-proposal-1.0-2026-07.md` item 4b.
 - **[RESOLVED] Overlapping result abstractions** — SQS/DynamoDB first converged onto
   `IHasMessageResult` (`92f4c459`, the `bool?` fork gone), then the **legacy `IMessageResult` was
   deleted outright and settlement rerouted through `IBenzeneResult`** (`6424cde9`, touching

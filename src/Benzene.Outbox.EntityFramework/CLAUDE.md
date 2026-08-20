@@ -48,7 +48,7 @@ concurrent calls, and `DbContext` is not thread-safe. `IDbContextFactory<TDbCont
 thread-safe, long-lived singleton service designed for exactly this "one long-lived owner, many
 short-lived contexts" shape, so `EntityFrameworkOutboxStore<TDbContext>` is registered singleton (same
 lifetime as `InMemoryOutboxStore`) and creates-and-disposes a fresh `TDbContext` inside every single
-method call. This deliberately deviates from `work/outbox-plan.md`'s Phase 4 wording ("resolves the
+method call. This deliberately deviates from `work/archive/outbox-plan-2026-08.md`'s Phase 4 wording ("resolves the
 scoped `TDbContext`") for the store specifically — the plan's prose undersells the connection-lifecycle
 hazard a naively-scoped store would create for a singleton dispatcher; the stage still resolves the
 scoped context exactly as written, because that half is correct and required.

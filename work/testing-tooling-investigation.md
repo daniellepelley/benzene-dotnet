@@ -28,7 +28,7 @@ FluentDocker shells out to the v1 binary name).
 - Migration cost per fixture, and whether both approaches can coexist during a gradual migration.
 
 **Spike:** migrate **one** fixture end-to-end — the strongest candidate is a fresh one rather than a
-rewrite, i.e. stand up the **RabbitMQ live integration test** (from `docs/plans/rabbitmq-plan.md`
+rewrite, i.e. stand up the **RabbitMQ live integration test** (from `work/archive/rabbitmq-plan-2026-08.md`
 Phase 3) on Testcontainers, and separately convert one existing fixture (e.g. `SqsFixture`/LocalStack)
 to compare against the current FluentDocker approach. Measure setup time, CI reliability, and code
 delta. Then decide whether to migrate the rest.

@@ -9,7 +9,7 @@ and rationale, and [`docs/contract-artifacts.md`](../../docs/contract-artifacts.
 consumer-facing guide.
 
 > **Status:** sln-approved (implementation plan Phase 1,
-> [`work/spec-mesh-tooling-implementation-plan.md`](../../work/spec-mesh-tooling-implementation-plan.md)),
+> [`work/archive/spec-mesh-tooling-implementation-plan-2026-08.md`](../../work/archive/spec-mesh-tooling-implementation-plan-2026-08.md)),
 > packed and published like any other `src/` package — no longer a spike. The introspection is
 > **cloud-agnostic** (see below); an **AWS Lambda** host adapter additionally supplies the inbound
 > transport-name list.

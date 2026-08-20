@@ -104,7 +104,7 @@ narrow exception is a *hard synchronous* dependency you genuinely cannot serve a
 a targeted **reachability-only** check against that one provider may go in **readiness** (never
 liveness); that is `AddServiceCheck("ThatProvider")` with **no** hash, so the contract-drift portion
 is excluded, drift never being a reason to stop serving traffic. See
-`work/client-health-checks-design.md` for the full rationale.
+`work/archive/client-health-checks-design-2026-08.md` for the full rationale.
 
 ## Topic-based wiring (every transport): `UseLivenessCheck` / `UseReadinessCheck`
 

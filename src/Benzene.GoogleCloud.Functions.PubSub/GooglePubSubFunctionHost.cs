@@ -44,7 +44,7 @@ public class GooglePubSubFunctionHost<TStartUp> : ICloudEventFunction<MessagePub
     /// <param name="cancellationToken">
     /// The Cloud Functions Framework's cancellation token for this invocation. Forwarded into the
     /// per-invocation scope so any component that resolves <c>ICancellationTokenAccessor</c> can
-    /// observe it (see <c>work/cancellation-design.md</c>).
+    /// observe it (see <c>work/archive/cancellation-design-2026-08.md</c>).
     /// </param>
     public Task HandleAsync(CloudEvent cloudEvent, MessagePublishedData data, CancellationToken cancellationToken) =>
         _app.SendAsync(data, cancellationToken);

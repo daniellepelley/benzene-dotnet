@@ -5,7 +5,7 @@ namespace Benzene.Results;
 /// <c>IBenzeneResult&lt;T&gt;</c> implementation can carry a deliberately-attached
 /// <see cref="ProblemDetails"/> document on - deliberately NOT a member of <c>IBenzeneResult</c>
 /// itself (that interface is frozen; see <c>work/benzene-result-errors-ruling.md</c> R7 and
-/// <c>work/problem-details-plan.md</c> decision 3). Two producers attach a document through this
+/// <c>work/archive/problem-details-plan-2026-08.md</c> decision 3). Two producers attach a document through this
 /// capability:
 /// </summary>
 /// <remarks>

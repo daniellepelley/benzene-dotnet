@@ -6,7 +6,7 @@ namespace Benzene.Test.Core.Core.Results;
 
 /// <summary>
 /// Coverage for the problem-type registry (<see cref="ProblemTypes"/>) - Phase 3 of
-/// work/problem-details-plan.md, §2.2's registry table.
+/// work/archive/problem-details-plan-2026-08.md, §2.2's registry table.
 /// </summary>
 public class ProblemTypesTest
 {

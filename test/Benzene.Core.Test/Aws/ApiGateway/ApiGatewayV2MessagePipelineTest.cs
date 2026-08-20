@@ -69,7 +69,7 @@ public class ApiGatewayV2MessagePipelineTest
     [Fact]
     public async Task Send_ValidationError_MapsToTheHttpStatusLineAndCarriesTheSameStatusInTheBody()
     {
-        // Phase 4 of work/problem-details-plan.md, v2 counterpart of the v1 pipeline test: 422 +
+        // Phase 4 of work/archive/problem-details-plan-2026-08.md, v2 counterpart of the v1 pipeline test: 422 +
         // application/problem+json, and the body's numeric `status` matches the response line - both
         // derived from the one IHttpStatusCodeMapper.
         var host = new InlineAwsLambdaStartUp()

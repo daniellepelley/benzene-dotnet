@@ -5,7 +5,7 @@ using Xunit;
 namespace Benzene.Test.Core.Core.Results;
 
 /// <summary>
-/// Coverage for Phase 5 of work/problem-details-plan.md: <see cref="BenzeneResult.Problem{T}"/> (the
+/// Coverage for Phase 5 of work/archive/problem-details-plan-2026-08.md: <see cref="BenzeneResult.Problem{T}"/> (the
 /// handler-authored-problem factory), <see cref="IHasProblemDetails"/>, and the
 /// <see cref="BenzeneResultExtensions.GetProblem"/> typed accessor - received vs. synthesized vs.
 /// handler-authored.

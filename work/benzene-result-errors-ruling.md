@@ -203,11 +203,11 @@ of a permanent inversion of the API's discoverability. Pre-1.0 is exactly when y
 
 ### 4.1 The freeze binds at the tag, not at the proposal
 
-`work/1.0-api-freeze-proposal.md` is marked EXECUTED on 2026-07-18. The objection — "the freeze
+`work/archive/1.0-api-freeze-proposal-2026-07.md` is marked EXECUTED on 2026-07-18. The objection — "the freeze
 already happened, this arrives after it" — does not survive contact with the record:
 
 - **2026-07-21**, three days *after* that document was marked executed,
-  `work/api-shape-proposal-1.0.md` records option **1c**: the legacy `IMessageResult` interface and
+  `work/archive/api-shape-proposal-1.0-2026-07.md` records option **1c**: the legacy `IMessageResult` interface and
   `MessageResult` class **deleted outright**, described in that document as "a hard breaking change,
   acceptable pre-1.0", migrating ~19 context types and ~23 test files.
 - The same freeze pass itself renamed a method on the dispatch interface (`HandlerAsync` →

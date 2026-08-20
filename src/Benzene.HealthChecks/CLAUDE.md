@@ -31,7 +31,7 @@ for the full Kubernetes wiring guide.
   deliberately separate from the liveness/readiness **probes**: a contract check calls a downstream
   service and reports drift, so wiring it into a probe would let one struggling dependency restart or
   de-route otherwise-healthy pods. Wire it to monitoring/the mesh, never a Kubernetes probe - see
-  `docs/kubernetes-health-checks.md` and `work/client-health-checks-design.md`.
+  `docs/kubernetes-health-checks.md` and `work/archive/client-health-checks-design-2026-08.md`.
 - `HealthCheckBuilder : IHealthCheckBuilder` - collects health checks (DI-resolved types, inline
   factory functions) and, via `IHealthCheckFinder`, DI-registered `IHealthCheck` implementations.
   `GetHealthChecks(resolver, includeDependencyChecks)` selects the probe scope: when `false` the

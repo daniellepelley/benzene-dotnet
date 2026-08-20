@@ -36,7 +36,7 @@ public enum OutboundTransport
 /// When <see langword="true"/>, <see cref="MeshServiceWiring.ConfigureServices"/> adds
 /// <c>Benzene.Outbox</c>'s <c>UseOutbox()</c> to this route's pipeline (after the trace/correlation
 /// stamping middleware, before the terminal transport converter) — see
-/// <c>work/outbox-plan.md</c> §2.1. Defaults to <see langword="false"/> so a service opts a route
+/// <c>work/archive/outbox-plan-2026-08.md</c> §2.1. Defaults to <see langword="false"/> so a service opts a route
 /// into the outbox one send at a time, without dragging every other service's routes (or this
 /// service's other routes) through it. The caller is also responsible for registering
 /// <c>Benzene.Outbox</c>'s <c>AddOutbox(...)</c> and an <c>IOutboxStore</c> (e.g.
@@ -46,7 +46,7 @@ public enum OutboundTransport
 /// When <see langword="true"/>, <see cref="MeshServiceWiring.ConfigureServices"/> adds
 /// <c>Benzene.ClaimCheck</c>'s <c>UseClaimCheck()</c> to this route's pipeline — placed AFTER
 /// <c>UseOutbox()</c> when <see cref="Outboxed"/> is also set, and before the terminal transport
-/// converter (see <c>work/claim-check-plan.md</c> Phase 6). Ordering matters here: capture (the first,
+/// converter (see <c>work/archive/claim-check-plan-2026-08.md</c> Phase 6). Ordering matters here: capture (the first,
 /// terminal pass through <c>UseOutbox()</c>) needs the REAL typed <c>Request</c> to serialize into its
 /// envelope, so offload must not run before it — it would replace <c>Request</c> with a placeholder the
 /// envelope would then durably store instead of the real payload. Placing <c>UseClaimCheck()</c> after

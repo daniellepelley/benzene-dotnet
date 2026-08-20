@@ -21,7 +21,7 @@ using Xunit;
 namespace Benzene.Test.Customization;
 
 // Regression coverage for making IBenzeneWireNames a real DI seam (see
-// work/customization-robustness-review.md): previously nothing resolved it, so registering a
+// work/archive/customization-robustness-review-2026-08.md): previously nothing resolved it, so registering a
 // replacement had no effect - this proves a replacement now changes the topic key each transport's
 // consumer-side topic getter reads, for every transport whose Add*Consumer left topicAttributeKey /
 // topicPropertyKey / topicHeaderKey at that transport's own default.

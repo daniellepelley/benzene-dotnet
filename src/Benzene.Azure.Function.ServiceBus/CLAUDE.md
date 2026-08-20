@@ -9,7 +9,7 @@ as they do for HTTP, Event Hubs, and Kafka.
 
 ## Settlement: safe-by-default (a handler failure result is retried, not completed)
 **`ServiceBusOptions.RaiseOnFailureStatus` defaults to `true`** (flipped from `false`, 2026-07-21 —
-see `work/settlement-contract-1.0.md`). Under the default `AckMode = AutoComplete`, a handler that
+see `work/archive/settlement-contract-1.0-2026-07.md`). Under the default `AckMode = AutoComplete`, a handler that
 returns a failure result (e.g. `BenzeneResult.ServiceUnavailable(...)`) is escalated into a thrown
 `ServiceBusMessageProcessingException`; the Functions host (which abandons on a thrown exception under
 `AutoCompleteMessages = true`) then **abandons** the message → redelivery (respecting the entity's
@@ -140,4 +140,4 @@ buildTransitive). The hand-written form still works. See `docs/azure-functions.m
 ## Claim-check hydration
 Not wired here yet: `Benzene.ClaimCheck`'s hydrate middleware needs an
 `IMessageBodySetter<ServiceBusContext>` registered — the same 5-line pattern as
-`Benzene.Aws.Lambda.Sqs`/`.Sns`/`.EventBridge` ship (see `work/claim-check-plan.md` Phase 2 step 4).
+`Benzene.Aws.Lambda.Sqs`/`.Sns`/`.EventBridge` ship (see `work/archive/claim-check-plan-2026-08.md` Phase 2 step 4).

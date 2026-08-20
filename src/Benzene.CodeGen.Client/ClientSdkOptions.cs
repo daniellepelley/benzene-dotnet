@@ -6,7 +6,7 @@ namespace Benzene.CodeGen.Client;
 /// topic policy). Both builders' legacy positional constructors delegate to an options-based
 /// constructor built from an instance of this class with today's defaults, so existing call sites
 /// and golden-file tests keep behaving identically - see
-/// work/spec-mesh-tooling-implementation-plan.md Phase 3b step 1.
+/// work/archive/spec-mesh-tooling-implementation-plan-2026-08.md Phase 3b step 1.
 /// </summary>
 public class ClientSdkOptions
 {

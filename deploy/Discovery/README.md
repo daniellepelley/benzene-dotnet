@@ -4,7 +4,7 @@ A one-shot job that enumerates a cloud account or cluster (filtered by tag/label
 found as a `mesh.json`-shaped registry document to a shared artifact store, and exits. It is the
 *discovery* half of mesh self-discovery; [`deploy/Mesh`](../Mesh) (`Benzene.Mesh.Host`) is the
 *runtime* half that reads the document back and interrogates each service. See
-[`work/mesh-self-discovery-design.md`](../../work/mesh-self-discovery-design.md) for the full design
+[`work/archive/mesh-self-discovery-design-2026-07.md`](../../work/archive/mesh-self-discovery-design-2026-07.md) for the full design
 and [`work/enterprise/slice-3-discovery.md`](../../work/enterprise/slice-3-discovery.md) for the brief
 this package implements.
 

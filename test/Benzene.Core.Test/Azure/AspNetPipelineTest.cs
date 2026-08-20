@@ -83,7 +83,7 @@ public class AspNetPipelineTest
 
         Assert.Equal(422, response.StatusCode);
         Assert.Equal("validation-error", payload.BenzeneStatus);
-        // Phase 4 of work/problem-details-plan.md: the numeric HTTP status is filled in by
+        // Phase 4 of work/archive/problem-details-plan-2026-08.md: the numeric HTTP status is filled in by
         // HttpProblemDetailsResponsePayloadMapper via the same IHttpStatusCodeMapper the response
         // line's 422 above comes from, so the two can never disagree.
         Assert.Equal(422, payload.Status);

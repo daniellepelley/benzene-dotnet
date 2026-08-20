@@ -27,7 +27,7 @@ namespace Benzene.Integration.Test.ClaimCheck;
 // limit to a real S3 bucket, carries the s3:// reference on the benzene-claim-check header, and the
 // standalone (non-Lambda) Benzene.Aws.Sqs consumer pipeline's UseClaimCheck<SqsConsumerMessageContext>()
 // hydrates it back to the full body before the handler ever sees it. See
-// work/claim-check-plan.md Phase 4.
+// work/archive/claim-check-plan-2026-08.md Phase 4.
 [Collection(DockerEmulatorCollection.Name)]
 public class ClaimCheckS3IntegrationTest
 {

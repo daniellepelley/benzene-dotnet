@@ -47,7 +47,7 @@
 > has failing traffic (`Errors > 0`) and has never sent any `mesh:issues` batch — absence only matters
 > when there's failure it should have explained. `CompositeMeshFleetReadModel`'s anonymous service rows
 > always carry `"issues"` (the composite plane has no ingest; its vessel is a named follow-up in
-> `work/mesh-drains-up-review.md`). Pinned by `conformance/mesh-issue-cases.json` (claims-gated — a
+> `work/archive/mesh-drains-up-review-2026-07.md`). Pinned by `conformance/mesh-issue-cases.json` (claims-gated — a
 > collector without the feed stays collector-conformant); Go collector parity pending.
 
 ## What this package does

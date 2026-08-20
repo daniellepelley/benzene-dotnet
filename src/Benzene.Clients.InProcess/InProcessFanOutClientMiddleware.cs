@@ -19,7 +19,7 @@ namespace Benzene.Clients.InProcess;
 /// <c>.UseInProcess(name)</c>, there is no one target response to map back).
 /// </summary>
 /// <remarks>
-/// See <c>work/inprocess-fanout-design.md</c> for the semantics this implements and what it
+/// See <c>work/archive/inprocess-fanout-design-2026-08.md</c> for the semantics this implements and what it
 /// deliberately does not solve (no in-process DLQ/redelivery for a failed consumer), and
 /// <see cref="InProcessFanOutTarget"/>/<see cref="DuplicateInProcessFanOutTargetException"/> for why
 /// each target dispatches under its own topic rather than the route's literal topic.

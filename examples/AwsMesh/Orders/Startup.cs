@@ -37,7 +37,7 @@ public class Startup : BenzeneStartUp
     /// The S3 bucket <c>Benzene.ClaimCheck.Aws.S3</c> offloads oversized <c>payments:capture</c> sends
     /// to — provisioned by <c>deploy/main.tf</c> (<c>aws_s3_bucket.claim_checks</c>, a DEDICATED bucket,
     /// separate from <c>aws_s3_bucket.artifacts</c> — see its comment for why). See README "Claim-check:
-    /// oversized payloads" and <c>work/claim-check-plan.md</c> Phase 6.
+    /// oversized payloads" and <c>work/archive/claim-check-plan-2026-08.md</c> Phase 6.
     /// </summary>
     private const string ClaimCheckBucketEnvVar = "CLAIM_CHECK_BUCKET";
 
@@ -48,8 +48,8 @@ public class Startup : BenzeneStartUp
             // point-to-point command — one consumer, must arrive). The payload type is the GENERATED
             // contract type, so the edge the mesh draws is declared with payments-api's own request shape
             // rather than a hand-copied mirror of it. Outboxed=true: this is the outbox dogfood — see
-            // Handlers/OrderHandlers.cs and work/outbox-plan.md's Phase 3. ClaimChecked=true: this is
-            // ALSO the claim-check dogfood (work/claim-check-plan.md Phase 6) — a caller that attaches a
+            // Handlers/OrderHandlers.cs and work/archive/outbox-plan-2026-08.md's Phase 3. ClaimChecked=true: this is
+            // ALSO the claim-check dogfood (work/archive/claim-check-plan-2026-08.md Phase 6) — a caller that attaches a
             // large SupportingDocument (see Handlers/OrderHandlers.cs) pushes this send's serialized body
             // over Benzene.ClaimCheck's default 192 KiB threshold, and UseClaimCheck() (wired below
             // OutboundSend.ClaimChecked in MeshServiceWiring, AFTER UseOutbox()) offloads it to the
@@ -66,7 +66,7 @@ public class Startup : BenzeneStartUp
         // client itself, registering it SCOPED — the lifetime IBenzeneMessageSender is registered with,
         // so the client can never become a captive dependency. It extends IBenzeneServiceContainer,
         // Benzene's own container abstraction, so it works whatever container is underneath rather than
-        // assuming Microsoft's. See work/spec-mesh-tooling-implementation-plan.md's finding 7c.
+        // assuming Microsoft's. See work/archive/spec-mesh-tooling-implementation-plan-2026-08.md's finding 7c.
         // (Not used by CreateOrderMessageHandler any more — an outboxed/SQS route is fire-and-forget
         // only, and this generated client's CapturePaymentsAsync asks for a typed PaymentDto response,
         // which no such route can ever produce. Left registered/generated as the from-source codegen
@@ -107,7 +107,7 @@ public class Startup : BenzeneStartUp
             {
                 typeof(GetOrdersMessageHandler),
                 typeof(CreateOrderMessageHandler),
-                // The Lambda relay pair (work/outbox-plan.md §2.5): streams dispatch (near-real-time) +
+                // The Lambda relay pair (work/archive/outbox-plan-2026-08.md §2.5): streams dispatch (near-real-time) +
                 // scheduled sweep (retry/park/cleanup backstop). See Handlers/OutboxHandlers.cs.
                 typeof(OutboxStreamDispatchMessageHandler),
                 typeof(OutboxSweepMessageHandler),

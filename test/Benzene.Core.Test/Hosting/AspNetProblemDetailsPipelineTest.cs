@@ -64,7 +64,7 @@ public class AspNetProblemDetailsStartUp : BenzeneStartUp
 }
 
 /// <summary>
-/// Coverage for Phase 4 of work/problem-details-plan.md over the reference self-host HTTP binding
+/// Coverage for Phase 4 of work/archive/problem-details-plan-2026-08.md over the reference self-host HTTP binding
 /// (<c>Benzene.AspNet.Core</c>, Kestrel, over a real socket - the same probe shape as
 /// <c>Customization/CustomStatusProbeTest.cs</c>, chosen because the in-memory
 /// <see cref="Microsoft.AspNetCore.Http.DefaultHttpContext"/> pattern

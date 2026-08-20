@@ -5,7 +5,7 @@ namespace Benzene.ClaimCheck;
 /// claim-check reference but <see cref="IClaimCheckStore.GetAsync"/> returns <c>null</c> for it - the
 /// payload was never stored, was already expired, or was stored by a different (foreign) service
 /// that this store cannot see. This is a fail-loud failure by design (§3 of
-/// <c>work/claim-check-plan.md</c>): there is no silent skip and no placeholder-processing, so the
+/// <c>work/archive/claim-check-plan-2026-08.md</c>): there is no silent skip and no placeholder-processing, so the
 /// transport's normal failure semantics (nack, redelivery, eventually a DLQ) apply exactly as they
 /// would for any other unprocessable message.
 /// </summary>

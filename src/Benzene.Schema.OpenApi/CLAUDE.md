@@ -52,7 +52,7 @@ for the `benzene` contract.
   `/benzene-message` - plus the transports each topic is reachable on (`EventServiceDocument.Transports`
   + per-topic HTTP mappings). Deliberately AWS-free.
 - `ITestPayloadDresser` / `TestPayloadDressingContext` - the **per-transport dressing seam** (decision
-  1(c) of `work/runtime-test-payloads-plan.md`). `TestPayloadsBuilder` resolves every registered
+  1(c) of `work/archive/runtime-test-payloads-plan-2026-08.md`). `TestPayloadsBuilder` resolves every registered
   `ITestPayloadDresser` (via `IServiceResolver.GetServices`) and folds each one's output into a topic's
   `Payloads[transport]` alongside the always-present `benzene-message` entry, reusing the same
   serialized body so all transports agree. A dresser returns `null` to skip (host not wired for the
@@ -75,7 +75,7 @@ for the `benzene` contract.
   `AsyncApiSpecOptions.ResponseTopicSuffix` / `Extensions.SetAsyncApiResponseTopicSuffix(...)`, defaulting
   to `AsyncApiDocumentBuilder.DefaultResponseTopicSuffix`); broadcast events and egress message-senders are
   things the app **`send`s**. This replaces 2.x's notoriously back-to-front `publish`/`subscribe` (see
-  `work/asyncapi-alignment.md` for why the old output was inverted). Channel/operation/message **map keys
+  `work/archive/asyncapi-alignment-2026-08.md` for why the old output was inverted). Channel/operation/message **map keys
   are sanitized** to `^[A-Za-z0-9.\-_]+$` (3.0 requires it; the raw topic, which can contain `:`, is kept
   in the channel's `address`). The document also carries `id` (`urn:benzene:service:<title>`) and
   `defaultContentType` (`application/json`). A builder test (`Operations_UseTheCorrectAsyncApiPerspective`)
@@ -120,7 +120,7 @@ for the `benzene` contract.
   programmatically, from per-schema JSON, or from a `components.schemas`-shaped JSON object);
   the builder serves them as `$ref`s (registering the whole catalog on first use so
   cross-`$ref`s resolve) and falls back to reflection for unmapped types. See
-  `work/complex-payloads-byo-schema-plan.md` for the full design/phases. Tests:
+  `work/archive/complex-payloads-byo-schema-plan-2026-08.md` for the full design/phases. Tests:
   `SuppliedSchemaBuilderTest`, `SpecSuppliedSchemasTest` (end-to-end through `UseSpec`).
 - `OpenApiValidationSchemaBuilder : ISchemaBuilder` - decorates generated schemas with validation
   constraints pulled from a registered `IValidationSchemaBuilder` (e.g. `Benzene.FluentValidation`'s):

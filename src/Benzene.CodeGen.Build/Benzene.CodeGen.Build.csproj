@@ -2,7 +2,7 @@
 
   <!--
     Benzene.CodeGen.Build — the MSBuild one-liner for client generation (implementation plan Phase 6,
-    work/spec-mesh-tooling-implementation-plan.md): drop a <BenzeneServiceContract> item pointing at a
+    work/archive/spec-mesh-tooling-implementation-plan-2026-08.md): drop a <BenzeneServiceContract> item pointing at a
     committed spec JSON file and get a typed client, regenerated incrementally, compiled straight into
     the consuming project. See build/Benzene.CodeGen.Build.targets for the mechanics and README.md for
     the consumer-facing guide.

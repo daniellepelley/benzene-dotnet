@@ -15,7 +15,7 @@ namespace Benzene.Aws.Lambda.Kinesis;
 /// records are ordered within a shard, so a failure resumes the whole batch from that sequence
 /// number onward rather than skipping individually-named records. This type's constructor reflects
 /// that contract directly - a single optional failed sequence number, not a list-builder - see
-/// <c>work/kinesis-batch-failure-handling-design.md</c> §3.1.
+/// <c>work/archive/kinesis-batch-failure-handling-design-2026-07.md</c> §3.1.
 /// </remarks>
 public class KinesisBatchResponse
 {

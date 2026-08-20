@@ -1,7 +1,7 @@
 namespace Benzene.Examples.AwsMesh.Shared;
 
 /// <summary>
-/// Demo-only helper for the claim-check dogfood (<c>work/claim-check-plan.md</c> Phase 6; README
+/// Demo-only helper for the claim-check dogfood (<c>work/archive/claim-check-plan-2026-08.md</c> Phase 6; README
 /// "Claim-check: oversized payloads"). Orders' <c>payments:capture</c> send is claim-checked
 /// (<c>OutboundSend.ClaimChecked</c>), and the demo needs a genuinely oversized payload to prove the
 /// offload actually triggers — but <c>CapturePayment</c> is a GENERATED contract type

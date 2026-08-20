@@ -2,7 +2,7 @@
 
 ## What this package does
 The **separate deployable** half of mesh self-discovery
-(`work/mesh-self-discovery-design.md`, `work/enterprise/slice-3-discovery.md`): a one-shot job that
+(`work/archive/mesh-self-discovery-design-2026-07.md`, `work/enterprise/slice-3-discovery.md`): a one-shot job that
 enumerates a cloud account/cluster (filtered by tag/label), writes what it found as a
 `mesh.json`-shaped registry document to a shared artifact store, and exits. It never serves traffic
 and it never invokes a discovered service - see `../README.md` for the full "why a separate

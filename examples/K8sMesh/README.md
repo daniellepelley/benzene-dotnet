@@ -59,7 +59,7 @@ curl -XPOST localhost:8081/benzene-message -H 'content-type: application/json' \
 ```
 
 Design + trade-offs (why HTTP-envelope over gRPC/TCP for internal calls):
-`work/lightweight-non-http-transport-design.md`. The quickest way to see the whole chain **without
+`work/archive/lightweight-non-http-transport-design-2026-07.md`. The quickest way to see the whole chain **without
 Kubernetes** is the `compose/` variant (`DOWNSTREAM_MSG_URL` is pre-wired there too).
 
 ### Message versioning over the chain (send v1 → upcast → one v2 handler)

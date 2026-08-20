@@ -9,7 +9,7 @@ Client abstractions for calling Benzene services. Provides interfaces and base i
 Shared abstractions for the per-transport batch clients (`SqsBatchMessageClient`,
 `SnsBatchMessageClient`, `EventBridgeBatchMessageClient`, `ServiceBusBatchMessageClient`,
 `EventHubBatchMessageClient`, `EventGridBatchMessageClient` in the `Benzene.Clients.*` transport
-packages) — design §30.1 of `work/designs/medium-fixes-design.md`:
+packages) — design §30.1 of `work/archive/medium-fixes-design-2026-08.md`:
 - `IBenzeneBatchMessageClient` (`: IDisposable`) — `Task<BatchSendResult> SendBatchAsync<TRequest>(IReadOnlyCollection<IBenzeneClientRequest<TRequest>> requests)`.
   A **separate** interface from `IBenzeneMessageClient` so the single-send path is untouched; a
   transport client can implement either or both. Batch send is fire-and-forget with per-entry
@@ -26,7 +26,7 @@ packages) — design §30.1 of `work/designs/medium-fixes-design.md`:
   batch as failed. Each transport's `CLAUDE.md` states which model it uses.
 
 ### Outbound routing (current, 2026-07-17)
-The outbound mechanism from `work/benzene-clients-redesign-plan.md` - a single topic-keyed
+The outbound mechanism from `work/archive/benzene-clients-redesign-plan-2026-07.md` - a single topic-keyed
 pipeline table. See that document for the full design and its now-complete 4-step migration plan
 (all four steps shipped 2026-07-17; the old service-name/topic-key factory + decorator-chain
 mechanism this replaced has been deleted, not just deprecated - see "Legacy outbound mechanism"
@@ -143,7 +143,7 @@ The alpha-era service-name/topic-key factory + decorator-chain mechanism - `Clie
 `TraceContextBenzeneMessageClientWrapper`, `ClientMessageSender<TRequest,TResponse>`,
 `ClientMapping`, `ClientMappingBuilder`, `TopicAndServiceKey`, `IClientHeaders`, `ClientHeaders` -
 **has been deleted entirely**, after one release cycle as `[Obsolete]`. See
-`work/benzene-clients-redesign-plan.md`'s 2026-07-17 Step 4 scope-correction update for the full
+`work/archive/benzene-clients-redesign-plan-2026-07.md`'s 2026-07-17 Step 4 scope-correction update for the full
 old→new mapping and what was verified safe to delete. **Untouched**:
 `IBenzeneMessageClient` itself and its concrete transport implementations
 (`SqsBenzeneMessageClient`, `SnsBenzeneMessageClient`, `AwsLambdaBenzeneMessageClient`,

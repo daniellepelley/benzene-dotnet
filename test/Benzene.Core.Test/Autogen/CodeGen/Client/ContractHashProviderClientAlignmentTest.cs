@@ -11,7 +11,7 @@ namespace Benzene.Test.Autogen.CodeGen.Client;
 
 /// <summary>
 /// Regression test for the projection-comparability bug fixed alongside the migration to the
-/// spec-pinned contractHash (contract-document.md §6; cross-language-clients-plan.md Phase 2 step
+/// spec-pinned contractHash (contract-document.md §6; work/archive/cross-language-clients-plan-2026-08.md Phase 2 step
 /// 3): before this fix, a default-generated client's embedded hash (already domain-scoped by
 /// <see cref="TopicScope"/> before <see cref="MessageClientSdkBuilder"/> ever hashes it) could never
 /// equal <see cref="Benzene.HealthChecks.Schema.SchemaHealthCheck"/>'s provider-side hash (computed

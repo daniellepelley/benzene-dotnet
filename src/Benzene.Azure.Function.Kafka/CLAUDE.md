@@ -11,7 +11,7 @@ AWS Kafka use `Benzene.Aws.Lambda.Kafka`, and for a self-hosted (non-Functions) 
 
 ## Settlement: safe-by-default (a handler failure result is retried, not accepted)
 **`KafkaOptions.RaiseOnFailureStatus` defaults to `true`** (flipped from `false`, 2026-07-21 — see
-`work/settlement-contract-1.0.md`). A handler that returns a failure result (e.g.
+`work/archive/settlement-contract-1.0-2026-07.md`). A handler that returns a failure result (e.g.
 `BenzeneResult.ServiceUnavailable(...)`) without throwing is escalated into a thrown
 `KafkaMessageProcessingException`, so the invocation fails and the offset is not committed → the
 record is redelivered (there is no partial-batch-failure mechanism for this trigger, so a failure
@@ -86,4 +86,4 @@ buildTransitive). The hand-written form still works. See `docs/azure-functions.m
 ## Claim-check hydration
 Not wired here yet: `Benzene.ClaimCheck`'s hydrate middleware needs an
 `IMessageBodySetter<KafkaContext>` registered — the same 5-line pattern as
-`Benzene.Aws.Lambda.Sqs`/`.Sns`/`.EventBridge` ship (see `work/claim-check-plan.md` Phase 2 step 4).
+`Benzene.Aws.Lambda.Sqs`/`.Sns`/`.EventBridge` ship (see `work/archive/claim-check-plan-2026-08.md` Phase 2 step 4).

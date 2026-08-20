@@ -4,7 +4,7 @@
 > **2026-07-25 SHIPPED: the pipeline-native issue feed (`mesh:issues`, spec §4.1) — drains-up 3.2.**
 > The mesh's first first-class "what is wrong" feed: fingerprint-deduplicated, classified failure
 > signatures emitted by the pipeline itself (delta counts, empty-batch liveness, normative fingerprint
-> recipe + classification precedence — full rulings and amendments in `work/mesh-drains-up-review.md`).
+> recipe + classification precedence — full rulings and amendments in `work/archive/mesh-drains-up-review-2026-07.md`).
 > Collector delta-merge + `FleetView.issues` + failure-gated `missingFeeds: ["issues"]`; UI feed-wins
 > inbox merge with fingerprint `#issue:` ids and exemplar-waterfall evidence; `examples/Mesh` wires it.
 > Claims-gated `mesh-issue-cases.json` conformance fixtures shipped. **Named deferrals:** Go reference
@@ -103,11 +103,11 @@
 >   This is exactly §10.2's "generate-and-copy, not live-dispatch" affordance and reuses machinery
 >   that already exists — `LambdaTestFilesBuilder`'s `sns`/`sqs`/`api-gateway`/`benzene-message`
 >   dressing over the deterministic `Benzene.Schema.OpenApi.Examples.ExamplePayloadBuilder`, and the
->   opt-in runtime endpoint already designed in `work/runtime-test-payloads-plan.md`
+>   opt-in runtime endpoint already designed in `work/archive/runtime-test-payloads-plan-2026-08.md`
 >   (`UseTestPayloads()`). "Supported payloads" = schema-derived defaults (already inlined per
 >   topic in `MeshTopicEntry.RequestSchema`/`ResponseSchema`/`MessageSchema`) **plus** code-registered
 >   custom examples, mapped to the existing BYO-schema seam (`SuppliedSchemaCatalog`/
->   `AddSuppliedSchemas`, see `work/complex-payloads-byo-schema-plan.md`). Envelope-dressing lives in
+>   `AddSuppliedSchemas`, see `work/archive/complex-payloads-byo-schema-plan-2026-08.md`). Envelope-dressing lives in
 >   a runtime-clean core + opt-in `Benzene.*.TestPayloads.Aws` package (plan decision 1(c)) — never
 >   in `Contracts`/`Ui`, never pulling AWS test-helpers into a service runtime. Azure dressing is a
 >   documented follow-up, not silently AWS-only. **No Cloud Service spec widening** — topics/schemas/
@@ -137,7 +137,7 @@
 >   - **Queue/stream transports (SQS/SNS/Event Hub/Kinesis/Event Grid):** out of scope for live
 >     send — **F3a compose+copy only**, exactly as §10.7 left them.
 >   - Data-layer/packages implications recorded here; each build case gets its own design doc only
->     if/when the maintainer approves. `runtime-test-payloads-plan.md` (opt-in `UseTestPayloads()`,
+>     if/when the maintainer approves. `archive/runtime-test-payloads-plan-2026-08.md` (opt-in `UseTestPayloads()`,
 >     transport-dress package split, gate decision 3) is the reusable foundation for all of it.
 >
 > **2026-07-22 ownership merge:** `mesh-ui-product-owner` has been merged into
@@ -284,7 +284,7 @@
 >   (matching `HealthCheckDependency` entries against other registered services' identifiers)
 >   is a real design question of its own, not yet done.
 >   **Update:** the shipped `ClientHealthCheck` (`Benzene.Clients.HealthChecks`, on the `contracts`
->   topic — see `work/client-health-checks-design.md` §7) now emits a `HealthCheckDependency("Service",
+>   topic — see `work/archive/client-health-checks-design-2026-08.md` §7) now emits a `HealthCheckDependency("Service",
 >   name)` per downstream, i.e. consumer→provider edges are becoming expressible in health output. The
 >   *edge-derivation* step (joining those to provider identities) is still the unbuilt piece; the
 >   resource-identity join key it needs is co-designed with the deferred §10.16/§10.18 per-topic binding.

@@ -16,7 +16,7 @@ namespace Benzene.Test.Resilience;
 /// <summary>
 /// Coverage for <see cref="TimeoutMiddleware{TContext}"/> and <c>Extensions.UseTimeout</c>: the
 /// save/restore composition over <see cref="ICancellationTokenAccessor"/> (see
-/// <c>work/cancellation-design.md</c> §2.2), and the timeout-vs-cancellation semantic line (§2.4) -
+/// <c>work/archive/cancellation-design-2026-08.md</c> §2.2), and the timeout-vs-cancellation semantic line (§2.4) -
 /// a service-configured deadline becomes a <see cref="TimeoutException"/>, but the host's own
 /// cancellation propagates as an untouched <see cref="OperationCanceledException"/> so redelivery
 /// still happens.

@@ -8,7 +8,7 @@ namespace Benzene.ClaimCheck;
 /// <summary>
 /// Inbound middleware that resolves a claim-check reference carried on the wire header named by
 /// <see cref="ClaimCheckOptions.HeaderName"/> back to the real body, replacing the message's raw body
-/// with it before deserialization. See <c>work/claim-check-plan.md</c> §1 for the full design
+/// with it before deserialization. See <c>work/archive/claim-check-plan-2026-08.md</c> §1 for the full design
 /// reasoning.
 /// </summary>
 /// <remarks>
@@ -30,7 +30,7 @@ namespace Benzene.ClaimCheck;
 /// <para>
 /// Hydration needs an <see cref="IMessageBodySetter{TContext}"/> for <typeparamref name="TContext"/>
 /// to replace the raw body - an abstraction most transports do not yet implement (see
-/// <c>work/claim-check-plan.md</c> Phase 2). When none is registered, this middleware fails loud with
+/// <c>work/archive/claim-check-plan-2026-08.md</c> Phase 2). When none is registered, this middleware fails loud with
 /// an <see cref="InvalidOperationException"/> naming the context type, rather than silently leaving
 /// the placeholder body for the handler to choke on.
 /// </para>

@@ -1,7 +1,7 @@
 # Benzene.Mesh.Discovery.Aws
 
 ## What this package does
-The **AWS** half of mesh self-discovery (see `work/mesh-self-discovery-design.md`). Enumerates the
+The **AWS** half of mesh self-discovery (see `work/archive/mesh-self-discovery-design-2026-07.md`). Enumerates the
 Lambda functions in an AWS account, filtered by tag, and emits `MeshServiceRegistryEntry` records so
 the mesh aggregator discovers services instead of being hand-fed a `mesh.json`. Discovered entries are
 bound to the existing AWS-Lambda-Invoke interrogation source (`Benzene.Mesh.Aws.Lambda`'s
@@ -28,7 +28,7 @@ surface needed.
 - `Extensions.AddMeshAwsLambdaDiscovery()` — registers a default-credential `AmazonLambdaClient`, the
   provider (as an additional `IMeshDiscoveryProvider`), and a `MeshDiscoveryRunner` over all providers.
 
-## Design decisions (from `work/mesh-self-discovery-design.md` §0.1)
+## Design decisions (from `work/archive/mesh-self-discovery-design-2026-07.md` §0.1)
 - **`AWSSDK.Lambda` `ListFunctions`+`ListTags` only** — no `ResourceGroupsTaggingAPI` (zero new AWS
   dependency; `AWSSDK.Lambda` is already approved). The tagging-API option may be added later as an
   alternative for large accounts (N+1 `ListTags` calls is the trade-off here).

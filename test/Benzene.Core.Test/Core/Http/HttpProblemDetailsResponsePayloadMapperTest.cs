@@ -12,7 +12,7 @@ namespace Benzene.Test.Core.Http;
 
 /// <summary>
 /// Coverage for <see cref="HttpProblemDetailsResponsePayloadMapper{TContext}"/> (Phase 4 of
-/// work/problem-details-plan.md): the HTTP-facing decorator that fills in
+/// work/archive/problem-details-plan-2026-08.md): the HTTP-facing decorator that fills in
 /// <see cref="ProblemDetails.Status"/> from the same <see cref="IHttpStatusCodeMapper"/> the
 /// response status line uses, and otherwise delegates straight through.
 /// </summary>

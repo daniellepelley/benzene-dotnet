@@ -1,7 +1,7 @@
 # Benzene.CodeGen.Build
 
 The MSBuild one-liner for client generation (implementation plan Phase 6/6b,
-`work/spec-mesh-tooling-implementation-plan.md`): a consumer team commits the producer's
+`work/archive/spec-mesh-tooling-implementation-plan-2026-08.md`): a consumer team commits the producer's
 `{service}.spec.json` (Phase 1's `Benzene.Descriptor` output, or `benzene spec` piped to a file) into
 their own repo, adds one `<BenzeneServiceContract>` item, and gets a typed client compiled into their
 project on every build — no manual `benzene build` invocation, no checked-in generated `.cs` files.

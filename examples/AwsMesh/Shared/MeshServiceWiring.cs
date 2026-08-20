@@ -144,7 +144,7 @@ public static class MeshServiceWiring
                             pipeline.UseW3CTraceContext().UseCorrelationId();
                             // Per-send opt-in only (OutboundSend.Outboxed) — placed after the trace/
                             // correlation stamping and before the terminal transport converter, per
-                            // work/outbox-plan.md §2.1, so the outbox captures the same business-time
+                            // work/archive/outbox-plan-2026-08.md §2.1, so the outbox captures the same business-time
                             // context a live send would carry. A service that never sets Outboxed=true
                             // never adds this middleware, and its routes behave exactly as before.
                             if (send.Outboxed)
@@ -157,7 +157,7 @@ public static class MeshServiceWiring
                             // send is actually about to hit the wire (either a non-outboxed route's normal
                             // send, or the relay dispatcher's pass-through re-send of a captured envelope's
                             // real deserialized payload). See OutboundSend.ClaimChecked's remarks and
-                            // work/claim-check-plan.md Phase 6. A service that never sets ClaimChecked=true
+                            // work/archive/claim-check-plan-2026-08.md Phase 6. A service that never sets ClaimChecked=true
                             // never adds this middleware, and its routes behave exactly as before.
                             if (send.ClaimChecked)
                             {
@@ -196,7 +196,7 @@ public static class MeshServiceWiring
     /// <param name="enableOutboxDispatchStream">
     /// When <see langword="true"/>, also mounts <c>Benzene.Aws.Lambda.DynamoDb</c>'s <c>UseDynamoDb</c>
     /// so this Lambda handles its own outbox table's DynamoDB Streams <c>INSERT</c> records (the
-    /// near-real-time half of the outbox relay pair, <c>work/outbox-plan.md</c> §2.5) via the same
+    /// near-real-time half of the outbox relay pair, <c>work/archive/outbox-plan-2026-08.md</c> §2.5) via the same
     /// <paramref name="handlers"/> list — e.g. Orders' <c>OutboxStreamDispatchMessageHandler</c>.
     /// Defaults to <see langword="false"/>: a service with no outbox has nothing to stream-dispatch,
     /// and this flag keeps the other five services' Lambdas exactly as before.
@@ -204,7 +204,7 @@ public static class MeshServiceWiring
     /// <param name="enableSqsIdempotency">
     /// When <see langword="true"/>, adds <c>Benzene.Idempotency</c>'s <c>UseIdempotency()</c> to this
     /// service's SQS ingress, ahead of message-handler dispatch — the consume-side half of the
-    /// outbox+idempotency pair (<c>work/outbox-plan.md</c> §2.6): an at-least-once redelivery off an
+    /// outbox+idempotency pair (<c>work/archive/outbox-plan-2026-08.md</c> §2.6): an at-least-once redelivery off an
     /// outboxed route carries the envelope id as the <c>idempotency-key</c> header by default, and this
     /// dedups it before the handler runs. Defaults to <see langword="false"/> so only the service
     /// actually consuming outboxed traffic pays for the store lookup.
@@ -212,7 +212,7 @@ public static class MeshServiceWiring
     /// <param name="enableClaimCheckHydration">
     /// When <see langword="true"/>, adds <c>Benzene.ClaimCheck</c>'s <c>UseClaimCheck&lt;SqsMessageContext&gt;()</c>
     /// to this service's SQS ingress — the receive-side half of the claim-check pair
-    /// (<c>work/claim-check-plan.md</c> Phase 6): a message whose sender offloaded it (see
+    /// (<c>work/archive/claim-check-plan-2026-08.md</c> Phase 6): a message whose sender offloaded it (see
     /// <see cref="OutboundSend.ClaimChecked"/>) carries the <c>benzene-claim-check</c> header, and this
     /// resolves it back to the real body before the handler runs. Placed after <c>UseIdempotency()</c>
     /// when both are enabled — a redelivered offloaded message still carries the same placeholder body
@@ -276,7 +276,7 @@ public static class MeshServiceWiring
                 .UseMessageHandlers(handlers, router => router.UseFluentValidation()));
 
             // Also where an EventBridge-scheduled "sweep" rule lands (e.g. Orders' outbox sweep,
-            // work/outbox-plan.md §2.5): a scheduled rule invokes the Lambda directly with the same
+            // work/archive/outbox-plan-2026-08.md §2.5): a scheduled rule invokes the Lambda directly with the same
             // detail-type-routed envelope any other EventBridge-delivered event uses, so a scheduled
             // sweep needs no wiring beyond an ordinary [Message("...")] handler in this list.
             aws.UseEventBridge(eventBridge => Observe(eventBridge)
@@ -285,7 +285,7 @@ public static class MeshServiceWiring
             if (enableOutboxDispatchStream)
             {
                 // The other half of the relay pair: a DynamoDB Streams INSERT on this service's own
-                // outbox table dispatches the just-captured envelope near-real-time (work/outbox-plan.md
+                // outbox table dispatches the just-captured envelope near-real-time (work/archive/outbox-plan-2026-08.md
                 // §2.5). No IAmazonDynamoDB is needed here — that's only for the outbox store/transaction
                 // the caller registers separately; this pipeline just deserializes the stream record.
                 aws.UseDynamoDb(ddb => Observe(ddb)

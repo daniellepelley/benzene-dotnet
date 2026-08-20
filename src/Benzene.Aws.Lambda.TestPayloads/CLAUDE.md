@@ -8,7 +8,7 @@ carries **no AWS coupling**. This package adds the SNS/SQS/API-Gateway dressings
 self-serves example payloads dressed for the transports it's actually wired to, ready to paste into
 the Lambda test console — the runtime counterpart of the build-time `Benzene.CodeGen.LambdaTestTool`.
 
-This is the split the maintainer's `work/runtime-test-payloads-plan.md` decision **1(c)** called for:
+This is the split the maintainer's `work/archive/runtime-test-payloads-plan-2026-08.md` decision **1(c)** called for:
 runtime-clean core, AWS dressing in a separate opt-in package, so a non-AWS or minimal service never
 pulls the `Amazon.Lambda.*Events` contracts into its runtime graph.
 

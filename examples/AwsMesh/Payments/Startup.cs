@@ -19,11 +19,11 @@ namespace Benzene.Examples.AwsMesh.Payments;
 /// Cloud Service Profile over HTTP, answers the mesh's direct-invoke interrogation, and routes its
 /// domain handlers over SQS, SNS and EventBridge too — every pipeline logged and every payload
 /// validated. Also the <b>consume side</b> of the outbox+idempotency pair
-/// (<c>work/outbox-plan.md</c> §2.6): the <c>payments:capture</c> SQS ingress runs
+/// (<c>work/archive/outbox-plan-2026-08.md</c> §2.6): the <c>payments:capture</c> SQS ingress runs
 /// <c>UseIdempotency()</c> (<c>enableSqsIdempotency</c>), deduping the redeliveries an at-least-once
 /// outbox relay can produce (orders-api's outbox stamps its envelope id into the <c>idempotency-key</c>
 /// header by default, matching this store's default key strategy with zero extra configuration). Also
-/// the <b>hydrate side</b> of the claim-check pair (<c>work/claim-check-plan.md</c> Phase 6): the same
+/// the <b>hydrate side</b> of the claim-check pair (<c>work/archive/claim-check-plan-2026-08.md</c> Phase 6): the same
 /// ingress runs <c>UseClaimCheck&lt;SqsMessageContext&gt;()</c> (<c>enableClaimCheckHydration</c>),
 /// resolving any <c>benzene-claim-check</c> reference orders-api's oversized sends carry back to the
 /// real body before the handler runs.
@@ -37,7 +37,7 @@ public class Startup : BenzeneStartUp
     /// The S3 bucket <c>Benzene.ClaimCheck.Aws.S3</c> hydrates offloaded <c>payments:capture</c>
     /// receives from — the same bucket orders-api's <c>ClaimCheckBucketEnvVar</c> offloads to (see its
     /// Startup for why it's a dedicated bucket). See README "Claim-check: oversized payloads" and
-    /// <c>work/claim-check-plan.md</c> Phase 6.
+    /// <c>work/archive/claim-check-plan-2026-08.md</c> Phase 6.
     /// </summary>
     private const string ClaimCheckBucketEnvVar = "CLAIM_CHECK_BUCKET";
 

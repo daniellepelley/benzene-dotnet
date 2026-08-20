@@ -87,7 +87,7 @@ public class SpecTest
         var document = new OpenApiStringReader().Read(response.Body, out _);
 
         // 3, not 2: the error-response schema is now Benzene.Results.ProblemDetails (Phase 3 of
-        // work/problem-details-plan.md), whose Errors member references BenzeneError as its own
+        // work/archive/problem-details-plan-2026-08.md), whose Errors member references BenzeneError as its own
         // schema component - the old ErrorPayload had no nested object-typed member, so it never
         // contributed a second schema.
         Assert.Equal(3, document.Components.Schemas.Count);

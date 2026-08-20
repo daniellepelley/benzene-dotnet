@@ -4,7 +4,7 @@ An `IClaimCheckStore` (from `Benzene.ClaimCheck`) backed by an Amazon S3 bucket 
 store for the claim-check pattern: `Benzene.ClaimCheck`'s outbound offload middleware puts an
 oversized serialized wire body here and gets an `s3://` reference back; the inbound hydrate
 middleware resolves that reference back to the body on the receiving side. Ships alongside
-`Benzene.ClaimCheck.Azure.Blob` as the second store package — see `work/claim-check-plan.md` §2 for
+`Benzene.ClaimCheck.Azure.Blob` as the second store package — see `work/archive/claim-check-plan-2026-08.md` §2 for
 why a claim-check store is its own abstraction rather than reusing `Benzene.Mesh.Aws.S3`'s
 `IMeshArtifactStore`, and §3 for the full retention/failure reasoning this package implements.
 
@@ -70,7 +70,7 @@ governs the bucket.
   instead, which the hydrate middleware turns into `ClaimCheckNotFoundException`.
 - Two independent services (a sender and a receiver in different deployments) sharing a claim-check
   bucket must agree on the same bucket **and** prefix — that agreement is the same kind of explicit
-  deployment contract the wire header itself represents (Tier C, `work/claim-check-plan.md` decision
+  deployment contract the wire header itself represents (Tier C, `work/archive/claim-check-plan-2026-08.md` decision
   2).
 
 ## Tests

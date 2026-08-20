@@ -4,7 +4,7 @@ namespace Benzene.Clients.TraceContext;
 
 /// <summary>
 /// Provides <see cref="UseW3CTraceContext"/> for an outbound <see cref="OutboundContext"/> pipeline -
-/// see <c>work/benzene-clients-redesign-plan.md</c>.
+/// see <c>work/archive/benzene-clients-redesign-plan-2026-07.md</c>.
 /// </summary>
 public static class Extensions
 {

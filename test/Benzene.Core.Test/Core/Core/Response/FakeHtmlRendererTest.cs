@@ -19,7 +19,7 @@ using Xunit;
 namespace Benzene.Test.Core.Core.Response;
 
 /// <summary>
-/// Proof, not product (Phase 3 of docs/plans/request-response-improvements-plan.md): a test-only
+/// Proof, not product (Phase 3 of work/archive/request-response-improvements-plan-2026-07.md): a test-only
 /// HTML renderer demonstrating that <see cref="IResponseRenderer{TContext}"/> supports a
 /// representation beyond JSON/XML with zero changes to core - a real <c>Benzene.Html.*</c> package is
 /// future work.

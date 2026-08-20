@@ -29,7 +29,7 @@ provider: SchemaHealthCheck  ──"schema" health check {hashCode}──▶  co
   provider hash and the consumer's baked-in hash are directly comparable - equal means no drift,
   different means the contract changed. (Before this alignment, the provider hashed every handler
   under the *old*, non-projecting algorithm while a default client's hash was already domain-scoped
-  before hashing - the two could never match; see `work/cross-language-clients-plan.md` Phase 2.)
+  before hashing - the two could never match; see `work/archive/cross-language-clients-plan-2026-08.md` Phase 2.)
 - The wire contract (the `Type` and `Data` key strings) lives in
   `Benzene.HealthChecks.Core.SchemaHealthCheckConstants`, referenced by both this package and the
   consumer-side processor so they can't drift on a literal.

@@ -121,7 +121,7 @@
 >    EventBridge). ~~Real EventBridge/CloudWatch Events support remains unbuilt~~ — **built
 >    2026-07-14**: `Benzene.Aws.Lambda.EventBridge` (inbound, topic = `detail-type`) +
 >    `Benzene.Clients.Aws/EventBridge` (outbound PutEvents client) + TestHelpers, per
->    `docs/plans/eventbridge-plan.md`.
+>    `work/archive/eventbridge-plan-2026-08.md`.
 > 3. **Unit Tests** (P0 #3) — all 9 packages to 90%+ coverage (up from as low as 52%).
 >    Found and fixed 3 real bugs along the way (X-Ray timer crash, SNS client resolver
 >    bug, Lambda health check status bug); found but did NOT fix a 4th
@@ -531,7 +531,7 @@ the bare-metal-to-StartUp migration guide were both found already done, 2026-07-
 > envelope is modeled as Benzene's own POCO), plus an outbound
 > `EventBridgeBenzeneMessageClient` in `Benzene.Clients.Aws` (`PutEvents`; new
 > `AWSSDK.EventBridge` dependency) and a `.TestHelpers` package. Design record:
-> `docs/plans/eventbridge-plan.md`.
+> `work/archive/eventbridge-plan-2026-08.md`.
 
 **Public API Surface:**
 - `S3Application`, `S3LambdaHandler`, `S3RecordContext`, `S3Registrations` — names now
@@ -889,7 +889,7 @@ test above is picked up
 ### New Event Sources (Priority Order)
 
 1. **AWS Lambda - DynamoDB Streams** (6-8 weeks) — ✅ **Built 2026-07-14**:
-   `Benzene.Aws.Lambda.DynamoDb` (+ `.TestHelpers`), per `docs/plans/dynamodb-streams-plan.md`.
+   `Benzene.Aws.Lambda.DynamoDb` (+ `.TestHelpers`), per `work/archive/dynamodb-streams-plan-2026-08.md`.
    Topic = `"{tableName}:{eventName}"`, body = record image unmarshalled from AttributeValue
    format to plain JSON, ordered sequential processing with stop-at-first-failure
    `ReportBatchItemFailures` checkpointing, zero new NuGet dependencies (own envelope POCOs).

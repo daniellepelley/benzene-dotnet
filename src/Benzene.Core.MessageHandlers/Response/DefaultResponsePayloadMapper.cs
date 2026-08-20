@@ -42,7 +42,7 @@ public class DefaultResponsePayloadMapper<TContext> : IResponsePayloadMapper<TCo
     }
 
     /// <summary>
-    /// Builds the problem document to emit for a failed result (work/problem-details-plan.md Phase 3
+    /// Builds the problem document to emit for a failed result (work/archive/problem-details-plan-2026-08.md Phase 3
     /// step 4): when the result implements <see cref="IHasProblemDetails"/> with a non-null
     /// <see cref="IHasProblemDetails.Problem"/> - a handler that deliberately authored one via
     /// <see cref="BenzeneResult.Problem{T}"/> (custom <see cref="ProblemDetails.Type"/>/<see

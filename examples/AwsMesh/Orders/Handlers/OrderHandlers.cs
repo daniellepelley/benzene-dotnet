@@ -43,7 +43,7 @@ public class GetOrdersMessageHandler : IMessageHandler<Void, OrderDto[]>
 /// whole request loudly (the caller sees the failure, exactly as before a transport failure would),
 /// and once the transaction commits, both downstream sends are durable — a relay Lambda (see
 /// <c>Handlers/OutboxHandlers.cs</c>) delivers them out of band, retried with backoff, parked after
-/// <c>OutboxOptions.MaxAttempts</c>. See <c>work/outbox-plan.md</c> §2.3's "Transactional" mode for
+/// <c>OutboxOptions.MaxAttempts</c>. See <c>work/archive/outbox-plan-2026-08.md</c> §2.3's "Transactional" mode for
 /// exactly what this does and does not guarantee (delivery is still at-least-once, never
 /// exactly-once).
 /// </summary>
@@ -83,7 +83,7 @@ public class CreateOrderMessageHandler : IMessageHandler<CreateOrder, OrderDto>
         // OutboundSqsContextConverter's remarks), and the generated client's method returns a typed
         // PaymentDto that no fire-and-forget transport can ever produce.
         //
-        // Claim-check dogfood (README "Claim-check: oversized payloads", work/claim-check-plan.md Phase
+        // Claim-check dogfood (README "Claim-check: oversized payloads", work/archive/claim-check-plan-2026-08.md Phase
         // 6): this route is also ClaimChecked=true (Startup). When the caller attaches a
         // SupportingDocument, ClaimCheckDemoPayload folds it into OrderId rather than adding a new field
         // to CapturePayment — see that helper's remarks for why. Ordinary calls with no

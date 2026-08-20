@@ -20,7 +20,7 @@ namespace Benzene.Test.Core.Core.Response;
 
 /// <summary>
 /// Coverage for <see cref="SerializerResponseRenderer{TContext}"/>'s failure-branch content type
-/// (Phase 3 of work/problem-details-plan.md, §2.3): the negotiated format is rewritten to its RFC
+/// (Phase 3 of work/archive/problem-details-plan-2026-08.md, §2.3): the negotiated format is rewritten to its RFC
 /// 9457 "problem" counterpart on a failed result, and left alone on success.
 /// </summary>
 public class SerializerResponseRendererContentTypeTest

@@ -15,7 +15,7 @@ namespace Benzene.Clients.Aws.Sqs;
 /// Converts between an outbound <see cref="OutboundContext"/> and an <see cref="SqsSendMessageContext"/>,
 /// so an outbound route (<c>OutboundRoutingBuilder.Route</c>) can send via SQS. The
 /// <see cref="OutboundContext"/> counterpart of <see cref="SqsContextConverter{T}"/> - see
-/// <c>work/benzene-clients-redesign-plan.md</c> §3.
+/// <c>work/archive/benzene-clients-redesign-plan-2026-07.md</c> §3.
 /// </summary>
 /// <remarks>
 /// SQS has no request/response semantics beyond a send acknowledgement, so the response this

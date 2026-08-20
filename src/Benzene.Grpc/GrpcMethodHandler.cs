@@ -138,7 +138,7 @@ public class GrpcMethodHandler : IGrpcMethodHandler
     /// <c>google.rpc.BadRequest</c> with one field violation per message - <see cref="Benzene.Abstractions.Results.BenzeneError.Field"/>
     /// fills <see cref="Google.Rpc.BadRequest.Types.FieldViolation.Field"/> when present (left unset,
     /// not empty-string, when the error isn't scoped to a field - Phase 5 of
-    /// work/problem-details-plan.md, "gRPC gets a free correctness win", ruling §5.3). Carrying
+    /// work/archive/problem-details-plan-2026-08.md, "gRPC gets a free correctness win", ruling §5.3). Carrying
     /// <see cref="Benzene.Abstractions.Results.BenzeneError.Code"/> in <c>google.rpc.ErrorInfo</c> is
     /// out of scope (parked, plan §8) - not added here.
     /// </summary>

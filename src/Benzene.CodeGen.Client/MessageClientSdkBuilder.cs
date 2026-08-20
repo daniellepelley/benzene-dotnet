@@ -121,7 +121,7 @@ public class MessageClientSdkBuilder : ICodeBuilder<EventServiceDocument>
     private string[] AddRoutingClass(EventServiceDocument eventServiceDocument)
     {
         // Reflected over by Benzene.Clients' ValidateOutboundRouting() at startup - see
-        // work/benzene-clients-redesign-plan.md §2.5. Exactly the topics this client has methods for:
+        // work/archive/benzene-clients-redesign-plan-2026-07.md §2.5. Exactly the topics this client has methods for:
         // Benzene's own reserved endpoints (benzene:*) are framework plumbing, not a client's domain
         // surface, and are excluded by TopicScope like any other reserved topic - naming one here
         // would demand an outbound route the consumer never asked for and fail its start-up checks.

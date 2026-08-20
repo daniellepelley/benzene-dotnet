@@ -4,7 +4,7 @@ using Benzene.Abstractions.DI;
 namespace Benzene.Clients;
 
 /// <summary>
-/// The compile-time-adjacent safety net from <c>work/benzene-clients-redesign-plan.md</c> §2.5:
+/// The compile-time-adjacent safety net from <c>work/archive/benzene-clients-redesign-plan-2026-07.md</c> §2.5:
 /// catches a missing outbound route at startup instead of the first time a rarely-hit code path
 /// executes it.
 /// </summary>

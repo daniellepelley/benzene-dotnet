@@ -125,7 +125,9 @@ available to you.
 
 ### Known live findings — start here, do not rediscover them
 
-`work/gaps-found-building-the-pattern-examples.md` is your standing backlog. Two of its entries are
+The live remainders from the pattern-examples gap hunt are tracked in `work/1.0-release-plan.md`
+§9 ("Remainders extracted by the 2026-08-20 archive sweep"); the full record is archived at
+`work/archive/gaps-found-building-the-pattern-examples-2026-08.md`. Two of its entries are
 textbook rule-1 failures found by exactly the duplication sweep above: seven hand-rolled outbound
 adapters across five patterns (no `OutboundContext` overload for RabbitMQ/Kafka/HTTP), and
 `UseAspNet` existing for releases while four in-repo examples hand-rolled its shape because nothing

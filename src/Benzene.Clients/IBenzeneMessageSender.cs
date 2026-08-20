@@ -7,7 +7,7 @@ namespace Benzene.Clients;
 /// request, nothing else - no service name, no client type, no factory resolution at the call site.
 /// Registered by <see cref="OutboundRoutingBuilder"/>/<c>AddOutboundRouting(...)</c>, which builds
 /// one outbound pipeline per topic ahead of time. See
-/// <c>work/benzene-clients-redesign-plan.md</c> §2.1 for the full design.
+/// <c>work/archive/benzene-clients-redesign-plan-2026-07.md</c> §2.1 for the full design.
 /// </summary>
 public interface IBenzeneMessageSender
 {

@@ -215,7 +215,7 @@ public class OutboxMiddlewareTest
     public async Task Capture_BareUseOutbox_InheritsWriteModeFromAddOutbox()
     {
         // A route that never passes its own configure delegate must still honor the process-wide
-        // default AddOutbox(configure) set - this is the exact wiring work/outbox-plan.md's Phase 3
+        // default AddOutbox(configure) set - this is the exact wiring work/archive/outbox-plan-2026-08.md's Phase 3
         // relies on ("AddOutbox(WriteMode=Transactional) ... UseOutbox()" with no per-route override).
         var (services, container) = NewContainer();
         container.AddOutbox(o => o.WriteMode = OutboxWriteMode.Transactional);

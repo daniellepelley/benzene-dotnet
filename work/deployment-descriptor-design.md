@@ -1,13 +1,13 @@
 # Design note: a build-time deployment descriptor for Benzene services
 
 **Status:** rationale for approved work. The follow-on
-[`spec-mesh-tooling-implementation-plan.md`](spec-mesh-tooling-implementation-plan.md) (maintainer
+[`archive/spec-mesh-tooling-implementation-plan-2026-08.md`](archive/spec-mesh-tooling-implementation-plan-2026-08.md) (maintainer
 approved 2026-08-09; owner design review 2026-08-12) committed Phase 1 of this to the roadmap —
 read this document for the *why*, the plan for the *what*. **Two positions below are superseded**
 by the plan's 2026-08-12 amendments: the "repositions, doesn't deprecate" stance on
 `Benzene.CodeGen.Terraform` and recommendation 5 — the owner's call is deprecation (freeze now,
 delete once the reference cookbook exists). Captures the conclusion of the "descriptor-first infra
-generation" investigation and is backed by a runnable spike (`work/spikes/deployment-descriptor/`)
+generation" investigation and is backed by a runnable spike (`work/archive/deployment-descriptor-spike-2026-08/`)
 that produced the real output quoted below against the `examples/AwsMesh/Payments` service.
 
 ---
@@ -80,7 +80,7 @@ produces or which transports it uses.
 
 ## The spike — real output from a non-running service
 
-`work/spikes/deployment-descriptor/` constructs the **real `examples/AwsMesh/Payments` service**
+`work/archive/deployment-descriptor-spike-2026-08/` constructs the **real `examples/AwsMesh/Payments` service**
 in-process (its actual `Startup.ConfigureServices` + `Configure`, exactly as `AwsLambdaHost<Startup>`
 runs on cold start), never deploying and never opening a socket, then reads the `spec` and `mesh`
 descriptors it already serves and distils a neutral `service.json`. The core is ~15 lines:
@@ -100,7 +100,7 @@ var descriptor = MeshDescriptorFactory.Create(lookUp, new MeshServiceInfo("payme
 
 The payments service consumes two domain topics, publishes two events over two different transports,
 and is wired over five inbound transports — and the distilled `service.json` captured **all of it**
-(full file in `work/spikes/deployment-descriptor/output/service.json`):
+(full file in `work/archive/deployment-descriptor-spike-2026-08/output/service.json`):
 
 ```jsonc
 {

@@ -7,7 +7,7 @@ namespace Benzene.Clients.CorrelationId;
 /// Outbound middleware that stamps the current <see cref="ICorrelationId"/> value onto
 /// <see cref="OutboundContext.Headers"/>. The middleware-pipeline replacement for
 /// <see cref="CorrelationIdBenzeneMessageClient"/> - see
-/// <c>work/benzene-clients-redesign-plan.md</c> §2.4.
+/// <c>work/archive/benzene-clients-redesign-plan-2026-07.md</c> §2.4.
 /// </summary>
 public class CorrelationIdMiddleware : IMiddleware<OutboundContext>
 {

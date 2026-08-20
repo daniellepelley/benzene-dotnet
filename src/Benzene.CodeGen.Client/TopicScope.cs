@@ -10,7 +10,7 @@ namespace Benzene.CodeGen.Client;
 /// <c>RequiredTopics</c>, or - in atomic mode - which per-topic clients exist) run. Filtering the
 /// document once this way, rather than re-implementing the same include/exclude rule at each site,
 /// is what makes those sites unable to disagree with each other - see
-/// work/spec-mesh-tooling-implementation-plan.md Phase 3b step 3.
+/// work/archive/spec-mesh-tooling-implementation-plan-2026-08.md Phase 3b step 3.
 /// </summary>
 internal static class TopicScope
 {

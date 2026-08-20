@@ -53,7 +53,7 @@ public class Startup
                 // the health/readiness surface is what stops a drifted or slow payments-api from
                 // de-routing orders-api. Added before the (terminal) cloud-service call, per its
                 // "app middleware goes first" contract. See docs/kubernetes-health-checks.md and
-                // work/client-health-checks-design.md.
+                // work/archive/client-health-checks-design-2026-08.md.
                 .UseContractsCheck(x => x.AddContractCheck<PaymentsContractClient>("payments-api"))
                 .UseBenzeneCloudService("orders-api", cloud => cloud
                     .WithServiceVersion("1.0.0")

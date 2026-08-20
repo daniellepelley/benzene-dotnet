@@ -24,7 +24,7 @@ emits an inspectable registry document. The vanilla host reads that document lik
 Discovery proposes; config disposes — and the proposal can be reviewed, diffed, or gated through a
 pull request before the mesh consumes it.
 
-This is not a new architecture. `work/mesh-self-discovery-design.md` already decided that discovery
+This is not a new architecture. `work/archive/mesh-self-discovery-design-2026-07.md` already decided that discovery
 creates config and the aggregator consumes it. This slice packages that seam.
 
 ## What exists today
@@ -47,7 +47,7 @@ Three facts that shape this slice:
 
 ## Before you start
 
-Read [`README.md`](README.md) here, `work/mesh-self-discovery-design.md`, and your merged slice 1
+Read [`README.md`](README.md) here, `work/archive/mesh-self-discovery-design-2026-07.md`, and your merged slice 1
 branch. Confirm green:
 
 ```bash

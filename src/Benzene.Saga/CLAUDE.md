@@ -5,7 +5,7 @@ An in-code **saga orchestrator** for distributed transactions across services: r
 stages that either **completes in full or rolls back in full**, leaving no orphaned records, so the
 whole operation can be safely retried. It's the generalized, sustainable successor to the original
 commercial Benzene saga code (`Legacy/Benzene.Framework/Saga` in the `BenzeneImport` repo) — see
-`work/saga-design.md` for the design and the decisions taken.
+`work/archive/saga-design-2026-07.md` for the design and the decisions taken.
 
 ## Capability boundary — in-process only, NO durable crash-resume
 This is a deliberate boundary, not a gap (see `work/1.0-release-plan.md` §2 and the
@@ -62,7 +62,7 @@ Saga  ── ordered ──▶  Stage  ── concurrent ──▶  Step (forwar
   `EventsFor(sagaId)`) is the built-in test double; a durable adapter is a 3-method copy-paste (see
   the cookbook). `SagaRunInfo`/`SagaStateEvent`/`SagaStateEventKind` are the data model.
 
-## Design decisions (from `work/saga-design.md` §7)
+## Design decisions (from `work/archive/saga-design-2026-07.md` §7)
 - **Await-all within a stage** (not fail-fast) — deterministic; every step's outcome is known
   before deciding to compensate.
 - **Best-effort rollback** — every compensation is attempted even if one fails; failures surface as

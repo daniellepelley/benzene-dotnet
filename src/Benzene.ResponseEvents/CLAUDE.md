@@ -4,7 +4,7 @@
 Republishes a request/response handler's response payload as a follow-up event on fire-and-forget
 transports — the *response-as-event* pattern. A handler on a queue transport (e.g. SQS
 `order:create`) returns a payload the transport can't deliver; a per-pipeline mapping publishes it
-as an event (`order:created`) instead. Design: `work/response-as-event-design.md`; usage:
+as an event (`order:created`) instead. Design: `work/archive/response-as-event-design-2026-07.md`; usage:
 `docs/cookbooks/response-as-event.md`.
 
 This was originally built inside the now-deleted `Benzene.Extras` grab-bag package and promoted to

@@ -64,7 +64,7 @@ public static class Extensions
     /// <summary>
     /// Wraps <typeparamref name="TContext"/>'s response payload mapper with
     /// <see cref="HttpProblemDetailsResponsePayloadMapper{TContext}"/>, so a failed result's problem
-    /// document carries the numeric HTTP <c>status</c> member (work/problem-details-plan.md Phase 4;
+    /// document carries the numeric HTTP <c>status</c> member (work/archive/problem-details-plan-2026-08.md Phase 4;
     /// docs/specification/wire-contracts.md §2.1/§2.3). Call this for every context an HTTP-facing
     /// transport serves requests on (self-host ASP.NET Core, API Gateway v1/v2, Azure Functions
     /// ASP.NET, ...) - a transport that only carries a <c>BenzeneMessage</c> envelope (no real HTTP

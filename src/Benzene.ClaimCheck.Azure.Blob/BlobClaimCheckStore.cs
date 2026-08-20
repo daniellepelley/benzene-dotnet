@@ -10,7 +10,7 @@ namespace Benzene.ClaimCheck.Azure.Blob;
 /// <c>Benzene.ClaimCheck.Aws.S3.S3ClaimCheckStore</c>. Issues opaque references of the form
 /// <c>azblob://{container}/{key}</c>; the key layout is <c>{prefix}{topic}/{yyyy/MM/dd}/{guid}</c>
 /// (topic verbatim, a UTC date segment so the container's lifecycle rule's effect is auditable by
-/// browsing the container). See <c>work/claim-check-plan.md</c> §2-§3 for why this is a separate store
+/// browsing the container). See <c>work/archive/claim-check-plan-2026-08.md</c> §2-§3 for why this is a separate store
 /// from <c>Benzene.Mesh.Azure.Blob.BlobMeshArtifactStore</c> and for the retention/failure posture this
 /// type honors (no delete-on-consume; TTL-based expiry owned by a Blob lifecycle-management policy on
 /// the container/prefix; a missing/expired blob resolves to <c>null</c>, never a silent substitute).

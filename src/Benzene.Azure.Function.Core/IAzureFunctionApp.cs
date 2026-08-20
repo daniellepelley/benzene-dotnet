@@ -20,7 +20,7 @@ public interface IAzureFunctionApp
     /// The isolated worker's cancellation token for this invocation (bound as a trigger method
     /// parameter by the Functions host), or <see cref="CancellationToken.None"/> if the trigger
     /// doesn't request one. Forwarded so any component resolved during the pipeline can observe it
-    /// via <c>ICancellationTokenAccessor</c> - see <c>work/cancellation-design.md</c>.
+    /// via <c>ICancellationTokenAccessor</c> - see <c>work/archive/cancellation-design-2026-08.md</c>.
     /// </param>
     /// <returns>A task that resolves to the response produced by the matching entry point application.</returns>
     Task<TResponse> HandleAsync<TRequest, TResponse>(TRequest request, string? name = null, CancellationToken cancellationToken = default);
@@ -36,7 +36,7 @@ public interface IAzureFunctionApp
     /// The isolated worker's cancellation token for this invocation (bound as a trigger method
     /// parameter by the Functions host), or <see cref="CancellationToken.None"/> if the trigger
     /// doesn't request one. Forwarded so any component resolved during the pipeline can observe it
-    /// via <c>ICancellationTokenAccessor</c> - see <c>work/cancellation-design.md</c>.
+    /// via <c>ICancellationTokenAccessor</c> - see <c>work/archive/cancellation-design-2026-08.md</c>.
     /// </param>
     /// <returns>A task that completes when the matching entry point application has finished handling the request.</returns>
     Task HandleAsync<TRequest>(TRequest request, string? name = null, CancellationToken cancellationToken = default);

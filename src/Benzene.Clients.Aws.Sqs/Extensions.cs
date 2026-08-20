@@ -82,7 +82,7 @@ public static class Extensions
 
     /// <summary>
     /// Converts an outbound route pipeline (<c>OutboundRoutingBuilder.Route</c>) to send via SQS,
-    /// using a custom middleware configuration. See <c>work/benzene-clients-redesign-plan.md</c> §3.
+    /// using a custom middleware configuration. See <c>work/archive/benzene-clients-redesign-plan-2026-07.md</c> §3.
     /// </summary>
     /// <param name="app">The outbound pipeline builder to convert.</param>
     /// <param name="queueUrl">The URL of the queue to send to.</param>

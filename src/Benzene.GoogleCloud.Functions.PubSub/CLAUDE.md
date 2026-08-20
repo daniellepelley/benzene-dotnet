@@ -60,7 +60,7 @@ package wired through `UseMessageHandlers()` exactly like every other transport,
   exception into a non-2xx response, so the subscription's own retry/dead-letter policy notices); a
   non-exception failure result is **escalated** into a thrown `PubSubMessageProcessingException` too,
   so the message is nacked and redelivered (`RaiseOnFailureStatus` defaults to `true`, safe-by-default
-  — see `work/settlement-contract-1.0.md`). Set `PubSubOptions.CatchExceptions = true` to catch and
+  — see `work/archive/settlement-contract-1.0-2026-07.md`). Set `PubSubOptions.CatchExceptions = true` to catch and
   log an exception instead; set `RaiseOnFailureStatus = false` for at-most-once (a failure result is
   accepted, not retried). A redelivered message must be handled idempotently.
 - **Preset-topic override is not implemented for this package yet** - unlike

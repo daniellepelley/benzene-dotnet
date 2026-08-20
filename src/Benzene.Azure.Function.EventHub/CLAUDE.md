@@ -13,7 +13,7 @@ if any handler **throws**, the exception cascades, fails the whole Functions inv
 Event Hubs trigger re-delivers the **entire** batch — so every already-succeeded sibling re-runs. A
 handler returning a non-exception **failure result** (e.g. `BenzeneResult.ServiceUnavailable(...)`)
 is now **escalated** the same way by default (`RaiseOnFailureStatus` defaults to `true`, flipped
-2026-07-21 — see `work/settlement-contract-1.0.md`, and the caveat below about the envelope path).
+2026-07-21 — see `work/archive/settlement-contract-1.0-2026-07.md`, and the caveat below about the envelope path).
 `CatchExceptions` (per-event isolation) stays opt-in (mirroring `Benzene.Azure.Function.EventGrid` /
 `Benzene.Azure.Function.QueueStorage` / `Benzene.Azure.Function.Kafka`):
 
@@ -154,4 +154,4 @@ buildTransitive). The hand-written form still works. See `docs/azure-functions.m
 Not wired here yet, and less mechanical than the other transports: there is already an
 `IMessageBodyGetter<EventHubContext>`, but hydration needs the matching
 `IMessageBodySetter<EventHubContext>` registered too — the same 5-line pattern as
-`Benzene.Aws.Lambda.Sqs`/`.Sns`/`.EventBridge` ship (see `work/claim-check-plan.md` Phase 2 step 4).
+`Benzene.Aws.Lambda.Sqs`/`.Sns`/`.EventBridge` ship (see `work/archive/claim-check-plan-2026-08.md` Phase 2 step 4).

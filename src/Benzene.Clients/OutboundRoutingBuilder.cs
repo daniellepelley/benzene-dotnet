@@ -8,7 +8,7 @@ namespace Benzene.Clients;
 /// Builds the topic-keyed outbound routing table: one <see cref="IMiddlewarePipeline{TContext}"/>
 /// per topic, replacing <c>ClientsBuilder</c>/<c>SingleClientsBuilder</c>'s split-by-cardinality
 /// shape outright - "one client" is just the N=1 case of "many". Registered via
-/// <c>AddOutboundRouting(...)</c>; see <c>work/benzene-clients-redesign-plan.md</c> §2.2.
+/// <c>AddOutboundRouting(...)</c>; see <c>work/archive/benzene-clients-redesign-plan-2026-07.md</c> §2.2.
 /// </summary>
 public class OutboundRoutingBuilder
 {

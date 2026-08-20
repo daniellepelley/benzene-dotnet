@@ -9,7 +9,7 @@ threshold - stores the serialized body in a pluggable `IClaimCheckStore` and rep
 a tiny placeholder, carrying the store-issued reference on the `benzene-claim-check` wire header.
 `ClaimCheckHydrateMiddleware<TContext>` runs on the receiving side's inbound transport pipeline, reads
 that header, resolves the reference back through the (receiver's own) `IClaimCheckStore`, and replaces
-the raw message body with the stored content before deserialization. See `work/claim-check-plan.md`
+the raw message body with the stored content before deserialization. See `work/archive/claim-check-plan-2026-08.md`
 §1-§3 for the full design reasoning (why middleware and not a client/transport feature, the wire
 shape, the store-abstraction contract, and the retention/failure posture) - it is the authority this
 package implements.
@@ -17,7 +17,7 @@ package implements.
 Persistence is pluggable via `IClaimCheckStore`, mirroring `Benzene.Idempotency`'s shape. **This
 package ships `InMemoryClaimCheckStore`** (single-process, for one host / tests / local development).
 For a real deployment, use a durable, shared store: `Benzene.ClaimCheck.Aws.S3` and
-`Benzene.ClaimCheck.Azure.Blob` are the sibling production stores (see `work/claim-check-plan.md`
+`Benzene.ClaimCheck.Azure.Blob` are the sibling production stores (see `work/archive/claim-check-plan-2026-08.md`
 Phases 4-5) - a payload offloaded by one instance must be resolvable by whichever instance receives
 the message, which an in-process dictionary cannot do across a fleet.
 
@@ -108,7 +108,7 @@ disappears is a real future refactor, out of scope here.
   the default `JsonSerializer`.
 - **Benzene.Core.Middleware** - the pipeline builder implementation extension methods bind to.
 
-No cloud SDK dependency - by design (see `work/claim-check-plan.md` §2 for why the S3/Blob stores are
+No cloud SDK dependency - by design (see `work/archive/claim-check-plan-2026-08.md` §2 for why the S3/Blob stores are
 separate packages rather than folded in here).
 
 ## Conventions

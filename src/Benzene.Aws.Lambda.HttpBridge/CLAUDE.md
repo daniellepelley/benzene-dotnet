@@ -50,7 +50,7 @@ var app = builder.Build();
 await app.StartAsync();     // LambdaServer captures the IHttpApplication here — required
 ```
 Two failure modes worth knowing, both remote from their cause and recorded in
-`work/aws-lambda-aspnetcore-research.md`: skipping `StartAsync()` leaves the HTTP path with nothing
+`work/archive/aws-lambda-aspnetcore-research-2026-07.md`: skipping `StartAsync()` leaves the HTTP path with nothing
 to dispatch into (exactly what `AddBenzeneAwsLambdaHosting` captures for you); and per-record SQS
 errors surface only through `ILogger`, so a cleared logging pipeline makes a broken handler look like
 a message that simply did not route (inherent to the SQS transport, stated in its docs). A third — the

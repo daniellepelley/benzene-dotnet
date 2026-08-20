@@ -15,7 +15,7 @@ namespace Benzene.Clients.Aws.EventBridge;
 /// <see cref="EventBridgeSendMessageContext"/>, so an outbound route (<c>OutboundRoutingBuilder.Route</c>)
 /// can publish via EventBridge. The <see cref="OutboundContext"/> counterpart of
 /// <see cref="EventBridgeContextConverter{T}"/> — the SNS/SQS <c>OutboundContext</c> converters' EventBridge
-/// twin. See <c>work/benzene-clients-redesign-plan.md</c> §3.
+/// twin. See <c>work/archive/benzene-clients-redesign-plan-2026-07.md</c> §3.
 /// </summary>
 /// <remarks>
 /// EventBridge routes on the event's <c>Source</c>/<c>DetailType</c>, so the Benzene routing topic maps to
