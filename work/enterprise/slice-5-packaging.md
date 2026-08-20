@@ -1,6 +1,7 @@
 # Slice 5 — Packaging polish
 
-**Status:** ready to build.
+**Status:** **SHIPPED** (verified against source 2026-08-20) — `deploy/Mesh/helm/benzene-mesh/`, `deploy/Mesh/CONFIG.md`, and the redacted
+startup summary in `MeshConfigSummary.cs` (covered by `MeshConfigSummaryTest`).
 **Depends on:** slice 1 (there is nothing to document until the config catalog exists) and slice 2
 (the Helm chart and the config reference both have to cover `auth`).
 **Branch:** `claude/mesh-enterprise-slice-5`
@@ -159,12 +160,12 @@ around it.
 
 ## Definition of done
 
-- [ ] `dotnet build` and `dotnet test` green on `deploy/Mesh/Benzene.Mesh.Host.sln`.
-- [ ] Startup logs the effective configuration, with secret-shaped keys redacted and a test proving it.
-- [ ] `deploy/Mesh/CONFIG.md` documents every config key and both worked examples.
-- [ ] `dotnet pack` produces an installable tool whose `--validate-config` works.
-- [ ] `helm lint` and `helm template` pass, with no secret in the rendered ConfigMap.
-- [ ] `README.md` and `CLAUDE.md` describe the host as it now is; the "No Tempo wiring" deviation is gone.
+- [x] `dotnet build` and `dotnet test` green on `deploy/Mesh/Benzene.Mesh.Host.sln`.
+- [x] Startup logs the effective configuration, with secret-shaped keys redacted and a test proving it.
+- [x] `deploy/Mesh/CONFIG.md` documents every config key and both worked examples.
+- [x] `dotnet pack` produces an installable tool whose `--validate-config` works.
+- [x] `helm lint` and `helm template` pass, with no secret in the rendered ConfigMap.
+- [x] `README.md` and `CLAUDE.md` describe the host as it now is; the "No Tempo wiring" deviation is gone.
 
 ## Do NOT touch
 

@@ -1,6 +1,10 @@
 # Slice 1 — Config schema v1: the whole catalog from `mesh.json`
 
-**Status:** ready to build. **This is the centrepiece of the set.**
+**Status:** **SHIPPED** (verified against source 2026-08-20) — `deploy/Mesh/Benzene.Mesh.Host/{MeshConfigLoader,MeshConfigValidator,MeshSourceRegistrar}.cs`
+plus `deploy/Mesh/mesh.sample.json` and the `--validate-config` entry point in `Program.cs`; covered by
+`MeshConfigLoaderTest`, `MeshConfigValidatorTest`, `MeshSourceRegistrarTest`, `MeshHostConfigTest` and
+`AwsMeshParityTest`.
+*(Original status: ready to build. **This is the centrepiece of the set.**)*
 **Depends on:** slice 0 (merged). Without 0.1 the adapters fight; without 0.2 non-filesystem
 artifact stores have nothing serving them; without 0.3 there is nowhere to put the tests.
 **Branch:** `claude/mesh-enterprise-slice-1`
@@ -232,17 +236,17 @@ credential chain or environment variables. Say so explicitly in the README.
 
 ## Definition of done
 
-- [ ] All build and test commands green, including `dotnet build Benzene.sln`.
-- [ ] `examples/K8sMesh/compose/mesh.json` still works unmodified, and the compose smoke test passes.
-- [ ] Every name in the valid-values lists registers what it should, proven by a test each.
-- [ ] Every unknown name fails at startup with a message listing the valid values, proven by a test each.
-- [ ] A missing required option names the missing key.
-- [ ] `--validate-config` returns 0 for the sample and non-zero for a broken config.
-- [ ] The AwsMesh parity test passes, or its gaps are reported.
-- [ ] `mesh.sample.json` exists; README documents every section plus the permission matrix; the
+- [x] All build and test commands green, including `dotnet build Benzene.sln`.
+- [x] `examples/K8sMesh/compose/mesh.json` still works unmodified, and the compose smoke test passes.
+- [x] Every name in the valid-values lists registers what it should, proven by a test each.
+- [x] Every unknown name fails at startup with a message listing the valid values, proven by a test each.
+- [x] A missing required option names the missing key.
+- [x] `--validate-config` returns 0 for the sample and non-zero for a broken config.
+- [x] The AwsMesh parity test passes, or its gaps are reported.
+- [x] `mesh.sample.json` exists; README documents every section plus the permission matrix; the
       "No Tempo wiring" deviation is gone from `CLAUDE.md`.
-- [ ] No `src/` options class was modified. No public API signature changed.
-- [ ] No `Benzene.Mesh.Discovery.*` reference was added.
+- [x] No `src/` options class was modified. No public API signature changed.
+- [x] No `Benzene.Mesh.Discovery.*` reference was added.
 
 ## Do NOT
 

@@ -1,6 +1,8 @@
 # Slice 3 — Discovery as a separate deployable
 
-**Status:** ready to build.
+**Status:** **SHIPPED** (verified against source 2026-08-20) — `deploy/Discovery/` (host + tests + `discovery.sample.json`) over
+`src/Benzene.Mesh.Discovery.{Aws,Azure,Kubernetes}/`, with the host-stays-clean invariant enforced by
+`NoDiscoveryInVanillaHostTest` and the union behaviour by `StartupRegistryDocumentsTest`.
 **Depends on:** slice 1 (the `registryDocuments` key joins the schema slice 1 establishes).
 **Branch:** `claude/mesh-enterprise-slice-3`
 
@@ -143,14 +145,14 @@ Cross-reference from the mesh host's README so an operator finds it.
 
 ## Definition of done
 
-- [ ] All build and test commands green; the compose smoke test still passes.
-- [ ] `registryDocuments` unions with `services`, `services` wins clashes, proven by tests.
-- [ ] Partial read failure degrades and logs; total failure fails loudly.
-- [ ] The discovery job runs once, writes the document, exits non-zero on failure.
-- [ ] Tag key, regions and namespace are all configurable.
-- [ ] **The invariant test fails if a `Benzene.Mesh.Discovery.*` reference is added to the host.**
+- [x] All build and test commands green; the compose smoke test still passes.
+- [x] `registryDocuments` unions with `services`, `services` wins clashes, proven by tests.
+- [x] Partial read failure degrades and logs; total failure fails loudly.
+- [x] The discovery job runs once, writes the document, exits non-zero on failure.
+- [x] Tag key, regions and namespace are all configurable.
+- [x] **The invariant test fails if a `Benzene.Mesh.Discovery.*` reference is added to the host.**
       Verify by temporarily adding one and watching it fail — then remove it.
-- [ ] Both READMEs explain the model and the least-privilege roles.
+- [x] Both READMEs explain the model and the least-privilege roles.
 
 ## Do NOT
 

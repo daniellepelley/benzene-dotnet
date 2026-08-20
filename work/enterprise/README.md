@@ -1,7 +1,10 @@
 # Mesh enterprise readiness — implementation briefs
 
-**Living document.** These are plans still being worked; see [`work/README.md`](../README.md) for
-the living-vs-dated rule.
+**Status (2026-08-20): slices 0, 1, 2, 3 and 5 have shipped** — each brief now carries its evidence and
+a ticked definition-of-done. **Slice 4 is the only one still to build**, and it is still design-first.
+The briefs stay here rather than being archived because the shipped host and packages are written to
+them and the "Deferred" section below is a live backlog. See [`work/README.md`](../README.md) for the
+living-vs-dated rule.
 
 ## What this is
 
@@ -21,20 +24,21 @@ says so in the roadmap when it lands. §4.4 (service registry) is the section th
 
 ## The slices
 
-| # | Slice | Depends on | Ready to build? |
+| # | Slice | Depends on | State |
 |---|---|---|---|
-| 0 | [Make the shipped adapters composable](slice-0-composable-adapters.md) | — | Yes |
-| 1 | [Config schema v1 — the whole catalog from `mesh.json`](slice-1-config-schema.md) | 0 | Yes |
-| 2 | [Auth in the host](slice-2-auth.md) | 1 | Yes |
-| 3 | [Discovery as a separate deployable](slice-3-discovery.md) | 1 | Yes |
-| 4 | [New sources — Prometheus/OTel and Elasticsearch](slice-4-sources.md) | 1 | **No — design first** |
-| 5 | [Packaging polish](slice-5-packaging.md) | 1, 2 | Yes |
+| 0 | [Make the shipped adapters composable](slice-0-composable-adapters.md) | — | **Shipped** — `src/Benzene.Mesh.Artifacts/`, host test project |
+| 1 | [Config schema v1 — the whole catalog from `mesh.json`](slice-1-config-schema.md) | 0 | **Shipped** — `MeshConfigLoader`/`MeshConfigValidator`/`MeshSourceRegistrar`, `mesh.sample.json`, `--validate-config` |
+| 2 | [Auth in the host](slice-2-auth.md) | 1 | **Shipped** — `MeshAuthGate.cs`, `src/Benzene.Mesh.Auth.Oidc/` |
+| 3 | [Discovery as a separate deployable](slice-3-discovery.md) | 1 | **Shipped** — `deploy/Discovery/`, `src/Benzene.Mesh.Discovery.{Aws,Azure,Kubernetes}/` |
+| 4 | [New sources — Prometheus/OTel and Elasticsearch](slice-4-sources.md) | 1 | **Not built — design first** |
+| 5 | [Packaging polish](slice-5-packaging.md) | 1, 2 | **Shipped** — `deploy/Mesh/helm/benzene-mesh/`, `CONFIG.md` |
 
 Slice 0 did not appear in the research document's roadmap. It was extracted from the "engineering
 pre-work slice 1 depends on" list, because those items are mechanical refactors — the ideal first
 pickup, and they must land before slice 1 or slice 1 fights them.
 
-**Defects found while writing these briefs**, each folded into a slice rather than left loose:
+**Defects found while writing these briefs**, each folded into a slice rather than left loose. **All
+six are fixed** (2026-08-20) — the slices that carried them have shipped:
 
 | Defect | Fixed in |
 |---|---|
@@ -50,6 +54,9 @@ Slice 4 is deliberately marked not-ready: it needs decisions from `observability
 from this brief alone.
 
 ## Picking up a slice — the contract
+
+*(Slice 4 is the only slice left to pick up. The contract below applies to it; for the five shipped
+slices, read their briefs as the design of record for code that already exists.)*
 
 1. **Read the whole brief first.** Each is self-contained: file paths, current code quoted verbatim,
    the exact change, and a verification command per task. You should not need to go exploring.

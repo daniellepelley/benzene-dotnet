@@ -1,6 +1,8 @@
 # Slice 2 — Auth in the host
 
-**Status:** ready to build.
+**Status:** **SHIPPED** (verified against source 2026-08-20) — `deploy/Mesh/Benzene.Mesh.Host/MeshAuthGate.cs` and `src/Benzene.Mesh.Auth.Oidc/`,
+covered by `MeshAuthGateTest` and `MeshAuthAcceptanceTest` (which is the `/artifacts/*`-is-protected test
+this slice asked for).
 **Depends on:** slice 1 (this adds an `auth` section to the config schema slice 1 establishes).
 **Branch:** `claude/mesh-enterprise-slice-2`
 **Spans two repos.** Tasks 2.1–2.7 are `benzene-dotnet`. Task 2.8 is `benzene-ui` and is optional
@@ -336,15 +338,15 @@ copies. Never hand-edit `mesh-ui.html`.
 
 ## Definition of done
 
-- [ ] `dotnet build Benzene.sln` and both host build/test commands green.
-- [ ] `auth.mode` of `none`, `proxy`, `basic`, `oidc` all work; `none` is the default and unchanged.
-- [ ] **`/artifacts/*` is protected in every non-`none` mode**, proven by a test that fails if the
+- [x] `dotnet build Benzene.sln` and both host build/test commands green.
+- [x] `auth.mode` of `none`, `proxy`, `basic`, `oidc` all work; `none` is the default and unchanged.
+- [x] **`/artifacts/*` is protected in every non-`none` mode**, proven by a test that fails if the
       gate is removed.
-- [ ] Authenticated-but-not-permitted returns 403; unauthenticated returns 401.
-- [ ] Dispatch requires `dispatchRole` when configured.
-- [ ] Exactly one new NuGet dependency (`Microsoft.AspNetCore.Authentication.OpenIdConnect`).
-- [ ] No secret appears in any config file or sample; secrets are read from environment variables.
-- [ ] `deploy/Mesh/README.md` documents each mode and the ingestion gap.
+- [x] Authenticated-but-not-permitted returns 403; unauthenticated returns 401.
+- [x] Dispatch requires `dispatchRole` when configured.
+- [x] Exactly one new NuGet dependency (`Microsoft.AspNetCore.Authentication.OpenIdConnect`).
+- [x] No secret appears in any config file or sample; secrets are read from environment variables.
+- [x] `deploy/Mesh/README.md` documents each mode and the ingestion gap.
 
 ## Do NOT
 

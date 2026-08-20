@@ -1,6 +1,9 @@
 # Slice 0 — Make the shipped adapters composable, and the host testable
 
-**Status:** ready to build. **This is the first pickup.**
+**Status:** **SHIPPED** (verified against source 2026-08-20) — `src/Benzene.Mesh.Artifacts/` exists with its `CLAUDE.md`, the host is testable via
+`deploy/Mesh/Benzene.Mesh.Host.Test/`, and `MeshConfigLoader` fails loudly on a missing `MESH_CONFIG_PATH`
+file.
+*(Original status: ready to build. **This is the first pickup.**)*
 **Depends on:** nothing.
 **Branch:** `claude/mesh-enterprise-slice-0`
 **Shape:** three independent tasks, ~10 files touched, one new `src/` package, one new test project.
@@ -207,15 +210,15 @@ Tests to write: `MESH_CONFIG_PATH` set + missing file → throws naming the path
 
 ## Definition of done
 
-- [ ] `dotnet build Benzene.sln`, `dotnet build Benzene.Examples.sln`, and
+- [x] `dotnet build Benzene.sln`, `dotnet build Benzene.Examples.sln`, and
       `dotnet build deploy/Mesh/Benzene.Mesh.Host.sln` all green.
-- [ ] `dotnet test test/Benzene.Mesh.Test/...` and `dotnet test deploy/Mesh/Benzene.Mesh.Host.sln` green.
-- [ ] A pre-registered `HttpClient` survives an adapter registration, proven by a test.
-- [ ] Two usage sources still register as two, proven by a test.
-- [ ] `Benzene.Mesh.Artifacts` exists with a `CLAUDE.md`; no copy remains under `examples/`.
-- [ ] The host fails loudly on a missing `MESH_CONFIG_PATH` file.
-- [ ] `build-mesh-host.yml` watches Dispatch and Artifacts, and runs tests.
-- [ ] No public API signature changed. No behaviour a user can see changed, except (a).
+- [x] `dotnet test test/Benzene.Mesh.Test/...` and `dotnet test deploy/Mesh/Benzene.Mesh.Host.sln` green.
+- [x] A pre-registered `HttpClient` survives an adapter registration, proven by a test.
+- [x] Two usage sources still register as two, proven by a test.
+- [x] `Benzene.Mesh.Artifacts` exists with a `CLAUDE.md`; no copy remains under `examples/`.
+- [x] The host fails loudly on a missing `MESH_CONFIG_PATH` file.
+- [x] `build-mesh-host.yml` watches Dispatch and Artifacts, and runs tests.
+- [x] No public API signature changed. No behaviour a user can see changed, except (a).
 
 ## Do NOT
 
