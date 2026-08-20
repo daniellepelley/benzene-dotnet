@@ -124,9 +124,22 @@ public static class MeshUiPage
     /// the <c>X-Benzene-Refresh</c> header on that POST; the server side of that contract is
     /// <c>Benzene.Mesh.Artifacts</c>'s <c>UseMeshRefreshGuard()</c>.
     /// </param>
+    /// <param name="environment">
+    /// Which estate this page is looking at — <c>production</c>, <c>staging</c>, <c>dev-pr-412</c>.
+    /// Free text, and the host's to declare: it is configured at deploy time and MUST NOT be inferred
+    /// from a hostname. The page renders it in its chrome on every screen, because a dev mesh and a
+    /// production mesh are otherwise pixel-identical and the only thing separating them is the URL.
+    /// <para>
+    /// Null or whitespace is honest and is the current default — nothing publishes an environment
+    /// until <c>placement.environment</c> reaches the spec — and the page then says the environment
+    /// is not published. It never guesses: an unlabelled production mesh rendering "dev" is the one
+    /// outcome this parameter exists to prevent.
+    /// </para>
+    /// </param>
     /// <returns>The complete, self-contained HTML document.</returns>
     public static string GetHtml(
-        string? manifestUrl, string? envelopeUrl, string? dispatchUrl, string? logoutUrl, string? refreshUrl)
+        string? manifestUrl, string? envelopeUrl, string? dispatchUrl, string? logoutUrl, string? refreshUrl,
+        string? environment = null)
     {
         var attribute = string.Empty;
         if (!string.IsNullOrWhiteSpace(manifestUrl))
@@ -152,6 +165,11 @@ public static class MeshUiPage
         if (!string.IsNullOrWhiteSpace(refreshUrl))
         {
             attribute += $" data-refresh-url=\"{WebUtility.HtmlEncode(refreshUrl)}\"";
+        }
+
+        if (!string.IsNullOrWhiteSpace(environment))
+        {
+            attribute += $" data-environment=\"{WebUtility.HtmlEncode(environment)}\"";
         }
 
         if (attribute.Length == 0)

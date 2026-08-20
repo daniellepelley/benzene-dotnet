@@ -75,6 +75,17 @@ public static class MeshUiExtensions
     /// that endpoint - <c>Benzene.Mesh.Artifacts</c>'s <c>UseMeshRefreshGuard()</c> is the matching
     /// server side, and the page's POST carries the <c>X-Benzene-Refresh</c> header it requires.
     /// </param>
+    /// <param name="environment">
+    /// Which estate this deployment looks at - <c>production</c>, <c>staging</c>, <c>dev-pr-412</c>.
+    /// Free text, configured at deploy time, and never inferred from a hostname. Rendered in the
+    /// page's chrome on every screen, because a dev mesh and a production mesh are otherwise
+    /// identical on screen and only the address bar distinguishes them.
+    /// <para>
+    /// Null is the current default and is honest: nothing publishes an environment until
+    /// <c>placement.environment</c> reaches the spec, and the page says so rather than guessing. An
+    /// unlabelled production mesh that rendered "dev" is the outcome this exists to prevent.
+    /// </para>
+    /// </param>
     /// <returns>The middleware pipeline builder, for chaining.</returns>
     public static IMiddlewarePipelineBuilder<TContext> UseMeshUi<TContext>(
         this IMiddlewarePipelineBuilder<TContext> app,
@@ -83,12 +94,13 @@ public static class MeshUiExtensions
         string? envelopeUrl = null,
         string? dispatchUrl = null,
         string? logoutUrl = null,
-        string? refreshUrl = null)
+        string? refreshUrl = null,
+        string? environment = null)
         where TContext : IHttpContext
     {
         app.Register(x =>
             x.AddSingleton(resolver => new MeshUiMiddleware<TContext>(
-                path, manifestUrl, envelopeUrl, dispatchUrl, logoutUrl, refreshUrl,
+                path, manifestUrl, envelopeUrl, dispatchUrl, logoutUrl, refreshUrl, environment,
                 resolver.GetService<IHttpRequestAdapter<TContext>>(),
                 resolver.GetService<IBenzeneResponseAdapter<TContext>>()
             )));

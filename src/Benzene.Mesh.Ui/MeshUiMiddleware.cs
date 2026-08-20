@@ -85,7 +85,7 @@ public class MeshUiMiddleware<TContext> : IMiddleware<TContext>, ITerminalMiddle
     public MeshUiMiddleware(string path, string manifestUrl, string? envelopeUrl, string? dispatchUrl,
         IHttpRequestAdapter<TContext> httpRequestAdapter,
         IBenzeneResponseAdapter<TContext> responseAdapter)
-        : this(path, manifestUrl, envelopeUrl, dispatchUrl, null, null, httpRequestAdapter, responseAdapter)
+        : this(path, manifestUrl, envelopeUrl, dispatchUrl, null, null, null, httpRequestAdapter, responseAdapter)
     {
     }
 
@@ -115,15 +115,19 @@ public class MeshUiMiddleware<TContext> : IMiddleware<TContext>, ITerminalMiddle
     /// <see cref="MeshUiPage.GetHtml(string?, string?, string?, string?, string?)"/>'s remarks. When
     /// null/whitespace the page stays read-only.
     /// </param>
+    /// <param name="environment">
+    /// Which estate this page is looking at - free text, declared at deploy time, never inferred.
+    /// Null/whitespace renders "environment not published" rather than a guess.
+    /// </param>
     /// <param name="httpRequestAdapter">Adapter used to read the request method and path.</param>
     /// <param name="responseAdapter">Adapter used to write the HTML response.</param>
     public MeshUiMiddleware(string path, string manifestUrl, string? envelopeUrl, string? dispatchUrl,
-        string? logoutUrl, string? refreshUrl,
+        string? logoutUrl, string? refreshUrl, string? environment,
         IHttpRequestAdapter<TContext> httpRequestAdapter,
         IBenzeneResponseAdapter<TContext> responseAdapter)
     {
         _path = NormalizePath(path);
-        _html = MeshUiPage.GetHtml(manifestUrl, envelopeUrl, dispatchUrl, logoutUrl, refreshUrl);
+        _html = MeshUiPage.GetHtml(manifestUrl, envelopeUrl, dispatchUrl, logoutUrl, refreshUrl, environment);
         _httpRequestAdapter = httpRequestAdapter;
         _responseAdapter = responseAdapter;
     }
