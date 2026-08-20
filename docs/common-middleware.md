@@ -511,9 +511,11 @@ model (the guarantee, a handler snippet, and the per-host seeding table) and
 middleware like this one reads and replaces the ambient token.
 
 Nesting: `.UseTimeout(...)` composes with itself and with the ambient host token — the innermost
-deadline governs while inside it, and each layer restores exactly the token it saw on the way in, so
-`.UseRetry(...).UseTimeout(...)` applies the same deadline to every retry attempt combined, while
-`.UseTimeout(...).UseRetry(...)` applies it once across all attempts.
+deadline governs while inside it, and each layer restores exactly the token it saw on the way in.
+The deadline is armed each time the middleware runs, so ordering against `.UseRetry(...)` matters:
+`.UseRetry(...).UseTimeout(...)` (retry outside) re-arms the deadline on every retry attempt — each
+attempt gets the full timeout — while `.UseTimeout(...).UseRetry(...)` (timeout outside) arms it
+once, so the single deadline spans all attempts combined.
 
 ---
 

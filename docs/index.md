@@ -70,7 +70,7 @@ Benzene is a hexagonal framework designed for services running in serverless env
 - **Clients & Resilience**
   - [Clients](clients.md)
   - [Caching](caching.md)
-  - [Resilience](resilience.md) — retry-with-backoff, plus the full Polly toolkit via `Benzene.Resilience.Polly`
+  - [Resilience](resilience.md) — retry-with-backoff and pipeline deadlines (`UseTimeout`), plus the full Polly toolkit via `Benzene.Resilience.Polly`
   - [Polly Resilience Pipelines](cookbooks/polly-resilience.md) — circuit breaker, timeout, hedging, fallback
   - [Rate Limiting](rate-limiting.md) — best-effort, per-instance protection for public endpoints (health checks, spec); authoritative limits belong at the gateway
   - [Claim Check](claim-check.md) — offload an oversized payload past a transport's size limit (SQS/SNS/EventBridge, Service Bus, Queue Storage, Kafka) via a middleware pair, backed by `Benzene.ClaimCheck.Aws.S3` / `Benzene.ClaimCheck.Azure.Blob`
