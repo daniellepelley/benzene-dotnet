@@ -30,6 +30,18 @@ Core AWS Lambda integration for Benzene. Provides base classes and abstractions 
 - `AwsRegistrations` - Registers AWS Lambda services
 - Extension methods for Lambda configuration
 - Log context extensions for Lambda
+- `SingleContextEscalatingApplicationBase<TSelf, TContext>` - shared try/catch/escalate/log logic
+  for the "run one context through the pipeline, in its own DI scope, decide whether an exception
+  or a returned failure result should cascade" shape - used by `Benzene.Aws.Lambda.Sns`'s
+  `SnsApplication`, `Benzene.Aws.Lambda.S3`'s `S3Application`, and
+  `Benzene.Aws.Lambda.EventBridge`'s `EventBridgeApplication` (per-record for SNS/S3's fan-out,
+  per-invocation for EventBridge's single event). `TSelf` keys the `ILogger<TSelf>` category so
+  each transport's logs keep their own recognizable category. Not adopted by SQS/Kafka (their own
+  extra batch-failure-mode/partition concerns don't fit this shape) or DynamoDB/Kinesis
+  (deliberately different ordered-stream shapes).
+- `HeaderDictionaryExtensions.AddIfPresent` - shared `IDictionary<string,string>` helper (add a
+  header only if the value is non-null/non-empty), used by `EventBridgeMessageHeadersGetter` and
+  `DynamoDbMessageHeadersGetter` to stop their identical private copies from drifting.
 
 ## When to use this package
 - When building any AWS Lambda function with Benzene

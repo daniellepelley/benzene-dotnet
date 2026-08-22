@@ -24,11 +24,24 @@ failure result is accepted and the invocation is not retried — mirroring `Benz
 `S3Options.CatchExceptions` (default `false`) conversely swallows/logs handler exceptions instead of
 cascading them.
 
+## invocationId: `UseS3(...)` auto-wires `UseBenzeneInvocation()`
+Each S3 record is dispatched through its own DI scope (`S3Application`'s per-record
+`serviceResolverFactory.CreateScope()`), disconnected from whatever the outer Lambda invocation's
+`IBenzeneInvocation` was populated with. `UseS3(...)` auto-wires `UseBenzeneInvocation()`
+(`BenzeneInvocationExtensions.cs`) as the first middleware in the S3 pipeline so it resolves inside
+each record's dispatch anyway (`InvocationId` = `responseElements.x-amz-request-id`, falling back to
+the object key then a generated id) - no application code changes needed. Mirrors
+`Benzene.Aws.Lambda.Sns`'s identical fix.
+
 ## Key types/interfaces
 
 ### Application & Handler
 - `S3Application` - Maps each record in an `S3Event` batch to an `S3RecordContext` and
-  runs them through the middleware pipeline, tagging the transport as `"s3"`
+  runs them through the middleware pipeline, tagging the transport as `"s3"`. Its
+  try/catch/escalate/log logic (per record: run the pipeline, escalate a failure result,
+  catch+log an exception) is now inherited from `Benzene.Aws.Lambda.Core`'s
+  `SingleContextEscalatingApplicationBase<TSelf, TContext>`, shared with `SnsApplication` and
+  `EventBridgeApplication` so the three near-identical implementations stop drifting.
 - `S3LambdaHandler` - Routes AWS Lambda invocations whose payload deserializes into an
   `S3Event` (matched via `Records[0].EventSource == "aws:s3"`) to `S3Application`
 
@@ -66,3 +79,8 @@ cascading them.
   constructor) optionally caps how many records run concurrently; `null` (the default) leaves the
   fan-out unbounded - the original behavior. Threaded straight into the base
   `MiddlewareMultiApplication`, which routes it through `Benzene.Core.Middleware`'s `BoundedFanOut`.
+- `Benzene.Aws.Lambda.S3.TestHelpers` has `AsS3()` (`MessageBuilderExtensions.cs`): builds an
+  `S3Event` with one record whose `eventName` is the message builder's topic and whose
+  bucket/key are settable parameters. Unlike SQS/SNS/DynamoDB/EventBridge, S3's body is always an
+  `S3Notification` built from the record's own metadata (see `S3MessageBodyGetter`), not an
+  arbitrary payload - so the message builder's `Message` isn't used by this helper, only its `Topic`.

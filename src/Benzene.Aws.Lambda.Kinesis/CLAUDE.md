@@ -48,7 +48,26 @@ app.UseKinesisStream(kinesis => kinesis
   Kinesis event source mapping invocations are synchronous from Lambda's own perspective once
   `ReportBatchItemFailures` is configured on the trigger.
 - `UseKinesisStream(action)` / `AddKinesis()` / `KinesisRegistrations` — standard adapter wiring, no
-  signature change from the checkpointing work above.
+  signature change from the checkpointing work above. Now auto-wires `UseBenzeneInvocation()`
+  (`BenzeneInvocationExtensions.cs`) as the pipeline's first middleware: the whole batch's single DI
+  scope (`MiddlewareApplication<TEvent,TContext,TResult>`'s own
+  `serviceResolverFactory.CreateScope()`) doesn't inherit the outer invocation's
+  `IBenzeneInvocation`, same underlying cause as SQS/SNS/S3/DynamoDB/Kafka — but unlike those,
+  there's no single natural per-record id here (one scope covers the whole batch), so
+  `InvocationId` is a freshly generated id, not derived from any record.
+
+## `KinesisStreamOptions.CatchExceptions` (default `true`) — catches by default, unlike the fan-out transports
+Unlike SNS/S3/EventBridge (`CatchExceptions` defaults `false` — an exception cascades by default),
+Kinesis defaults to **catching** a pipeline exception: the checkpointer's resume point already *is*
+the correct failure signal for the shard-ordered retry contract (see "Real checkpointing" above), so
+catching it and still returning a real `KinesisBatchResponse` loses no information — this was already
+the (previously non-configurable) behavior; it's now toggleable. Set
+`CatchExceptions = false` (`UseKinesisStream(action, new KinesisStreamOptions { CatchExceptions = false })`)
+to let the exception cascade and fail the whole invocation instead — losing the partial-resume
+information in the response, but matching the fan-out transports' opt-out shape — if your deployment's
+monitoring/alerting depends on invocation failures rather than the batch response or logs. See
+`work/archive/kinesis-batch-failure-handling-design-2026-07.md` §3.3 for why catching is the deliberate
+default here.
 
 ## When to use this package
 - Consuming a Kinesis Data Stream in Lambda for stream processing: windowed aggregation, per-partition
@@ -103,6 +122,13 @@ app.UseKinesisStream(kinesis => kinesis
 - No automatic `UseCheckpointAfterEach()` operator exists yet (streaming Phase 2, see
   `work/archive/streaming-plan-2026-08.md`) — a handler that wants per-record (rather than whole-batch-on-success)
   checkpointing must still checkpoint explicitly at the right point in its own stream-processing logic.
+
+## Test helpers
+`Benzene.Aws.Lambda.Kinesis.TestHelpers` has `AsKinesis()` (`MessageBuilderExtensions.cs`): builds a
+`KinesisEvent` with N records, each carrying the message builder's `Message` JSON-serialized into
+`KinesisRecordData.Data` (base64, decode with `GetDataAsString()`). Unlike SQS/SNS/DynamoDB/EventBridge,
+Kinesis is fan-in with no per-record topic routing, so the message builder's `Topic`/`Headers` aren't
+used — only `Message`.
 
 ## Tests
 - `test/Benzene.Core.Test/Aws/Kinesis/UseKinesisStreamTest.cs` — full pipeline happy path, routing

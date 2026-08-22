@@ -30,7 +30,19 @@ format into plain JSON, so handlers receive ordinary POCOs. See
   aws-region). No `_benzeneHeaders` convention — these events originate from table writes, not
   a Benzene publisher.
 - `UseDynamoDb(action)` / `AddDynamoDb()` / `DynamoDbRegistrations` — standard adapter wiring,
-  mirrors `Benzene.Aws.Lambda.Sqs`.
+  mirrors `Benzene.Aws.Lambda.Sqs`. Now auto-wires `UseBenzeneInvocation()`
+  (`BenzeneInvocationExtensions.cs`) as the pipeline's first middleware, same reason as
+  `Benzene.Aws.Lambda.Sns`: each record is dispatched through its own DI scope
+  (`DynamoDbApplication`'s per-record `serviceResolverFactory.CreateScope()`), which doesn't
+  inherit the outer invocation's `IBenzeneInvocation` — `InvocationId` = the record's `eventID`.
+
+## No `DynamoDbOptions` / `CatchExceptions` / `RaiseOnFailureStatus` — deliberate, not a gap
+Unlike SNS/S3/EventBridge/Kinesis, `DynamoDbApplication` has no options class and no way to catch an
+exception and keep going, or to accept a failure result without stopping the batch. This is design
+decision DS5 (`work/archive/batch-failure-handling-2026-07.md`): ordering is the whole point of the
+sequential stop-at-first-failure shape (see the class summary above), so there is no "catch and
+continue" mode to opt into — any failure (thrown or returned) always stops the batch at that record
+and reports it for redelivery, full stop.
 
 ## When to use this package
 - Handling table change streams (event sourcing, projections, cache invalidation, outbox) with
