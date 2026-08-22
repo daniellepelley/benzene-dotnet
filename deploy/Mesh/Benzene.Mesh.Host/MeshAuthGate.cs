@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Benzene.Auth.Basic;
 using Benzene.Auth.Core;
+using Benzene.Mesh.Dispatch;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Http;
@@ -22,12 +23,27 @@ namespace Benzene.Mesh.Host;
 /// <remarks>
 /// One gate, not three mechanisms per mode: <c>proxy</c>/<c>basic</c>/<c>oidc</c> are all decided here,
 /// so <c>/artifacts</c> (outside the Benzene pipeline) and everything inside it are protected the same
-/// way. On success this also sets <see cref="AuthenticationHolder.Principal"/> - resolved from
-/// <see cref="HttpContext.RequestServices"/>, the same <see cref="IServiceProvider"/>
-/// <c>Benzene.Microsoft.Dependencies</c> backs Benzene's own <c>IServiceResolver</c> with, so a
-/// downstream Benzene-pipeline check (e.g. <c>AuthorizationExtensions.RequireRole</c>) sees the same
-/// scoped instance this gate populated.
-///
+/// way. On success this sets <see cref="AuthenticationHolder.Principal"/> (resolved from
+/// <see cref="HttpContext.RequestServices"/>) AND <c>context.User</c>, for every mode - not only
+/// <c>oidc</c>, which gets <c>context.User</c> for free from <c>UseAuthentication()</c>.
+/// <para>
+/// <b>Neither reaches the Benzene pipeline below, in THIS host.</b> <c>Startup.Configure</c> wires
+/// Benzene via <c>app.UseBenzene(IApplicationBuilder, ...)</c> - the "embedding" overload, which (per
+/// its own remarks) resolves the Benzene pipeline's handlers/middleware through a SEPARATE
+/// <see cref="IServiceProvider"/> built from a CLONE of the registrations, not
+/// <see cref="HttpContext.RequestServices"/>'s real root provider - and
+/// <c>MiddlewareApplication.HandleAsync</c> additionally creates a fresh DI scope per request/envelope
+/// on top of that. So a scoped type this gate sets via <c>RequestServices</c> (like
+/// <see cref="AuthenticationHolder"/>) is a DIFFERENT INSTANCE from whatever the same type resolves to
+/// inside the Benzene pipeline - a downstream <c>AuthorizationExtensions.RequireRole</c> would see no
+/// principal at all, not this gate's caller. <c>context.User</c> is the one thing that DOES cross that
+/// boundary: <c>IHttpContextAccessor</c>'s backing store is a process-wide <c>AsyncLocal</c>, so any DI
+/// container that resolves it (see <c>Startup.ConfigureServices</c>' <c>MeshDispatchIdentity</c>
+/// registration) sees the SAME ambient <c>HttpContext</c>, this gate included. This is also why
+/// <see cref="MeshAuthConfig.DispatchRole"/> is enforced right here, directly against
+/// <c>HttpContext</c>, rather than as a Benzene-pipeline check - see <see cref="DispatchPath"/> and
+/// <see cref="InvokeAsync"/>.
+/// </para>
 /// The push-ingestion endpoint (<see cref="IngestionPath"/>) is deliberately exempt from all of the
 /// above - it is a service self-reporting, not a browser session, and is controlled independently by
 /// <c>auth.ingestion</c> instead (see <see cref="HandleIngestionAsync"/>).
@@ -36,6 +52,15 @@ public class MeshAuthGate
 {
     /// <summary>The push-ingestion endpoint's route - see <c>MeshReportMessageHandler</c>'s <c>[HttpEndpoint]</c>.</summary>
     public const string IngestionPath = "/mesh/report";
+
+    /// <summary>
+    /// The well-known path <c>Startup.Configure</c> mounts the opt-in dispatch envelope at. Read
+    /// straight off <see cref="MeshDispatchGuardOptions"/>'s own default (there is no config knob to
+    /// move either independently) rather than a second, hand-kept literal, so this and
+    /// <c>Startup</c>'s own <c>MeshDispatchGuardOptions</c> instance can never drift apart.
+    /// <see cref="MeshAuthConfig.DispatchRole"/> is enforced against exactly this path - see <see cref="InvokeAsync"/>.
+    /// </summary>
+    public static readonly string DispatchPath = new MeshDispatchGuardOptions().Path;
 
     /// <summary>The header <c>auth.ingestion.mode: "sharedSecret"</c> reads its secret from.</summary>
     public const string IngestSecretHeaderName = "X-Mesh-Ingest-Secret";
@@ -161,11 +186,38 @@ public class MeshAuthGate
             return;
         }
 
+        // work/enterprise/slice-2-auth.md task 2.5's dispatchRole gate. Enforced HERE, not as
+        // AuthorizationExtensions.RequireRole on the mesh:dispatch BenzeneMessage envelope in
+        // Startup.Configure: that envelope's inner pipeline runs in its own freshly-created DI scope
+        // (see MiddlewareApplication.HandleAsync's serviceResolverFactory.CreateScope()) so it never
+        // sees the AuthenticationHolder this gate populates on HttpContext.RequestServices - a
+        // RequireRole there would see no principal at all and refuse every dispatch, role or no role.
+        // This gate already runs once per request against the one HttpContext, so the check belongs
+        // here, matched to the fixed, well-known dispatch path (see DispatchPath) exactly as
+        // IngestionPath is above - one gate for the whole host, per the class remarks.
+        if (!string.IsNullOrEmpty(_config.DispatchRole) &&
+            context.Request.Path.Equals(DispatchPath, StringComparison.OrdinalIgnoreCase) &&
+            !HasAnyRole(principal, new[] { _config.DispatchRole }))
+        {
+            await WriteForbiddenAsync(context,
+                $"Missing required role for mesh dispatch (requires: {_config.DispatchRole})");
+            return;
+        }
+
         var holder = context.RequestServices.GetService<AuthenticationHolder>();
         if (holder != null)
         {
             holder.Principal = principal;
         }
+
+        // Publishes the authenticated caller on the standard ASP.NET Core surface, for every mode -
+        // not only oidc, which gets this for free from UseAuthentication(). This (not AuthenticationHolder
+        // above) is what MeshDispatchIdentity's registration in Startup.ConfigureServices reads via
+        // IHttpContextAccessor: HttpContextAccessor's backing store is a process-wide AsyncLocal, so it
+        // is visible from ANY DI container/scope that resolves it - including the mesh:dispatch
+        // BenzeneMessage envelope's own, separately-built container (see Startup's remarks on why
+        // AuthenticationHolder/MeshDispatchIdentity registered directly cannot cross that boundary).
+        context.User = principal;
 
         await _next(context);
     }
@@ -189,6 +241,17 @@ public class MeshAuthGate
         var identity = new ClaimsIdentity("Proxy");
         identity.AddClaim(new Claim(ClaimTypes.Name, userHeader.ToString()));
         identity.AddClaim(new Claim(ClaimTypes.Email, userHeader.ToString()));
+
+        if (!string.IsNullOrEmpty(_config.Proxy.GroupsHeader) &&
+            context.Request.Headers.TryGetValue(_config.Proxy.GroupsHeader, out var groupsHeader))
+        {
+            foreach (var group in groupsHeader.ToString()
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                identity.AddClaim(new Claim(ClaimTypes.Role, group));
+            }
+        }
+
         return new ClaimsPrincipal(identity);
     }
 
@@ -254,20 +317,28 @@ public class MeshAuthGate
             }
         }
 
-        if (_config.RequiredGroups.Length > 0)
+        if (_config.RequiredGroups.Length > 0 && !HasAnyRole(principal, _config.RequiredGroups))
         {
-            var granted = principal.FindAll("groups").Concat(principal.FindAll(ClaimTypes.Role))
-                .Concat(principal.FindAll("role")).Concat(principal.FindAll("roles"))
-                .Select(c => c.Value);
-            var hasGroup = _config.RequiredGroups.Any(g => granted.Contains(g, StringComparer.Ordinal)) ||
-                _config.RequiredGroups.Any(principal.IsInRole);
-            if (!hasGroup)
-            {
-                return false;
-            }
+            return false;
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="principal"/> holds at least one of <paramref name="anyOfRoles"/>, read
+    /// from a <c>groups</c> claim or the common role claim types (<see cref="ClaimTypes.Role"/>,
+    /// <c>role</c>, <c>roles</c>) as well as <see cref="ClaimsPrincipal.IsInRole"/>. Shared by
+    /// <see cref="IsPermitted"/> (<see cref="MeshAuthConfig.RequiredGroups"/>) and the
+    /// <see cref="MeshAuthConfig.DispatchRole"/> gate in <see cref="InvokeAsync"/> - both are "does this
+    /// caller hold role X", just against a different config value.
+    /// </summary>
+    private static bool HasAnyRole(ClaimsPrincipal principal, IReadOnlyCollection<string> anyOfRoles)
+    {
+        var granted = principal.FindAll("groups").Concat(principal.FindAll(ClaimTypes.Role))
+            .Concat(principal.FindAll("role")).Concat(principal.FindAll("roles"))
+            .Select(c => c.Value);
+        return anyOfRoles.Any(r => granted.Contains(r, StringComparer.Ordinal)) || anyOfRoles.Any(principal.IsInRole);
     }
 
     /// <summary>

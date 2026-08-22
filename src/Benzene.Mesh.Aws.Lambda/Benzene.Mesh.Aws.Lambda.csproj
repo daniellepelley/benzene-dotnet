@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>Benzene.Mesh.Aws.Lambda</AssemblyName>
     <RootNamespace>Benzene.Mesh.Aws.Lambda</RootNamespace>
+    <Description>AWS Lambda bindings for the Benzene Mesh aggregator: an IMeshServiceSource (AddMeshLambdaSource) that interrogates a service's spec/health by Invoke instead of HTTP, and an IMeshServiceDispatcher (AddMeshLambdaDispatcher) that dispatches a mesh:dispatch payload the same way.</Description>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 

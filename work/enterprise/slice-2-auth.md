@@ -3,6 +3,39 @@
 **Status:** **SHIPPED** (verified against source 2026-08-20) — `deploy/Mesh/Benzene.Mesh.Host/MeshAuthGate.cs` and `src/Benzene.Mesh.Auth.Oidc/`,
 covered by `MeshAuthGateTest` and `MeshAuthAcceptanceTest` (which is the `/artifacts/*`-is-protected test
 this slice asked for).
+
+> **CORRECTION (2026-08-22):** the 2026-08-20 "SHIPPED"/"verified against source" line above and the
+> task 2.5 checkbox below were wrong about the dispatch gate. Re-verifying against source found
+> `Startup.cs` calling `UseMeshDispatch()` alone — no `[HttpEndpoint]` route, no `UseBenzeneMessage`
+> envelope, and no route reachable through `.UseMessageHandlers()` either (the handler carries no
+> `[HttpEndpoint]` attribute) — so `mesh:dispatch` had **no HTTP path that reached it in this host at
+> all**, and `AuthorizationExtensions.RequireRole` was never called anywhere in `Startup.cs`.
+> `MeshAuthConfig.DispatchRole` was bound and validated by the config loader (hence exercised by
+> `MeshHostConfigTest`) but enforced nowhere - a principal with no role, and in fact any principal at
+> all, could not have been rejected by a check that was never wired, because the request could not
+> reach the check either way. `UseMeshDispatchGuard()` was similarly never called in this host - only
+> `UseMeshDispatch()` was - so the guard's CSRF/identity/rate-limit checks in the middleware from
+> `Benzene.Mesh.Artifacts` this doc points to below were dormant here too.
+>
+> Fixed in the same session that found it. `Startup.Configure` now gives `mesh:dispatch` its own
+> `UseBenzeneMessage` envelope (mirroring `examples/AwsMesh/Mesh/Startup.cs`'s own `DispatchPath`
+> pattern) with `UseMeshDispatchGuard()` mounted directly ahead of it. `DispatchRole` is enforced in
+> `MeshAuthGate` itself, not via `RequireRole` on that envelope - see `MeshAuthGate`'s remarks for why
+> (that envelope's inner pipeline runs in a separately-built DI scope this host's `app.UseBenzene(IApplicationBuilder, ...)`
+> wiring creates, which never sees anything this gate sets via `HttpContext.RequestServices`; the gate
+> also now sets `context.User` for every mode, and `MeshDispatchIdentity` is registered to read it back
+> through `IHttpContextAccessor`, so the guard's identity check - previously unreachable, now reachable
+> - is not itself always-refuse). Regression coverage:
+> `deploy/Mesh/Benzene.Mesh.Host.Test/MeshDispatchRoleAcceptanceTest.cs` boots the real `Startup` on a
+> real Kestrel pipeline and proves, against actual HTTP responses: (a) a principal missing the
+> configured `dispatchRole` gets 403 before the handler runs; (b) a principal holding it passes the
+> check and reaches `MeshDispatchMessageHandler`; (c) the dispatch guard is actually wired into this
+> host's pipeline (a request missing its CSRF header is refused by the guard specifically, not by the
+> role check). All three were previously unverified by any test - `MeshAuthGateTest.cs` has no
+> dispatch-role coverage at all (confirmed by re-checking it while writing this correction), and even
+> a unit test against `MeshAuthGate` alone could not have caught this: the gap was in `Startup.cs`'s
+> pipeline wiring, one level up from the gate.
+
 **Depends on:** slice 1 (this adds an `auth` section to the config schema slice 1 establishes).
 **Branch:** `claude/mesh-enterprise-slice-2`
 **Spans two repos.** Tasks 2.1–2.7 are `benzene-dotnet`. Task 2.8 is `benzene-ui` and is optional
@@ -244,9 +277,24 @@ into a redirect loop.
 
 Then the one read/write distinction worth having in v1: when `auth.mode != "none"` **and**
 `Dispatch.Enabled` is true **and** `dispatchRole` is set, `mesh:dispatch` additionally requires that
-role. Use the existing `AuthorizationExtensions.RequireRole<TContext>(...)` — it is transport-neutral
-and already tested. "Who may fire the button that invokes real handlers" is the first question a
-security reviewer asks.
+role. "Who may fire the button that invokes real handlers" is the first question a security reviewer
+asks.
+
+**Corrected 2026-08-22 (see the CORRECTION note at the top of this file): do NOT use
+`AuthorizationExtensions.RequireRole<TContext>` on the `mesh:dispatch` `UseBenzeneMessage` envelope's
+own inner pipeline, despite that being the obvious reading of the original advice above.** That
+envelope's inner pipeline runs in a separately-built DI scope (this host wires Benzene via
+`app.UseBenzene(IApplicationBuilder, ...)`, the "embedding" overload - see its own remarks on the
+clone provider this creates), which never sees anything `MeshAuthGate` sets on
+`HttpContext.RequestServices` - `RequireRole` there sees no principal at all and refuses every
+dispatch, role or no role, not just a wrongly-roled one. Enforce `dispatchRole` in `MeshAuthGate`
+itself instead, directly against `HttpContext`, keyed on the dispatch path (`MeshAuthGate.DispatchPath`)
+- see its remarks for the full explanation and `HasAnyRole` for the role-matching logic (shared with
+the `requiredGroups` check above it). Making the dispatch guard's identity check work end-to-end (so a
+correctly-role-gated dispatch doesn't then get refused by the guard for "no identity") needed the same
+kind of cross-scope fix: `MeshAuthGate` now sets `context.User` for every mode, and
+`Startup.ConfigureServices` registers `MeshDispatchIdentity` to read it back through
+`IHttpContextAccessor` - a process-wide `AsyncLocal`, the one thing that DOES cross that DI boundary.
 
 **Note on the config shape:** slice 1 nested the dispatch flags — `_config.EnableDispatch` /
 `_config.DispatchAllowInProduction` from the original sketch shipped as `_config.Dispatch.Enabled` /
@@ -343,7 +391,11 @@ copies. Never hand-edit `mesh-ui.html`.
 - [x] **`/artifacts/*` is protected in every non-`none` mode**, proven by a test that fails if the
       gate is removed.
 - [x] Authenticated-but-not-permitted returns 403; unauthenticated returns 401.
-- [x] Dispatch requires `dispatchRole` when configured.
+- [x] Dispatch requires `dispatchRole` when configured. **Corrected 2026-08-22: this box was checked
+      2026-08-20 while the checked-in code did not do this at all - see the CORRECTION note at the top
+      of this file. Now actually true, and now actually tested
+      (`MeshDispatchRoleAcceptanceTest.cs`) against a real request through the real host, not just
+      against config binding.**
 - [x] Exactly one new NuGet dependency (`Microsoft.AspNetCore.Authentication.OpenIdConnect`).
 - [x] No secret appears in any config file or sample; secrets are read from environment variables.
 - [x] `deploy/Mesh/README.md` documents each mode and the ingestion gap.

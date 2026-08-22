@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>Benzene.Mesh.Fleet.Tempo</AssemblyName>
     <RootNamespace>Benzene.Mesh.Fleet.Tempo</RootNamespace>
+    <Description>An IMeshTraceSource for the Benzene Mesh's live Fleet view backed by Grafana Tempo's query API: reads recent traces, correlations, and flows for the composite fleet read model. Adds AddTempoFleetReadModel.</Description>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 

@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>Benzene.Mesh.Artifacts</AssemblyName>
     <RootNamespace>Benzene.Mesh.Artifacts</RootNamespace>
-    <Description>Serves a Benzene.Mesh.Aggregator's generated catalog artifacts (manifest.json, topology.json, services/*.json, usage.json, annotations.json, asyncapi.json) over HTTP from any registered IMeshArtifactStore, so the Mesh UI has something to load regardless of which store backs it, and guards the endpoint that regenerates them (UseMeshRefreshGuard: a custom-header CSRF check plus a manifest-age throttle).</Description>
+    <Description>Serves a Benzene.Mesh.Aggregator's generated catalog artifacts (manifest.json, topology.json, services/*.json, usage.json, annotations.json, asyncapi.json) over HTTP from any registered IMeshArtifactStore, so the Mesh UI has something to load regardless of which store backs it, and guards the endpoints that act on its behalf: UseMeshRefreshGuard (a custom-header CSRF check plus a manifest-age throttle) for the refresh endpoint, and UseMeshDispatchGuard (CSRF, fail-closed identity, a payload bound, and a per-identity rate limit) for the mesh:dispatch endpoint.</Description>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 

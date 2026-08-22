@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>Benzene.Mesh.Tracing.Tempo</AssemblyName>
     <RootNamespace>Benzene.Mesh.Tracing.Tempo</RootNamespace>
+    <Description>Builds the mesh aggregator's topology.json service-graph edges from Grafana Tempo's metrics-generator, queried via its Prometheus-compatible API - distinct from Benzene.Mesh.Fleet.Tempo (the live Fleet view's IMeshTraceSource). Adds AddTempoTopology.</Description>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 

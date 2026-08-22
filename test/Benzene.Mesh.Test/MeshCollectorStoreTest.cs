@@ -85,13 +85,15 @@ public class MeshCollectorStoreTest
         Assert.Equal("topic", fleet.Traces[0].Topic); // the flow's entry topic (earliest event's)
     }
 
-    private static MeshServiceDescriptor Descriptor(string service, string[]? topics = null, string[]? produces = null)
+    private static MeshServiceDescriptor Descriptor(
+        string service, string[]? topics = null, string[]? produces = null, string? serviceVersion = null)
     {
         return new MeshServiceDescriptor
         {
             Service = service,
             Topics = (topics ?? Array.Empty<string>()).Select(id => new MeshTopicDescriptor { Id = id }).ToList(),
-            Produces = (produces ?? Array.Empty<string>()).Select(id => new MeshTopicDescriptor { Id = id }).ToList()
+            Produces = (produces ?? Array.Empty<string>()).Select(id => new MeshTopicDescriptor { Id = id }).ToList(),
+            ServiceVersion = serviceVersion
         };
     }
 
@@ -154,6 +156,46 @@ public class MeshCollectorStoreTest
         Assert.Empty(store.Topic("order:create", null)!.Consumers);
         Assert.Empty(store.Topic("payments:capture", null)!.Providers);
         Assert.Equal(new List<string> { "orders" }, store.Topic("order:cancel", null)!.Consumers);
+    }
+
+    // ---- ServiceVersion (mesh.md §2.5): retained on ingest, exposed on both query results ----
+
+    [Fact]
+    public void Register_WithServiceVersion_IsRetainedAndExposedOnFleetAndServiceQueries()
+    {
+        var store = new MeshCollectorStore();
+        store.Register(Descriptor("orders", topics: new[] { "order:create" }, serviceVersion: "2.3.1"));
+
+        var summary = store.Fleet().Services.Single(s => s.Service == "orders");
+        var view = store.Service("orders", null);
+
+        Assert.Equal("2.3.1", summary.ServiceVersion);
+        Assert.NotNull(view);
+        Assert.Equal("2.3.1", view!.ServiceVersion);
+        Assert.Equal("2.3.1", view.Descriptor?.ServiceVersion); // still on the full descriptor too
+    }
+
+    [Fact]
+    public void Register_WithNoServiceVersion_LeavesItNull_NotDefaultedOrDropped()
+    {
+        var store = new MeshCollectorStore();
+        store.Register(Descriptor("orders", topics: new[] { "order:create" })); // no serviceVersion
+
+        var summary = store.Fleet().Services.Single(s => s.Service == "orders");
+
+        Assert.Null(summary.ServiceVersion);
+    }
+
+    [Fact]
+    public void Reregistration_ReplacesServiceVersion_WithTheLatestDescriptors()
+    {
+        var store = new MeshCollectorStore();
+        store.Register(Descriptor("orders", topics: new[] { "order:create" }, serviceVersion: "1.0.0"));
+        store.Register(Descriptor("orders", topics: new[] { "order:create" }, serviceVersion: "2.0.0"));
+
+        var summary = store.Fleet().Services.Single(s => s.Service == "orders");
+
+        Assert.Equal("2.0.0", summary.ServiceVersion);
     }
 
     // ---- §4.2 declared vs. observed: liveness ("Unobserved") ----

@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>Benzene.Mesh.Fleet.Aws.XRay</AssemblyName>
     <RootNamespace>Benzene.Mesh.Fleet.Aws.XRay</RootNamespace>
+    <Description>An IMeshTraceSource for the Benzene Mesh's live Fleet view backed by AWS X-Ray: reads recent traces, correlations, and flows for the composite fleet read model. Adds AddXRayFleetReadModel.</Description>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 

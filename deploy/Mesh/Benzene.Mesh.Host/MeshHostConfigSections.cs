@@ -144,6 +144,16 @@ public class MeshAuthProxyConfig
     /// bypass, since anyone who can reach the host could set it themselves. See <see cref="MeshAuthGate"/>.
     /// </summary>
     public string[] TrustedProxies { get; set; } = Array.Empty<string>();
+
+    /// <summary>
+    /// Optional request header carrying the caller's groups/roles as a comma-separated list (e.g.
+    /// oauth2-proxy's <c>X-Forwarded-Groups</c>), trusted from the same <see cref="TrustedProxies"/>
+    /// peers as <see cref="UserHeader"/>. Each value is added as a role claim, so it feeds both
+    /// <see cref="MeshAuthConfig.RequiredGroups"/> and <see cref="MeshAuthConfig.DispatchRole"/>. Null
+    /// (the default) means mode <c>proxy</c> establishes an identity with no roles - matching today's
+    /// behaviour.
+    /// </summary>
+    public string? GroupsHeader { get; set; }
 }
 
 /// <summary>

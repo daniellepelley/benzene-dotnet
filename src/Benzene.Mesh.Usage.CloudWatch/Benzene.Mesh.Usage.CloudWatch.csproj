@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>Benzene.Mesh.Usage.CloudWatch</AssemblyName>
     <RootNamespace>Benzene.Mesh.Usage.CloudWatch</RootNamespace>
+    <Description>An IMeshUsageSource for the Benzene Mesh aggregator backed by Amazon CloudWatch: reads per-topic request counts over a window back into usage.json from the benzene.messages.processed metric. Adds AddCloudWatchUsage.</Description>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
