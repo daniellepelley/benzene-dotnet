@@ -64,6 +64,28 @@ public class ScatterGatherTest
     }
 
     [Fact]
+    public async Task WhenAWorkerThrowsOperationCanceled_PropagatesCancellation_InsteadOfReportingAFailedShard()
+    {
+        var sender = new Mock<IBenzeneMessageSender>();
+        sender
+            .Setup(x => x.SendAsync<int, int>("work", It.IsAny<int>(), It.IsAny<IDictionary<string, string>?>()))
+            .Returns((string _, int shard, IDictionary<string, string>? _) =>
+                shard == 2
+                    ? Task.FromCanceled<IBenzeneResult<int>>(new CancellationToken(canceled: true))
+                    : Task.FromResult(Ok(shard)));
+
+        var exception = await Record.ExceptionAsync(() =>
+            sender.Object.ScatterGatherAsync<int, int, int>(
+                "work", new[] { 1, 2, 3 }, seed: 0, reduce: (acc, p) => acc + p,
+                new ScatterGatherOptions { PartialFailureMode = PartialFailureMode.BestEffort }));
+
+        // TaskCanceledException (thrown here because the shard's Task was created via
+        // Task.FromCanceled) is itself an OperationCanceledException - the point is that it
+        // propagates as a cancellation, not that it gets reported as a failed shard.
+        Assert.IsAssignableFrom<System.OperationCanceledException>(exception);
+    }
+
+    [Fact]
     public async Task BestEffort_WhenAWorkerThrows_TreatsShardAsFailed()
     {
         var sender = new Mock<IBenzeneMessageSender>();

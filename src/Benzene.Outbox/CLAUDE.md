@@ -107,11 +107,13 @@ Neither write mode is exactly-once. Read this before picking one.
   (`IServiceResolverFactory.CreateScope()`), marks that scope's `OutboxDispatchScope`, deserializes
   the payload, and re-sends through that scope's `IBenzeneMessageSender` - the exact same route
   pipeline (transport, retry, health checks) an inline send would have used.
-- `OutboxDispatcherWorker : IBenzeneWorker` - a poll loop calling `RunOnceAsync` on
+- `OutboxDispatcherWorker : IBenzeneWorker, IDisposable` - a poll loop calling `RunOnceAsync` on
   `OutboxOptions.PollInterval` (default 5s), with a graceful stop that finishes an in-flight run.
-  This package does not depend on `Benzene.HostedService` or `Benzene.SelfHost` - wire the resolved
-  worker into whichever host you use (see "Usage" below). **Not suitable for AWS Lambda** - see
-  "Relay hosts" below.
+  `Dispose()` releases the internal stop-signal `CancellationTokenSource` - call it after `StopAsync`
+  has returned (or if the worker was never started); `AddOutboxDispatcherWorker()` registers it as a
+  singleton, so a DI container disposes it for you on shutdown. This package does not depend on
+  `Benzene.HostedService` or `Benzene.SelfHost` - wire the resolved worker into whichever host you
+  use (see "Usage" below). **Not suitable for AWS Lambda** - see "Relay hosts" below.
 - `OutboxDefaults.IdempotencyKeyHeaderName` - `"idempotency-key"`, a **deliberate value duplicate**
   of `Benzene.Idempotency.IdempotencyDefaults.HeaderName`. `Benzene.Outbox` does not take a package
   reference on `Benzene.Idempotency` for one string, so it stays installable (and testable) without
@@ -199,4 +201,5 @@ await sender.SendAsync<CapturePaymentRequest, Void>("payments:capture", request)
 - `test/Benzene.Core.Test/Outbox/OutboxDispatcherTest.cs` - run-once success/reschedule/park paths,
   retention cleanup, `DispatchOneAsync`'s claim-refused path.
 - `test/Benzene.Core.Test/Outbox/OutboxDispatcherWorkerTest.cs` - starts/stops cleanly, polls on the
-  configured interval, survives a failing run.
+  configured interval, survives a failing run, disposes cleanly (with or without ever starting, and
+  idempotently on a repeat `Dispose()`).

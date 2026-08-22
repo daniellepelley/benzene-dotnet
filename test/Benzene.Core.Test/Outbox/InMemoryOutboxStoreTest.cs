@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Benzene.Outbox;
 using Xunit;
@@ -164,6 +165,22 @@ public class InMemoryOutboxStoreTest
         await store.ClaimAsync("env-1", TimeSpan.FromMinutes(1));
 
         Assert.Null(await store.ClaimAsync("env-1", TimeSpan.FromMinutes(1)));
+    }
+
+    [Fact]
+    public async Task ClaimAsync_ConcurrentCallersOnTheSameId_ExactlyOneWins()
+    {
+        var store = new InMemoryOutboxStore();
+        await store.AddAsync([NewEnvelope()]);
+        const int callers = 50;
+
+        var claims = await Task.WhenAll(Enumerable.Range(0, callers)
+            .Select(_ => Task.Run(() => store.ClaimAsync("env-1", TimeSpan.FromMinutes(1)))));
+
+        // Guards the lock scope around the due-check + lease write in ClaimAsync - if it narrowed to
+        // just the write, two racing callers could both observe the envelope as unleased and both win.
+        Assert.Single(claims, c => c is not null);
+        Assert.Equal(callers - 1, claims.Count(c => c is null));
     }
 
     [Fact]

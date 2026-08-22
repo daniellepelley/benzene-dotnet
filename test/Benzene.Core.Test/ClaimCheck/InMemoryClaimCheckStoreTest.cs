@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Benzene.ClaimCheck;
@@ -74,6 +75,28 @@ public class InMemoryClaimCheckStoreTest
 
         Assert.Equal("body-a", await store.GetAsync(referenceA));
         Assert.Equal("body-b", await store.GetAsync(referenceB));
+    }
+
+    [Fact]
+    public async Task Put_ConcurrentCallers_AllSucceed_AndEachRoundTripsItsOwnBody()
+    {
+        // PutAsync always mints a fresh, unique key (a GUID), so unlike the idempotency/outbox
+        // stores there is no shared key for callers to race over and no "one winner" to assert.
+        // The real concurrency hazard here is the shared Dictionary itself: concurrent writes to it
+        // without the store's lock can corrupt its internal state or lose entries. This drives many
+        // callers at the underlying dictionary at once and checks every one of them got back a
+        // distinct, working reference - the lock around _entries is what makes that safe.
+        var store = new InMemoryClaimCheckStore();
+        const int callers = 50;
+
+        var references = await Task.WhenAll(Enumerable.Range(0, callers)
+            .Select(i => Task.Run(() => store.PutAsync($"body-{i}", new ClaimCheckPutContext("orders:create")))));
+
+        Assert.Equal(callers, references.Distinct().Count());
+
+        var bodies = await Task.WhenAll(references.Select(r => store.GetAsync(r)));
+        Assert.All(bodies, Assert.NotNull);
+        Assert.Equal(callers, bodies.Distinct().Count());
     }
 
     [Fact]

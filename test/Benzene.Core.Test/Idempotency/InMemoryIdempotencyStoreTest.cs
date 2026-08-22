@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Benzene.Idempotency;
@@ -80,6 +81,22 @@ public class InMemoryIdempotencyStoreTest
 
         Assert.True((await store.TryClaimAsync("key-a")).Claimed);
         Assert.True((await store.TryClaimAsync("key-b")).Claimed);
+    }
+
+    [Fact]
+    public async Task TryClaim_ConcurrentCallersOnTheSameKey_ExactlyOneWins()
+    {
+        var store = new InMemoryIdempotencyStore();
+        const int callers = 50;
+
+        var claims = await Task.WhenAll(Enumerable.Range(0, callers)
+            .Select(_ => Task.Run(() => store.TryClaimAsync("key-1"))));
+
+        // The lock around the read-then-write in TryClaimAsync is what makes this deterministic - if
+        // that scope narrowed to just the write, two callers could both observe no live entry and
+        // both win.
+        Assert.Equal(1, claims.Count(c => c.Claimed));
+        Assert.Equal(callers - 1, claims.Count(c => !c.Claimed));
     }
 
     [Fact]

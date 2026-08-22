@@ -17,13 +17,14 @@ namespace Benzene.Outbox;
 /// DynamoDB-Streams-plus-scheduled-sweep relay pattern documented in <c>Benzene.Outbox/CLAUDE.md</c>
 /// and built out in <c>Benzene.Outbox.DynamoDb</c> (Phase 2).
 /// </remarks>
-public class OutboxDispatcherWorker : IBenzeneWorker
+public class OutboxDispatcherWorker : IBenzeneWorker, IDisposable
 {
     private readonly IOutboxDispatcher _dispatcher;
     private readonly OutboxOptions _options;
     private readonly ILogger _logger;
     private readonly CancellationTokenSource _stoppingCts = new();
     private Task? _runTask;
+    private bool _disposed;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="OutboxDispatcherWorker"/> class.
@@ -101,5 +102,21 @@ public class OutboxDispatcherWorker : IBenzeneWorker
         {
             await _runTask;
         }
+    }
+
+    /// <summary>
+    /// Disposes <see cref="_stoppingCts"/>. Call after <see cref="StopAsync"/> has returned (or
+    /// without ever starting the worker) - disposing while the poll loop is still running would race
+    /// its use of the token.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _stoppingCts.Dispose();
+        _disposed = true;
     }
 }
