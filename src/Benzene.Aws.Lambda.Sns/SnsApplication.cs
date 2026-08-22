@@ -1,14 +1,12 @@
-using System;
 using System.Linq;
 using System.Threading.Tasks;
 using Amazon.Lambda.SNSEvents;
 using Benzene.Abstractions.DI;
 using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Abstractions.Middleware;
+using Benzene.Aws.Lambda.Core;
 using Benzene.Core.MessageHandlers.Info;
 using Benzene.Core.Middleware;
-using Benzene.Core;
-using Microsoft.Extensions.Logging;
 
 namespace Benzene.Aws.Lambda.Sns;
 
@@ -17,9 +15,8 @@ namespace Benzene.Aws.Lambda.Sns;
 /// them all through the middleware pipeline concurrently, tagging the transport as <c>"sns"</c> for the
 /// duration.
 /// </summary>
-public class SnsApplication : IMiddlewareApplication<SNSEvent>
+public class SnsApplication : SingleContextEscalatingApplicationBase<SnsApplication, SnsRecordContext>, IMiddlewareApplication<SNSEvent>
 {
-    private readonly IMiddlewarePipeline<SnsRecordContext> _pipeline;
     private readonly SnsOptions _options;
 
     /// <summary>
@@ -33,9 +30,15 @@ public class SnsApplication : IMiddlewareApplication<SNSEvent>
     /// off) if omitted.
     /// </param>
     public SnsApplication(IMiddlewarePipeline<SnsRecordContext> pipeline, SnsOptions options = null)
+        : base(
+            new TransportMiddlewarePipeline<SnsRecordContext>(TransportNames.Sns, pipeline),
+            (options ??= new SnsOptions()).CatchExceptions,
+            options.RaiseOnFailureStatus,
+            context => context.SnsRecord.Sns.MessageId,
+            messageId => new SnsMessageProcessingException(messageId),
+            "Processing SNS message {id} failed")
     {
-        _pipeline = new TransportMiddlewarePipeline<SnsRecordContext>(TransportNames.Sns, pipeline);
-        _options = options ?? new SnsOptions();
+        _options = options;
     }
 
     /// <summary>
@@ -54,30 +57,6 @@ public class SnsApplication : IMiddlewareApplication<SNSEvent>
         // BoundedFanOut optionally caps how many records run at once (SnsOptions.MaxDegreeOfParallelism);
         // unset leaves the fan-out unbounded, exactly as before.
         var contexts = @event.Records.Select(record => SnsRecordContext.CreateInstance(@event, record));
-        await BoundedFanOut.WhenAllAsync(contexts, async context =>
-            {
-                try
-                {
-                    using (var scope = serviceResolverFactory.CreateScope())
-                    {
-                        await _pipeline.HandleAsync(context, scope);
-                    }
-
-                    if (_options.RaiseOnFailureStatus && context.MessageResult?.IsSuccessful == false)
-                    {
-                        throw new SnsMessageProcessingException(context.SnsRecord.Sns.MessageId);
-                    }
-                }
-                catch (Exception ex) when (_options.CatchExceptions)
-                {
-                    using (var loggingScope = serviceResolverFactory.CreateScope())
-                    {
-                        loggingScope.GetService<ILogger<SnsApplication>>()
-                            .LogError(ex, BenzeneFailure.IsInfrastructure(ex)
-                    ? BenzeneFailure.InfrastructureLogPrefix + " Processing SNS message {messageId} failed — this service is mis-wired; the message is not at fault"
-                    : "Processing SNS message {messageId} failed", context.SnsRecord.Sns.MessageId);
-                    }
-                }
-            }, _options.MaxDegreeOfParallelism);
+        await BoundedFanOut.WhenAllAsync(contexts, context => ProcessAsync(context, serviceResolverFactory), _options.MaxDegreeOfParallelism);
     }
 }
