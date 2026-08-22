@@ -14,10 +14,6 @@ Defined in `Benzene.Abstractions.MessageHandlers`:
 
 ```csharp
 public interface IMessageHandler<TRequest, TResponse>
-    : IMessageHandlerBase<TRequest, TResponse>
-{}
-
-public interface IMessageHandlerBase<TRequest, TResponse>
 {
     Task<IBenzeneResult<TResponse>> HandleAsync(TRequest request);
 }

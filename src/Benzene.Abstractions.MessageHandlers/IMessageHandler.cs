@@ -4,18 +4,16 @@ namespace Benzene.Abstractions.MessageHandlers;
 
 /// <summary>
 /// The interface application code implements to handle a message and produce a typed response.
-/// Equivalent to <see cref="IMessageHandlerBase{TRequest, TResponse}"/>, kept as its own interface
-/// (rather than a type alias) so handler discovery (<see cref="IMessageHandlersFinder"/>) and DI
-/// registration can consistently look for <c>IMessageHandler&lt;,&gt;</c> as the "this is a handler"
-/// marker, while <see cref="IMessageHandlerBase{TRequest, TResponse}"/> stays available as the
-/// narrower contract other abstractions (e.g. wrapping/decoration) can depend on without pulling in
-/// handler-discovery semantics.
 /// </summary>
 /// <typeparam name="TRequest">The strongly-typed request this handler accepts.</typeparam>
 /// <typeparam name="TResponse">The strongly-typed response this handler returns.</typeparam>
 public interface IMessageHandler<TRequest, TResponse>
-    : IMessageHandlerBase<TRequest, TResponse>
-{}
+{
+    /// <summary>Handles the given request and returns a typed result.</summary>
+    /// <param name="request">The strongly-typed request to handle.</param>
+    /// <returns>The result of handling the request, including its response payload.</returns>
+    Task<IBenzeneResult<TResponse>> HandleAsync(TRequest request);
+}
 
 /// <summary>
 /// The interface application code implements to handle a message that produces no response payload

@@ -9,7 +9,6 @@ Defines abstractions for message-based request/response handling in Benzene. Pro
 - `IMessageHandler` - Base marker interface for all message handlers
 - `IMessageHandler<TRequest>` - Handler with request, no response
 - `IMessageHandler<TRequest, TResponse>` - Handler with request and response
-- `IMessageHandlerBase<TRequest, TResponse>` - Base interface with context
 
 ### Handler Infrastructure
 - `IMessageHandlerFactory` - Creates handler instances
