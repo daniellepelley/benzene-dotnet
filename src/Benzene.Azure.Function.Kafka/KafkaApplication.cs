@@ -5,10 +5,9 @@ using System.Threading.Tasks;
 using Benzene.Abstractions.DI;
 using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Abstractions.Middleware;
-using Benzene.Core.MessageHandlers.Info;
+using Benzene.Azure.Function.Core;
 using Benzene.Core.Middleware;
 using Microsoft.Azure.Functions.Worker;
-using Benzene.Core;
 using Microsoft.Extensions.Logging;
 
 namespace Benzene.Azure.Function.Kafka;
@@ -40,18 +39,15 @@ public class KafkaApplication : EntryPointMiddlewareApplication<KafkaRecord[]>
 /// Runs every record in a Kafka trigger batch through the middleware pipeline concurrently, each in
 /// its own service scope, applying <see cref="KafkaOptions"/> to decide whether a record's exception
 /// or failure result is contained (logged, doesn't affect the rest of the batch) or left to cascade
-/// and fail the whole invocation.
+/// and fail the whole invocation. The fan-out/settle/escalate/log skeleton itself lives in
+/// <see cref="AzureFunctionBatchApplicationBase{TContext, TState}"/>; this class plugs in the
+/// Kafka-specific bits - Kafka uses no extra per-item state, so <c>TState</c> is <c>object?</c>.
 /// </summary>
-public class KafkaBatchApplication : IMiddlewareApplication<KafkaRecord[]>
+public class KafkaBatchApplication : AzureFunctionBatchApplicationBase<KafkaContext, object?>, IMiddlewareApplication<KafkaRecord[]>
 {
-    private readonly IMiddlewarePipeline<KafkaContext> _pipeline;
-    private readonly KafkaOptions _options;
-
     public KafkaBatchApplication(IMiddlewarePipeline<KafkaContext> pipeline, KafkaOptions? options = null)
-    {
-        _pipeline = new TransportMiddlewarePipeline<KafkaContext>(TransportNames.Kafka, pipeline);
-        _options = options ?? new KafkaOptions();
-    }
+        : base(pipeline, TransportNames.Kafka, (options ??= new KafkaOptions()).CatchExceptions, options.RaiseOnFailureStatus, options.MaxDegreeOfParallelism)
+    { }
 
     public Task HandleAsync(KafkaRecord[] @event, IServiceResolverFactory serviceResolverFactory)
         => HandleAsync(@event, serviceResolverFactory, CancellationToken.None);
@@ -61,36 +57,22 @@ public class KafkaBatchApplication : IMiddlewareApplication<KafkaRecord[]>
     /// own scope with the ambient cancellation token so any component resolved during that record's
     /// pipeline run can observe cancellation via <see cref="ICancellationTokenAccessor"/>.
     /// </summary>
-    public async Task HandleAsync(KafkaRecord[] @event, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
-    {
-        // BoundedFanOut optionally caps how many records run at once (KafkaOptions.MaxDegreeOfParallelism);
-        // unset leaves the fan-out unbounded, exactly as before.
-        var contexts = @event.Select(kafkaEvent => new KafkaContext(kafkaEvent));
-        await BoundedFanOut.WhenAllAsync(contexts, async context =>
-            {
-                try
-                {
-                    using (var scope = serviceResolverFactory.CreateScope())
-                    {
-                        scope.SeedCancellationToken(cancellationToken);
-                        await _pipeline.HandleAsync(context, scope);
-                    }
+    public Task HandleAsync(KafkaRecord[] @event, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
+        // BoundedFanOut (via the base class) optionally caps how many records run at once
+        // (KafkaOptions.MaxDegreeOfParallelism); unset leaves the fan-out unbounded, exactly as before.
+        => HandleBatchAsync(@event.Select(item => (new KafkaContext(item), (object?)null)), serviceResolverFactory, cancellationToken);
 
-                    if (_options.RaiseOnFailureStatus && context.MessageResult?.IsSuccessful == false)
-                    {
-                        throw new KafkaMessageProcessingException(context.KafkaEvent.Topic);
-                    }
-                }
-                catch (Exception ex) when (_options.CatchExceptions)
-                {
-                    using (var loggingScope = serviceResolverFactory.CreateScope())
-                    {
-                        loggingScope.GetService<ILogger<KafkaApplication>>()
-                            .LogError(ex, BenzeneFailure.IsInfrastructure(ex)
-                    ? BenzeneFailure.InfrastructureLogPrefix + " Processing Kafka record on topic {topic} failed — this service is mis-wired; the message is not at fault"
-                    : "Processing Kafka record on topic {topic} failed", context.KafkaEvent.Topic);
-                    }
-                }
-            }, _options.MaxDegreeOfParallelism);
-    }
+    /// <inheritdoc/>
+    protected override Exception CreateProcessingException(KafkaContext context)
+        => new KafkaMessageProcessingException(context.KafkaEvent.Topic);
+
+    /// <inheritdoc/>
+    protected override object GetLogId(KafkaContext context) => context.KafkaEvent.Topic;
+
+    /// <inheritdoc/>
+    protected override string FailureLogMessageTemplate => "Processing Kafka record on topic {topic} failed";
+
+    /// <inheritdoc/>
+    protected override ILogger GetLogger(IServiceResolver serviceResolver)
+        => serviceResolver.GetService<ILogger<KafkaApplication>>();
 }

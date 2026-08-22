@@ -6,6 +6,14 @@ worker): delivers a queue message to a Benzene middleware pipeline. The Azure co
 `Benzene.Aws.Lambda.Sqs` in spirit, but structurally closer to `Benzene.Azure.Function.EventHub` —
 see "Routing" below for why.
 
+## Gap: no self-hosted worker counterpart
+Unlike Service Bus/Event Hub/Cosmos DB, which each ship both a self-hosted worker
+(`Benzene.Azure.ServiceBus`/`.EventHub`/`.CosmosDb`, for `UseWorker(...)`) *and* this kind of
+Functions trigger adapter, there is no `Benzene.Azure.QueueStorage` self-hosted worker — only the
+Functions trigger adapter in this package. This is a currently-unbuilt gap, not a deliberate design
+decision (see `docs/hosting.md`'s "Worker concurrency" section). Building it is a real feature
+addition (a polling worker around the Queue Storage SDK), not something to bolt on as a fix.
+
 ## Failure handling: a returned failure result is retried by default (opt out via `QueueStorageOptions`)
 Safe-by-default (`QueueStorageOptions.RaiseOnFailureStatus` defaults to `true`, flipped 2026-07-21 —
 see `work/archive/settlement-contract-1.0-2026-07.md`): if a handler returns a non-exception failure result (e.g.
@@ -80,10 +88,15 @@ visibility timeout in `host.json`) and poison-queue machinery is the per-message
 into a throw so the host's retry/poison handling engages for those too (see the top-of-file
 section). There is still no per-message settlement dimension (the host owns delete/retry).
 
-## No TestHelpers package
-Deliberate: the transport message is a plain string, so
-`Benzene.Core.Messages.TestHelpers`' `AsBenzeneMessage(serializer)` (serialized to text) is
-already the whole helper — a `.TestHelpers` package would be an identity function.
+## TestHelpers package
+`Benzene.Azure.Function.QueueStorage.TestHelpers` (`MessageBuilderExtensions.AsQueueStorageBenzeneMessage`)
+turns an `IMessageBuilder<T>` into a `QueueStorageMessage` whose text is the Benzene message envelope
+(`{ "topic": ..., "headers": ..., "body": ... }`) serialized with the same serializer the pipeline
+deserializes it with (default `JsonSerializer`, or a supplied one) — the shape a `UseBenzeneMessage(...)`
+pipeline expects. Not an identity function: it builds the envelope via `AsBenzeneMessage(serializer)`
+*and* serializes it into the message text, so a component test can push the demo message straight
+through a built Azure Function app's `HandleQueueMessages(...)` entry point exactly as the trigger
+would deliver it.
 
 ## Tests
 - `test/Benzene.Core.Test/Azure/QueueStoragePipelineTest.cs` — envelope routing, preset-topic

@@ -32,7 +32,7 @@ public class OutboundEventHubContextConverter : IContextConverter<OutboundContex
 
     private readonly ISerializer _serializer;
     private readonly string _topicPropertyKey;
-    private readonly string _partitionKeyHeader;
+    private readonly string? _partitionKeyHeader;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="OutboundEventHubContextConverter"/> class using a
@@ -43,7 +43,7 @@ public class OutboundEventHubContextConverter : IContextConverter<OutboundContex
     /// The header whose value becomes the Event Hubs partition key (co-locating related events on one
     /// partition, preserving order). <c>null</c> (the default) sends with no partition key.
     /// </param>
-    public OutboundEventHubContextConverter(string topicPropertyKey = DefaultTopicProperty, string partitionKeyHeader = null)
+    public OutboundEventHubContextConverter(string topicPropertyKey = DefaultTopicProperty, string? partitionKeyHeader = null)
         : this(new JsonSerializer(), topicPropertyKey, partitionKeyHeader)
     { }
 
@@ -53,7 +53,7 @@ public class OutboundEventHubContextConverter : IContextConverter<OutboundContex
     /// <param name="serializer">The serializer used to serialize the outgoing message.</param>
     /// <param name="topicPropertyKey">The event property the topic is written to (defaults to <see cref="DefaultTopicProperty"/>).</param>
     /// <param name="partitionKeyHeader">The header whose value becomes the partition key (defaults to <c>null</c> - no key).</param>
-    public OutboundEventHubContextConverter(ISerializer serializer, string topicPropertyKey = DefaultTopicProperty, string partitionKeyHeader = null)
+    public OutboundEventHubContextConverter(ISerializer serializer, string topicPropertyKey = DefaultTopicProperty, string? partitionKeyHeader = null)
     {
         _serializer = serializer;
         _topicPropertyKey = topicPropertyKey;
@@ -76,7 +76,7 @@ public class OutboundEventHubContextConverter : IContextConverter<OutboundContex
 
         eventData.Properties[_topicPropertyKey] = contextIn.Topic;
 
-        string partitionKey = null;
+        string? partitionKey = null;
         if (_partitionKeyHeader != null)
         {
             contextIn.Headers.TryGetValue(_partitionKeyHeader, out partitionKey);

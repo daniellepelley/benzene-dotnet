@@ -15,7 +15,7 @@ public class EventHubSendMessageContext
     /// The partition key that co-locates related events on the same partition (preserving their
     /// order), or <c>null</c> to let Event Hubs distribute the event across partitions.
     /// </param>
-    public EventHubSendMessageContext(EventData eventData, string partitionKey = null)
+    public EventHubSendMessageContext(EventData eventData, string? partitionKey = null)
     {
         EventData = eventData;
         PartitionKey = partitionKey;
@@ -31,7 +31,7 @@ public class EventHubSendMessageContext
     /// delivered in order there - the only mechanism Event Hubs offers for per-key ordering. <c>null</c>
     /// lets the service distribute events across partitions (no ordering guarantee).
     /// </summary>
-    public string PartitionKey { get; }
+    public string? PartitionKey { get; }
 
     /// <summary>
     /// Gets or sets whether the event was sent. Set by <see cref="EventHubClientMiddleware"/> once the

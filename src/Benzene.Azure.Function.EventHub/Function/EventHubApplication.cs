@@ -7,9 +7,8 @@ using Azure.Messaging.EventHubs;
 using Benzene.Abstractions.DI;
 using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Abstractions.Middleware;
-using Benzene.Core.MessageHandlers.Info;
+using Benzene.Azure.Function.Core;
 using Benzene.Core.Middleware;
-using Benzene.Core;
 using Microsoft.Extensions.Logging;
 
 namespace Benzene.Azure.Function.EventHub.Function;
@@ -59,18 +58,18 @@ public class EventHubApplication : EntryPointMiddlewareApplication<EventData[]>
 /// in its own service scope, applying <see cref="EventHubOptions"/> to decide whether an event's
 /// exception or failure result is contained (logged, so its siblings still complete) or left to
 /// cascade and fail the whole Functions invocation (so the Event Hubs trigger re-delivers the entire
-/// batch). Mirrors <c>EventGridBatchApplication</c> and <c>QueueStorageBatchApplication</c>.
+/// batch). Mirrors <c>EventGridBatchApplication</c> and <c>QueueStorageBatchApplication</c>. The
+/// fan-out/settle/escalate/log skeleton itself lives in
+/// <see cref="AzureFunctionBatchApplicationBase{TContext, TState}"/>; this class plugs in the
+/// Event Hub-specific bits (context creation, sequence-number id, and
+/// <see cref="EventHubMessageProcessingException"/>) - Event Hub uses no extra per-item state, so
+/// <c>TState</c> is <c>object?</c>.
 /// </summary>
-public class EventHubBatchApplication : IMiddlewareApplication<EventData[]>
+public class EventHubBatchApplication : AzureFunctionBatchApplicationBase<EventHubContext, object?>, IMiddlewareApplication<EventData[]>
 {
-    private readonly IMiddlewarePipeline<EventHubContext> _pipeline;
-    private readonly EventHubOptions _options;
-
-    public EventHubBatchApplication(IMiddlewarePipeline<EventHubContext> pipeline, EventHubOptions options = null)
-    {
-        _pipeline = new TransportMiddlewarePipeline<EventHubContext>(TransportNames.EventHub, pipeline);
-        _options = options ?? new EventHubOptions();
-    }
+    public EventHubBatchApplication(IMiddlewarePipeline<EventHubContext> pipeline, EventHubOptions? options = null)
+        : base(pipeline, TransportNames.EventHub, (options ??= new EventHubOptions()).CatchExceptions, options.RaiseOnFailureStatus, options.MaxDegreeOfParallelism)
+    { }
 
     public Task HandleAsync(EventData[] @event, IServiceResolverFactory serviceResolverFactory)
         => HandleAsync(@event, serviceResolverFactory, CancellationToken.None);
@@ -80,35 +79,20 @@ public class EventHubBatchApplication : IMiddlewareApplication<EventData[]>
     /// event's own scope with the ambient cancellation token so any component resolved during that
     /// event's pipeline run can observe cancellation via <see cref="ICancellationTokenAccessor"/>.
     /// </summary>
-    public async Task HandleAsync(EventData[] @event, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
-    {
-        var contexts = @event.Select(EventHubContext.CreateInstance);
-        await BoundedFanOut.WhenAllAsync(contexts, async context =>
-            {
-                try
-                {
-                    using (var scope = serviceResolverFactory.CreateScope())
-                    {
-                        scope.SeedCancellationToken(cancellationToken);
-                        await _pipeline.HandleAsync(context, scope);
-                    }
+    public Task HandleAsync(EventData[] @event, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
+        => HandleBatchAsync(@event.Select(item => (EventHubContext.CreateInstance(item), (object?)null)), serviceResolverFactory, cancellationToken);
 
-                    if (_options.RaiseOnFailureStatus && context.MessageResult?.IsSuccessful == false)
-                    {
-                        throw new EventHubMessageProcessingException(
-                            context.EventData.SequenceNumber.ToString(CultureInfo.InvariantCulture));
-                    }
-                }
-                catch (Exception ex) when (_options.CatchExceptions)
-                {
-                    using (var loggingScope = serviceResolverFactory.CreateScope())
-                    {
-                        loggingScope.GetService<ILogger<EventHubApplication>>()
-                            .LogError(ex, BenzeneFailure.IsInfrastructure(ex)
-                    ? BenzeneFailure.InfrastructureLogPrefix + " Processing Event Hub event {sequenceNumber} failed — this service is mis-wired; the message is not at fault"
-                    : "Processing Event Hub event {sequenceNumber} failed", context.EventData.SequenceNumber);
-                    }
-                }
-            }, _options.MaxDegreeOfParallelism);
-    }
+    /// <inheritdoc/>
+    protected override Exception CreateProcessingException(EventHubContext context)
+        => new EventHubMessageProcessingException(context.EventData.SequenceNumber.ToString(CultureInfo.InvariantCulture));
+
+    /// <inheritdoc/>
+    protected override object GetLogId(EventHubContext context) => context.EventData.SequenceNumber;
+
+    /// <inheritdoc/>
+    protected override string FailureLogMessageTemplate => "Processing Event Hub event {sequenceNumber} failed";
+
+    /// <inheritdoc/>
+    protected override ILogger GetLogger(IServiceResolver serviceResolver)
+        => serviceResolver.GetService<ILogger<EventHubApplication>>();
 }

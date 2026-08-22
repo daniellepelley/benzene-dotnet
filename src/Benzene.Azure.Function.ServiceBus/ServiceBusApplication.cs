@@ -6,10 +6,9 @@ using Azure.Messaging.ServiceBus;
 using Benzene.Abstractions.DI;
 using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Abstractions.Middleware;
-using Benzene.Core.MessageHandlers.Info;
+using Benzene.Azure.Function.Core;
 using Benzene.Core.Middleware;
 using Microsoft.Azure.Functions.Worker;
-using Benzene.Core;
 using Microsoft.Extensions.Logging;
 
 namespace Benzene.Azure.Function.ServiceBus;
@@ -45,15 +44,23 @@ public class ServiceBusApplication : EntryPointMiddlewareApplication<ServiceBusR
 /// is <see cref="ServiceBusAckMode.Explicit"/>, to complete or abandon each message individually
 /// based on that same outcome.
 /// </summary>
-public class ServiceBusBatchApplication : IMiddlewareApplication<ServiceBusReceivedMessage[]>, IMiddlewareApplication<ServiceBusTriggerBatch>
+/// <remarks>
+/// The fan-out/settle/escalate/log skeleton itself lives in
+/// <see cref="AzureFunctionBatchApplicationBase{TContext, TState}"/>. Service Bus is the one
+/// transport package that plugs into every hook, because <see cref="ServiceBusOptions.AckMode"/> =
+/// <see cref="ServiceBusAckMode.Explicit"/> needs per-message state beyond the context itself (the
+/// <see cref="ServiceBusMessageActions"/> to complete/abandon against, and whether this message has
+/// already been acted on) - carried as this class's private <see cref="AckState"/>, the base's
+/// <c>TState</c>.
+/// </remarks>
+public class ServiceBusBatchApplication : AzureFunctionBatchApplicationBase<ServiceBusContext, ServiceBusBatchApplication.AckState>, IMiddlewareApplication<ServiceBusReceivedMessage[]>, IMiddlewareApplication<ServiceBusTriggerBatch>
 {
-    private readonly IMiddlewarePipeline<ServiceBusContext> _pipeline;
     private readonly ServiceBusOptions _options;
 
     public ServiceBusBatchApplication(IMiddlewarePipeline<ServiceBusContext> pipeline, ServiceBusOptions? options = null)
+        : base(pipeline, TransportNames.ServiceBus, (options ??= new ServiceBusOptions()).CatchExceptions, options.RaiseOnFailureStatus, options.MaxDegreeOfParallelism)
     {
-        _pipeline = new TransportMiddlewarePipeline<ServiceBusContext>(TransportNames.ServiceBus, pipeline);
-        _options = options ?? new ServiceBusOptions();
+        _options = options;
     }
 
     /// <summary>
@@ -92,72 +99,106 @@ public class ServiceBusBatchApplication : IMiddlewareApplication<ServiceBusRecei
     public Task HandleAsync(ServiceBusTriggerBatch @event, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
         => HandleAsync(@event.Messages, @event.MessageActions, serviceResolverFactory, cancellationToken);
 
-    private async Task HandleAsync(ServiceBusReceivedMessage[] messages, ServiceBusMessageActions? messageActions, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
+    private Task HandleAsync(ServiceBusReceivedMessage[] messages, ServiceBusMessageActions? messageActions, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
     {
         var explicitAck = messageActions != null && _options.AckMode == ServiceBusAckMode.Explicit;
 
-        // BoundedFanOut optionally caps how many messages run at once
+        // Built here (not via a base-class item-to-context hook) so messageActions/explicitAck - both
+        // local to this one call - can flow into each message's AckState via an ordinary closure,
+        // rather than through shared mutable state on this (potentially long-lived, concurrently
+        // invoked) application instance.
+        var entries = messages.Select(message => (new ServiceBusContext(message), new AckState(messageActions, explicitAck)));
+
+        // BoundedFanOut (via the base class) optionally caps how many messages run at once
         // (ServiceBusOptions.MaxDegreeOfParallelism); unset leaves the fan-out unbounded, exactly as
         // before.
-        var contexts = messages.Select(message => new ServiceBusContext(message));
-        await BoundedFanOut.WhenAllAsync(contexts, async context =>
-            {
-                var acked = false;
+        return HandleBatchAsync(entries, serviceResolverFactory, cancellationToken);
+    }
 
-                try
-                {
-                    using (var scope = serviceResolverFactory.CreateScope())
-                    {
-                        scope.SeedCancellationToken(cancellationToken);
-                        await _pipeline.HandleAsync(context, scope);
-                    }
+    /// <inheritdoc/>
+    protected override async Task OnPipelineSucceededAsync(ServiceBusContext context, AckState state)
+    {
+        if (!state.ExplicitAck)
+        {
+            return;
+        }
 
-                    if (explicitAck)
-                    {
-                        acked = true;
-                        // Abandon on failure OR a null result (a pipeline that short-circuited without
-                        // setting one), completing only on genuine success - matching the SQS reference so
-                        // an unestablished outcome errs toward redelivery, not silent completion/loss.
-                        if (context.MessageResult?.IsSuccessful != true)
-                        {
-                            await messageActions!.AbandonMessageAsync(context.Message);
-                        }
-                        else
-                        {
-                            await messageActions!.CompleteMessageAsync(context.Message);
-                        }
-                    }
+        state.Acked = true;
 
-                    // Escalate a failure result to a thrown exception only under AutoComplete: the
-                    // Functions host (AutoCompleteMessages=true) then abandons the message, which is the
-                    // only redelivery lever there. Under Explicit ack the message was already abandoned
-                    // above, so throwing again would be redundant and would needlessly fail the whole
-                    // (possibly batched) invocation even though every message was settled individually.
-                    if (!explicitAck && _options.RaiseOnFailureStatus && context.MessageResult?.IsSuccessful == false)
-                    {
-                        throw new ServiceBusMessageProcessingException(context.Message.MessageId);
-                    }
-                }
-                catch (Exception ex) when (_options.CatchExceptions)
-                {
-                    if (explicitAck && !acked)
-                    {
-                        await messageActions!.AbandonMessageAsync(context.Message);
-                    }
+        // Abandon on failure OR a null result (a pipeline that short-circuited without setting one),
+        // completing only on genuine success - matching the SQS reference so an unestablished outcome
+        // errs toward redelivery, not silent completion/loss.
+        if (context.MessageResult?.IsSuccessful != true)
+        {
+            await state.MessageActions!.AbandonMessageAsync(context.Message);
+        }
+        else
+        {
+            await state.MessageActions!.CompleteMessageAsync(context.Message);
+        }
+    }
 
-                    using (var loggingScope = serviceResolverFactory.CreateScope())
-                    {
-                        loggingScope.GetService<ILogger<ServiceBusApplication>>()
-                            .LogError(ex, BenzeneFailure.IsInfrastructure(ex)
-                    ? BenzeneFailure.InfrastructureLogPrefix + " Processing Service Bus message {messageId} failed — this service is mis-wired; the message is not at fault"
-                    : "Processing Service Bus message {messageId} failed", context.Message.MessageId);
-                    }
-                }
-                catch (Exception) when (explicitAck && !acked)
-                {
-                    await messageActions!.AbandonMessageAsync(context.Message);
-                    throw;
-                }
-            }, _options.MaxDegreeOfParallelism);
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Escalates a failure result to a thrown exception only under <c>AutoComplete</c>: the Functions
+    /// host (<c>AutoCompleteMessages=true</c>) then abandons the message, which is the only
+    /// redelivery lever there. Under Explicit ack the message was already abandoned by
+    /// <see cref="OnPipelineSucceededAsync"/> above, so throwing again would be redundant and would
+    /// needlessly fail the whole (possibly batched) invocation even though every message was settled
+    /// individually.
+    /// </remarks>
+    protected override bool ShouldEscalateFailure(ServiceBusContext context, AckState state) => !state.ExplicitAck;
+
+    /// <inheritdoc/>
+    protected override async Task OnExceptionCaughtAsync(ServiceBusContext context, AckState state, Exception exception)
+    {
+        if (state.ExplicitAck && !state.Acked)
+        {
+            await state.MessageActions!.AbandonMessageAsync(context.Message);
+        }
+    }
+
+    /// <inheritdoc/>
+    protected override bool ShouldCleanUpBeforeRethrow(ServiceBusContext context, AckState state)
+        => state.ExplicitAck && !state.Acked;
+
+    /// <inheritdoc/>
+    protected override Task CleanUpBeforeRethrowAsync(ServiceBusContext context, AckState state)
+        => state.MessageActions!.AbandonMessageAsync(context.Message);
+
+    /// <inheritdoc/>
+    protected override Exception CreateProcessingException(ServiceBusContext context)
+        => new ServiceBusMessageProcessingException(context.Message.MessageId);
+
+    /// <inheritdoc/>
+    protected override object GetLogId(ServiceBusContext context) => context.Message.MessageId;
+
+    /// <inheritdoc/>
+    protected override string FailureLogMessageTemplate => "Processing Service Bus message {messageId} failed";
+
+    /// <inheritdoc/>
+    protected override ILogger GetLogger(IServiceResolver serviceResolver)
+        => serviceResolver.GetService<ILogger<ServiceBusApplication>>();
+
+    /// <summary>
+    /// Per-message ack-tracking state threaded through <see cref="ServiceBusBatchApplication"/>'s hook
+    /// overrides: the <see cref="ServiceBusMessageActions"/> to complete/abandon against (if any - only
+    /// present when the <see cref="ServiceBusTriggerBatch"/> overload was used), whether
+    /// <see cref="ServiceBusOptions.AckMode"/> is <see cref="ServiceBusAckMode.Explicit"/> for this
+    /// call, and whether this specific message has already been completed/abandoned.
+    /// </summary>
+    public sealed class AckState
+    {
+        internal AckState(ServiceBusMessageActions? messageActions, bool explicitAck)
+        {
+            MessageActions = messageActions;
+            ExplicitAck = explicitAck;
+        }
+
+        internal ServiceBusMessageActions? MessageActions { get; }
+
+        internal bool ExplicitAck { get; }
+
+        internal bool Acked { get; set; }
     }
 }

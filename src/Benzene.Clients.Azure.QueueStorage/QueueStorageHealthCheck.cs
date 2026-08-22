@@ -60,6 +60,6 @@ public class QueueStorageHealthCheck : IHealthCheck
 
     // Pulls the non-sensitive discriminators Azure already returns off a RequestFailedException; null for
     // a non-Azure exception (e.g. a raw socket failure).
-    private static (string ErrorCode, int? StatusCode) AzureErrorDetails(Exception ex)
+    private static (string? ErrorCode, int? StatusCode) AzureErrorDetails(Exception ex)
         => ex is RequestFailedException rfe ? (rfe.ErrorCode, (int?)rfe.Status) : (null, null);
 }

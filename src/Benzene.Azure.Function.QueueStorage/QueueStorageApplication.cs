@@ -5,9 +5,8 @@ using System.Threading.Tasks;
 using Benzene.Abstractions.DI;
 using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Abstractions.Middleware;
-using Benzene.Core.MessageHandlers.Info;
+using Benzene.Azure.Function.Core;
 using Benzene.Core.Middleware;
-using Benzene.Core;
 using Microsoft.Extensions.Logging;
 
 namespace Benzene.Azure.Function.QueueStorage;
@@ -40,18 +39,16 @@ public class QueueStorageApplication : EntryPointMiddlewareApplication<QueueStor
 /// Runs every message in a Queue Storage delivery through the middleware pipeline concurrently, each
 /// in its own service scope, applying <see cref="QueueStorageOptions"/> to decide whether a message's
 /// exception or failure result is contained (logged) or left to cascade and fail the invocation (so
-/// the host's poison handling engages).
+/// the host's poison handling engages). The fan-out/settle/escalate/log skeleton itself lives in
+/// <see cref="AzureFunctionBatchApplicationBase{TContext, TState}"/>; this class plugs in the
+/// Queue Storage-specific bits - Queue Storage uses no extra per-item state, so <c>TState</c> is
+/// <c>object?</c>.
 /// </summary>
-public class QueueStorageBatchApplication : IMiddlewareApplication<QueueStorageMessage[]>
+public class QueueStorageBatchApplication : AzureFunctionBatchApplicationBase<QueueStorageContext, object?>, IMiddlewareApplication<QueueStorageMessage[]>
 {
-    private readonly IMiddlewarePipeline<QueueStorageContext> _pipeline;
-    private readonly QueueStorageOptions _options;
-
-    public QueueStorageBatchApplication(IMiddlewarePipeline<QueueStorageContext> pipeline, QueueStorageOptions options = null)
-    {
-        _pipeline = new TransportMiddlewarePipeline<QueueStorageContext>(TransportNames.QueueStorage, pipeline);
-        _options = options ?? new QueueStorageOptions();
-    }
+    public QueueStorageBatchApplication(IMiddlewarePipeline<QueueStorageContext> pipeline, QueueStorageOptions? options = null)
+        : base(pipeline, TransportNames.QueueStorage, (options ??= new QueueStorageOptions()).CatchExceptions, options.RaiseOnFailureStatus, options.MaxDegreeOfParallelism)
+    { }
 
     public Task HandleAsync(QueueStorageMessage[] @event, IServiceResolverFactory serviceResolverFactory)
         => HandleAsync(@event, serviceResolverFactory, CancellationToken.None);
@@ -61,34 +58,20 @@ public class QueueStorageBatchApplication : IMiddlewareApplication<QueueStorageM
     /// message's own scope with the ambient cancellation token so any component resolved during that
     /// message's pipeline run can observe cancellation via <see cref="ICancellationTokenAccessor"/>.
     /// </summary>
-    public async Task HandleAsync(QueueStorageMessage[] @event, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
-    {
-        var contexts = @event.Select(message => new QueueStorageContext(message));
-        await BoundedFanOut.WhenAllAsync(contexts, async context =>
-            {
-                try
-                {
-                    using (var scope = serviceResolverFactory.CreateScope())
-                    {
-                        scope.SeedCancellationToken(cancellationToken);
-                        await _pipeline.HandleAsync(context, scope);
-                    }
+    public Task HandleAsync(QueueStorageMessage[] @event, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
+        => HandleBatchAsync(@event.Select(item => (new QueueStorageContext(item), (object?)null)), serviceResolverFactory, cancellationToken);
 
-                    if (_options.RaiseOnFailureStatus && context.MessageResult?.IsSuccessful == false)
-                    {
-                        throw new QueueStorageMessageProcessingException(context.Message.MessageId ?? "unknown");
-                    }
-                }
-                catch (Exception ex) when (_options.CatchExceptions)
-                {
-                    using (var loggingScope = serviceResolverFactory.CreateScope())
-                    {
-                        loggingScope.GetService<ILogger<QueueStorageApplication>>()
-                            .LogError(ex, BenzeneFailure.IsInfrastructure(ex)
-                    ? BenzeneFailure.InfrastructureLogPrefix + " Processing Queue Storage message {messageId} failed — this service is mis-wired; the message is not at fault"
-                    : "Processing Queue Storage message {messageId} failed", context.Message.MessageId);
-                    }
-                }
-            }, _options.MaxDegreeOfParallelism);
-    }
+    /// <inheritdoc/>
+    protected override Exception CreateProcessingException(QueueStorageContext context)
+        => new QueueStorageMessageProcessingException(context.Message.MessageId ?? "unknown");
+
+    /// <inheritdoc/>
+    protected override object? GetLogId(QueueStorageContext context) => context.Message.MessageId;
+
+    /// <inheritdoc/>
+    protected override string FailureLogMessageTemplate => "Processing Queue Storage message {messageId} failed";
+
+    /// <inheritdoc/>
+    protected override ILogger GetLogger(IServiceResolver serviceResolver)
+        => serviceResolver.GetService<ILogger<QueueStorageApplication>>();
 }
