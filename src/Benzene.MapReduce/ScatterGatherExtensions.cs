@@ -59,9 +59,12 @@ public static class ScatterGatherExtensions
                         ? Outcome<TShard, TPartial>.Ok(shard, result.Payload)
                         : Outcome<TShard, TPartial>.Failed(shard);
                 }
-                catch
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     // A transport-level throw is a failed shard; the policy below decides what that means.
+                    // OperationCanceledException is deliberately excluded (matching RetryMiddleware's
+                    // DefaultShouldRetry) so a caller-requested cancellation propagates as cancellation
+                    // instead of being silently reported as a failed shard.
                     return Outcome<TShard, TPartial>.Failed(shard);
                 }
             },
