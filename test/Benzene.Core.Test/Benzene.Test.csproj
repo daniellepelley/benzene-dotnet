@@ -70,7 +70,9 @@
     <ProjectReference Include="..\..\src\Benzene.Aws.Lambda.EventBridge.TestHelpers\Benzene.Aws.Lambda.EventBridge.TestHelpers.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Aws.Lambda.Core.TestHelpers\Benzene.Aws.Lambda.Core.TestHelpers.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Aws.Lambda.Kinesis\Benzene.Aws.Lambda.Kinesis.csproj" />
+    <ProjectReference Include="..\..\src\Benzene.Aws.Lambda.Kinesis.TestHelpers\Benzene.Aws.Lambda.Kinesis.TestHelpers.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Aws.Lambda.S3\Benzene.Aws.Lambda.S3.csproj" />
+    <ProjectReference Include="..\..\src\Benzene.Aws.Lambda.S3.TestHelpers\Benzene.Aws.Lambda.S3.TestHelpers.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Aws.Lambda.Kafka\Benzene.Aws.Lambda.Kafka.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Aws.Lambda.Kafka.TestHelpers\Benzene.Aws.Lambda.Kafka.TestHelpers.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Aws.Lambda.Sqs\Benzene.Aws.Lambda.Sqs.csproj" />

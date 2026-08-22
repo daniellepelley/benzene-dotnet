@@ -25,7 +25,11 @@ Full detail (including the interaction with `CatchExceptions`): `docs/cookbooks/
 ## Key types/interfaces
 
 ### Application & Handler
-- `SnsApplication` - SNS application for Lambda
+- `SnsApplication : SingleContextEscalatingApplicationBase<SnsApplication, SnsRecordContext>` - SNS
+  application for Lambda. Its per-record try/catch/escalate/log logic (run the pipeline, escalate a
+  failure result, catch+log an exception) is inherited from `Benzene.Aws.Lambda.Core`'s shared base,
+  along with `S3Application` and `EventBridgeApplication`, so the three near-identical
+  implementations stop drifting the way SQS/Kafka's own per-record logic already had.
 - `SnsLambdaHandler` - Lambda function handler for SNS
 
 ### Context

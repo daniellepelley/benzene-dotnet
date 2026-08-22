@@ -1,12 +1,10 @@
-using System;
 using System.Threading.Tasks;
 using Benzene.Abstractions.DI;
 using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Abstractions.Middleware;
+using Benzene.Aws.Lambda.Core;
 using Benzene.Core.MessageHandlers.Info;
 using Benzene.Core.Middleware;
-using Benzene.Core;
-using Microsoft.Extensions.Logging;
 
 namespace Benzene.Aws.Lambda.EventBridge;
 
@@ -16,11 +14,8 @@ namespace Benzene.Aws.Lambda.EventBridge;
 /// Lambda target with exactly one event, not a batch. Exception/failure-status behavior is
 /// configurable via <see cref="EventBridgeOptions"/>, mirroring <c>SnsApplication</c>.
 /// </summary>
-public class EventBridgeApplication : IMiddlewareApplication<EventBridgeEvent>
+public class EventBridgeApplication : SingleContextEscalatingApplicationBase<EventBridgeApplication, EventBridgeContext>, IMiddlewareApplication<EventBridgeEvent>
 {
-    private readonly IMiddlewarePipeline<EventBridgeContext> _pipeline;
-    private readonly EventBridgeOptions _options;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="EventBridgeApplication"/> class.
     /// </summary>
@@ -32,9 +27,14 @@ public class EventBridgeApplication : IMiddlewareApplication<EventBridgeEvent>
     /// <see cref="EventBridgeOptions.CatchExceptions"/> off) if omitted.
     /// </param>
     public EventBridgeApplication(IMiddlewarePipeline<EventBridgeContext> pipeline, EventBridgeOptions options = null)
+        : base(
+            new TransportMiddlewarePipeline<EventBridgeContext>(TransportNames.EventBridge, pipeline),
+            (options ??= new EventBridgeOptions()).CatchExceptions,
+            options.RaiseOnFailureStatus,
+            context => context.Event.Id,
+            eventId => new EventBridgeMessageProcessingException(eventId),
+            "Processing EventBridge event {id} failed")
     {
-        _pipeline = new TransportMiddlewarePipeline<EventBridgeContext>(TransportNames.EventBridge, pipeline);
-        _options = options ?? new EventBridgeOptions();
     }
 
     /// <summary>
@@ -45,29 +45,6 @@ public class EventBridgeApplication : IMiddlewareApplication<EventBridgeEvent>
     /// </summary>
     /// <param name="event">The EventBridge event to process.</param>
     /// <param name="serviceResolverFactory">The service resolver factory used to create the per-event scope.</param>
-    public async Task HandleAsync(EventBridgeEvent @event, IServiceResolverFactory serviceResolverFactory)
-    {
-        var context = new EventBridgeContext(@event);
-
-        try
-        {
-            using (var scope = serviceResolverFactory.CreateScope())
-            {
-                await _pipeline.HandleAsync(context, scope);
-            }
-
-            if (_options.RaiseOnFailureStatus && context.MessageResult?.IsSuccessful == false)
-            {
-                throw new EventBridgeMessageProcessingException(context.Event.Id);
-            }
-        }
-        catch (Exception ex) when (_options.CatchExceptions)
-        {
-            using var loggingScope = serviceResolverFactory.CreateScope();
-            loggingScope.GetService<ILogger<EventBridgeApplication>>()
-                .LogError(ex, BenzeneFailure.IsInfrastructure(ex)
-                    ? BenzeneFailure.InfrastructureLogPrefix + " Processing EventBridge event {id} failed — this service is mis-wired; the message is not at fault"
-                    : "Processing EventBridge event {id} failed", context.Event.Id);
-        }
-    }
+    public Task HandleAsync(EventBridgeEvent @event, IServiceResolverFactory serviceResolverFactory)
+        => ProcessAsync(new EventBridgeContext(@event), serviceResolverFactory);
 }

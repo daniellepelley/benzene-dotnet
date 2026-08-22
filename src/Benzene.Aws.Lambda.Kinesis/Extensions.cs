@@ -41,7 +41,11 @@ public static class Extensions
         KinesisStreamOptions options = null)
     {
         app.Register(x => x.AddKinesis());
-        var pipeline = app.CreateMiddlewarePipeline(action);
+        var pipeline = app.CreateMiddlewarePipeline<StreamContext<KinesisEventRecord>>(builder =>
+        {
+            builder.UseBenzeneInvocation();
+            action(builder);
+        });
         return app.Use(resolver => new KinesisLambdaHandler(new KinesisStreamApplication(pipeline, options), resolver));
     }
 }

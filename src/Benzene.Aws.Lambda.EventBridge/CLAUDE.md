@@ -26,9 +26,11 @@ idempotent.
 - `EventBridgeLambdaHandler : AwsLambdaMiddlewareRouter<EventBridgeEvent>` — claims payloads with
   both `detail-type` and `source` present; everything else falls through to the next event source
   adapter. Fire-and-forget (EventBridge targets are invoked asynchronously; no response written).
-- `EventBridgeApplication : MiddlewareApplication<EventBridgeEvent, EventBridgeContext>` —
+- `EventBridgeApplication : SingleContextEscalatingApplicationBase<EventBridgeApplication, EventBridgeContext>` —
   single-context: EventBridge delivers ONE event per invocation (no `Records` batch), so this is
-  one pipeline invocation + one DI scope per event, not a `MiddlewareMultiApplication` fan-out.
+  one pipeline invocation + one DI scope per event, not a fan-out. Its try/catch/escalate/log logic
+  is inherited from `Benzene.Aws.Lambda.Core`'s shared base, along with `SnsApplication` and
+  `S3Application`, so the three near-identical implementations stop drifting.
 - `EventBridgeContext : IHasMessageResult` — carries the event and the handler result.
 - Getters: topic = `detail-type` (wrapped in `PresetTopicMessageTopicGetter`, so `.UsePresetTopic(...)`
   / `.UseTopicFrom(...)` can route a foreign bus event whose `detail-type` is not a Benzene topic);
@@ -37,7 +39,11 @@ idempotent.
   inside `detail` (EventBridge has no native per-message attributes — the outbound client in
   `Benzene.Clients.Aws/EventBridge/` embeds them there).
 - `UseEventBridge(action)` / `AddEventBridge()` / `EventBridgeRegistrations` — standard adapter
-  wiring, mirrors `Benzene.Aws.Lambda.Sns`.
+  wiring, mirrors `Benzene.Aws.Lambda.Sns`. Now auto-wires `UseBenzeneInvocation()`
+  (`BenzeneInvocationExtensions.cs`) as the pipeline's first middleware, same reason as
+  `Benzene.Aws.Lambda.Sns`: the event is dispatched through its own DI scope
+  (`EventBridgeApplication`'s per-event `serviceResolverFactory.CreateScope()`), which doesn't
+  inherit the outer invocation's `IBenzeneInvocation` — `InvocationId` = the event's `id`.
 
 ## When to use this package
 - Handling EventBridge bus events (domain events, scheduled rules, AWS service events) with

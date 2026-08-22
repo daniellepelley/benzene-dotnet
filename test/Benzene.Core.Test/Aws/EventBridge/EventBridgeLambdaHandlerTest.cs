@@ -20,7 +20,12 @@ public class EventBridgeLambdaHandlerTest
     {
         EventBridgeContext handledContext = null;
 
-        var app = new MiddlewarePipelineBuilder<AwsEventStreamContext>(new MicrosoftBenzeneServiceContainer(new ServiceCollection()));
+        // Uses the same underlying container for the runtime resolver as the pipeline was built
+        // against (rather than ServiceResolverMother's unrelated one) - UseEventBridge now auto-wires
+        // UseBenzeneInvocation() as the pipeline's first middleware, which needs its registration
+        // (added via app.Register(...) against THIS container) resolvable at runtime.
+        var services = new ServiceCollection();
+        var app = new MiddlewarePipelineBuilder<AwsEventStreamContext>(new MicrosoftBenzeneServiceContainer(services));
         app.UseEventBridge(eventBridge => eventBridge
             .Use(null, (context, next) =>
             {
@@ -31,7 +36,9 @@ public class EventBridgeLambdaHandlerTest
 
         var request = MessageBuilder.Create(Defaults.Topic, Defaults.MessageAsObject).AsEventBridge();
 
-        await app.Build().HandleAsync(AwsEventStreamContextBuilder.Build(request), ServiceResolverMother.CreateServiceResolver());
+        using var factory = new MicrosoftServiceResolverFactory(services);
+        using var resolver = factory.CreateScope();
+        await app.Build().HandleAsync(AwsEventStreamContextBuilder.Build(request), resolver);
 
         Assert.NotNull(handledContext);
         Assert.Equal(Defaults.Topic, handledContext.Event.DetailType);
