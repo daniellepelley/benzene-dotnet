@@ -1,5 +1,6 @@
 namespace Benzene.Grpc.Serialization;
 
+/// <summary>Converts between the wire protobuf request/response and a handler's or client's declared types.</summary>
 public interface IGrpcMessageAdapter
 {
     /// <summary>

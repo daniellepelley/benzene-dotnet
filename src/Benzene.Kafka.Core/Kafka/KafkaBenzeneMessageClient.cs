@@ -9,23 +9,33 @@ using Benzene.Results;
 using Confluent.Kafka;
 using Microsoft.Extensions.Logging;
 using Void = Benzene.Abstractions.Results.Void;
-using JsonSerializer = Benzene.Core.MessageHandlers.Serialization.JsonSerializer;
 
 namespace Benzene.Kafka.Core.Kafka;
 
+/// <summary>
+/// An <see cref="IBenzeneMessageClient"/> that produces outbound messages to Kafka, so business logic
+/// depends only on <c>IBenzeneMessageSender</c>/<c>IBenzeneMessageClient</c> and stays
+/// transport-agnostic. A message is converted to a <see cref="KafkaSendMessageContext"/> and run
+/// through a one-middleware produce pipeline.
+/// </summary>
 public class KafkaBenzeneMessageClient : IBenzeneMessageClient
 {
     // Shared across every SendMessageAsync call rather than constructed per call: JsonSerializer
     // wraps a JsonSerializerOptions instance, and System.Text.Json caches resolved converters/type
     // metadata per JsonSerializerOptions instance - a fresh one per send would silently defeat that
-    // cache on every single outbound message. System.Text.Json's serializer is documented thread-safe
-    // once its options are no longer being mutated, so one shared instance is safe here.
-    private static readonly ISerializer SharedSerializer = new JsonSerializer();
+    // cache on every single outbound message. Benzene.Clients.JsonSerializer.Shared is the one
+    // instance every outbound client package (Benzene.Clients.Http, Benzene.RabbitMq, this one) draws
+    // from rather than each declaring its own.
+    private static readonly ISerializer SharedSerializer = JsonSerializer.Shared;
 
     private readonly ILogger<KafkaBenzeneMessageClient> _logger;
     private readonly IServiceResolver _serviceResolver;
     private readonly IMiddlewarePipeline<KafkaSendMessageContext> _middlewarePipeline;
 
+    /// <summary>Initializes a new instance publishing on the given producer.</summary>
+    /// <param name="producer">The Kafka producer to publish with.</param>
+    /// <param name="logger">Logs a send failure.</param>
+    /// <param name="serviceResolver">The resolver the produce pipeline runs in.</param>
     public KafkaBenzeneMessageClient(IProducer<string, string> producer, ILogger<KafkaBenzeneMessageClient> logger, IServiceResolver serviceResolver)
     {
         _serviceResolver = serviceResolver;
@@ -38,6 +48,10 @@ public class KafkaBenzeneMessageClient : IBenzeneMessageClient
             .Build();
     }
 
+    /// <summary>Initializes a new instance from an already-built produce pipeline (for testing).</summary>
+    /// <param name="middlewarePipeline">The produce pipeline to run each message through.</param>
+    /// <param name="logger">Logs a send failure.</param>
+    /// <param name="serviceResolver">The resolver the produce pipeline runs in.</param>
     public KafkaBenzeneMessageClient(IMiddlewarePipeline<KafkaSendMessageContext> middlewarePipeline, ILogger<KafkaBenzeneMessageClient> logger, IServiceResolver serviceResolver)
     {
         _serviceResolver = serviceResolver;
@@ -45,6 +59,7 @@ public class KafkaBenzeneMessageClient : IBenzeneMessageClient
         _middlewarePipeline = middlewarePipeline;
     }
 
+    /// <inheritdoc />
     public async Task<IBenzeneResult<TResponse>> SendMessageAsync<TRequest, TResponse>(IBenzeneClientRequest<TRequest> request)
     {
         try
@@ -69,6 +84,7 @@ public class KafkaBenzeneMessageClient : IBenzeneMessageClient
         }
     }
 
+    /// <inheritdoc />
     public void Dispose()
     {
         // Method intentionally left empty.

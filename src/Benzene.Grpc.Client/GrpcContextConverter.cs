@@ -26,6 +26,9 @@ public class GrpcContextConverter<T> : IContextConverter<IBenzeneClientContext<T
         _deadline = deadline;
     }
 
+    /// <summary>Builds the outbound gRPC send context, converting headers from the client context.</summary>
+    /// <param name="contextIn">The client context to convert.</param>
+    /// <returns>A task that resolves to the built <see cref="GrpcSendMessageContext"/>.</returns>
     public Task<GrpcSendMessageContext> CreateRequestAsync(IBenzeneClientContext<T, Void> contextIn)
     {
         var headers = new Metadata();
@@ -37,6 +40,9 @@ public class GrpcContextConverter<T> : IContextConverter<IBenzeneClientContext<T
         return Task.FromResult(new GrpcSendMessageContext(contextIn.Request.Topic, contextIn.Request.Message, headers, deadline: _deadline, _cancellationToken));
     }
 
+    /// <summary>Maps an OK status to a successful result, or any other status to service-unavailable.</summary>
+    /// <param name="contextIn">The client context to set the response on.</param>
+    /// <param name="contextOut">The completed <see cref="GrpcSendMessageContext"/>.</param>
     public Task MapResponseAsync(IBenzeneClientContext<T, Void> contextIn, GrpcSendMessageContext contextOut)
     {
         contextIn.Response = contextOut.Status.StatusCode == StatusCode.OK

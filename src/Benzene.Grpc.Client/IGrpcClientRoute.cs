@@ -10,5 +10,9 @@ namespace Benzene.Grpc.Client;
 /// </summary>
 public interface IGrpcClientRoute
 {
+    /// <summary>Invokes the route's gRPC method for <paramref name="context"/> and records the outcome on it.</summary>
+    /// <param name="invoker">The gRPC call invoker to call with.</param>
+    /// <param name="adapter">Converts between the wire protobuf request/response and the caller's declared types.</param>
+    /// <param name="context">The outbound send context carrying the message to convert and send.</param>
     Task InvokeAsync(CallInvoker invoker, IGrpcMessageAdapter adapter, GrpcSendMessageContext context);
 }

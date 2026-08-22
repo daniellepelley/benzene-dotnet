@@ -8,8 +8,12 @@ using Benzene.Kafka.Core.KafkaMessage;
 
 namespace Benzene.Kafka.Core;
 
+/// <summary>DI registration for the inbound Kafka consumer pipeline getters/setters.</summary>
 public static class DependencyInjectionExtensions
 {
+    /// <summary>Registers the default inbound Kafka message getters/setter and declares the Kafka transport.</summary>
+    /// <param name="services">The service container to register on.</param>
+    /// <returns>The service container, for chaining.</returns>
     public static IBenzeneServiceContainer AddKafka<TKey, TValue>(this IBenzeneServiceContainer services)
     {
         // TryAdd: a user registration made earlier (ConfigureServices runs before Configure, where

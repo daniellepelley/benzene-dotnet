@@ -5,8 +5,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Benzene.Abstractions.DI;
+using Benzene.Abstractions.Serialization;
 using Benzene.HealthChecks.Core;
-using JsonSerializer = Benzene.Clients.JsonSerializer;
 
 namespace Benzene.Clients.Http;
 
@@ -35,7 +35,7 @@ namespace Benzene.Clients.Http;
 /// </remarks>
 public class HttpBenzeneMessageHealthCheck : IHealthCheck
 {
-    private static readonly JsonSerializer Serializer = new();
+    private static readonly ISerializer Serializer = JsonSerializer.Shared;
 
     private readonly HttpClient _httpClient;
     private readonly string _url;

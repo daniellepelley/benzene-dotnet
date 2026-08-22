@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>Benzene.Kafka.Core</AssemblyName>
     <RootNamespace>Benzene.Kafka.Core</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>

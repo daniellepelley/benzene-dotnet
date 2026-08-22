@@ -8,6 +8,12 @@ using Microsoft.Extensions.Logging;
 
 namespace Benzene.Kafka.Core;
 
+/// <summary>
+/// A self-hosted background worker that consumes Kafka records via a Confluent.Kafka
+/// <see cref="IConsumer{TKey,TValue}"/> and dispatches them through a <see cref="KafkaApplication{TKey,TValue}"/>
+/// pipeline, applying <see cref="BenzeneKafkaConfig"/>'s concurrency, ordering, offset-commit, and
+/// dead-lettering behavior.
+/// </summary>
 public class BenzeneKafkaWorker<TKey, TValue> : IBenzeneWorker, IDisposable
 {
     private readonly IServiceResolverFactory _serviceResolverFactory;
@@ -22,6 +28,13 @@ public class BenzeneKafkaWorker<TKey, TValue> : IBenzeneWorker, IDisposable
     private Task? _runTask;
     private CancellationTokenSource? _linkedCts;
 
+    /// <summary>Initializes a new instance of the <see cref="BenzeneKafkaWorker{TKey,TValue}"/> class.</summary>
+    /// <param name="serviceResolverFactory">Creates the per-record DI scope the pipeline runs in.</param>
+    /// <param name="kafkaApplication">The pipeline each consumed record is dispatched through.</param>
+    /// <param name="benzeneKafkaConfig">The worker's configuration.</param>
+    /// <param name="logger">Logs worker lifecycle and per-record failures.</param>
+    /// <param name="consumerFactory">Builds the underlying <see cref="IConsumer{TKey,TValue}"/>; defaults to <see cref="KafkaConsumerFactory{TKey,TValue}"/>.</param>
+    /// <param name="deadLetterOptions">Dead-letter topic/producer configuration; <c>null</c> disables dead-lettering.</param>
     public BenzeneKafkaWorker(IServiceResolverFactory serviceResolverFactory,
         KafkaApplication<TKey, TValue> kafkaApplication, BenzeneKafkaConfig benzeneKafkaConfig,
         ILogger<BenzeneKafkaWorker<TKey, TValue>> logger,
@@ -403,6 +416,7 @@ public class BenzeneKafkaWorker<TKey, TValue> : IBenzeneWorker, IDisposable
         }
     }
 
+    /// <inheritdoc />
     public void Dispose()
     {
         _stoppingCts.Dispose();

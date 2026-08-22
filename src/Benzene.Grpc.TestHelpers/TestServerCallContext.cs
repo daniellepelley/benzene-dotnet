@@ -17,6 +17,11 @@ public class TestServerCallContext : ServerCallContext
     private readonly DateTime _deadline;
     private readonly Metadata _responseTrailers = new();
 
+    /// <summary>Creates a <see cref="TestServerCallContext"/> with the given method, headers, cancellation token, and deadline.</summary>
+    /// <param name="method">The gRPC method path. Defaults to a placeholder test method.</param>
+    /// <param name="requestHeaders">The inbound request metadata; defaults to empty.</param>
+    /// <param name="cancellationToken">The call's cancellation token; defaults to <see cref="System.Threading.CancellationToken.None"/>.</param>
+    /// <param name="deadline">The call's deadline; defaults to <see cref="DateTime.MaxValue"/> (no deadline).</param>
     public static TestServerCallContext Create(
         string method = "/benzene.test.TestService/Echo",
         Metadata? requestHeaders = null,
@@ -34,35 +39,49 @@ public class TestServerCallContext : ServerCallContext
         _deadline = deadline;
     }
 
+    /// <summary>Gets the response headers written via <see cref="ServerCallContext.WriteResponseHeadersAsync"/>, for test assertions.</summary>
     public Metadata WrittenResponseHeaders { get; private set; } = new();
 
+    /// <inheritdoc />
     protected override string MethodCore => _method;
 
+    /// <inheritdoc />
     protected override string HostCore => "test-host";
 
+    /// <inheritdoc />
     protected override string PeerCore => "test-peer";
 
+    /// <inheritdoc />
     protected override DateTime DeadlineCore => _deadline;
 
+    /// <inheritdoc />
     protected override Metadata RequestHeadersCore => _requestHeaders;
 
+    /// <inheritdoc />
     protected override CancellationToken CancellationTokenCore => _cancellationToken;
 
+    /// <inheritdoc />
     protected override Metadata ResponseTrailersCore => _responseTrailers;
 
+    /// <inheritdoc />
     protected override Status StatusCore { get; set; }
 
+    /// <inheritdoc />
     protected override WriteOptions? WriteOptionsCore { get; set; }
 
+    /// <inheritdoc />
     protected override AuthContext AuthContextCore => throw new NotImplementedException();
 
+    /// <inheritdoc />
     protected override IDictionary<object, object> UserStateCore => throw new NotImplementedException();
 
+    /// <inheritdoc />
     protected override ContextPropagationToken? CreatePropagationTokenCore(ContextPropagationOptions? options)
     {
         throw new NotImplementedException();
     }
 
+    /// <inheritdoc />
     protected override Task WriteResponseHeadersAsyncCore(Metadata responseHeaders)
     {
         WrittenResponseHeaders = responseHeaders;

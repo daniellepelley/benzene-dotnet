@@ -3,8 +3,10 @@ using Benzene.Abstractions.Messages.Mappers;
 
 namespace Benzene.Kafka.Core.KafkaMessage;
 
+/// <summary>Reads the inbound message headers from a <see cref="KafkaRecordContext{TKey,TValue}"/>.</summary>
 public class KafkaMessageHeadersGetter<TKey, TValue> : IMessageHeadersGetter<KafkaRecordContext<TKey, TValue>>
 {
+    /// <inheritdoc />
     public IDictionary<string, string> GetHeaders(KafkaRecordContext<TKey, TValue> context)
     {
         // Kafka headers are an ordered list that legitimately permits repeated keys, so build the

@@ -2,6 +2,7 @@ using Google.Protobuf;
 
 namespace Benzene.Grpc.Client;
 
+/// <summary>Maps an outbound Benzene topic to the gRPC method that serves it, for <see cref="GrpcBenzeneMessageClient"/>.</summary>
 public interface IGrpcClientRouteRegistry
 {
     /// <summary>
@@ -13,5 +14,6 @@ public interface IGrpcClientRouteRegistry
         where TRequest : class, IMessage<TRequest>
         where TResponse : class, IMessage<TResponse>;
 
+    /// <summary>Finds the registered route for <paramref name="topic"/>, or <c>null</c> if none is registered.</summary>
     IGrpcClientRoute? Find(string topic);
 }

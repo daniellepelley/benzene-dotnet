@@ -7,34 +7,56 @@ using Void = Benzene.Abstractions.Results.Void;
 
 namespace Benzene.Kafka.Core.Kafka;
 
+/// <summary>Pipeline-builder extensions for the outbound Kafka produce path.</summary>
 public static class Extensions
 {
+    /// <summary>Adds a <see cref="KafkaClientMiddleware"/> built from the given producer to the pipeline.</summary>
+    /// <param name="app">The pipeline builder to add the middleware to.</param>
+    /// <param name="producer">The Kafka producer to publish with.</param>
+    /// <returns>The pipeline builder, for chaining.</returns>
     public static IMiddlewarePipelineBuilder<KafkaSendMessageContext> UseKafkaClient(
         this IMiddlewarePipelineBuilder<KafkaSendMessageContext> app, IProducer<string, string> producer)
     {
         return app.Use(_ => new KafkaClientMiddleware(producer));
     }
- 
+
+    /// <summary>Adds a <see cref="KafkaClientMiddleware"/> resolved from the service container to the pipeline.</summary>
+    /// <param name="app">The pipeline builder to add the middleware to.</param>
+    /// <returns>The pipeline builder, for chaining.</returns>
     public static IMiddlewarePipelineBuilder<KafkaSendMessageContext> UseKafkaClient(
         this IMiddlewarePipelineBuilder<KafkaSendMessageContext> app)
     {
         app.Register(x => x.AddScoped<KafkaClientMiddleware>());
         return app.Use<KafkaSendMessageContext, KafkaClientMiddleware>();
     }
-   
+
+    /// <summary>Converts <typeparamref name="TContext"/> to <typeparamref name="TContextOut"/> and builds the inner pipeline from <paramref name="action"/>.</summary>
+    /// <param name="app">The pipeline builder to convert.</param>
+    /// <param name="converter">Converts the context and maps the response back.</param>
+    /// <param name="action">Configures the inner pipeline the converted context runs through.</param>
+    /// <returns>The pipeline builder, for chaining.</returns>
     public static IMiddlewarePipelineBuilder<TContext> Convert<TContext, TContextOut>(this IMiddlewarePipelineBuilder<TContext> app,
         IContextConverter<TContext, TContextOut> converter, Action<IMiddlewarePipelineBuilder<TContextOut>> action)
     {
         var middlewarePipeline = app.CreateMiddlewarePipeline(action);
         return app.Use(serviceResolver => new ContextConverterMiddleware<TContext, TContextOut>(converter, middlewarePipeline, serviceResolver));
     }
-    
+
+    /// <summary>Converts a Benzene outbound client context to a Kafka produce and runs it through the given inner pipeline.</summary>
+    /// <param name="app">The outbound client pipeline builder.</param>
+    /// <param name="action">Configures the inner Kafka produce pipeline.</param>
+    /// <param name="keyHeader">The outbound header whose value becomes the Kafka message key. <c>null</c> (the default) produces a keyless message.</param>
+    /// <returns>The same builder, for chaining.</returns>
     public static IMiddlewarePipelineBuilder<IBenzeneClientContext<T, Void>> UseKafka<T>(this IMiddlewarePipelineBuilder<IBenzeneClientContext<T, Void>> app,
         Action<IMiddlewarePipelineBuilder<KafkaSendMessageContext>> action, string keyHeader = null)
     {
         return Convert(app, new KafkaContextConverter<T>(new Benzene.Core.MessageHandlers.Serialization.JsonSerializer(), keyHeader), action);
     }
 
+    /// <summary>Converts a Benzene outbound client context to a Kafka produce, using the default <see cref="KafkaClientMiddleware"/> configuration.</summary>
+    /// <param name="app">The outbound client pipeline builder.</param>
+    /// <param name="keyHeader">The outbound header whose value becomes the Kafka message key. <c>null</c> (the default) produces a keyless message.</param>
+    /// <returns>The same builder, for chaining.</returns>
     public static IMiddlewarePipelineBuilder<IBenzeneClientContext<T, Void>> UseKafka<T>(this IMiddlewarePipelineBuilder<IBenzeneClientContext<T, Void>> app, string keyHeader = null)
     {
         return app.Convert(new KafkaContextConverter<T>(new Benzene.Core.MessageHandlers.Serialization.JsonSerializer(), keyHeader), builder => builder.UseKafkaClient());

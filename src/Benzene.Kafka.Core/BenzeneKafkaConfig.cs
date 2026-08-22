@@ -2,9 +2,13 @@
 
 namespace Benzene.Kafka.Core;
 
+/// <summary>Configuration for a <see cref="BenzeneKafkaWorker{TKey,TValue}"/> instance.</summary>
 public class BenzeneKafkaConfig
 {
+    /// <summary>Gets or sets the Confluent.Kafka consumer configuration (brokers, group id, etc.).</summary>
     public required ConsumerConfig ConsumerConfig { get; set; }
+
+    /// <summary>Gets or sets the topics to subscribe to.</summary>
     public required string[] Topics { get; set; }
 
     /// <summary>The maximum number of messages handled concurrently.</summary>

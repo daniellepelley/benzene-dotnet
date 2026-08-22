@@ -6,6 +6,7 @@ using Grpc.Net.Client;
 
 namespace Benzene.Grpc.Client;
 
+/// <summary>DI registration for the outbound gRPC client.</summary>
 public static class DependencyInjectionExtensions
 {
     /// <summary>

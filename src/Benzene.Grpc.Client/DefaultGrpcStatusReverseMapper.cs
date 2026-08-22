@@ -15,6 +15,7 @@ public class DefaultGrpcStatusReverseMapper : IGrpcStatusReverseMapper
 
     private readonly IDictionary<StatusCode, string> _dictionary;
 
+    /// <summary>Initializes a new instance of the <see cref="DefaultGrpcStatusReverseMapper"/> class.</summary>
     public DefaultGrpcStatusReverseMapper()
     {
         _dictionary = new Dictionary<StatusCode, string>
@@ -33,6 +34,7 @@ public class DefaultGrpcStatusReverseMapper : IGrpcStatusReverseMapper
         };
     }
 
+    /// <inheritdoc />
     public string Map(StatusCode statusCode, Metadata? trailers)
     {
         var trailerStatus = trailers?.FirstOrDefault(x => !x.IsBinary && x.Key == TrailerKey)?.Value;

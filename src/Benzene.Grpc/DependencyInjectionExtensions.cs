@@ -10,6 +10,7 @@ using Benzene.Grpc.Serialization;
 
 namespace Benzene.Grpc;
 
+/// <summary>DI registration for routing gRPC calls to Benzene message handlers.</summary>
 public static class DependencyInjectionExtensions
 {
     /// <summary>

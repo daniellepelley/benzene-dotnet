@@ -6,12 +6,15 @@ using Grpc.Core;
 
 namespace Benzene.Grpc.Client;
 
+/// <summary>Default <see cref="IGrpcClientRouteRegistry"/> implementation: an in-memory, thread-safe topic-to-route index.</summary>
 public class GrpcClientRouteRegistry : IGrpcClientRouteRegistry
 {
     private static readonly ConcurrentDictionary<Type, object> ParsersByType = new();
 
     private readonly ConcurrentDictionary<string, IGrpcClientRoute> _routesByTopic = new();
 
+    /// <inheritdoc />
+    /// <exception cref="BenzeneException"><paramref name="fullMethodName"/> is not a valid <c>/package.Service/Method</c> path.</exception>
     public IGrpcClientRouteRegistry Add<TRequest, TResponse>(string topic, string fullMethodName)
         where TRequest : class, IMessage<TRequest>
         where TResponse : class, IMessage<TResponse>
@@ -28,6 +31,7 @@ public class GrpcClientRouteRegistry : IGrpcClientRouteRegistry
         return this;
     }
 
+    /// <inheritdoc />
     public IGrpcClientRoute? Find(string topic)
     {
         return _routesByTopic.TryGetValue(topic, out var route) ? route : null;

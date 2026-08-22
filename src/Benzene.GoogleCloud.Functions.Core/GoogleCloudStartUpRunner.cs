@@ -10,8 +10,8 @@ namespace Benzene.GoogleCloud.Functions.Core;
 /// a platform-neutral <see cref="BenzeneStartUp"/>'s <c>Configure</c> - constructing the StartUp,
 /// reading its configuration, and preparing the <see cref="IServiceCollection"/>/
 /// <see cref="IBenzeneServiceContainer"/> pair <c>ConfigureServices</c>/<c>Configure</c> are run
-/// against. Factored out so each trigger-type package (<c>Benzene.GoogleCloud.Functions.Http</c>
-/// today, a future <c>Benzene.GoogleCloud.Functions.PubSub</c>) doesn't duplicate it, mirroring why
+/// against. Factored out so each trigger-type package (<c>Benzene.GoogleCloud.Functions.Http</c>,
+/// <c>Benzene.GoogleCloud.Functions.PubSub</c>) doesn't duplicate it, mirroring why
 /// <c>Benzene.Aws.Lambda.Core</c> exists as a shared foundation for its own event-source packages.
 /// </summary>
 public static class GoogleCloudStartUpRunner

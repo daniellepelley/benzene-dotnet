@@ -4,6 +4,7 @@ using Benzene.Results;
 
 namespace Benzene.Clients.Common
 {
+    /// <summary>Extension methods mapping a <see cref="BenzeneMessageClientResponse"/> onto an <see cref="IBenzeneResult{T}"/>.</summary>
     public static class BenzeneResultExtensions
     {
         /// <summary>
