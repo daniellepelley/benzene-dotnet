@@ -89,4 +89,29 @@ public class OutboxDispatcherWorkerTest
 
         await worker.StopAsync(CancellationToken.None);
     }
+
+    [Fact]
+    public async Task Dispose_AfterStopAsync_DoesNotThrow_AndIsIdempotent()
+    {
+        var dispatcher = new Mock<IOutboxDispatcher>();
+        dispatcher
+            .Setup(d => d.RunOnceAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new OutboxDispatchResult(0, 0, 0, 0));
+        var worker = new OutboxDispatcherWorker(dispatcher.Object, new OutboxOptions { PollInterval = TimeSpan.FromMilliseconds(10) });
+
+        await worker.StartAsync(CancellationToken.None);
+        await worker.StopAsync(CancellationToken.None);
+
+        worker.Dispose();
+        worker.Dispose(); // Disposing twice must not throw (ObjectDisposedException from the CTS).
+    }
+
+    [Fact]
+    public void Dispose_WithoutEverStarting_DoesNotThrow()
+    {
+        var dispatcher = new Mock<IOutboxDispatcher>();
+        var worker = new OutboxDispatcherWorker(dispatcher.Object, new OutboxOptions());
+
+        worker.Dispose();
+    }
 }
