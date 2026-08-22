@@ -19,6 +19,14 @@ namespace Benzene.Aws.Lambda.DynamoDb;
 /// per-key ordering the stream guarantees. The first failed record's sequence number is reported
 /// as the batch item failure, so Lambda checkpoints there and redelivers from that record.
 /// </summary>
+/// <remarks>
+/// Deliberately has no <c>DynamoDbOptions</c>/<c>CatchExceptions</c>/<c>RaiseOnFailureStatus</c>
+/// toggle, unlike <c>SnsApplication</c>/<c>S3Application</c>/<c>EventBridgeApplication</c> - ordering
+/// is the whole point of this shape (see the class summary), so there is no "catch and keep going"
+/// or "at-most-once" mode to opt into: any failure (thrown or returned) always stops the batch at
+/// that record and reports it, full stop. See <c>work/archive/batch-failure-handling-2026-07.md</c>'s
+/// "Deliberately deferred" note on DS5 for the design record.
+/// </remarks>
 public class DynamoDbApplication : IMiddlewareApplication<DynamoDbEvent, DynamoDbBatchResponse>
 {
     private readonly IMiddlewarePipeline<DynamoDbRecordContext> _pipeline;

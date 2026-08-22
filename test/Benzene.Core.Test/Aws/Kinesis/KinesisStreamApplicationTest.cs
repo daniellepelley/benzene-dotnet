@@ -169,4 +169,34 @@ public class KinesisStreamApplicationTest
 
         Assert.Empty(response.BatchItemFailures);
     }
+
+    [Fact]
+    public void KinesisStreamOptions_Defaults_CatchesExceptions_AndAutoCheckpointsOnSuccess()
+    {
+        var options = new KinesisStreamOptions();
+        Assert.True(options.CatchExceptions);
+        Assert.True(options.AutoCheckpointOnSuccess);
+    }
+
+    [Fact]
+    public async Task HandleAsync_DefaultOptions_PipelineThrows_ExceptionIsCaught_ReturnsPartialResumePoint()
+    {
+        var application = BuildApplication(_ => throw new InvalidOperationException("boom"));
+
+        var response = await application.HandleAsync(CreateKinesisEvent("1", "2"), ServiceResolverFactory());
+
+        var failure = Assert.Single(response.BatchItemFailures);
+        Assert.Equal("1", failure.ItemIdentifier);
+    }
+
+    [Fact]
+    public async Task HandleAsync_CatchExceptionsFalse_PipelineThrows_ExceptionCascades()
+    {
+        var application = BuildApplication(
+            _ => throw new InvalidOperationException("boom"),
+            new KinesisStreamOptions { CatchExceptions = false });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => application.HandleAsync(CreateKinesisEvent("1", "2"), ServiceResolverFactory()));
+    }
 }

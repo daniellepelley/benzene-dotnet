@@ -16,4 +16,21 @@ public class KinesisStreamOptions
     /// shard-ordered retry signal. Mirrors Cosmos's <c>AutoCheckpointOnSuccess</c>.
     /// </summary>
     public bool AutoCheckpointOnSuccess { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets whether an exception from the stream pipeline is caught (logged, and the batch
+    /// response returned with the resume point computed from whatever the handler had checkpointed
+    /// before failing) instead of left to cascade out of the Lambda invocation. Defaults to
+    /// <c>true</c> - unlike the fan-out transports' <c>CatchExceptions</c> (which defaults
+    /// <c>false</c>: an uncaught exception is the safer default there), Kinesis's checkpointer resume
+    /// point already <em>is</em> the correct failure signal for the shard-ordered retry contract, so
+    /// catching and still returning a real response loses no information and is the safer default
+    /// here - see
+    /// <c>work/archive/kinesis-batch-failure-handling-design-2026-07.md</c> §3.3. Set <c>false</c> to
+    /// let the exception cascade and fail the whole invocation instead (losing the partial-resume
+    /// information in the response, but matching the fan-out transports' opt-out shape) if your
+    /// deployment's monitoring/alerting depends on invocation failures rather than the batch response
+    /// or logs.
+    /// </summary>
+    public bool CatchExceptions { get; set; } = true;
 }

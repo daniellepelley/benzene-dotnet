@@ -23,10 +23,11 @@ namespace Benzene.Aws.Lambda.Kinesis;
 /// Response-producing: wires a <see cref="KinesisStreamCheckpointer"/> into the batch's
 /// <see cref="StreamContext{TItem}"/> and returns a <see cref="KinesisBatchResponse"/> naming the
 /// sequence number to resume from, for triggers with <c>ReportBatchItemFailures</c> configured. If
-/// the pipeline throws, the exception is caught (logged, not rethrown) so the response still carries
-/// whatever the handler had checkpointed before failing — the checkpointer's resume point is itself
-/// the correct failure signal for Kinesis's shard-ordered retry contract, so there's nothing to gain
-/// by cascading the exception instead. See <c>work/archive/kinesis-batch-failure-handling-design-2026-07.md</c>.
+/// the pipeline throws, by default (<see cref="KinesisStreamOptions.CatchExceptions"/>) the exception
+/// is caught (logged, not rethrown) so the response still carries whatever the handler had
+/// checkpointed before failing — the checkpointer's resume point is itself the correct failure signal
+/// for Kinesis's shard-ordered retry contract, so there's nothing to gain by cascading the exception
+/// instead. See <c>work/archive/kinesis-batch-failure-handling-design-2026-07.md</c>.
 /// </remarks>
 public class KinesisStreamApplication : StreamMiddlewareApplication<KinesisEvent, KinesisEventRecord, KinesisBatchResponse>
 {
@@ -42,7 +43,7 @@ public class KinesisStreamApplication : StreamMiddlewareApplication<KinesisEvent
         : base(
             new CatchAndCheckpointPipeline(
                 new TransportMiddlewarePipeline<StreamContext<KinesisEventRecord>>(TransportNames.Kinesis, pipeline),
-                (options ?? new KinesisStreamOptions()).AutoCheckpointOnSuccess),
+                options ??= new KinesisStreamOptions()),
             @event => BuildContext(@event.Records),
             context => BuildResponse((KinesisStreamCheckpointer)context.Checkpointer))
     { }
@@ -75,12 +76,12 @@ public class KinesisStreamApplication : StreamMiddlewareApplication<KinesisEvent
     private class CatchAndCheckpointPipeline : IMiddlewarePipeline<StreamContext<KinesisEventRecord>>
     {
         private readonly IMiddlewarePipeline<StreamContext<KinesisEventRecord>> _pipeline;
-        private readonly bool _autoCheckpointOnSuccess;
+        private readonly KinesisStreamOptions _options;
 
-        public CatchAndCheckpointPipeline(IMiddlewarePipeline<StreamContext<KinesisEventRecord>> pipeline, bool autoCheckpointOnSuccess)
+        public CatchAndCheckpointPipeline(IMiddlewarePipeline<StreamContext<KinesisEventRecord>> pipeline, KinesisStreamOptions options)
         {
             _pipeline = pipeline;
-            _autoCheckpointOnSuccess = autoCheckpointOnSuccess;
+            _options = options;
         }
 
         public async Task HandleAsync(StreamContext<KinesisEventRecord> context, IServiceResolver serviceResolver)
@@ -94,12 +95,12 @@ public class KinesisStreamApplication : StreamMiddlewareApplication<KinesisEvent
                 // UseStream callback overload never checkpoints on its own. A handler that manages its
                 // own checkpoints is left untouched. Never runs on the throwing path below, where the
                 // resume point must stay at the handler's last explicit checkpoint.
-                if (_autoCheckpointOnSuccess && context.Checkpointer is KinesisStreamCheckpointer checkpointer && !checkpointer.HasCheckpointed)
+                if (_options.AutoCheckpointOnSuccess && context.Checkpointer is KinesisStreamCheckpointer checkpointer && !checkpointer.HasCheckpointed)
                 {
                     checkpointer.CheckpointAll();
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (_options.CatchExceptions)
             {
                 serviceResolver.GetService<ILogger<KinesisStreamApplication>>()
                     .LogError(ex, BenzeneFailure.IsInfrastructure(ex)
