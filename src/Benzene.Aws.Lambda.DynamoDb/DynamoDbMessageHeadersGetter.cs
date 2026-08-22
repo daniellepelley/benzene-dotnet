@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Benzene.Abstractions.Messages.Mappers;
+using Benzene.Aws.Lambda.Core;
 
 namespace Benzene.Aws.Lambda.DynamoDb;
 
@@ -21,22 +22,14 @@ public class DynamoDbMessageHeadersGetter : IMessageHeadersGetter<DynamoDbRecord
         var record = context.Record;
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        AddIfPresent(headers, "dynamodb-event-name", record.EventName);
-        AddIfPresent(headers, "dynamodb-event-id", record.EventId);
-        AddIfPresent(headers, "dynamodb-table", DynamoDbUtils.GetTableName(record.EventSourceArn));
-        AddIfPresent(headers, "dynamodb-sequence-number", record.Dynamodb?.SequenceNumber);
-        AddIfPresent(headers, "dynamodb-stream-view-type", record.Dynamodb?.StreamViewType);
-        AddIfPresent(headers, "dynamodb-event-source-arn", record.EventSourceArn);
-        AddIfPresent(headers, "dynamodb-aws-region", record.AwsRegion);
+        headers.AddIfPresent("dynamodb-event-name", record.EventName);
+        headers.AddIfPresent("dynamodb-event-id", record.EventId);
+        headers.AddIfPresent("dynamodb-table", DynamoDbUtils.GetTableName(record.EventSourceArn));
+        headers.AddIfPresent("dynamodb-sequence-number", record.Dynamodb?.SequenceNumber);
+        headers.AddIfPresent("dynamodb-stream-view-type", record.Dynamodb?.StreamViewType);
+        headers.AddIfPresent("dynamodb-event-source-arn", record.EventSourceArn);
+        headers.AddIfPresent("dynamodb-aws-region", record.AwsRegion);
 
         return headers;
-    }
-
-    private static void AddIfPresent(IDictionary<string, string> headers, string key, string value)
-    {
-        if (!string.IsNullOrEmpty(value))
-        {
-            headers[key] = value;
-        }
     }
 }
