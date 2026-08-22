@@ -18,6 +18,11 @@ using Benzene.Xml;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
+// `using static` (not `using Benzene.NewtonsoftJson;`) brings AddNewtonsoftJson() into scope
+// without making the unqualified `JsonSerializer` used throughout this file (the
+// Benzene.Core.MessageHandlers.Serialization one) ambiguous with Benzene.NewtonsoftJson.JsonSerializer.
+using static Benzene.NewtonsoftJson.DependencyInjectionExtensions;
+using NewtonsoftJsonSerializer = Benzene.NewtonsoftJson.JsonSerializer;
 
 namespace Benzene.Test.Core.Core.MessageHandling;
 
@@ -151,6 +156,39 @@ public class DeferredRequestMapperTest
 
         var services = ServiceResolverMother.CreateServiceCollection();
         services.UsingBenzene(x => x.AddBenzeneMessage().AddMessagePack());
+
+        var serviceResolver = new MicrosoftServiceResolverAdapter(services.BuildServiceProvider());
+        var mediaFormatNegotiator = serviceResolver.GetService<IMediaFormatNegotiator<BenzeneMessageContext>>();
+
+        var requestMapper = new MultiSerializerOptionsRequestMapper<BenzeneMessageContext>(
+                mediaFormatNegotiator,
+                serviceResolver,
+                new BenzeneMessageGetter(),
+                Array.Empty<IRequestEnricher<BenzeneMessageContext>>());
+
+        var requestFactory = new DeferredRequestMapper<BenzeneMessageContext>(requestMapper, context);
+        var request = requestFactory.GetRequest<ExampleRequestPayload>();
+
+        Assert.Equal("some-name", request!.Name);
+    }
+
+    [Fact]
+    public void GetsRequest_Multi_NewtonsoftJson()
+    {
+        // application/json is also the process default's content type, but the default
+        // JsonMediaFormat is only ever injected as the negotiator's fallback (never a negotiated
+        // IMediaFormat<TContext> candidate - see its own doc comment), so AddNewtonsoftJson()
+        // registering a real candidate at the same content type wins the negotiation and the body
+        // is read through Json.NET rather than the System.Text.Json default.
+        var serializer = new NewtonsoftJsonSerializer();
+        var context = new BenzeneMessageContext(new BenzeneMessageRequest
+        {
+            Headers = new Dictionary<string, string> { { "content-type", "application/json" }},
+            Body = serializer.Serialize(new ExampleRequestPayload { Name = "some-name"})
+        });
+
+        var services = ServiceResolverMother.CreateServiceCollection();
+        services.UsingBenzene(x => x.AddBenzeneMessage().AddNewtonsoftJson());
 
         var serviceResolver = new MicrosoftServiceResolverAdapter(services.BuildServiceProvider());
         var mediaFormatNegotiator = serviceResolver.GetService<IMediaFormatNegotiator<BenzeneMessageContext>>();

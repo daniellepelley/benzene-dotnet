@@ -4,6 +4,7 @@
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <AssemblyName>Benzene.Avro</AssemblyName>
         <RootNamespace>Benzene.Avro</RootNamespace>
         <Description>Apache Avro serialization integration for Benzene: a binary IMediaFormat that plugs into the request/response content-negotiation pipeline and exercises the byte-oriented IPayloadSerializer path.</Description>

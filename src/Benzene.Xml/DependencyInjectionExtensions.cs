@@ -5,6 +5,9 @@ using Benzene.Core.MessageHandlers.MediaFormats;
 
 namespace Benzene.Xml;
 
+/// <summary>
+/// DI registration extensions for XML content negotiation support.
+/// </summary>
 public static class DependencyInjectionExtensions
 {
     /// <summary>

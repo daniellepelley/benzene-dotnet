@@ -4,6 +4,9 @@ using Benzene.Abstractions.Middleware;
 
 namespace Benzene.MessagePack;
 
+/// <summary>
+/// DI registration extensions for MessagePack content negotiation support.
+/// </summary>
 public static class DependencyInjectionExtensions
 {
     /// <summary>

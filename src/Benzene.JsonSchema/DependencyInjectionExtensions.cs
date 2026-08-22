@@ -2,8 +2,17 @@ using Benzene.Abstractions.DI;
 
 namespace Benzene.JsonSchema;
 
+/// <summary>
+/// DI registration extensions for JSON Schema request validation.
+/// </summary>
 public static class DependencyInjectionExtensions
 {
+    /// <summary>
+    /// Registers <see cref="DefaultJsonSchemaProvider{TContext}"/> (generated-from-request-type
+    /// schemas) and <see cref="JsonSchemaMiddleware{TContext}"/> for every context type.
+    /// </summary>
+    /// <param name="services">The service container to register into.</param>
+    /// <returns>The same container, for chaining.</returns>
     public static IBenzeneServiceContainer AddJsonSchema(this IBenzeneServiceContainer services)
     {
         // TryAdd so a provider registered in ConfigureServices (a user's own, or
