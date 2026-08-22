@@ -5,9 +5,11 @@ Redis-backed implementation of the `Benzene.Cache.Core` abstractions, using Stac
 distributed caching shared across instances.
 
 ## Key types/interfaces
-- `RedisCacheService` - **abstract** `ICacheService`. You subclass it and implement
-  `GetConfigurationOptionsAsync()` (returns a StackExchange.Redis `ConfigurationOptions`). Holds a
-  lazily-established `IConnectionMultiplexer`; `CanConnectAsync()` issues a `PING`. Factory methods
+- `RedisCacheService` - **abstract** `ICacheService`, `IAsyncDisposable`. You subclass it and
+  implement `GetConfigurationOptionsAsync()` (returns a StackExchange.Redis `ConfigurationOptions`).
+  Holds a lazily-established, cached `IConnectionMultiplexer`; `CanConnectAsync()` issues a `PING`.
+  `DisposeAsync()` disposes that cached multiplexer (a no-op if a connect was never started or never
+  completed) - register your subclass so its container disposes it on shutdown. Factory methods
   build the concrete entry/action types below.
 - `RedisCacheEntry<T>` (internal) - `CacheEntry<T>` over a single key. `Get`/`Set`/`Invalidate` map
   to `StringGetAsync` / `StringSetAsync` (with TTL) / `KeyDeleteAsync`.

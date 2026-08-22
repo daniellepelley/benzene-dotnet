@@ -8,6 +8,7 @@ using Benzene.Results;
 using Benzene.Test.Cache.Redis.Instance;
 using Benzene.Test.Cache.Redis.Mocks;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using StackExchange.Redis;
@@ -294,6 +295,46 @@ public class RedisCacheServiceTest
     }
 
     [Fact]
+    public async Task DisposeAsync_AfterConnecting_DisposesTheMultiplexer()
+    {
+        var connectionFactory = new MockConnectionFactory();
+        var service = new TestRedisCacheService(NullLogger<RedisCacheService>.Instance, new DebugTimerFactory(), connectionFactory);
+
+        // Force the connect to actually run (StartConnection in the constructor only kicks it off).
+        await service.CanConnectAsync();
+
+        await service.DisposeAsync();
+
+        connectionFactory.ConnectionMultiplexerMock.Verify(x => x.DisposeAsync(), Times.Once);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_WithoutEverConnecting_DoesNotThrow()
+    {
+        // Unlike TestRedisCacheService, this never calls StartConnection - no connect is ever kicked
+        // off, so there is genuinely nothing for DisposeAsync to dispose.
+        var connectionFactory = new MockConnectionFactory();
+        var service = new NeverConnectedTestRedisCacheService(NullLogger<RedisCacheService>.Instance, new DebugTimerFactory(), connectionFactory);
+
+        await service.DisposeAsync();
+
+        connectionFactory.ConnectionMultiplexerMock.Verify(x => x.DisposeAsync(), Times.Never);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_CalledTwice_DoesNotThrow_AndDisposesTheMultiplexerOnlyOnce()
+    {
+        var connectionFactory = new MockConnectionFactory();
+        var service = new TestRedisCacheService(NullLogger<RedisCacheService>.Instance, new DebugTimerFactory(), connectionFactory);
+        await service.CanConnectAsync();
+
+        await service.DisposeAsync();
+        await service.DisposeAsync();
+
+        connectionFactory.ConnectionMultiplexerMock.Verify(x => x.DisposeAsync(), Times.Once);
+    }
+
+    [Fact]
     public async Task CacheWildcardTest()
     {
         var connectionFactory = new MockConnectionFactory();
@@ -303,5 +344,18 @@ public class RedisCacheServiceTest
         var actions = service.GetTestWildcardActions();
 
         Assert.False(await actions.InvalidateAsync());
+    }
+
+    /// <summary>
+    /// A <see cref="RedisCacheService"/> that, unlike <see cref="TestRedisCacheService"/>, never calls
+    /// <c>StartConnection</c> - so it stays in the genuine "never connected" state a disposal test
+    /// needs.
+    /// </summary>
+    private sealed class NeverConnectedTestRedisCacheService(
+        ILogger<RedisCacheService> logger, IProcessTimerFactory processTimerFactory, IRedisConnectionFactory connectionFactory)
+        : RedisCacheService(logger, processTimerFactory, connectionFactory)
+    {
+        protected override Task<ConfigurationOptions> GetConfigurationOptionsAsync() =>
+            Task.FromResult(new ConfigurationOptions());
     }
 }

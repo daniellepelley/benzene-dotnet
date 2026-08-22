@@ -6,7 +6,7 @@ using StackExchange.Redis;
 
 namespace Benzene.Cache.Redis;
 
-public abstract class RedisCacheService : ICacheService
+public abstract class RedisCacheService : ICacheService, IAsyncDisposable
 {
     public ILogger Logger { get; }
     public IProcessTimerFactory ProcessTimerFactory { get; }
@@ -109,5 +109,38 @@ public abstract class RedisCacheService : ICacheService
         }
 
         return builder.ToString();
+    }
+
+    /// <summary>
+    /// Disposes the underlying <see cref="IConnectionMultiplexer"/> this service connected and
+    /// cached, if a connect was ever started. Best-effort: a connect that never completed, or that
+    /// faulted, has no multiplexer to dispose and is simply dropped.
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        Task<IConnectionMultiplexer>? connectionTask;
+        lock (_connectionLock)
+        {
+            connectionTask = _redisConnectionTask;
+            _redisConnectionTask = null;
+        }
+
+        if (connectionTask is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var multiplexer = await connectionTask.ConfigureAwait(false);
+            await multiplexer.DisposeAsync().ConfigureAwait(false);
+        }
+        catch
+        {
+            // The connect itself faulted/was cancelled - nothing was ever connected, so there is
+            // nothing to dispose. Disposal must not throw for a connection that already failed.
+        }
+
+        GC.SuppressFinalize(this);
     }
 }
