@@ -390,6 +390,12 @@ leases running concurrently.
 The same is true of `Benzene.Aws.Sqs`'s `SqsConsumer`, whose "concurrency" is simply the poll
 batch (`MaxNumberOfMessages`) dispatched per iteration.
 
+**Gap: no self-hosted Azure Queue Storage worker.** Unlike Service Bus/Event Hub/Cosmos DB above,
+Azure Queue Storage has only the Functions trigger adapter (`Benzene.Azure.Function.QueueStorage`)
+— there is no `Benzene.Azure.QueueStorage` package with a polling worker for the self-hosted-worker
+host (mode 3, `UseWorker(...)`). This is a currently-unbuilt gap, not a deliberate design decision —
+nothing in this repo's design notes excludes it, it just hasn't been built yet.
+
 This is a separate, smaller concern from the *serverless* batch adapters (SQS in
 `Benzene.Aws.Lambda.Sqs`; Event Hubs/Kafka/Service Bus triggers in the `Benzene.Azure.Function.*`
 packages), which today dispatch an entire batch via an uncapped `Task.WhenAll` - capping that

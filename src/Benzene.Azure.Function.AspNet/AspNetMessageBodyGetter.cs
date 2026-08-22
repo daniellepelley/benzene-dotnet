@@ -1,6 +1,7 @@
 using Benzene.Abstractions.Messages.Mappers;
 using Benzene.Http.RequestBody;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 
 namespace Benzene.Azure.Function.AspNet;
 
@@ -15,12 +16,15 @@ namespace Benzene.Azure.Function.AspNet;
 public class AspNetMessageBodyGetter : IMessageBodyGetter<AspNetContext>, IHttpRequestBodyReader<AspNetContext>
 {
     private readonly HttpRequestBodyBuffer _buffer;
+    private readonly ILogger<AspNetMessageBodyGetter> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="AspNetMessageBodyGetter"/> class.</summary>
     /// <param name="buffer">The scoped per-request body buffer.</param>
-    public AspNetMessageBodyGetter(HttpRequestBodyBuffer buffer)
+    /// <param name="logger">Logs a body-read failure caught in <see cref="ReadBodyAsync"/> instead of swallowing it silently.</param>
+    public AspNetMessageBodyGetter(HttpRequestBodyBuffer buffer, ILogger<AspNetMessageBodyGetter> logger)
     {
         _buffer = buffer;
+        _logger = logger;
     }
 
     /// <summary>
@@ -62,8 +66,9 @@ public class AspNetMessageBodyGetter : IMessageBodyGetter<AspNetContext>, IHttpR
 
             return body;
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogWarning(ex, "Reading the Azure Functions ASP.NET request body failed; treating it as absent");
             return null;
         }
     }

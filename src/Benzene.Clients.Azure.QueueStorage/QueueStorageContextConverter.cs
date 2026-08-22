@@ -6,6 +6,7 @@ using Benzene.Abstractions.Serialization;
 using Benzene.Clients;
 using Benzene.Core.Messages.BenzeneMessage;
 using Benzene.Results;
+using Void = Benzene.Abstractions.Results.Void;
 
 namespace Benzene.Clients.Azure.QueueStorage;
 

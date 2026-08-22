@@ -27,7 +27,7 @@ public class EventHubBatchMessageClient : IBenzeneBatchMessageClient
 {
     private readonly EventHubProducerClient _producerClient;
     private readonly string _topicPropertyKey;
-    private readonly string _partitionKeyHeader;
+    private readonly string? _partitionKeyHeader;
     private readonly ISerializer _serializer;
 
     /// <summary>
@@ -38,7 +38,7 @@ public class EventHubBatchMessageClient : IBenzeneBatchMessageClient
     /// <param name="partitionKeyHeader">The request header whose value becomes the partition key (defaults to <c>null</c> — no key).</param>
     public EventHubBatchMessageClient(EventHubProducerClient producerClient,
         string topicPropertyKey = EventHubContextConverter<object>.DefaultTopicProperty,
-        string partitionKeyHeader = null)
+        string? partitionKeyHeader = null)
     {
         _producerClient = producerClient;
         _topicPropertyKey = topicPropertyKey;

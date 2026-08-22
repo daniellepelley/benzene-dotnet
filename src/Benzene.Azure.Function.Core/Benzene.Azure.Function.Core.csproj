@@ -39,6 +39,11 @@
   <ItemGroup>
     <ProjectReference Include="..\Benzene.Abstractions.Pipelines\Benzene.Abstractions.Pipelines.csproj" />
     <ProjectReference Include="..\Benzene.Core\Benzene.Core.csproj" />
+    <!-- Brings in Benzene.Core.Middleware (BoundedFanOut), Benzene.Abstractions.Middleware
+         (IMiddlewarePipeline), and Benzene.Abstractions.MessageHandlers (IHasMessageResult,
+         TransportNames) transitively - needed by AzureFunctionBatchApplicationBase, the shared
+         fan-out/settle/escalate/log skeleton every Functions-trigger package builds on. -->
+    <ProjectReference Include="..\Benzene.Core.MessageHandlers\Benzene.Core.MessageHandlers.csproj" />
     <ProjectReference Include="..\Benzene.HealthChecks\Benzene.HealthChecks.csproj" />
     <ProjectReference Include="..\Benzene.Http\Benzene.Http.csproj" />
     <ProjectReference Include="..\Benzene.Microsoft.Dependencies\Benzene.Microsoft.Dependencies.csproj" />

@@ -52,7 +52,7 @@ public static class Extensions
     public static IMiddlewarePipelineBuilder<IBenzeneClientContext<T, Void>> UseEventHub<T>(this IMiddlewarePipelineBuilder<IBenzeneClientContext<T, Void>> app,
         Action<IMiddlewarePipelineBuilder<EventHubSendMessageContext>> action,
         string topicPropertyKey = EventHubContextConverter<T>.DefaultTopicProperty,
-        string partitionKeyHeader = null)
+        string? partitionKeyHeader = null)
     {
         return app.Convert(new EventHubContextConverter<T>(topicPropertyKey, partitionKeyHeader), action);
     }
@@ -73,7 +73,7 @@ public static class Extensions
     /// Reuses the given <paramref name="producerClient"/> instance directly.
     /// </param>
     /// <returns>The pipeline builder, for chaining.</returns>
-    public static IMiddlewarePipelineBuilder<IBenzeneClientContext<T, Void>> UseEventHub<T>(this IMiddlewarePipelineBuilder<IBenzeneClientContext<T, Void>> app, EventHubProducerClient producerClient, string topicPropertyKey = EventHubContextConverter<T>.DefaultTopicProperty, string partitionKeyHeader = null, bool healthCheck = true)
+    public static IMiddlewarePipelineBuilder<IBenzeneClientContext<T, Void>> UseEventHub<T>(this IMiddlewarePipelineBuilder<IBenzeneClientContext<T, Void>> app, EventHubProducerClient producerClient, string topicPropertyKey = EventHubContextConverter<T>.DefaultTopicProperty, string? partitionKeyHeader = null, bool healthCheck = true)
     {
         if (healthCheck)
         {
@@ -93,7 +93,7 @@ public static class Extensions
     public static IMiddlewarePipelineBuilder<OutboundContext> UseEventHub(this IMiddlewarePipelineBuilder<OutboundContext> app,
         Action<IMiddlewarePipelineBuilder<EventHubSendMessageContext>> action,
         string topicPropertyKey = OutboundEventHubContextConverter.DefaultTopicProperty,
-        string partitionKeyHeader = null)
+        string? partitionKeyHeader = null)
     {
         return app.Convert(new OutboundEventHubContextConverter(topicPropertyKey, partitionKeyHeader), action);
     }

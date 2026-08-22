@@ -69,7 +69,7 @@ public class EventHubHealthCheck : IHealthCheck
     // a bad credential/claim as UnauthorizedAccessException. Map the latter to 403 so the shared policy
     // classifies a permission failure as a persistent Failed; report the EventHubsException reason as the
     // error code (no status -> transient Failed); null for anything else (e.g. a raw socket failure).
-    private static (string ErrorCode, int? StatusCode) EventHubErrorDetails(Exception ex)
+    private static (string? ErrorCode, int? StatusCode) EventHubErrorDetails(Exception ex)
     {
         if (ex is UnauthorizedAccessException)
         {

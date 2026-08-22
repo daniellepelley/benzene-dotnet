@@ -5,9 +5,8 @@ using System.Threading.Tasks;
 using Benzene.Abstractions.DI;
 using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Abstractions.Middleware;
-using Benzene.Core.MessageHandlers.Info;
+using Benzene.Azure.Function.Core;
 using Benzene.Core.Middleware;
-using Benzene.Core;
 using Microsoft.Extensions.Logging;
 
 namespace Benzene.Azure.Function.EventGrid;
@@ -38,18 +37,16 @@ public class EventGridApplication : EntryPointMiddlewareApplication<EventGridTri
 /// Runs every event in an Event Grid delivery through the middleware pipeline concurrently, each in
 /// its own service scope, applying <see cref="EventGridOptions"/> to decide whether an event's
 /// exception or failure result is contained (logged) or left to cascade and fail the invocation (so
-/// Event Grid's retry/dead-letter policy engages).
+/// Event Grid's retry/dead-letter policy engages). The fan-out/settle/escalate/log skeleton itself
+/// lives in <see cref="AzureFunctionBatchApplicationBase{TContext, TState}"/>; this class plugs
+/// in the Event Grid-specific bits - Event Grid uses no extra per-item state, so <c>TState</c> is
+/// <c>object?</c>.
 /// </summary>
-public class EventGridBatchApplication : IMiddlewareApplication<EventGridTriggerEvent[]>
+public class EventGridBatchApplication : AzureFunctionBatchApplicationBase<EventGridContext, object?>, IMiddlewareApplication<EventGridTriggerEvent[]>
 {
-    private readonly IMiddlewarePipeline<EventGridContext> _pipeline;
-    private readonly EventGridOptions _options;
-
-    public EventGridBatchApplication(IMiddlewarePipeline<EventGridContext> pipeline, EventGridOptions options = null)
-    {
-        _pipeline = new TransportMiddlewarePipeline<EventGridContext>(TransportNames.EventGrid, pipeline);
-        _options = options ?? new EventGridOptions();
-    }
+    public EventGridBatchApplication(IMiddlewarePipeline<EventGridContext> pipeline, EventGridOptions? options = null)
+        : base(pipeline, TransportNames.EventGrid, (options ??= new EventGridOptions()).CatchExceptions, options.RaiseOnFailureStatus, options.MaxDegreeOfParallelism)
+    { }
 
     public Task HandleAsync(EventGridTriggerEvent[] @event, IServiceResolverFactory serviceResolverFactory)
         => HandleAsync(@event, serviceResolverFactory, CancellationToken.None);
@@ -59,34 +56,20 @@ public class EventGridBatchApplication : IMiddlewareApplication<EventGridTrigger
     /// own scope with the ambient cancellation token so any component resolved during that event's
     /// pipeline run can observe cancellation via <see cref="ICancellationTokenAccessor"/>.
     /// </summary>
-    public async Task HandleAsync(EventGridTriggerEvent[] @event, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
-    {
-        var contexts = @event.Select(gridEvent => new EventGridContext(gridEvent));
-        await BoundedFanOut.WhenAllAsync(contexts, async context =>
-            {
-                try
-                {
-                    using (var scope = serviceResolverFactory.CreateScope())
-                    {
-                        scope.SeedCancellationToken(cancellationToken);
-                        await _pipeline.HandleAsync(context, scope);
-                    }
+    public Task HandleAsync(EventGridTriggerEvent[] @event, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
+        => HandleBatchAsync(@event.Select(item => (new EventGridContext(item), (object?)null)), serviceResolverFactory, cancellationToken);
 
-                    if (_options.RaiseOnFailureStatus && context.MessageResult?.IsSuccessful == false)
-                    {
-                        throw new EventGridMessageProcessingException(context.Event.Id ?? context.Event.EventType ?? "unknown");
-                    }
-                }
-                catch (Exception ex) when (_options.CatchExceptions)
-                {
-                    using (var loggingScope = serviceResolverFactory.CreateScope())
-                    {
-                        loggingScope.GetService<ILogger<EventGridApplication>>()
-                            .LogError(ex, BenzeneFailure.IsInfrastructure(ex)
-                    ? BenzeneFailure.InfrastructureLogPrefix + " Processing Event Grid event {id} failed — this service is mis-wired; the message is not at fault"
-                    : "Processing Event Grid event {id} failed", context.Event.Id);
-                    }
-                }
-            }, _options.MaxDegreeOfParallelism);
-    }
+    /// <inheritdoc/>
+    protected override Exception CreateProcessingException(EventGridContext context)
+        => new EventGridMessageProcessingException(context.Event.Id ?? context.Event.EventType ?? "unknown");
+
+    /// <inheritdoc/>
+    protected override object? GetLogId(EventGridContext context) => context.Event.Id;
+
+    /// <inheritdoc/>
+    protected override string FailureLogMessageTemplate => "Processing Event Grid event {id} failed";
+
+    /// <inheritdoc/>
+    protected override ILogger GetLogger(IServiceResolver serviceResolver)
+        => serviceResolver.GetService<ILogger<EventGridApplication>>();
 }
