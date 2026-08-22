@@ -1,6 +1,7 @@
 using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Middleware;
 using Benzene.Mesh.Contracts;
+using Microsoft.Extensions.Logging;
 
 namespace Benzene.Mesh.Reporting;
 
@@ -58,6 +59,7 @@ public static class Extensions
         return app.Use(resolver => new MeshSelfReportMiddleware<TContext>(
             resolver.GetService<IMeshReportPublisher>(),
             resolver.GetService<MeshSelfReportOptions>(),
-            resolver.GetService<MeshSelfReportState>()));
+            resolver.GetService<MeshSelfReportState>(),
+            resolver.TryGetService<ILogger<MeshSelfReportMiddleware<TContext>>>()));
     }
 }

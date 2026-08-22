@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>Benzene.Mesh.Usage.ApplicationInsights</AssemblyName>
     <RootNamespace>Benzene.Mesh.Usage.ApplicationInsights</RootNamespace>
+    <Description>An IMeshUsageSource for the Benzene Mesh aggregator backed by Azure Monitor / Application Insights (queried via Azure.Monitor.Query): reads per-topic request counts over a window back into usage.json, the Azure analogue of Benzene.Mesh.Usage.CloudWatch. Adds AddApplicationInsightsUsage.</Description>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 

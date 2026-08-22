@@ -1,6 +1,7 @@
 using Benzene.HealthChecks.Core;
 using Benzene.Mesh.Contracts;
 using Benzene.Mesh.Reporting;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace Benzene.Mesh.Test;
@@ -64,6 +65,28 @@ public class MeshSelfReportMiddlewareTest
         await Task.Delay(TimeSpan.FromMilliseconds(200));
 
         Assert.True(publisher.WasCalled);
+    }
+
+    [Fact]
+    public async Task HandleAsync_PublisherThrows_LogsTheSwallowedExceptionWhenALoggerIsAvailable()
+    {
+        // The swallowed exception must never reach the caller (proven above) but must not be totally
+        // silent either - a misconfigured reporter should be diagnosable from the logs.
+        var publisher = new FailingMeshReportPublisher();
+        var logger = new RecordingLogger();
+        var options = new MeshSelfReportOptions(
+            "orders-api",
+            () => Task.FromResult<string?>("{}"),
+            () => Task.FromResult<HealthCheckResponse?>(null));
+        var middleware = new MeshSelfReportMiddleware<string>(publisher, options, new MeshSelfReportState(), logger);
+
+        await middleware.HandleAsync("context", () => Task.CompletedTask);
+        await logger.Signal.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.IsType<InvalidOperationException>(entry.Exception);
+        Assert.Contains("orders-api", entry.Message);
     }
 
     [Fact]
@@ -132,5 +155,22 @@ public class MeshSelfReportMiddlewareTest
         }
 
         public Task PublishAsync(MeshServiceReport report) => _stall;
+    }
+
+    private class RecordingLogger : ILogger
+    {
+        public readonly TaskCompletionSource Signal = new();
+        public readonly List<(LogLevel Level, Exception? Exception, string Message)> Entries = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            Entries.Add((logLevel, exception, formatter(state, exception)));
+            Signal.TrySetResult();
+        }
     }
 }

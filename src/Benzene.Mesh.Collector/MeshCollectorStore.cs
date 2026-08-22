@@ -328,6 +328,7 @@ public class MeshCollectorStore : IMeshFleetReadModel
                 Binding = summary.Binding,
                 Placement = summary.Placement,
                 Topics = summary.Topics,
+                ServiceVersion = summary.ServiceVersion,
                 Health = summary.Health,
                 LastSeen = summary.LastSeen,
                 Invocations = summary.Invocations,
@@ -605,6 +606,7 @@ public class MeshCollectorStore : IMeshFleetReadModel
             summary.Binding = state.Descriptor.Binding;
             summary.Placement = state.Descriptor.Placement;
             summary.Topics = state.Descriptor.Topics.Count;
+            summary.ServiceVersion = state.Descriptor.ServiceVersion;
         }
         else
         {

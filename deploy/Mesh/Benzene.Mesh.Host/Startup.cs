@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Amazon.S3;
 using Azure.Identity;
 using Azure.Storage.Blobs;
@@ -21,6 +22,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -196,9 +198,17 @@ public class Startup
 
         // Registered unconditionally (a scoped holder no one reads costs one small per-request
         // allocation): MeshAuthGate sets AuthenticationHolder.Principal on every successful
-        // authentication so a downstream Benzene-pipeline check can read the same caller - see
-        // MeshAuthGate's remarks for why this is safe to resolve straight off HttpContext.RequestServices.
+        // authentication. See MeshAuthGate's remarks: this does NOT reach the Benzene pipeline below
+        // in this host (a separate, cloned IServiceProvider) - context.User, via IHttpContextAccessor,
+        // is what does.
         services.TryAddScoped<AuthenticationHolder>();
+
+        // The bridge MeshDispatchIdentity's registration (below, and see MeshAuthGate's remarks) reads
+        // to cross from MeshAuthGate's HttpContext into the Benzene pipeline's own, separately-built
+        // DI container - IHttpContextAccessor's backing store is a process-wide AsyncLocal, so it is
+        // visible from any container that resolves it, unlike a scoped instance set on
+        // HttpContext.RequestServices directly.
+        services.AddHttpContextAccessor();
 
         if (string.Equals(_config.Auth.Mode, "oidc", StringComparison.OrdinalIgnoreCase))
         {
@@ -254,6 +264,27 @@ public class Startup
             {
                 x.AddSingleton(_registry);
                 x.AddMeshLambdaDispatcher();
+
+                // Populates MeshDispatchIdentity.Email from the SAME caller MeshAuthGate authenticated
+                // (via context.User - see its remarks on why that, not AuthenticationHolder, is the one
+                // thing that crosses into this pipeline's own separately-built container), so
+                // MeshDispatchGuardMiddleware's fail-closed identity check (mounted in Configure()
+                // below) and the handler's own audit record both see who is actually dispatching,
+                // instead of treating every request as unattributed. Registered here (during
+                // ConfigureServices, so it lands in the real root IServiceCollection AND gets copied
+                // into the Benzene pipeline's clone - see MeshAuthGate's remarks) with plain AddScoped
+                // rather than the TryAddScoped UseMeshDispatchGuard uses for its own fallback
+                // registration below, so THIS one wins.
+                x.AddScoped(resolver =>
+                {
+                    var user = resolver.GetService<IHttpContextAccessor>().HttpContext?.User;
+                    return new MeshDispatchIdentity
+                    {
+                        Email = user?.FindFirst(ClaimTypes.Email)?.Value
+                            ?? user?.FindFirst(ClaimTypes.Name)?.Value
+                            ?? user?.Identity?.Name,
+                    };
+                });
             }
         });
     }
@@ -337,25 +368,39 @@ public class Startup
                 // Opt-in live dispatch (mesh:dispatch). Off by default; even when on it self-refuses in
                 // Production unless Dispatch.AllowInProduction is also set - a real handler runs.
                 //
-                // STOPPED HERE (work/enterprise/slice-2-auth.md task 2.5's dispatchRole gate): as wired,
-                // UseMeshDispatch only registers the handler DEFINITION - it adds no [HttpEndpoint] route
-                // and isn't placed on any UseBenzeneMessage envelope (unlike the fleet-query plane above,
-                // which gets its own /benzene/invoke endpoint). AspNetMessageTopicGetter resolves a
-                // request's topic purely by matching [HttpEndpoint]-attributed routes
-                // (ReflectionHttpEndpointFinder scans only that attribute), so mesh:dispatch has no HTTP
-                // path that reaches it in this host today - a pre-existing gap, not introduced here (see
-                // Benzene.Mesh.Dispatch/CLAUDE.md's "Follow-ups": the mesh UI send leg is still unbuilt).
-                // AuthorizationExtensions.RequireRole<TContext> is transport-pipeline-scoped
-                // (IMiddlewarePipelineBuilder<TContext>), not per-handler, so adding it here would gate
-                // every request that reaches this shared outer pipeline - including /mesh/report and
-                // mesh-ui/spec-ui - not just mesh:dispatch, which contradicts 2.5's own "200 on read"
-                // requirement. Making dispatch reachable (its own UseBenzeneMessage envelope, mirroring
-                // the fleet-query pattern) is a design decision the brief doesn't make and is arguably
-                // dispatch-reachability work, not auth work - so DispatchRole is bound/validated in
-                // config (MeshAuthConfig.DispatchRole) but not enforced by new pipeline wiring here.
+                // work/enterprise/slice-2-auth.md task 2.5, fixed 2026-08-22 (see that file's dated
+                // correction note): UseMeshDispatch alone only registers the handler DEFINITION - no
+                // [HttpEndpoint] route, no envelope - so mesh:dispatch had no HTTP path reaching it at
+                // all. It now gets its own UseBenzeneMessage envelope, mirroring the fleet-query plane
+                // above and examples/AwsMesh/Mesh/Startup.cs's own DispatchPath pattern, with
+                // UseMeshDispatchGuard mounted directly ahead of it (CSRF header, fail-closed identity,
+                // payload bound, per-identity rate limit - see that middleware's remarks).
+                //
+                // DispatchRole is enforced in MeshAuthGate itself (see its remarks and
+                // MeshAuthGate.DispatchPath), NOT here via AuthorizationExtensions.RequireRole on the
+                // envelope below: that envelope's inner pipeline runs in a freshly-created DI scope
+                // (MiddlewareApplication.HandleAsync's serviceResolverFactory.CreateScope()), so a
+                // RequireRole placed on the `dispatch =>` callback would never see the
+                // AuthenticationHolder MeshAuthGate populated on HttpContext.RequestServices - it would
+                // see no principal at all and refuse every dispatch attempt outright, role or no role.
+                // MeshAuthGate runs directly against HttpContext, before any of this, so it is the one
+                // place that check can actually work.
                 if (_config.Dispatch.Enabled)
                 {
+                    // Defaults only (Path "/mesh/dispatch", Topic benzene:mesh:dispatch) - one instance
+                    // shared with the envelope below so the guard's path and the envelope it guards can
+                    // never drift apart, and equal to MeshAuthGate.DispatchPath (see its remarks).
+                    var dispatchGuardOptions = new MeshDispatchGuardOptions();
+                    asp.UseMeshDispatchGuard(dispatchGuardOptions);
                     asp.UseMeshDispatch(new MeshDispatchOptions { AllowInProduction = _config.Dispatch.AllowInProduction });
+                    asp.UseBenzeneMessage(
+                        new BenzeneMessageHttpOptions
+                        {
+                            Path = dispatchGuardOptions.Path,
+                            TopicFilter = topic => string.Equals(
+                                topic, global::Benzene.Mesh.Dispatch.Extensions.DispatchTopic, StringComparison.OrdinalIgnoreCase),
+                        },
+                        dispatch => dispatch.UseMessageHandlers(typeof(MeshDispatchMessageHandler)));
                 }
 
                 asp.UseMessageHandlers();

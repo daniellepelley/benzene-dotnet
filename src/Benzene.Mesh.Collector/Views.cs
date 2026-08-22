@@ -67,6 +67,14 @@ public class ServiceSummary
     public int Instances { get; set; }
     public string Health { get; set; } = MeshHealth.Unknown;
 
+    /// <summary>The service's declared version (mesh.md §2.5), from the latest registered descriptor's
+    /// <see cref="MeshServiceDescriptor.ServiceVersion"/> - null when no descriptor has registered yet
+    /// (the "descriptor" MissingFeeds entry already names that case) or the service never declared one
+    /// (versioning is opt-in). Omitted from the wire when absent, matching every other optional field
+    /// here.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ServiceVersion { get; set; }
+
     /// <summary>When this service was last observed, or null when the plane carries no live-time signal
     /// (the composite plane's anonymous rows). Absent is OMITTED, never a default epoch — 2026-07-25
     /// live-fire fix: a serialized 0001-01-01 read as "stale for two millennia" and lit the Unhealthy
@@ -165,6 +173,12 @@ public class ServiceView
     public MeshPlacement Placement { get; set; } = new();
     public int Topics { get; set; }
     public string Health { get; set; } = MeshHealth.Unknown;
+
+    /// <summary>See <see cref="ServiceSummary.ServiceVersion"/> - duplicated here at the top level
+    /// (like <see cref="Runtime"/>/<see cref="Binding"/>/<see cref="Placement"/> already are) so a
+    /// reader doesn't have to drill into <see cref="Descriptor"/> for it.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ServiceVersion { get; set; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public DateTimeOffset? LastSeen { get; set; }

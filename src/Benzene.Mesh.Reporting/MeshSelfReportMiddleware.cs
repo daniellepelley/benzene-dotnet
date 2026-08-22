@@ -1,6 +1,7 @@
 using Benzene.Abstractions.Middleware;
 using Benzene.HealthChecks.Core;
 using Benzene.Mesh.Contracts;
+using Microsoft.Extensions.Logging;
 
 namespace Benzene.Mesh.Reporting;
 
@@ -13,25 +14,38 @@ namespace Benzene.Mesh.Reporting;
 /// so a hot service doesn't publish on every single invocation.
 /// </summary>
 /// <remarks>
-/// Publishing is fire-and-forget and fully best-effort: it never delays the response this
-/// middleware wraps, and a publish failure (or a spec/health provider throwing) is swallowed, never
-/// propagated - this is side-channel telemetry, not part of the primary request/message path.
+/// Publishing is fire-and-forget and fully best-effort to the CALLER: it never delays the response
+/// this middleware wraps, and a publish failure (or a spec/health provider throwing) never propagates
+/// to the primary request/message path. It is not silent to an operator, though - the swallowed
+/// exception is logged (when a logger is available), the same "non-fatal to the caller, but never
+/// invisible" treatment <c>Benzene.Mesh.Artifacts.MeshDispatchGuardMiddleware</c> and
+/// <c>Benzene.Mesh.Auth.Oidc.OidcCallbackMiddleware</c> already give their own non-fatal failures - a
+/// misconfigured reporter (wrong URL, expired credential, ...) should be diagnosable from the logs,
+/// not discovered by noticing the dashboard never updates.
 /// </remarks>
 public class MeshSelfReportMiddleware<TContext> : IMiddleware<TContext>
 {
     private readonly IMeshReportPublisher _publisher;
     private readonly MeshSelfReportOptions _options;
     private readonly MeshSelfReportState _state;
+    private readonly ILogger? _logger;
 
     /// <summary>Initializes a new instance of the <see cref="MeshSelfReportMiddleware{TContext}"/> class.</summary>
     /// <param name="publisher">Publishes the report this middleware builds.</param>
     /// <param name="options">How to name this service, build its report, and throttle publishing.</param>
     /// <param name="state">Tracks the last publish time, shared across requests within this process.</param>
-    public MeshSelfReportMiddleware(IMeshReportPublisher publisher, MeshSelfReportOptions options, MeshSelfReportState state)
+    /// <param name="logger">
+    /// Logs a swallowed publish failure. Optional (like <c>Benzene.Mesh.Artifacts.MeshDispatchGuardMiddleware</c>'s
+    /// own logger) so a host with no logging configured still works - it just reports nothing when a
+    /// publish fails, exactly as before this was added.
+    /// </param>
+    public MeshSelfReportMiddleware(
+        IMeshReportPublisher publisher, MeshSelfReportOptions options, MeshSelfReportState state, ILogger? logger = null)
     {
         _publisher = publisher;
         _options = options;
         _state = state;
+        _logger = logger;
     }
 
     /// <inheritdoc />
@@ -88,10 +102,13 @@ public class MeshSelfReportMiddleware<TContext> : IMiddleware<TContext>
             var report = new MeshServiceReport(_options.ServiceName, DateTimeOffset.UtcNow, specJson, health, error);
             await _publisher.PublishAsync(report);
         }
-        catch
+        catch (Exception ex)
         {
             // Best-effort side-channel telemetry - a publish failure must never affect (or even be
-            // visible to) the primary request/message path this middleware wraps.
+            // visible to) the primary request/message path this middleware wraps. Logged server-side
+            // regardless, so a misconfigured reporter fails loudly in the logs instead of totally
+            // silently - see the class remarks.
+            _logger?.LogWarning(ex, "Mesh self-report publish failed for service {Service}", _options.ServiceName);
         }
     }
 }

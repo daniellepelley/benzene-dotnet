@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>Benzene.Mesh.Fleet.Jaeger</AssemblyName>
     <RootNamespace>Benzene.Mesh.Fleet.Jaeger</RootNamespace>
+    <Description>An IMeshTraceSource for the Benzene Mesh's live Fleet view backed by Jaeger's query API: reads recent traces, correlations, and flows for the composite fleet read model. Adds AddJaegerFleetReadModel.</Description>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
