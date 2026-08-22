@@ -88,6 +88,19 @@
 >   `HandleAsync` round-trip through `Function` itself (not just the test-helper reconstruction) — see
 >   `examples/Google/README.md`'s Notes section for what that leaves open.
 
+> **2026-08-22 correction (archived record — see below):** this document is filed under `work/archive/`
+> and its historical content above is left as written. One correction for anyone reading it as current
+> status: **Phase 2's client half has since shipped**, as `Benzene.Clients.GoogleCloud.PubSub`
+> (`PubSubClientMiddleware`, `OutboundPubSubContextConverter`, `PubSubSendMessageContext`,
+> `Extensions.UsePubSub`/`UsePubSubClient`) — an outbound publish client wired the same way as every
+> other transport's `Benzene.Clients.*` package (`OutboundRoutingBuilder.Route(...).UsePubSub(...)`),
+> under the `Benzene.Clients.GoogleCloud.*` naming §6 question 1 ultimately settled on rather than the
+> `Benzene.Google.*`/`Benzene.Clients.Google` names this document uses throughout. Still unbuilt, per
+> the rest of Phase 2 and later phases: the **pull-subscription background worker**
+> (`SubscriberClient`-based, for GKE/Compute Engine/an always-on Cloud Run instance), a
+> **request/response client**, a **batch client** (mirroring `SnsBatchMessageClient`/
+> `EventGridBatchMessageClient`), and a **health check** (mirroring `SqsHealthCheck`/`SnsHealthCheck`).
+
 ## Purpose
 
 Benzene has mature, production-shaped native adapters for AWS (`Benzene.Aws.*`, 9 production
