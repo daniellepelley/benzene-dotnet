@@ -4,8 +4,10 @@ using Benzene.Results;
 
 namespace Benzene.Clients.Common;
 
+/// <summary>Maps a numeric HTTP status code (as a string or <see cref="HttpStatusCode"/>) onto a Benzene result.</summary>
 public static class BenzeneResultHttpMapper
 {
+    /// <summary>Maps a numeric HTTP status code string onto an <see cref="IBenzeneResult{T}"/>, classifying it as successful or not.</summary>
     public static IBenzeneResult<T> Map<T>(string statusCode)
     {
         switch (statusCode)
@@ -34,6 +36,7 @@ public static class BenzeneResultHttpMapper
         }
     }
 
+    /// <summary>Maps a numeric HTTP status code string onto its <see cref="BenzeneResultStatus"/> equivalent.</summary>
     public static string MapBenzeneResultStatus(string statusCode)
     {
         switch (statusCode)
@@ -75,6 +78,7 @@ public static class BenzeneResultHttpMapper
     }
 
 
+    /// <summary>Maps an <see cref="HttpStatusCode"/> onto an <see cref="IBenzeneResult{T}"/>, classifying it as successful or not.</summary>
     public static IBenzeneResult<T> Map<T>(HttpStatusCode httpStatusCode)
     {
         return Map<T>(Convert.ToInt32(httpStatusCode).ToString());

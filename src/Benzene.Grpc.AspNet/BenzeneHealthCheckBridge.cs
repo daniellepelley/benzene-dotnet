@@ -34,6 +34,7 @@ public class BenzeneHealthCheckBridge : IHealthCheck
         _includeTypes = includeTypes;
     }
 
+    /// <inheritdoc />
     public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {
         var checks = _healthChecks

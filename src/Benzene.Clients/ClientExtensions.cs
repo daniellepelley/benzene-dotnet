@@ -4,20 +4,24 @@ using Void = Benzene.Abstractions.Results.Void;
 
 namespace Benzene.Clients;
 
+/// <summary>Convenience overloads over <see cref="IBenzeneMessageClient"/>/<see cref="IBenzeneMessageSender"/>.</summary>
 public static class ClientExtensions
 {
+    /// <summary>Sends <paramref name="message"/> on <paramref name="topic"/> with no headers.</summary>
     public static Task<IBenzeneResult<TResponse>> SendMessageAsync<TMessage, TResponse>(
         this IBenzeneMessageClient source, string topic, TMessage message)
     {
         return source.SendMessageAsync<TMessage, TResponse>(topic, message, new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
     }
 
+    /// <summary>Sends <paramref name="message"/> on <paramref name="topic"/> with the given headers.</summary>
     public static Task<IBenzeneResult<TResponse>> SendMessageAsync<TMessage, TResponse>(
         this IBenzeneMessageClient source, string topic, TMessage message, IDictionary<string, string> headers)
     {
         return source.SendMessageAsync<TMessage, TResponse>(new BenzeneClientRequest<TMessage>(topic, message, headers));
     }
 
+    /// <summary>Sends <paramref name="request"/> on <paramref name="topic"/>, discarding any response payload (<see cref="Void"/>).</summary>
     public static async Task<IBenzeneResult> SendMessageAsync<TRequest>(this IBenzeneMessageClient client,
         string topic, TRequest request)
     {

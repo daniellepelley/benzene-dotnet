@@ -4,15 +4,20 @@ using Benzene.Core.Exceptions;
 
 namespace Benzene.Grpc;
 
+/// <summary>Default <see cref="IGrpcMethodFinder"/> implementation: discovers <c>[GrpcMethod]</c>-decorated handlers via reflection.</summary>
 public class ReflectionGrpcMethodFinder : IGrpcMethodFinder
 {
     private readonly IMessageHandlersFinder _messageHandlersFinder;
 
+    /// <summary>Initializes a new instance of the <see cref="ReflectionGrpcMethodFinder"/> class.</summary>
+    /// <param name="messageHandlersFinder">Discovers the registered message handler definitions to scan.</param>
     public ReflectionGrpcMethodFinder(IMessageHandlersFinder messageHandlersFinder)
     {
         _messageHandlersFinder = messageHandlersFinder;
     }
 
+    /// <inheritdoc />
+    /// <exception cref="BenzeneException">Two handlers declare the same gRPC method.</exception>
     public IGrpcMethodDefinition[] FindDefinitions()
     {
         var handlers = _messageHandlersFinder.FindDefinitions()

@@ -3,11 +3,14 @@ using Benzene.Abstractions.Middleware;
 
 namespace Benzene.Clients.Http;
 
+/// <summary>Terminal middleware that sends the context's <see cref="HttpRequestMessage"/> and records the response.</summary>
 public class HttpClientMiddleware : IMiddleware<HttpSendMessageContext>, ITerminalMiddleware
 {
     private readonly HttpClient _httpClient;
     private readonly ICancellationTokenAccessor _cancellationTokenAccessor;
 
+    /// <summary>Initializes a new instance of the <see cref="HttpClientMiddleware"/> class with no cancellation-token accessor.</summary>
+    /// <param name="httpClient">The client to send with.</param>
     public HttpClientMiddleware(HttpClient httpClient)
         : this(httpClient, null)
     {
@@ -23,8 +26,10 @@ public class HttpClientMiddleware : IMiddleware<HttpSendMessageContext>, ITermin
         _cancellationTokenAccessor = cancellationTokenAccessor;
     }
 
+    /// <summary>Gets the name of this middleware.</summary>
     public string Name => nameof(HttpClientMiddleware);
 
+    /// <summary>Sends the context's request and records the response. Terminal middleware; does not call <paramref name="next"/>.</summary>
     public async Task HandleAsync(HttpSendMessageContext context, Func<Task> next)
     {
         var cancellationToken = _cancellationTokenAccessor?.CancellationToken ?? CancellationToken.None;

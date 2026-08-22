@@ -17,6 +17,12 @@ using Void = Benzene.Abstractions.Results.Void;
 
 namespace Benzene.Grpc.Client;
 
+/// <summary>
+/// An <see cref="IBenzeneMessageClient"/> that calls another service over gRPC, so business logic
+/// depends only on <c>IBenzeneMessageSender</c>/<c>IBenzeneMessageClient</c> and stays
+/// transport-agnostic. A message is converted to a <see cref="GrpcSendMessageContext"/>, routed to a
+/// gRPC method via <see cref="IGrpcClientRouteRegistry"/>, and run through a one-middleware call pipeline.
+/// </summary>
 public class GrpcBenzeneMessageClient : IBenzeneMessageClient
 {
     private readonly IGrpcMessageAdapter _adapter;
@@ -25,6 +31,13 @@ public class GrpcBenzeneMessageClient : IBenzeneMessageClient
     private readonly IServiceResolver _serviceResolver;
     private readonly IMiddlewarePipeline<GrpcSendMessageContext> _middlewarePipeline;
 
+    /// <summary>Initializes a new instance calling over the given channel.</summary>
+    /// <param name="channel">The gRPC channel to call on.</param>
+    /// <param name="routeRegistry">Resolves a Benzene topic to its gRPC method.</param>
+    /// <param name="adapter">Converts between the wire protobuf request/response and the caller's declared types.</param>
+    /// <param name="statusReverseMapper">Maps a gRPC status back to a Benzene result status.</param>
+    /// <param name="logger">Logs a send failure.</param>
+    /// <param name="serviceResolver">The resolver the call pipeline runs in.</param>
     public GrpcBenzeneMessageClient(GrpcChannel channel, IGrpcClientRouteRegistry routeRegistry, IGrpcMessageAdapter adapter,
         IGrpcStatusReverseMapper statusReverseMapper, ILogger<GrpcBenzeneMessageClient> logger, IServiceResolver serviceResolver)
     {
@@ -40,6 +53,12 @@ public class GrpcBenzeneMessageClient : IBenzeneMessageClient
             .Build();
     }
 
+    /// <summary>Initializes a new instance from an already-built call pipeline (for testing).</summary>
+    /// <param name="middlewarePipeline">The call pipeline to run each message through.</param>
+    /// <param name="adapter">Converts between the wire protobuf request/response and the caller's declared types.</param>
+    /// <param name="statusReverseMapper">Maps a gRPC status back to a Benzene result status.</param>
+    /// <param name="logger">Logs a send failure.</param>
+    /// <param name="serviceResolver">The resolver the call pipeline runs in.</param>
     public GrpcBenzeneMessageClient(IMiddlewarePipeline<GrpcSendMessageContext> middlewarePipeline, IGrpcMessageAdapter adapter,
         IGrpcStatusReverseMapper statusReverseMapper, ILogger<GrpcBenzeneMessageClient> logger, IServiceResolver serviceResolver)
     {
@@ -50,6 +69,7 @@ public class GrpcBenzeneMessageClient : IBenzeneMessageClient
         _serviceResolver = serviceResolver;
     }
 
+    /// <inheritdoc />
     public async Task<IBenzeneResult<TResponse>> SendMessageAsync<TRequest, TResponse>(IBenzeneClientRequest<TRequest> request)
     {
         try
@@ -128,6 +148,7 @@ public class GrpcBenzeneMessageClient : IBenzeneMessageClient
         return deadline.HasValue && deadline.Value != DateTime.MaxValue ? deadline : null;
     }
 
+    /// <inheritdoc />
     public void Dispose()
     {
         // Method intentionally left empty.

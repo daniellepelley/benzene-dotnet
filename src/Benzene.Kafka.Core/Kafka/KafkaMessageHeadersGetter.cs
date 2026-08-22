@@ -3,8 +3,10 @@ using Benzene.Abstractions.Messages.Mappers;
 
 namespace Benzene.Kafka.Core.Kafka;
 
+/// <summary>Reads the outbound message headers from a <see cref="KafkaSendMessageContext"/>.</summary>
 public class KafkaSendMessageHeadersGetter : IMessageHeadersGetter<KafkaSendMessageContext>
 {
+    /// <inheritdoc />
     public IDictionary<string, string> GetHeaders(KafkaSendMessageContext context)
     {
         // Last-wins over the ordered header list (Kafka permits duplicate keys); ToDictionary would

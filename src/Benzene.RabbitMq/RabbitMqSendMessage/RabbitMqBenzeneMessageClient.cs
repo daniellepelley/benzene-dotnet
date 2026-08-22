@@ -9,7 +9,6 @@ using Benzene.Results;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 using Void = Benzene.Abstractions.Results.Void;
-using JsonSerializer = Benzene.Core.MessageHandlers.Serialization.JsonSerializer;
 
 namespace Benzene.RabbitMq.RabbitMqSendMessage;
 
@@ -22,8 +21,11 @@ namespace Benzene.RabbitMq.RabbitMqSendMessage;
 public class RabbitMqBenzeneMessageClient : IBenzeneMessageClient
 {
     // Shared across every send: JsonSerializer wraps a JsonSerializerOptions whose resolved
-    // converter/type metadata is cached per instance, so a fresh one per send would defeat that cache.
-    private static readonly ISerializer SharedSerializer = new JsonSerializer();
+    // converter/type metadata is cached per instance, so a fresh one per send would defeat that
+    // cache. Benzene.Clients.JsonSerializer.Shared is the one instance every outbound client package
+    // (Benzene.Clients.Http, Benzene.Kafka.Core, this one) draws from rather than each declaring its
+    // own.
+    private static readonly ISerializer SharedSerializer = JsonSerializer.Shared;
 
     private readonly ILogger<RabbitMqBenzeneMessageClient> _logger;
     private readonly IServiceResolver _serviceResolver;

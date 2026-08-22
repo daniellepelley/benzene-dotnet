@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Benzene.Clients.Http;
 
+/// <summary>Pipeline-builder and DI extensions for the outbound plain-HTTP and BenzeneMessage-over-HTTP send paths.</summary>
 public static class Extensions
 {
     /// <summary>
@@ -59,25 +60,42 @@ public static class Extensions
             resolver.GetService<HttpClient>(), url, healthCheckTopic, resolver.TryGetService<ICancellationTokenAccessor>()));
     }
 
+    /// <summary>Adds an <see cref="HttpClientMiddleware"/> built from the given client to the pipeline.</summary>
+    /// <param name="app">The pipeline builder to add the middleware to.</param>
+    /// <param name="httpClient">The <see cref="HttpClient"/> to send with.</param>
+    /// <returns>The pipeline builder, for chaining.</returns>
     public static IMiddlewarePipelineBuilder<HttpSendMessageContext> UseHttpClient(
         this IMiddlewarePipelineBuilder<HttpSendMessageContext> app, HttpClient httpClient)
     {
         return app.Use(_ => new HttpClientMiddleware(httpClient));
     }
- 
+
+    /// <summary>Adds an <see cref="HttpClientMiddleware"/> resolved from the service container to the pipeline.</summary>
+    /// <param name="app">The pipeline builder to add the middleware to.</param>
+    /// <returns>The pipeline builder, for chaining.</returns>
     public static IMiddlewarePipelineBuilder<HttpSendMessageContext> UseHttpClient(
         this IMiddlewarePipelineBuilder<HttpSendMessageContext> app)
     {
         app.Register(x => x.AddScoped<HttpClientMiddleware>());
         return app.Use<HttpSendMessageContext, HttpClientMiddleware>();
     }
-   
-     public static IMiddlewarePipelineBuilder<TContext> Convert<TContext, TContextOut>(this IMiddlewarePipelineBuilder<TContext> app,
+
+    /// <summary>Converts <typeparamref name="TContext"/> to <typeparamref name="TContextOut"/> and runs the given pipeline.</summary>
+    /// <param name="app">The pipeline builder to convert.</param>
+    /// <param name="converter">Converts the context and maps the response back.</param>
+    /// <param name="middlewarePipeline">The already-built pipeline the converted context runs through.</param>
+    /// <returns>The pipeline builder, for chaining.</returns>
+    public static IMiddlewarePipelineBuilder<TContext> Convert<TContext, TContextOut>(this IMiddlewarePipelineBuilder<TContext> app,
         IContextConverter<TContext, TContextOut> converter, IMiddlewarePipeline<TContextOut> middlewarePipeline)
     {
         return app.Use(serviceResolver => new ContextConverterMiddleware<TContext, TContextOut>(converter, middlewarePipeline, serviceResolver));
     }
 
+    /// <summary>Converts <typeparamref name="TContext"/> to <typeparamref name="TContextOut"/> and builds the inner pipeline from <paramref name="action"/>.</summary>
+    /// <param name="app">The pipeline builder to convert.</param>
+    /// <param name="converter">Converts the context and maps the response back.</param>
+    /// <param name="action">Configures the inner pipeline the converted context runs through.</param>
+    /// <returns>The pipeline builder, for chaining.</returns>
     public static IMiddlewarePipelineBuilder<TContext> Convert<TContext, TContextOut>(this IMiddlewarePipelineBuilder<TContext> app,
         IContextConverter<TContext, TContextOut> converter, Action<IMiddlewarePipelineBuilder<TContextOut>> action)
     {
@@ -85,13 +103,24 @@ public static class Extensions
 
         return app.Use(serviceResolver => new ContextConverterMiddleware<TContext, TContextOut>(converter, middlewarePipeline, serviceResolver));
     }
-    
+
+    /// <summary>Converts an <see cref="IBenzeneClientContext{TRequest,TResponse}"/> pipeline to send plain HTTP, using a custom inner pipeline.</summary>
+    /// <param name="app">The client pipeline builder to convert.</param>
+    /// <param name="verb">The HTTP verb to send.</param>
+    /// <param name="path">The request path (or full URL).</param>
+    /// <param name="action">Configures the inner HTTP send pipeline.</param>
+    /// <returns>The pipeline builder, for chaining.</returns>
     public static IMiddlewarePipelineBuilder<IBenzeneClientContext<TRequest, TResponse>> UseHttp<TRequest, TResponse>(this IMiddlewarePipelineBuilder<IBenzeneClientContext<TRequest, TResponse>> app,
         string verb, string path, Action<IMiddlewarePipelineBuilder<HttpSendMessageContext>> action)
     {
         return Convert(app, new HttpContextConverter<TRequest, TResponse>(verb, path), action);
     }
-    
+
+    /// <summary>Converts an <see cref="IBenzeneClientContext{TRequest,TResponse}"/> pipeline to send plain HTTP, using the default <see cref="HttpClientMiddleware"/> configuration.</summary>
+    /// <param name="app">The client pipeline builder to convert.</param>
+    /// <param name="verb">The HTTP verb to send.</param>
+    /// <param name="path">The request path (or full URL).</param>
+    /// <returns>The pipeline builder, for chaining.</returns>
     public static IMiddlewarePipelineBuilder<IBenzeneClientContext<TRequest, TResponse>> UseHttp<TRequest, TResponse>(this IMiddlewarePipelineBuilder<IBenzeneClientContext<TRequest, TResponse>> app,
         string verb, string path)
     {

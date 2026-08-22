@@ -8,12 +8,17 @@ using Grpc.Core;
 
 namespace Benzene.Grpc;
 
+/// <summary>Default <see cref="IGrpcMethodHandler"/> implementation: runs one call through a middleware pipeline in its own DI scope.</summary>
 public class GrpcMethodHandler : IGrpcMethodHandler
 {
-    private IGrpcMethodDefinition _grpcMethodDefinition;
-    private IServiceResolverFactory _serviceResolverFactory;
-    private IMiddlewarePipeline<GrpcContext> _middlewarePipeline;
+    private readonly IGrpcMethodDefinition _grpcMethodDefinition;
+    private readonly IServiceResolverFactory _serviceResolverFactory;
+    private readonly IMiddlewarePipeline<GrpcContext> _middlewarePipeline;
 
+    /// <summary>Initializes a new instance of the <see cref="GrpcMethodHandler"/> class.</summary>
+    /// <param name="grpcMethodDefinition">The routed method (path and Benzene topic) this handler serves.</param>
+    /// <param name="serviceResolverFactory">Creates the per-call DI scope the pipeline runs in.</param>
+    /// <param name="middlewarePipeline">The pipeline each call is dispatched through.</param>
     public GrpcMethodHandler(IGrpcMethodDefinition grpcMethodDefinition, IServiceResolverFactory serviceResolverFactory, IMiddlewarePipeline<GrpcContext> middlewarePipeline)
     {
         _middlewarePipeline = middlewarePipeline;
@@ -21,6 +26,7 @@ public class GrpcMethodHandler : IGrpcMethodHandler
         _grpcMethodDefinition = grpcMethodDefinition;
     }
 
+    /// <inheritdoc />
     public async Task<TResponse> HandleAsync<TRequest, TResponse>(TRequest request, ServerCallContext context)
         where TRequest : class
         where TResponse : class
@@ -38,6 +44,7 @@ public class GrpcMethodHandler : IGrpcMethodHandler
         return resolver.GetService<IGrpcMessageAdapter>().ConvertResponse<TResponse>(grpcContext.ResponsePayload);
     }
 
+    /// <inheritdoc />
     public async Task ServerStreamingAsync<TRequest, TResponse>(TRequest request, IServerStreamWriter<TResponse> responseStream, ServerCallContext context)
         where TRequest : class
         where TResponse : class
@@ -51,6 +58,7 @@ public class GrpcMethodHandler : IGrpcMethodHandler
         await GrpcStreamAdapter.WriteAll(items, responseStream, context.CancellationToken);
     }
 
+    /// <inheritdoc />
     public async Task<TResponse> ClientStreamingAsync<TRequest, TResponse>(IAsyncStreamReader<TRequest> requestStream, ServerCallContext context)
         where TRequest : class
         where TResponse : class
@@ -69,6 +77,7 @@ public class GrpcMethodHandler : IGrpcMethodHandler
         return resolver.GetService<IGrpcMessageAdapter>().ConvertResponse<TResponse>(grpcContext.ResponsePayload);
     }
 
+    /// <inheritdoc />
     public async Task DuplexStreamingAsync<TRequest, TResponse>(IAsyncStreamReader<TRequest> requestStream, IServerStreamWriter<TResponse> responseStream, ServerCallContext context)
         where TRequest : class
         where TResponse : class

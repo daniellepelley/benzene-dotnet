@@ -7,16 +7,24 @@ using Benzene.Results;
 
 namespace Benzene.Clients.Http;
 
+/// <summary>Converts an <see cref="IBenzeneClientContext{TRequest,TResponse}"/> to a plain HTTP request/response.</summary>
 public class HttpContextConverter<TRequest, TResponse> : IContextConverter<IBenzeneClientContext<TRequest, TResponse>, HttpSendMessageContext>
 {
     private readonly ISerializer _serializer;
     private readonly string _verb;
     private readonly string _path;
 
+    /// <summary>Initializes a new instance of the <see cref="HttpContextConverter{TRequest,TResponse}"/> class using a JSON serializer.</summary>
+    /// <param name="verb">The HTTP verb to send.</param>
+    /// <param name="path">The request path (or full URL; relative composes with the <c>HttpClient</c>'s <c>BaseAddress</c>).</param>
     public HttpContextConverter(string verb, string path)
         : this(verb, path, new JsonSerializer())
     { }
 
+    /// <summary>Initializes a new instance of the <see cref="HttpContextConverter{TRequest,TResponse}"/> class.</summary>
+    /// <param name="verb">The HTTP verb to send.</param>
+    /// <param name="path">The request path (or full URL).</param>
+    /// <param name="serializer">The serializer used for the request body and response.</param>
     public HttpContextConverter(string verb, string path, ISerializer serializer)
     {
         _verb = verb;
@@ -24,6 +32,9 @@ public class HttpContextConverter<TRequest, TResponse> : IContextConverter<IBenz
         _serializer = serializer;
     }
 
+    /// <summary>Builds the outbound <see cref="HttpRequestMessage"/> from the client context.</summary>
+    /// <param name="contextIn">The client context to convert.</param>
+    /// <returns>A task that resolves to the built <see cref="HttpSendMessageContext"/>.</returns>
     public Task<HttpSendMessageContext> CreateRequestAsync(IBenzeneClientContext<TRequest, TResponse> contextIn)
     {
         var request = new HttpRequestMessage
@@ -43,6 +54,9 @@ public class HttpContextConverter<TRequest, TResponse> : IContextConverter<IBenz
         return Task.FromResult(new HttpSendMessageContext(request));
     }
 
+    /// <summary>Reads and disposes the response, deserializing the body as <typeparamref name="TResponse"/> on success, and sets it on the client context.</summary>
+    /// <param name="contextIn">The client context to set the response on.</param>
+    /// <param name="contextOut">The completed <see cref="HttpSendMessageContext"/>.</param>
     public async Task MapResponseAsync(IBenzeneClientContext<TRequest, TResponse> contextIn, HttpSendMessageContext contextOut)
     {
         // Both HttpRequestMessage and HttpResponseMessage are IDisposable and created per outbound

@@ -16,11 +16,14 @@ public class GrpcClientRoute<TRequest, TResponse> : IGrpcClientRoute
 {
     private readonly Method<TRequest, TResponse> _method;
 
+    /// <summary>Initializes a new instance of the <see cref="GrpcClientRoute{TRequest,TResponse}"/> class.</summary>
+    /// <param name="method">The gRPC unary method descriptor to call.</param>
     public GrpcClientRoute(Method<TRequest, TResponse> method)
     {
         _method = method;
     }
 
+    /// <inheritdoc />
     public async Task InvokeAsync(CallInvoker invoker, IGrpcMessageAdapter adapter, GrpcSendMessageContext context)
     {
         var request = adapter.ConvertResponse<TRequest>(context.Message);

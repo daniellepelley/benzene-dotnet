@@ -12,6 +12,11 @@ using Benzene.Abstractions;
 
 namespace Benzene.Kafka.Core.Kafka;
 
+/// <summary>
+/// Converts an inbound message context (of any transport) to a Kafka produce request/response, for a
+/// message handler that produces to Kafka as its response. Used by the reflected message-handler
+/// pipeline, not by <see cref="KafkaContextConverter{T}"/>'s outbound-client path.
+/// </summary>
 public class KafkaMessageContextConverter<TContext> : IContextConverter<TContext, KafkaSendMessageContext>
 {
     // The routing-topic key. The outbound topic is set explicitly (below) from the topic getter, so a
@@ -31,6 +36,12 @@ public class KafkaMessageContextConverter<TContext> : IContextConverter<TContext
     private readonly IMessageHandlerResultSetter<TContext> _messageHandlerResultSetter;
     private readonly IBenzeneResponseAdapter<TContext> _benzeneResponseAdapter;
 
+    /// <summary>Initializes a new instance of the <see cref="KafkaMessageContextConverter{TContext}"/> class.</summary>
+    /// <param name="messageTopicGetter">Reads the outbound produce topic from the context.</param>
+    /// <param name="messageBodyGetter">Reads the outbound message body from the context.</param>
+    /// <param name="messageHeadersGetter">Reads the outbound message headers from the context.</param>
+    /// <param name="messageHandlerResultSetter">Records the outcome onto the context when <paramref name="benzeneResponseAdapter"/> is unavailable.</param>
+    /// <param name="benzeneResponseAdapter">When available, sets the response status code onto the context directly.</param>
     public KafkaMessageContextConverter(IMessageTopicGetter<TContext> messageTopicGetter, IMessageBodyGetter<TContext> messageBodyGetter, IMessageHeadersGetter<TContext> messageHeadersGetter, IMessageHandlerResultSetter<TContext> messageHandlerResultSetter, IBenzeneResponseAdapter<TContext> benzeneResponseAdapter)
     {
         _messageTopicGetter = messageTopicGetter;
@@ -40,6 +51,10 @@ public class KafkaMessageContextConverter<TContext> : IContextConverter<TContext
         _messageBodyGetter = messageBodyGetter;
     }
 
+    /// <summary>Builds a Kafka produce request from the topic/body/headers getters.</summary>
+    /// <param name="contextIn">The context to convert.</param>
+    /// <returns>A task that resolves to the built <see cref="KafkaSendMessageContext"/>.</returns>
+    /// <exception cref="InvalidOperationException">The topic getter returned no topic.</exception>
     public Task<KafkaSendMessageContext> CreateRequestAsync(TContext contextIn)
     {
         var topic = _messageTopicGetter.GetTopic(contextIn)
@@ -77,6 +92,9 @@ public class KafkaMessageContextConverter<TContext> : IContextConverter<TContext
         ));
     }
 
+    /// <summary>Records a successful produce as an OK result on the context.</summary>
+    /// <param name="contextIn">The context to set the response on.</param>
+    /// <param name="contextOut">The completed <see cref="KafkaSendMessageContext"/>.</param>
     public Task MapResponseAsync(TContext contextIn, KafkaSendMessageContext contextOut)
     {
         if (_benzeneResponseAdapter != null)

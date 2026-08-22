@@ -14,6 +14,8 @@ namespace Benzene.Kafka.Core.KafkaMessage;
 /// </summary>
 public class KafkaApplication<TKey, TValue> : MiddlewareApplication<ConsumeResult<TKey, TValue>, KafkaRecordContext<TKey, TValue>, IBenzeneResult?>
 {
+    /// <summary>Initializes a new instance of the <see cref="KafkaApplication{TKey,TValue}"/> class.</summary>
+    /// <param name="pipeline">The message pipeline each consumed record is dispatched through.</param>
     public KafkaApplication(IMiddlewarePipeline<KafkaRecordContext<TKey, TValue>> pipeline)
         :base(new TransportMiddlewarePipeline<KafkaRecordContext<TKey, TValue>>(TransportNames.Kafka, pipeline),
             @event => new KafkaRecordContext<TKey, TValue>(@event),

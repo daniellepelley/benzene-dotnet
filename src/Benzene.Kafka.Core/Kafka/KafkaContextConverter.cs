@@ -8,11 +8,13 @@ using Confluent.Kafka;
 
 namespace Benzene.Kafka.Core.Kafka;
 
+/// <summary>Converts an <see cref="IBenzeneClientContext{T,Void}"/> to a Kafka produce request/response.</summary>
 public class KafkaContextConverter<T> : IContextConverter<IBenzeneClientContext<T, Abstractions.Results.Void>, KafkaSendMessageContext>
 {
     private readonly ISerializer _serializer;
     private readonly string _keyHeader;
 
+    /// <summary>Initializes a new instance of the <see cref="KafkaContextConverter{T}"/> class using a JSON serializer and no message key.</summary>
     public KafkaContextConverter()
         :this(new JsonSerializer())
     { }
@@ -29,6 +31,9 @@ public class KafkaContextConverter<T> : IContextConverter<IBenzeneClientContext<
         _keyHeader = keyHeader;
     }
 
+    /// <summary>Builds a Kafka produce request, serializing the message and copying headers, from the client context.</summary>
+    /// <param name="contextIn">The client context to convert.</param>
+    /// <returns>A task that resolves to the built <see cref="KafkaSendMessageContext"/>.</returns>
     public Task<KafkaSendMessageContext> CreateRequestAsync(IBenzeneClientContext<T, Abstractions.Results.Void> contextIn)
     {
         var headers = new Headers();
@@ -55,6 +60,9 @@ public class KafkaContextConverter<T> : IContextConverter<IBenzeneClientContext<
             }));
     }
 
+    /// <summary>Maps a persisted delivery result to an accepted result, or an unpersisted one to service-unavailable.</summary>
+    /// <param name="contextIn">The client context to set the response on.</param>
+    /// <param name="contextOut">The completed <see cref="KafkaSendMessageContext"/>.</param>
     public Task MapResponseAsync(IBenzeneClientContext<T, Abstractions.Results.Void> contextIn, KafkaSendMessageContext contextOut)
     {
         contextIn.Response = contextOut.Response?.Status == PersistenceStatus.Persisted

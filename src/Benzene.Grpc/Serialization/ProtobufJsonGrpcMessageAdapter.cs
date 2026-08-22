@@ -36,6 +36,7 @@ public class ProtobufJsonGrpcMessageAdapter : IGrpcMessageAdapter
         Converters = { new JsonStringEnumConverter() }
     };
 
+    /// <inheritdoc />
     public TRequest? ConvertRequest<TRequest>(object? protobufMessage)
     {
         switch (protobufMessage)
@@ -51,6 +52,8 @@ public class ProtobufJsonGrpcMessageAdapter : IGrpcMessageAdapter
         }
     }
 
+    /// <inheritdoc />
+    /// <exception cref="BenzeneException">The payload is null, or cannot be converted to <typeparamref name="TResponse"/>.</exception>
     public TResponse ConvertResponse<TResponse>(object? payload)
     {
         if (payload is TResponse direct)

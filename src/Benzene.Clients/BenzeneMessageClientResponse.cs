@@ -10,6 +10,11 @@
     /// </summary>
     public class BenzeneMessageClientResponse
     {
+        /// <summary>Initializes a new instance of the <see cref="BenzeneMessageClientResponse"/> class.</summary>
+        /// <param name="statusCode">The Benzene result status (or tolerated numeric HTTP status code).</param>
+        /// <param name="body">The response body.</param>
+        /// <param name="headers">The response headers; defaults to an empty, case-insensitive dictionary.</param>
+        /// <param name="isSuccessful">The sender's authoritative success/failure signal, when present.</param>
         public BenzeneMessageClientResponse(string statusCode, string body, IDictionary<string, string>? headers = null, bool? isSuccessful = null)
         {
             StatusCode = statusCode;
@@ -18,6 +23,7 @@
             IsSuccessful = isSuccessful;
         }
 
+        /// <summary>Gets the Benzene result status (e.g. <c>"ok"</c>, <c>"not-found"</c>), or a tolerated numeric HTTP status code.</summary>
         public string StatusCode { get; }
 
         /// <summary>
@@ -27,7 +33,11 @@
         /// back to classifying <see cref="StatusCode"/> against the known status vocabulary.
         /// </summary>
         public bool? IsSuccessful { get; }
+
+        /// <summary>Gets the response headers.</summary>
         public IDictionary<string, string> Headers { get; }
+
+        /// <summary>Gets the response body.</summary>
         public string Body { get; }
     }
 }

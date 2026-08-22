@@ -6,8 +6,10 @@ using Microsoft.Extensions.Logging;
 
 namespace Benzene.Kafka.Core;
 
+/// <summary><see cref="IBenzeneWorkerStartup"/> extensions for wiring an inbound Kafka consumer worker.</summary>
 public static class Extensions
 {
+    /// <summary>Adds a <see cref="BenzeneKafkaWorker{TKey,TValue}"/> to the worker startup, built from the given configuration and pipeline.</summary>
     /// <param name="app">The worker startup to add the Kafka consumer to.</param>
     /// <param name="benzeneKafkaConfig">The consumer configuration and processing behavior to use.</param>
     /// <param name="action">The action that configures the inner Kafka message pipeline.</param>

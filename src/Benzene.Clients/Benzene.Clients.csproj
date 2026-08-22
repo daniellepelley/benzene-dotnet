@@ -6,6 +6,7 @@
         <Nullable>enable</Nullable>
         <AssemblyName>Benzene.Clients</AssemblyName>
         <RootNamespace>Benzene.Clients</RootNamespace>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
     </PropertyGroup>
 
     <ItemGroup>

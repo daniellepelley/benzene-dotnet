@@ -14,6 +14,7 @@ public class DefaultGrpcStatusCodeMapper : IGrpcStatusCodeMapper
     private const StatusCode DefaultValue = StatusCode.Internal;
     private readonly IDictionary<string, StatusCode> _dictionary;
 
+    /// <summary>Initializes a new instance of the <see cref="DefaultGrpcStatusCodeMapper"/> class.</summary>
     public DefaultGrpcStatusCodeMapper()
     {
         _dictionary = new Dictionary<string, StatusCode>
@@ -38,6 +39,7 @@ public class DefaultGrpcStatusCodeMapper : IGrpcStatusCodeMapper
         };
     }
 
+    /// <inheritdoc />
     public StatusCode Map(string? benzeneResultStatus)
     {
         if (benzeneResultStatus == null)

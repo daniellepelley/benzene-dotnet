@@ -28,6 +28,7 @@ public class GrpcTestHost : IDisposable
         });
     }
 
+    /// <inheritdoc />
     public void Dispose()
     {
         _host.Dispose();

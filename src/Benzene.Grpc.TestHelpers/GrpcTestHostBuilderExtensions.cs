@@ -11,6 +11,7 @@ using Microsoft.Extensions.Hosting;
 
 namespace Benzene.Grpc.TestHelpers;
 
+/// <summary><see cref="BenzeneTestHostBuilder{TStartUp}"/> extensions for building an in-memory gRPC test host.</summary>
 public static class GrpcTestHostBuilderExtensions
 {
     /// <summary>
