@@ -10,6 +10,12 @@ using Json.Schema;
 
 namespace Benzene.JsonSchema;
 
+/// <summary>
+/// Middleware that validates the request body against the schema resolved by the registered
+/// <see cref="IJsonSchemaProvider{TContext}"/>, short-circuiting the pipeline with a validation-error
+/// result when the body is missing, malformed, or fails the schema.
+/// </summary>
+/// <typeparam name="TContext">The transport-specific context type this middleware applies to.</typeparam>
 public class JsonSchemaMiddleware<TContext> : IMiddleware<TContext> where TContext : class
 {
     private readonly IMessageBodyGetter<TContext> _messageBodyGetter;
@@ -19,6 +25,15 @@ public class JsonSchemaMiddleware<TContext> : IMiddleware<TContext> where TConte
     private readonly IMessageTopicGetter<TContext> _messageTopicGetter;
     private readonly IMessageHandlerDefinitionLookUp _messageHandlerDefinitionLookUp;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="JsonSchemaMiddleware{TContext}"/> class.
+    /// </summary>
+    /// <param name="messageBodyGetter">Reads the raw request body to validate.</param>
+    /// <param name="jsonSchemaProvider">Resolves the schema to validate against.</param>
+    /// <param name="defaultStatuses">Supplies the status used for a validation-error result.</param>
+    /// <param name="messageHandlerResultSetter">Sets the short-circuit result on validation failure.</param>
+    /// <param name="messageTopicGetter">Resolves the current message's topic from the context.</param>
+    /// <param name="messageHandlerDefinitionLookUp">Looks up the handler registered for a topic, to attach to the failure result.</param>
     public JsonSchemaMiddleware(IMessageBodyGetter<TContext> messageBodyGetter,
         IJsonSchemaProvider<TContext> jsonSchemaProvider,
         IDefaultStatuses defaultStatuses,
@@ -34,8 +49,10 @@ public class JsonSchemaMiddleware<TContext> : IMiddleware<TContext> where TConte
         _messageBodyGetter = messageBodyGetter;
     }
 
+    /// <inheritdoc />
     public string Name => "JsonSchema";
 
+    /// <inheritdoc />
     public async Task HandleAsync(TContext context, Func<Task> next)
     {
         var jsonSchema = _jsonSchemaProvider.Get(context);

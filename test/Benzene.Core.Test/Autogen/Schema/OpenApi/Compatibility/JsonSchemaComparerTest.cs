@@ -158,6 +158,92 @@ public class JsonSchemaComparerTest
         Assert.True(viaJson.Length > 0 || name == "identical", $"corpus case '{name}' detected nothing");
     }
 
+    [Fact]
+    public void BothWalkers_ProduceIdenticalChangeSets_NestedArrayItems()
+    {
+        // The tuple-shaped EquivalenceCorpus above only expresses flat scalar properties, so array
+        // recursion (both walkers' `items` handling) is exercised separately here - two levels deep
+        // (array-of-array-of-object) so a single pass through "items" isn't mistaken for full
+        // recursive coverage. A property is removed from the innermost object, nested inside both
+        // array layers, and both walkers must land on the same "matrix[][].flag" path.
+        var baselineRequest = new OpenApiSchema
+        {
+            Type = "object",
+            Properties = new Dictionary<string, OpenApiSchema>
+            {
+                ["matrix"] = new OpenApiSchema
+                {
+                    Type = "array",
+                    Items = new OpenApiSchema { Type = "array", Items = MatrixCell(includeFlag: true) },
+                },
+            },
+        };
+        var currentRequest = new OpenApiSchema
+        {
+            Type = "object",
+            Properties = new Dictionary<string, OpenApiSchema>
+            {
+                ["matrix"] = new OpenApiSchema
+                {
+                    Type = "array",
+                    Items = new OpenApiSchema { Type = "array", Items = MatrixCell(includeFlag: false) },
+                },
+            },
+        };
+
+        var openApiReport = new SchemaCompatibilityComparer().Compare(
+            DocOf(Req(Topic, baselineRequest, OpenApi(NoFields))),
+            DocOf(Req(Topic, currentRequest, OpenApi(NoFields))));
+        var viaOpenApi = openApiReport.Changes
+            .Where(c => c.Direction == SchemaDirection.Request)
+            .Select(Tuple).ToArray();
+
+        var baselineJson = MatrixJson(includeFlag: true);
+        var currentJson = MatrixJson(includeFlag: false);
+
+        var viaJson = JsonSchemaComparer
+            .Compare(baselineJson, currentJson, SchemaDirection.Request, Topic, $"{Topic}.request")
+            .Select(Tuple).ToArray();
+
+        Assert.Equal(viaOpenApi, viaJson);
+        Assert.Contains(viaJson, c => c.Item1 == SchemaChangeKind.PropertyRemoved && c.Item3 == $"{Topic}.request.matrix[][].flag");
+    }
+
+    private static OpenApiSchema MatrixCell(bool includeFlag)
+    {
+        var properties = new Dictionary<string, OpenApiSchema> { ["cell"] = new OpenApiSchema { Type = "string" } };
+        if (includeFlag)
+        {
+            properties["flag"] = new OpenApiSchema { Type = "boolean" };
+        }
+
+        return new OpenApiSchema { Type = "object", Properties = properties };
+    }
+
+    private static JsonObject MatrixJson(bool includeFlag)
+    {
+        var cellProperties = new JsonObject { ["cell"] = new JsonObject { ["type"] = "string" } };
+        if (includeFlag)
+        {
+            cellProperties["flag"] = new JsonObject { ["type"] = "boolean" };
+        }
+
+        var cell = new JsonObject { ["type"] = "object", ["properties"] = cellProperties };
+
+        return new JsonObject
+        {
+            ["type"] = "object",
+            ["properties"] = new JsonObject
+            {
+                ["matrix"] = new JsonObject
+                {
+                    ["type"] = "array",
+                    ["items"] = new JsonObject { ["type"] = "array", ["items"] = cell },
+                },
+            },
+        };
+    }
+
     public static TheoryData<string, (string, string, bool)[], (string, string, bool)[]> EquivalenceCorpus() => new()
     {
         { "identical", [("id", "string", true)], [("id", "string", true)] },

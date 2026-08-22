@@ -19,6 +19,11 @@ public class DefaultJsonSchemaProvider<TContext> : IJsonSchemaProvider<TContext>
     private readonly IMessageTopicGetter<TContext> _messageTopicGetter;
     private readonly IMessageHandlerDefinitionLookUp _messageHandlerDefinitionLookUp;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DefaultJsonSchemaProvider{TContext}"/> class.
+    /// </summary>
+    /// <param name="messageTopicGetter">Resolves the current message's topic from the context.</param>
+    /// <param name="messageHandlerDefinitionLookUp">Looks up the handler (and its request type) registered for a topic.</param>
     public DefaultJsonSchemaProvider(IMessageTopicGetter<TContext> messageTopicGetter,
         IMessageHandlerDefinitionLookUp messageHandlerDefinitionLookUp)
     {
@@ -26,6 +31,7 @@ public class DefaultJsonSchemaProvider<TContext> : IJsonSchemaProvider<TContext>
         _messageHandlerDefinitionLookUp = messageHandlerDefinitionLookUp;
     }
 
+    /// <inheritdoc />
     public Json.Schema.JsonSchema? Get(TContext context)
     {
         var topic = _messageTopicGetter.GetTopic(context);

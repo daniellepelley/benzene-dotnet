@@ -17,6 +17,12 @@ public class SuppliedJsonSchemaProvider<TContext> : IJsonSchemaProvider<TContext
     private readonly IMessageHandlerDefinitionLookUp _messageHandlerDefinitionLookUp;
     private readonly DefaultJsonSchemaProvider<TContext> _fallback;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SuppliedJsonSchemaProvider{TContext}"/> class.
+    /// </summary>
+    /// <param name="catalog">The hand-authored schemas to check before falling back to the generated default.</param>
+    /// <param name="messageTopicGetter">Resolves the current message's topic from the context.</param>
+    /// <param name="messageHandlerDefinitionLookUp">Looks up the handler (and its request type) registered for a topic.</param>
     public SuppliedJsonSchemaProvider(SuppliedJsonSchemaCatalog catalog,
         IMessageTopicGetter<TContext> messageTopicGetter,
         IMessageHandlerDefinitionLookUp messageHandlerDefinitionLookUp)
@@ -27,6 +33,7 @@ public class SuppliedJsonSchemaProvider<TContext> : IJsonSchemaProvider<TContext
         _fallback = new DefaultJsonSchemaProvider<TContext>(messageTopicGetter, messageHandlerDefinitionLookUp);
     }
 
+    /// <inheritdoc />
     public Json.Schema.JsonSchema? Get(TContext context)
     {
         var topic = _messageTopicGetter.GetTopic(context);
