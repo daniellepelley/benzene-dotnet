@@ -26,7 +26,11 @@ namespace Benzene.Aws.Lambda.S3
         public static IMiddlewarePipelineBuilder<AwsEventStreamContext> UseS3(this IMiddlewarePipelineBuilder<AwsEventStreamContext> app, Action<IMiddlewarePipelineBuilder<S3RecordContext>> action, Action<S3Options> configure = null)
         {
             app.Register(x => x.AddS3());
-            var pipeline = app.CreateMiddlewarePipeline(action);
+            var pipeline = app.CreateMiddlewarePipeline<S3RecordContext>(builder =>
+            {
+                builder.UseBenzeneInvocation();
+                action(builder);
+            });
             var options = new S3Options();
             configure?.Invoke(options);
             return app.Use(resolver => new S3LambdaHandler(new S3Application(pipeline, options), resolver));

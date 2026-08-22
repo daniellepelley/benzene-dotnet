@@ -25,7 +25,12 @@ public class DynamoDbLambdaHandlerTest
     {
         DynamoDbRecordContext handledContext = null;
 
-        var app = new MiddlewarePipelineBuilder<AwsEventStreamContext>(new MicrosoftBenzeneServiceContainer(new ServiceCollection()));
+        // Uses the same underlying container for the runtime resolver as the pipeline was built
+        // against (rather than ServiceResolverMother's unrelated one) - UseDynamoDb now auto-wires
+        // UseBenzeneInvocation() as the pipeline's first middleware, which needs its registration
+        // (added via app.Register(...) against THIS container) resolvable at runtime.
+        var services = new ServiceCollection();
+        var app = new MiddlewarePipelineBuilder<AwsEventStreamContext>(new MicrosoftBenzeneServiceContainer(services));
         app.UseDynamoDb(dynamoDb => dynamoDb
             .Use(null, (context, next) =>
             {
@@ -36,7 +41,9 @@ public class DynamoDbLambdaHandlerTest
 
         var request = MessageBuilder.Create("example-orders:INSERT", Defaults.MessageAsObject).AsDynamoDb();
 
-        await app.Build().HandleAsync(AwsEventStreamContextBuilder.Build(request), ServiceResolverMother.CreateServiceResolver());
+        using var factory = new MicrosoftServiceResolverFactory(services);
+        using var resolver = factory.CreateScope();
+        await app.Build().HandleAsync(AwsEventStreamContextBuilder.Build(request), resolver);
 
         Assert.NotNull(handledContext);
         Assert.Equal("INSERT", handledContext.Record.EventName);

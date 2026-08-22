@@ -19,7 +19,11 @@ public static class Extensions
     public static IMiddlewarePipelineBuilder<AwsEventStreamContext> UseDynamoDb(this IMiddlewarePipelineBuilder<AwsEventStreamContext> app, Action<IMiddlewarePipelineBuilder<DynamoDbRecordContext>> action)
     {
         app.Register(x => x.AddDynamoDb());
-        var pipeline = app.CreateMiddlewarePipeline(action);
+        var pipeline = app.CreateMiddlewarePipeline<DynamoDbRecordContext>(builder =>
+        {
+            builder.UseBenzeneInvocation();
+            action(builder);
+        });
         return app.Use(resolver => new DynamoDbLambdaHandler(new DynamoDbApplication(pipeline), resolver));
     }
 }

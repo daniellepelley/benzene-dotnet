@@ -28,7 +28,11 @@ public static class Extensions
     public static IMiddlewarePipelineBuilder<AwsEventStreamContext> UseEventBridge(this IMiddlewarePipelineBuilder<AwsEventStreamContext> app, Action<IMiddlewarePipelineBuilder<EventBridgeContext>> action, Action<EventBridgeOptions> configure = null)
     {
         app.Register(x => x.AddEventBridge());
-        var pipeline = app.CreateMiddlewarePipeline(action);
+        var pipeline = app.CreateMiddlewarePipeline<EventBridgeContext>(builder =>
+        {
+            builder.UseBenzeneInvocation();
+            action(builder);
+        });
         var options = new EventBridgeOptions();
         configure?.Invoke(options);
         return app.Use(resolver => new EventBridgeLambdaHandler(new EventBridgeApplication(pipeline, options), resolver));
