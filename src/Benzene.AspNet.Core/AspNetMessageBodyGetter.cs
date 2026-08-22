@@ -1,6 +1,7 @@
 using Benzene.Abstractions.Messages.Mappers;
 using Benzene.Http.RequestBody;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 
 namespace Benzene.AspNet.Core;
 
@@ -15,12 +16,15 @@ namespace Benzene.AspNet.Core;
 public class AspNetMessageBodyGetter : IMessageBodyGetter<AspNetContext>, IHttpRequestBodyReader<AspNetContext>
 {
     private readonly HttpRequestBodyBuffer _buffer;
+    private readonly ILogger<AspNetMessageBodyGetter> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="AspNetMessageBodyGetter"/> class.</summary>
     /// <param name="buffer">The scoped per-request body buffer.</param>
-    public AspNetMessageBodyGetter(HttpRequestBodyBuffer buffer)
+    /// <param name="logger">Logs the exception swallowed by the <see cref="ReadBodyAsync"/> fallback path.</param>
+    public AspNetMessageBodyGetter(HttpRequestBodyBuffer buffer, ILogger<AspNetMessageBodyGetter> logger)
     {
         _buffer = buffer;
+        _logger = logger;
     }
 
     /// <summary>
@@ -66,8 +70,12 @@ public class AspNetMessageBodyGetter : IMessageBodyGetter<AspNetContext>, IHttpR
 
             return body;
         }
-        catch
+        catch (Exception ex)
         {
+            // Deliberate fallback: a body that can't be read is treated as no body, not a request
+            // failure. Logged (rather than silently swallowed) so the failure is diagnosable instead
+            // of just showing up downstream as an unexpectedly empty request.
+            _logger.LogDebug(ex, "Failed to read the ASP.NET Core request body; treating it as empty.");
             return null;
         }
     }

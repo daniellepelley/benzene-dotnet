@@ -40,7 +40,7 @@ depend on the abstractions without pulling in an implementation.
 |---|---|
 | `Benzene.Abstractions` | Root abstractions — `ISerializer`, service-container and service-resolver interfaces, log-context and message builders shared across the framework. |
 | `Benzene.Abstractions.MessageHandlers` | Interfaces for message handlers, routing, and the handler pipeline (`IMessageRouterBuilder`, `IHandlerPipelineBuilder`, `IMessageHandlerFactory`). |
-| `Benzene.Abstractions.Messages` | Client/message-sending contracts (`IBenzeneClientContext`, `IBenzeneClientRequest`, `IMessageSenderBuilder`) for outbound messaging. |
+| `Benzene.Abstractions.Messages` | Client/message-sending contracts (`IBenzeneClientContext`, `IBenzeneClientRequest`, `IMessageSenderDefinition`) for outbound messaging. |
 | `Benzene.Abstractions.Middleware` | The middleware pipeline contracts — `IMiddleware`, `IMiddlewarePipeline`, `IMiddlewarePipelineBuilder`, `IMiddlewareApplication`. |
 | `Benzene.Abstractions.Pipelines` | Application/host contracts — `IBenzeneApplicationBuilder`, `IStartUp`, `IClientHeaders`. |
 | `Benzene.Abstractions.Validation` | Validation contracts — `IValidationSchemaBuilder`, `ValidationStatusAttribute`. |

@@ -39,6 +39,8 @@ the scope-state builders used by `UseLogResult`/`UseLogContext`:
 - `DictionaryUtils` - Dictionary manipulation helpers
 - `Utils` - General utility methods
 - `Constants` - Framework constants
+- `CachingFinder<TDefinition>` - Shared double-checked-locking cache for a "find all definitions" call;
+  backs `Benzene.Core.MessageHandlers.CacheMessageHandlersFinder` and `Benzene.Http.Routing.CacheHttpEndpointFinder`.
 
 ### Extension Methods
 - Various DI-related extensions

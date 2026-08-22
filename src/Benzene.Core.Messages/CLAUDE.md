@@ -41,7 +41,8 @@ types, and the context-predicate helpers used for pipeline branching. There is n
   `IContextPredicate<TContext>` conditions used by `.Split(...)`.
 
 ### Helpers
-- `MediaType`, `DictionaryUtils`, `Constants`.
+- `MediaType`, `Constants`. (Dictionary/reflection helpers used across the framework live in the
+  single canonical `Benzene.Core.Helper.DictionaryUtils` / `Utils`.)
 
 ## When to use this package
 - When using the in-process BenzeneMessage transport (e.g. direct Lambda message invoke).

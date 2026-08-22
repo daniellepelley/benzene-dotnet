@@ -1,11 +1,10 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
+using System.Linq.Expressions;
 
 namespace Benzene.Core.Helper;
 
 /// <summary>
-/// Provides utility methods for manipulating and combining dictionaries.
+/// Provides utility methods for manipulating and combining dictionaries, and for enriching plain
+/// objects from a dictionary of property values (route params, query-string, headers, claims, ...).
 /// </summary>
 public static class DictionaryUtils
 {
@@ -52,8 +51,8 @@ public static class DictionaryUtils
     }
 
     // Adds the key (lower-cased) if absent, or fills it in when the existing value is null; the key is
-    // lower-cased once and looked up once, instead of the previous ContainsKey + up-to-three indexer
-    // re-lookups (each re-lower-casing the key) per entry.
+    // lower-cased once and looked up once, instead of a ContainsKey + up-to-three indexer re-lookups
+    // (each re-lower-casing the key) per entry.
     private static void MapOnto(IDictionary<string, object> source, string key, object value)
     {
         var lowerKey = key.ToLowerInvariant();
@@ -67,7 +66,7 @@ public static class DictionaryUtils
             source[lowerKey] = value;
         }
     }
-    
+
     /// <summary>
     /// Combines multiple dictionaries into a single dictionary, using the first occurrence of each key.
     /// </summary>
@@ -83,17 +82,24 @@ public static class DictionaryUtils
         {
             foreach (var keyValue in dictionary)
             {
-                output.TryAdd(keyValue.Key, keyValue.Value); 
+                output.TryAdd(keyValue.Key, keyValue.Value);
             }
         }
 
         return output;
     }
 
+    /// <summary>
+    /// Keeps only the entries of <paramref name="source"/> whose key is in <paramref name="filter"/>,
+    /// renaming each kept key to the value <paramref name="filter"/> maps it to.
+    /// </summary>
+    /// <param name="source">The dictionary to filter and rename entries from.</param>
+    /// <param name="filter">Maps source keys (case-insensitive) to the output key to rename them to.</param>
+    /// <returns>A new dictionary containing only the renamed, filtered entries.</returns>
     public static IDictionary<string, string> FilterAndReplace(IDictionary<string, string> source,
         IDictionary<string, string> filter)
     {
-        // Single pass with TryGetValue/TryAdd (first-wins), replacing the per-entry double lookup +
+        // Single pass with TryGetValue/TryAdd (first-wins), replacing a per-entry double lookup +
         // GroupBy/First/ToDictionary. Only entries whose key is in the filter are kept.
         var output = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -109,15 +115,17 @@ public static class DictionaryUtils
     }
 
     /// <summary>
-    /// Replaces keys in a source dictionary based on a filter dictionary using case-insensitive matching.
+    /// Renames <paramref name="source"/>'s entries using <paramref name="filter"/> as a key-rename map,
+    /// keeping entries whose key is not in <paramref name="filter"/> unchanged (unlike
+    /// <see cref="FilterAndReplace"/>, which drops them).
     /// </summary>
     /// <param name="source">The source dictionary to process.</param>
-    /// <param name="filter">The filter dictionary mapping old keys to new keys.</param>
+    /// <param name="filter">Maps source keys (case-insensitive) to the output key to rename them to.</param>
     /// <returns>A new dictionary with replaced keys.</returns>
     public static IDictionary<string, string> Replace(IDictionary<string, string> source,
         IDictionary<string, string> filter)
     {
-        // Single pass with TryGetValue/TryAdd (first-wins), replacing the per-entry double lookup +
+        // Single pass with TryGetValue/TryAdd (first-wins), replacing a per-entry double lookup +
         // GroupBy/First/ToDictionary. A key found in the filter is renamed; others pass through.
         var output = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -144,7 +152,7 @@ public static class DictionaryUtils
     /// <summary>
     /// Checks if a dictionary key equals a specific value.
     /// </summary>
-    /// <param name="dictionary">The dictionary to check.</param>
+    /// <param name="dictionary">The dictionary to check, or <c>null</c> (in which case <c>false</c> is returned).</param>
     /// <param name="key">The key to check.</param>
     /// <param name="value">The value to compare against.</param>
     /// <returns>True if the key exists and its value equals the specified value; otherwise, false.</returns>
@@ -154,28 +162,49 @@ public static class DictionaryUtils
         {
             return keyValue == value;
         }
-    
+
         return false;
     }
 
     /// <summary>
-    /// Enriches an object by setting its properties from a dictionary using case-insensitive property name matching.
+    /// Sets each property on <paramref name="source"/> whose name matches (case-insensitively) a key
+    /// in <paramref name="dictionary"/> to that entry's value, converting the value's type if needed.
+    /// Used to fold enricher-supplied values (route params, query-string, headers, claims - typically
+    /// strings) onto a mapped request object.
     /// </summary>
     /// <typeparam name="T">The type of object to enrich.</typeparam>
-    /// <param name="source">The object to enrich.</param>
+    /// <param name="source">The object to enrich, or <c>null</c> (in which case a new instance is created via <see cref="Activator.CreateInstance{T}()"/> before enriching).</param>
     /// <param name="dictionary">The dictionary containing property values.</param>
-    /// <returns>The enriched object.</returns>
+    /// <returns>The enriched object (a new instance if <paramref name="source"/> was <c>null</c>).</returns>
     public static T Enrich<T>(T source, IDictionary<string, object> dictionary)
     {
-        foreach (var propertyInfo in typeof(T).GetProperties())
+        if (dictionary.Count == 0)
         {
-            var fields = dictionary.Where(x =>
-                x.Key.Equals(propertyInfo.Name, StringComparison.InvariantCultureIgnoreCase)).ToArray();
+            return source;
+        }
 
-            if (fields.Any())
+        var setters = PropertySetterCache<T>.Setters;
+        if (setters.Count == 0)
+        {
+            return source;
+        }
+
+        // Build one case-insensitive lookup over the caller's dictionary up front (O(dictionary size)),
+        // instead of a per-property linear .Where() scan (O(properties x dictionary size)). TryAdd (not
+        // the case-insensitive-dictionary copy constructor) so two differently-cased keys in the source
+        // don't throw - the first one wins.
+        var caseInsensitiveValues = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in dictionary)
+        {
+            caseInsensitiveValues.TryAdd(entry.Key, entry.Value);
+        }
+
+        foreach (var (propertyName, setter) in setters)
+        {
+            if (caseInsensitiveValues.TryGetValue(propertyName, out var value))
             {
                 source = EnsureNotNull(source);
-                propertyInfo.SetValue(source, fields.First().Value);
+                setter.Set(source, GetValue(value, setter.PropertyType));
             }
         }
 
@@ -187,4 +216,75 @@ public static class DictionaryUtils
         return source ?? Activator.CreateInstance<T>();
     }
 
+    private static object GetValue(object originalValue, Type propertyType)
+    {
+        if (originalValue.GetType() == propertyType)
+        {
+            return originalValue;
+        }
+
+        // Enrichers feed string values (route params, query-string, headers, claims) that need to be
+        // coerced to the DTO's property type. Convert.ChangeType only handles the IConvertible
+        // primitives, so Guid, enum and any Nullable<T> target threw InvalidCastException. Unwrap the
+        // nullable, and parse Guid/enum explicitly; the compiled setter boxes the value back to the
+        // declared property type.
+        var targetType = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+
+        if (originalValue.GetType() == targetType)
+        {
+            return originalValue;
+        }
+
+        if (targetType == typeof(Guid))
+        {
+            return originalValue is Guid guid ? guid : Guid.Parse(originalValue.ToString());
+        }
+
+        if (targetType.IsEnum)
+        {
+            return originalValue is string enumText
+                ? Enum.Parse(targetType, enumText, ignoreCase: true)
+                : Enum.ToObject(targetType, originalValue);
+        }
+
+        return Convert.ChangeType(originalValue, targetType);
+    }
+
+    /// <summary>
+    /// Caches a compiled setter delegate per writable public instance property of <typeparamref name="T"/>,
+    /// built once (via <see cref="System.Linq.Expressions"/>) the first time <typeparamref name="T"/> is
+    /// enriched, so repeated <see cref="Enrich{T}"/> calls for the same request type avoid re-reflecting
+    /// over <see cref="Type.GetProperties()"/> and calling <c>PropertyInfo.SetValue</c> per property, per
+    /// message. Non-writable properties are silently excluded (rather than replicating the reflective
+    /// path's <c>ArgumentException</c> if such a property happened to match a dictionary key - an
+    /// unencountered edge case in practice, since enrichment targets are always plain settable DTOs).
+    /// </summary>
+    private static class PropertySetterCache<T>
+    {
+        public static readonly IReadOnlyDictionary<string, (Type PropertyType, Action<T, object> Set)> Setters = Build();
+
+        private static Dictionary<string, (Type, Action<T, object>)> Build()
+        {
+            var setters = new Dictionary<string, (Type, Action<T, object>)>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var property in typeof(T).GetProperties())
+            {
+                var setMethod = property.GetSetMethod();
+                if (setMethod == null)
+                {
+                    continue;
+                }
+
+                var instanceParameter = Expression.Parameter(typeof(T), "instance");
+                var valueParameter = Expression.Parameter(typeof(object), "value");
+                var convertedValue = Expression.Convert(valueParameter, property.PropertyType);
+                var call = Expression.Call(instanceParameter, setMethod, convertedValue);
+                var compiled = Expression.Lambda<Action<T, object>>(call, instanceParameter, valueParameter).Compile();
+
+                setters[property.Name] = (property.PropertyType, compiled);
+            }
+
+            return setters;
+        }
+    }
 }

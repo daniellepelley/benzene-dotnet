@@ -1,4 +1,6 @@
-﻿namespace Benzene.Http.Routing;
+﻿using Benzene.Core.Helper;
+
+namespace Benzene.Http.Routing;
 
 /// <summary>
 /// Provides a caching decorator for <see cref="IHttpEndpointFinder"/> that caches endpoint definitions
@@ -8,12 +10,14 @@
 /// This finder wraps another endpoint finder and caches its results. Subsequent calls to
 /// <see cref="FindDefinitions"/> return the cached results rather than performing discovery again.
 /// This improves performance when endpoint discovery is expensive (e.g., reflection-based discovery).
+/// The caching itself (double-checked locking) lives in the shared
+/// <see cref="CachingFinder{TDefinition}"/>; this type is just the <see cref="IHttpEndpointFinder"/>-
+/// shaped entry point onto it - the same pattern <c>Benzene.Core.MessageHandlers.CacheMessageHandlersFinder</c>
+/// uses for handler definitions.
 /// </remarks>
 public class CacheHttpEndpointFinder : IHttpEndpointFinder
 {
-    private readonly IHttpEndpointFinder _inner;
-    private readonly object _lock = new();
-    private volatile IHttpEndpointDefinition[]? _httpEndpointDefinitions;
+    private readonly CachingFinder<IHttpEndpointDefinition> _cache;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CacheHttpEndpointFinder"/> class.
@@ -21,7 +25,7 @@ public class CacheHttpEndpointFinder : IHttpEndpointFinder
     /// <param name="inner">The underlying endpoint finder to wrap with caching.</param>
     public CacheHttpEndpointFinder(IHttpEndpointFinder inner)
     {
-        _inner = inner;
+        _cache = new CachingFinder<IHttpEndpointDefinition>(inner.FindDefinitions);
     }
 
     /// <summary>
@@ -31,20 +35,5 @@ public class CacheHttpEndpointFinder : IHttpEndpointFinder
     /// An array of HTTP endpoint definitions, either from cache or by calling the inner finder
     /// on the first invocation.
     /// </returns>
-    public IHttpEndpointDefinition[] FindDefinitions()
-    {
-        // Double-checked lock rather than `??=`: the latter is a non-atomic read-then-write, so two
-        // threads racing the first call both see null and both run the inner (potentially reflection-
-        // based) discovery. The volatile field publishes the result safely.
-        var cached = _httpEndpointDefinitions;
-        if (cached != null)
-        {
-            return cached;
-        }
-
-        lock (_lock)
-        {
-            return _httpEndpointDefinitions ??= _inner.FindDefinitions();
-        }
-    }
+    public IHttpEndpointDefinition[] FindDefinitions() => _cache.FindDefinitions();
 }

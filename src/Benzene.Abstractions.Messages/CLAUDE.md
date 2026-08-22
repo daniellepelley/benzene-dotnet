@@ -18,7 +18,8 @@ vocabulary the outbound (`Benzene.Clients`) and inbound message-handler pipeline
 - `IMessageSender<TRequest>` - `SendMessageAsync(TRequest) → Task<IBenzeneResult>` (fire, no typed
   response).
 - `IMessageSender<TRequest, TResponse>` - `SendMessageAsync(TRequest) → Task<IBenzeneResult<TResponse>>`.
-- `IMessageSenderBuilder` / `IMessageSenderDefinition` - registration/construction of senders.
+- `IMessageSenderDefinition` - registration/construction of senders (the builder itself,
+  `IMessageSenderBuilder`, lives in `Benzene.Core.Messages.MessageSender`).
 
 ### Raw message payloads
 - `IRawStringMessage` - a payload carrying pre-rendered string `Content` (bypasses format

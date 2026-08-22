@@ -1,4 +1,5 @@
 using Benzene.Abstractions.MessageHandlers;
+using Benzene.Core.Helper;
 
 namespace Benzene.Core.MessageHandlers;
 
@@ -9,13 +10,14 @@ namespace Benzene.Core.MessageHandlers;
 /// </summary>
 /// <remarks>
 /// The cache is populated lazily on first use and never invalidated - handler definitions are
-/// assumed not to change for the lifetime of the process.
+/// assumed not to change for the lifetime of the process. The caching itself (double-checked
+/// locking) lives in the shared <see cref="CachingFinder{TDefinition}"/>; this type is just the
+/// package-local, <see cref="IMessageHandlersFinder"/>-shaped entry point onto it - the same pattern
+/// <c>Benzene.Http.Routing.CacheHttpEndpointFinder</c> uses for endpoint definitions.
 /// </remarks>
 internal class CacheMessageHandlersFinder : IMessageHandlersFinder
 {
-    private readonly IMessageHandlersFinder _inner;
-    private readonly object _lock = new();
-    private volatile IMessageHandlerDefinition[]? _messageHandlerDefinitions;
+    private readonly CachingFinder<IMessageHandlerDefinition> _cache;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CacheMessageHandlersFinder"/> class.
@@ -23,27 +25,12 @@ internal class CacheMessageHandlersFinder : IMessageHandlersFinder
     /// <param name="inner">The finder to cache the results of.</param>
     public CacheMessageHandlersFinder(IMessageHandlersFinder inner)
     {
-        _inner = inner;
+        _cache = new CachingFinder<IMessageHandlerDefinition>(inner.FindDefinitions);
     }
 
     /// <summary>
     /// Returns the cached handler definitions, calling the inner finder only on the first invocation.
     /// </summary>
     /// <returns>The cached (or newly discovered, on first call) handler definitions.</returns>
-    public IMessageHandlerDefinition[] FindDefinitions()
-    {
-        // Double-checked lock rather than `??=`: the latter is a non-atomic read-then-write, so two
-        // threads racing the first call both see null and both run the inner (potentially reflection-
-        // based, assembly-scanning) discovery. The volatile field publishes the result safely.
-        var cached = _messageHandlerDefinitions;
-        if (cached != null)
-        {
-            return cached;
-        }
-
-        lock (_lock)
-        {
-            return _messageHandlerDefinitions ??= _inner.FindDefinitions();
-        }
-    }
+    public IMessageHandlerDefinition[] FindDefinitions() => _cache.FindDefinitions();
 }

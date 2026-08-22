@@ -1,5 +1,5 @@
 using Benzene.Abstractions.MessageHandlers.Request;
-using Benzene.Core.MessageHandlers.Helper;
+using Benzene.Core.Helper;
 
 namespace Benzene.Core.MessageHandlers.Request;
 

@@ -20,6 +20,11 @@ public class AutofacServiceResolverFactory : IServiceResolverFactory
 
     public void Dispose()
     {
+        // The factory built this container (the only constructor takes a ContainerBuilder), so it
+        // owns disposal. Disposing runs the container's IDisposable singletons' cleanup - previously
+        // this was a no-op and they leaked until process exit, mirroring the bug already fixed on the
+        // Microsoft.Extensions.DependencyInjection adapter (see MicrosoftServiceResolverFactory.Dispose).
+        _container.Dispose();
     }
 
     public IServiceResolver CreateScope()

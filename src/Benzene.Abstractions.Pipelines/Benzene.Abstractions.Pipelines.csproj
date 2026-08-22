@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>Benzene.Abstractions</RootNamespace>
-    <AssemblyName>Benzene.Abstrations.Pipelines</AssemblyName>
+    <AssemblyName>Benzene.Abstractions.Pipelines</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>

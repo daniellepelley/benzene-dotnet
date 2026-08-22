@@ -1,4 +1,3 @@
-using System;
 namespace Benzene.Core.Exceptions;
 
 /// <summary>

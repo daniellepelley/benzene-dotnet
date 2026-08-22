@@ -1,5 +1,6 @@
 ﻿using System.Reflection;
 using Benzene.Abstractions.MessageHandlers;
+using Benzene.Core.Helper;
 using Benzene.Core.MessageHandlers;
 using Benzene.Http.Routing;
 using Benzene.Schema.OpenApi.EventService;

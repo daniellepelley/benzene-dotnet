@@ -1,4 +1,5 @@
 using Benzene.Core.DI;
+using Benzene.Core.Helper;
 
 namespace Benzene.Microsoft.Dependencies;
 
