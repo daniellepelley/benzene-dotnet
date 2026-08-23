@@ -5,6 +5,7 @@ using Benzene.Abstractions.Middleware;
 using Benzene.Abstractions.Results;
 using Benzene.Abstractions.Serialization;
 using Benzene.Results;
+using Void = Benzene.Abstractions.Results.Void;
 
 namespace Benzene.Clients.Aws.Lambda;
 

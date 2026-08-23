@@ -15,7 +15,7 @@ public static class DynamoDbUtils
     /// The resource segment contains colons of its own (the stream timestamp), so the ARN is split
     /// on <c>':'</c> with a maximum count of 6 before splitting the resource on <c>'/'</c>.
     /// </remarks>
-    public static string GetTableName(string eventSourceArn)
+    public static string? GetTableName(string? eventSourceArn)
     {
         if (string.IsNullOrEmpty(eventSourceArn))
         {

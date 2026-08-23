@@ -17,7 +17,7 @@ public static class HeaderDictionaryExtensions
     /// <param name="headers">The header dictionary to add to.</param>
     /// <param name="key">The header name.</param>
     /// <param name="value">The header value, or <c>null</c>/empty to skip adding it.</param>
-    public static void AddIfPresent(this IDictionary<string, string> headers, string key, string value)
+    public static void AddIfPresent(this IDictionary<string, string> headers, string key, string? value)
     {
         if (!string.IsNullOrEmpty(value))
         {

@@ -26,7 +26,7 @@ public class KinesisBatchResponse
     /// The sequence number of the first record to resume from, or <c>null</c> if the whole batch
     /// completed successfully.
     /// </param>
-    public KinesisBatchResponse(string failedSequenceNumber = null)
+    public KinesisBatchResponse(string? failedSequenceNumber = null)
     {
         BatchItemFailures = failedSequenceNumber == null
             ? new List<BatchItemFailure>()

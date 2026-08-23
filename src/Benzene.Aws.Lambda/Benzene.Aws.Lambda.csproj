@@ -12,6 +12,8 @@
     -->
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
         <AssemblyName>Benzene.Aws.Lambda</AssemblyName>
         <RootNamespace>Benzene.Aws.Lambda</RootNamespace>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>

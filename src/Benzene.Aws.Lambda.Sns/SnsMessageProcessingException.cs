@@ -14,7 +14,7 @@ public class SnsMessageProcessingException : Exception
     /// Initializes a new instance of the <see cref="SnsMessageProcessingException"/> class.
     /// </summary>
     /// <param name="messageId">The SNS message ID that the handler reported a failure for.</param>
-    public SnsMessageProcessingException(string messageId)
+    public SnsMessageProcessingException(string? messageId)
         : base($"Message handler reported an unsuccessful result for SNS message {messageId}.")
     {
         MessageId = messageId;
@@ -23,5 +23,5 @@ public class SnsMessageProcessingException : Exception
     /// <summary>
     /// Gets the SNS message ID that the handler reported a failure for.
     /// </summary>
-    public string MessageId { get; }
+    public string? MessageId { get; }
 }

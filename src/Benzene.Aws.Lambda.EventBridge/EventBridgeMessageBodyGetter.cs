@@ -10,7 +10,7 @@ namespace Benzene.Aws.Lambda.EventBridge;
 /// </summary>
 public class EventBridgeMessageBodyGetter : IMessageBodyGetter<EventBridgeContext>
 {
-    public string GetBody(EventBridgeContext context)
+    public string? GetBody(EventBridgeContext context)
     {
         var detail = context.Event.Detail;
         return detail.ValueKind == JsonValueKind.Undefined ? null : detail.GetRawText();

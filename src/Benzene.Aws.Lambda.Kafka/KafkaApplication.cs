@@ -39,7 +39,7 @@ public class KafkaApplication : IMiddlewareApplication<KafkaEvent, KafkaBatchRes
     /// <see cref="KafkaOptions"/> instance (<see cref="KafkaBatchFailureMode.PartialBatchFailure"/>) if
     /// omitted.
     /// </param>
-    public KafkaApplication(IMiddlewarePipeline<KafkaContext> pipeline, KafkaOptions options = null)
+    public KafkaApplication(IMiddlewarePipeline<KafkaContext> pipeline, KafkaOptions? options = null)
     {
         _pipeline = new TransportMiddlewarePipeline<KafkaContext>(TransportNames.Kafka, pipeline);
         _options = options ?? new KafkaOptions();
@@ -72,7 +72,7 @@ public class KafkaApplication : IMiddlewareApplication<KafkaEvent, KafkaBatchRes
             await ProcessPartitionAsync(@event, partition.Key, partition.Value, serviceResolverFactory),
             _options.MaxDegreeOfParallelism);
 
-        var failures = perPartition.Where(failure => failure != null).ToList();
+        var failures = perPartition.Where(failure => failure != null).Select(failure => failure!).ToList();
 
         if (failures.Count > 0 && _options.BatchFailureMode == KafkaBatchFailureMode.FailWholeBatch)
         {
@@ -82,7 +82,7 @@ public class KafkaApplication : IMiddlewareApplication<KafkaEvent, KafkaBatchRes
         return new KafkaBatchResponse(failures);
     }
 
-    private async Task<KafkaBatchResponse.BatchItemFailure> ProcessPartitionAsync(
+    private async Task<KafkaBatchResponse.BatchItemFailure?> ProcessPartitionAsync(
         KafkaEvent @event, string partitionKey, IEnumerable<KafkaEvent.KafkaEventRecord> records,
         IServiceResolverFactory serviceResolverFactory)
     {

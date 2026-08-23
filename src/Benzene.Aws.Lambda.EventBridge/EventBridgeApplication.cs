@@ -26,7 +26,7 @@ public class EventBridgeApplication : SingleContextEscalatingApplicationBase<Eve
     /// <see cref="EventBridgeOptions.RaiseOnFailureStatus"/> on,
     /// <see cref="EventBridgeOptions.CatchExceptions"/> off) if omitted.
     /// </param>
-    public EventBridgeApplication(IMiddlewarePipeline<EventBridgeContext> pipeline, EventBridgeOptions options = null)
+    public EventBridgeApplication(IMiddlewarePipeline<EventBridgeContext> pipeline, EventBridgeOptions? options = null)
         : base(
             new TransportMiddlewarePipeline<EventBridgeContext>(TransportNames.EventBridge, pipeline),
             (options ??= new EventBridgeOptions()).CatchExceptions,

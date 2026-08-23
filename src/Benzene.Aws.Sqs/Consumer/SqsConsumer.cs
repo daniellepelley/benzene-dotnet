@@ -47,7 +47,7 @@ public class SqsConsumer : IBenzeneWorker
     /// </param>
     public SqsConsumer(IServiceResolverFactory serviceResolverFactory,
         SqsConsumerApplication sqsConsumerApplication, SqsConsumerConfig sqsConsumerConfig, ISqsClientFactory sqsClientFactory,
-        SqsConsumerOptions options = null)
+        SqsConsumerOptions? options = null)
     {
         _sqsClientFactory = sqsClientFactory;
         _sqsConsumerConfig = sqsConsumerConfig;

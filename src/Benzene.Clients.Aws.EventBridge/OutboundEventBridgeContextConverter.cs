@@ -35,7 +35,7 @@ public class OutboundEventBridgeContextConverter : IContextConverter<OutboundCon
 
     private readonly ISerializer _serializer;
     private readonly string _source;
-    private readonly string _eventBusName;
+    private readonly string? _eventBusName;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="OutboundEventBridgeContextConverter"/> class, using the
@@ -43,7 +43,7 @@ public class OutboundEventBridgeContextConverter : IContextConverter<OutboundCon
     /// </summary>
     /// <param name="source">The EventBridge event <c>source</c> stamped on published events.</param>
     /// <param name="eventBusName">The event bus to publish to; null/empty targets the default bus.</param>
-    public OutboundEventBridgeContextConverter(string source, string eventBusName = null)
+    public OutboundEventBridgeContextConverter(string source, string? eventBusName = null)
         : this(source, eventBusName, new JsonSerializer())
     { }
 
@@ -53,7 +53,7 @@ public class OutboundEventBridgeContextConverter : IContextConverter<OutboundCon
     /// <param name="source">The EventBridge event <c>source</c> stamped on published events.</param>
     /// <param name="eventBusName">The event bus to publish to; null/empty targets the default bus.</param>
     /// <param name="serializer">The serializer used to serialize the message payload into <c>Detail</c>.</param>
-    public OutboundEventBridgeContextConverter(string source, string eventBusName, ISerializer serializer)
+    public OutboundEventBridgeContextConverter(string source, string? eventBusName, ISerializer serializer)
     {
         _source = source;
         _eventBusName = eventBusName;

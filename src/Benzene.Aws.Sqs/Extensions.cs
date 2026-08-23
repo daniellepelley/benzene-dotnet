@@ -30,7 +30,7 @@ public static class Extensions
     /// messages that actually succeeded in a poll batch.
     /// </param>
     /// <returns>The worker startup for method chaining.</returns>
-    public static IBenzeneWorkerStartup UseSqs(this IBenzeneWorkerStartup app, SqsConsumerConfig sqsConsumerConfig, ISqsClientFactory sqsClientFactory, Action<IMiddlewarePipelineBuilder<SqsConsumerMessageContext>> action, Action<SqsConsumerOptions> configure = null)
+    public static IBenzeneWorkerStartup UseSqs(this IBenzeneWorkerStartup app, SqsConsumerConfig sqsConsumerConfig, ISqsClientFactory sqsClientFactory, Action<IMiddlewarePipelineBuilder<SqsConsumerMessageContext>> action, Action<SqsConsumerOptions>? configure = null)
     {
         app.Register(x => x
             .AddBenzeneMessage()

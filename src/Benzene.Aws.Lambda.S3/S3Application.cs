@@ -30,7 +30,7 @@ public class S3Application : SingleContextEscalatingApplicationBase<S3Applicatio
     /// <see cref="S3Options.RaiseOnFailureStatus"/> on, <see cref="S3Options.CatchExceptions"/> off,
     /// unbounded fan-out) if omitted.
     /// </param>
-    public S3Application(IMiddlewarePipeline<S3RecordContext> pipeline, S3Options options = null)
+    public S3Application(IMiddlewarePipeline<S3RecordContext> pipeline, S3Options? options = null)
         : base(
             new TransportMiddlewarePipeline<S3RecordContext>(TransportNames.S3, pipeline),
             (options ??= new S3Options()).CatchExceptions,

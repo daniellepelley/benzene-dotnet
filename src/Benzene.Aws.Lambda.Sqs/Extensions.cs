@@ -26,7 +26,7 @@ public static class Extensions
     /// to consume messages a non-Benzene producer routes on another attribute.
     /// </param>
     /// <returns>The pipeline builder for method chaining.</returns>
-    public static IMiddlewarePipelineBuilder<AwsEventStreamContext> UseSqs(this IMiddlewarePipelineBuilder<AwsEventStreamContext> app, Action<IMiddlewarePipelineBuilder<SqsMessageContext>> action, Action<SqsOptions> configure = null, string topicAttributeKey = SqsMessageTopicGetter.DefaultTopicAttribute)
+    public static IMiddlewarePipelineBuilder<AwsEventStreamContext> UseSqs(this IMiddlewarePipelineBuilder<AwsEventStreamContext> app, Action<IMiddlewarePipelineBuilder<SqsMessageContext>> action, Action<SqsOptions>? configure = null, string topicAttributeKey = SqsMessageTopicGetter.DefaultTopicAttribute)
     {
         app.Register(x => x.AddSqs(topicAttributeKey));
         var pipeline = app.CreateMiddlewarePipeline<SqsMessageContext>(builder =>

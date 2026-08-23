@@ -25,12 +25,12 @@ public class EventBridgeBenzeneMessageClient : IBenzeneMessageClient
     private static readonly JsonSerializer SharedSerializer = new();
     private readonly ILogger<EventBridgeBenzeneMessageClient> _logger;
     private readonly string _source;
-    private readonly string _eventBusName;
+    private readonly string? _eventBusName;
     private readonly IServiceResolver _serviceResolver;
     private readonly IMiddlewarePipeline<EventBridgeSendMessageContext> _middlewarePipeline;
 
     public EventBridgeBenzeneMessageClient(string source, IAmazonEventBridge amazonEventBridge,
-        ILogger<EventBridgeBenzeneMessageClient> logger, IServiceResolver serviceResolver, string eventBusName = null)
+        ILogger<EventBridgeBenzeneMessageClient> logger, IServiceResolver serviceResolver, string? eventBusName = null)
     {
         _source = source;
         _eventBusName = eventBusName;
@@ -45,7 +45,7 @@ public class EventBridgeBenzeneMessageClient : IBenzeneMessageClient
     }
 
     public EventBridgeBenzeneMessageClient(string source, IMiddlewarePipeline<EventBridgeSendMessageContext> middlewarePipeline,
-        ILogger<EventBridgeBenzeneMessageClient> logger, IServiceResolver serviceResolver, string eventBusName = null)
+        ILogger<EventBridgeBenzeneMessageClient> logger, IServiceResolver serviceResolver, string? eventBusName = null)
     {
         _source = source;
         _eventBusName = eventBusName;

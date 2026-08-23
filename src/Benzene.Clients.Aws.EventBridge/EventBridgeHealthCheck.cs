@@ -33,7 +33,7 @@ public class EventBridgeHealthCheck : IHealthCheck
     /// <summary>Initializes a new instance of the <see cref="EventBridgeHealthCheck"/> class.</summary>
     /// <param name="eventBridge">The EventBridge client used to run the check.</param>
     /// <param name="eventBusName">The event bus to check; null/empty targets the account's default bus.</param>
-    public EventBridgeHealthCheck(IAmazonEventBridge eventBridge, string eventBusName = null)
+    public EventBridgeHealthCheck(IAmazonEventBridge eventBridge, string? eventBusName = null)
     {
         _eventBridge = eventBridge;
         _eventBusName = string.IsNullOrEmpty(eventBusName) ? DefaultEventBusName : eventBusName;
@@ -69,6 +69,6 @@ public class EventBridgeHealthCheck : IHealthCheck
 
     // Pulls the non-sensitive discriminators AWS already returns off an SDK exception; null for a
     // non-AWS exception (e.g. a raw connectivity failure).
-    private static (string ErrorCode, int? StatusCode) AwsErrorDetails(Exception ex)
+    private static (string? ErrorCode, int? StatusCode) AwsErrorDetails(Exception ex)
         => ex is AmazonServiceException ase ? (ase.ErrorCode, (int?)(int)ase.StatusCode) : (null, null);
 }

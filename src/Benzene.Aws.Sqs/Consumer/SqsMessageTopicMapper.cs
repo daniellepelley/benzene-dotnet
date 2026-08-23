@@ -45,7 +45,7 @@ public class SqsConsumerMessageTopicGetter : IMessageTopicGetter<SqsConsumerMess
         return new Topic(GetFromAttributes(context, _topicAttributeKey));
     }
 
-    private static string GetFromAttributes(SqsConsumerMessageContext context, string key)
+    private static string? GetFromAttributes(SqsConsumerMessageContext context, string key)
     {
         var attributes = context.Message.MessageAttributes;
         if (attributes == null || !attributes.ContainsKey(key))

@@ -23,7 +23,7 @@ public static class Extensions
     /// bound how many topic-partitions run concurrently.
     /// </param>
     /// <returns>The pipeline builder for method chaining.</returns>
-    public static IMiddlewarePipelineBuilder<AwsEventStreamContext> UseKafka(this IMiddlewarePipelineBuilder<AwsEventStreamContext> app, Action<IMiddlewarePipelineBuilder<KafkaContext>> action, Action<KafkaOptions> configure = null)
+    public static IMiddlewarePipelineBuilder<AwsEventStreamContext> UseKafka(this IMiddlewarePipelineBuilder<AwsEventStreamContext> app, Action<IMiddlewarePipelineBuilder<KafkaContext>> action, Action<KafkaOptions>? configure = null)
     {
         app.Register(x => x.AddKafka());
         var pipeline = app.CreateMiddlewarePipeline<KafkaContext>(builder =>

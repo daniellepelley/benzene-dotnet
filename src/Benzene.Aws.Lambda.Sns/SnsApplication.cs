@@ -29,7 +29,7 @@ public class SnsApplication : SingleContextEscalatingApplicationBase<SnsApplicat
     /// <see cref="SnsOptions.RaiseOnFailureStatus"/> on, <see cref="SnsOptions.CatchExceptions"/>
     /// off) if omitted.
     /// </param>
-    public SnsApplication(IMiddlewarePipeline<SnsRecordContext> pipeline, SnsOptions options = null)
+    public SnsApplication(IMiddlewarePipeline<SnsRecordContext> pipeline, SnsOptions? options = null)
         : base(
             new TransportMiddlewarePipeline<SnsRecordContext>(TransportNames.Sns, pipeline),
             (options ??= new SnsOptions()).CatchExceptions,

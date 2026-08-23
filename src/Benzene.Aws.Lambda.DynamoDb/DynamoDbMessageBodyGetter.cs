@@ -15,7 +15,7 @@ public class DynamoDbMessageBodyGetter : IMessageBodyGetter<DynamoDbRecordContex
     /// </summary>
     /// <param name="context">The DynamoDB record context to extract the body from.</param>
     /// <returns>The unmarshalled JSON object as a string, or null if the record carries no image at all.</returns>
-    public string GetBody(DynamoDbRecordContext context)
+    public string? GetBody(DynamoDbRecordContext context)
     {
         var data = context.Record.Dynamodb;
         if (data == null)
