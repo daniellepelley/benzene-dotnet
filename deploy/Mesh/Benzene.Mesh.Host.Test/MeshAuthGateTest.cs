@@ -126,6 +126,35 @@ public class MeshAuthGateTest
         Assert.Contains("open, sharedSecret", exception.Message);
     }
 
+    // Regression (found by adversarial review, corrected 2026-08-23): InvokeAsync's "mode none" branch
+    // returns immediately (see the top of InvokeAsync) BEFORE the dispatchRole check further down ever
+    // runs - mode "none" establishes no principal at all, so a dispatchRole requirement configured
+    // alongside it could never be enforced. An operator who sets auth.mode "none" (e.g. trusting a
+    // network perimeter for general access) and auth.dispatchRole (meaning to additionally gate the
+    // dangerous mesh:dispatch endpoint by role) silently got a mesh:dispatch open to ANY caller, role or
+    // no role - the exact "documented/bound but never wired into the path that needs it" pattern this
+    // file's other Validate() checks exist to catch before a deploy, not discover after one.
+    [Fact]
+    public void Validate_DispatchRoleSetWithModeNone_Throws()
+    {
+        var config = new MeshAuthConfig { Mode = "none", DispatchRole = "mesh-admins" };
+
+        var exception = Assert.Throws<InvalidOperationException>(() => MeshAuthGate.Validate(config));
+
+        Assert.Contains("dispatchRole", exception.Message);
+        Assert.Contains("none", exception.Message);
+    }
+
+    [Fact]
+    public void Validate_DispatchRoleUnsetWithModeNone_DoesNotThrow()
+    {
+        var config = new MeshAuthConfig { Mode = "none" };
+
+        var exception = Record.Exception(() => MeshAuthGate.Validate(config));
+
+        Assert.Null(exception);
+    }
+
     // --- mode none -----------------------------------------------------------------------------
 
     [Fact]

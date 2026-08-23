@@ -158,6 +158,22 @@ public class MeshAuthGate
         {
             throw new InvalidOperationException("auth.ingestion.mode 'sharedSecret' requires the MESH_INGEST_SECRET environment variable to be set.");
         }
+
+        // Found by adversarial review (corrected 2026-08-23): InvokeAsync's "mode none" branch returns
+        // straight to _next(context) before the dispatchRole check further down ever runs (see
+        // InvokeAsync's remarks) - mode "none" establishes no principal at all, so a dispatchRole
+        // requirement configured alongside it could never be enforced. That combination isn't a
+        // harmless no-op; it is a config that reads as "gate mesh:dispatch by role" but actually leaves
+        // mesh:dispatch reachable by any caller, role or no role - precisely the silent under-protection
+        // this whole Validate method exists to catch before a deploy, not discover after one.
+        if (!string.IsNullOrEmpty(config.DispatchRole) && string.Equals(config.Mode, "none", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "auth.dispatchRole is set but auth.mode is 'none' - mode 'none' establishes no caller " +
+                "identity, so a dispatchRole requirement could never be enforced and mesh:dispatch would " +
+                "be reachable by any caller regardless of role. Choose an auth mode that establishes an " +
+                "identity (proxy/basic/oidc), or remove auth.dispatchRole.");
+        }
     }
 
     /// <summary>Handles one request - see the class remarks for the overall shape.</summary>
