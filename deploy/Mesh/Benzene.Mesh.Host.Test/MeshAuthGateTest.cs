@@ -360,6 +360,30 @@ public class MeshAuthGateTest
     }
 
     [Fact]
+    public void IngestionPathWithTrailingSlash_SharedSecretModeMissingHeader_StillUnauthorized()
+    {
+        // Regression test (corrected 2026-08-22): the exact-path checks in InvokeAsync used to compare
+        // context.Request.Path against IngestionPath/DispatchPath with plain PathString.Equals - no
+        // trailing-slash normalization - while the router downstream DOES strip a trailing slash before
+        // matching. A request to "/mesh/report/" (one added slash) missed this gate's check entirely
+        // and reached MeshReportMessageHandler unauthenticated, on the default config. See
+        // MeshPathCanonicalizer.Canonicalize's remarks.
+        WithEnvVars(("MESH_INGEST_SECRET", "top-secret"), () =>
+        {
+            var next = NextDelegate(out var wasCalled);
+            var config = new MeshAuthConfig();
+            config.Ingestion.Mode = "sharedSecret";
+            var gate = new MeshAuthGate(next, config);
+            var context = NewContext(MeshAuthGate.IngestionPath + "/");
+
+            Invoke(gate, context);
+
+            Assert.False(wasCalled());
+            Assert.Equal(401, context.Response.StatusCode);
+        });
+    }
+
+    [Fact]
     public void IngestionPath_SharedSecretModeWrongSecret_Unauthorized()
     {
         WithEnvVars(("MESH_INGEST_SECRET", "top-secret"), () =>

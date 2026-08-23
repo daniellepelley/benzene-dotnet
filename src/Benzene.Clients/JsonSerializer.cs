@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Text.Encodings.Web;
+using System.Text.Json;
 using Benzene.Abstractions.Serialization;
 
 namespace Benzene.Clients;
@@ -7,6 +8,15 @@ namespace Benzene.Clients;
 /// A System.Text.Json-backed <see cref="ISerializer"/>: camelCase property names on serialize,
 /// case-insensitive property matching on deserialize.
 /// </summary>
+/// <remarks>
+/// Uses <see cref="JavaScriptEncoder.UnsafeRelaxedJsonEscaping"/>, matching
+/// <c>Benzene.Core.MessageHandlers.Serialization.JsonSerializer</c> (the process default) — see that
+/// class's remarks for why. Corrected 2026-08-22: <see cref="Shared"/> lacked this encoder when it was
+/// first added, so pointing Kafka's and RabbitMq's outbound clients at it (their own prior per-class
+/// instances used the process default) silently switched their wire JSON from relaxed to HTML-safe
+/// escaping — a real behavioral change for any payload containing <c>&lt;</c>, <c>&gt;</c>,
+/// <c>&amp;</c> or <c>'</c>, and a divergence from every other Benzene transport's wire format.
+/// </remarks>
 public class JsonSerializer : ISerializer
 {
     /// <summary>
@@ -23,7 +33,8 @@ public class JsonSerializer : ISerializer
     // serialize/deserialize.
     private static readonly JsonSerializerOptions SerializeOptions = new()
     {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
     private static readonly JsonSerializerOptions DeserializeOptions = new()

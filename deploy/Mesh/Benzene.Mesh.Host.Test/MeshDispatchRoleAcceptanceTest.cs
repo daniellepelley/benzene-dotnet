@@ -135,6 +135,35 @@ public class MeshDispatchRoleAcceptanceTest
         Assert.DoesNotContain("No service named", body);
     }
 
+    [Fact]
+    public async Task DispatchPathWithTrailingSlash_CallerWithoutRole_IsStillForbidden()
+    {
+        // Regression test (corrected 2026-08-22): InvokeAsync's dispatchRole check used to compare
+        // context.Request.Path against DispatchPath with plain PathString.Equals - no trailing-slash
+        // normalization - while BenzeneMessageHttpMiddleware (which owns the dispatch envelope this
+        // check is meant to gate) DOES strip a trailing slash before routing. A request to
+        // "/mesh/dispatch/" (one added slash) missed this check entirely and reached
+        // MeshDispatchMessageHandler for ANY authenticated caller, role or no role. See
+        // MeshPathCanonicalizer.Canonicalize's remarks.
+        await using var host = await StartHostAsync(MeshJson(dispatchRole: "mesh-admins"));
+        var request = new HttpRequestMessage(HttpMethod.Post, DispatchPath + "/")
+        {
+            Content = new StringContent(
+                """{"topic":"benzene:mesh:dispatch","headers":{},"body":"{\"service\":\"orders-api\",\"topic\":\"some:topic\",\"body\":\"{}\"}"}""",
+                Encoding.UTF8, "application/json"),
+        };
+        request.Headers.TryAddWithoutValidation("X-Forwarded-User", "alice@example.com");
+        request.Headers.TryAddWithoutValidation(DispatchHeaderName, "1");
+        // No X-Forwarded-Groups header at all - alice is authenticated but holds no role/group.
+
+        var response = await host.Client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Contains("mesh-admins", body);
+        Assert.DoesNotContain("No service named", body);
+    }
+
     // --- (b) holding the configured role: gets past the auth check -----------------------------
 
     [Fact]

@@ -81,7 +81,6 @@ public abstract class SingleContextEscalatingApplicationBase<TSelf, TContext>
     /// <param name="serviceResolverFactory">The service resolver factory used to create this context's scope.</param>
     protected async Task ProcessAsync(TContext context, IServiceResolverFactory serviceResolverFactory)
     {
-        var id = _idSelector(context);
         try
         {
             using (var scope = serviceResolverFactory.CreateScope())
@@ -91,7 +90,13 @@ public abstract class SingleContextEscalatingApplicationBase<TSelf, TContext>
 
             if (_raiseOnFailureStatus && context.MessageResult?.IsSuccessful == false)
             {
-                throw _exceptionFactory(id);
+                // _idSelector runs here, inside the try, deliberately - not unconditionally before it.
+                // Some transports' selectors (SNS, EventBridge) dereference nested event properties with
+                // no null-conditional chaining, matching how those two only ever touched them on this
+                // same already-escalating path before this base existed. Evaluating it any earlier would
+                // mean a null/malformed record throws unconditionally on every context, bypassing
+                // catchExceptions entirely instead of being subject to it like everything else here.
+                throw _exceptionFactory(_idSelector(context));
             }
         }
         catch (Exception ex) when (_catchExceptions)
@@ -100,7 +105,24 @@ public abstract class SingleContextEscalatingApplicationBase<TSelf, TContext>
             loggingScope.GetService<ILogger<TSelf>>()
                 .LogError(ex, BenzeneFailure.IsInfrastructure(ex)
                     ? BenzeneFailure.InfrastructureLogPrefix + " " + _failureLogMessage + " — this service is mis-wired; the message is not at fault"
-                    : _failureLogMessage, id);
+                    : _failureLogMessage, SafeId(context));
+        }
+    }
+
+    /// <summary>
+    /// <see cref="_idSelector"/>, but guaranteed not to throw: this runs inside the catch block purely
+    /// to label a log line, and a selector that itself faults on a malformed context must never mask
+    /// the real exception being logged or escape the catch that's supposed to be swallowing it.
+    /// </summary>
+    private string SafeId(TContext context)
+    {
+        try
+        {
+            return _idSelector(context);
+        }
+        catch
+        {
+            return "unknown";
         }
     }
 }

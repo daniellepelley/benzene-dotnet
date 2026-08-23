@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Benzene.Auth.Basic;
 using Benzene.Auth.Core;
+using Benzene.Mesh.Artifacts;
 using Benzene.Mesh.Dispatch;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
@@ -61,6 +62,15 @@ public class MeshAuthGate
     /// <see cref="MeshAuthConfig.DispatchRole"/> is enforced against exactly this path - see <see cref="InvokeAsync"/>.
     /// </summary>
     public static readonly string DispatchPath = new MeshDispatchGuardOptions().Path;
+
+    /// <summary>
+    /// <see cref="IngestionPath"/>/<see cref="DispatchPath"/>, canonicalized once through the exact
+    /// same rule <see cref="MeshDispatchGuardMiddleware"/> and the router use - see
+    /// <see cref="MeshPathCanonicalizer.Canonicalize"/>'s remarks and <c>InvokeAsync</c>'s
+    /// trailing-slash correction below.
+    /// </summary>
+    private static readonly string CanonicalIngestionPath = MeshPathCanonicalizer.Canonicalize(IngestionPath);
+    private static readonly string CanonicalDispatchPath = MeshPathCanonicalizer.Canonicalize(DispatchPath);
 
     /// <summary>The header <c>auth.ingestion.mode: "sharedSecret"</c> reads its secret from.</summary>
     public const string IngestSecretHeaderName = "X-Mesh-Ingest-Secret";
@@ -153,7 +163,16 @@ public class MeshAuthGate
     /// <summary>Handles one request - see the class remarks for the overall shape.</summary>
     public async Task InvokeAsync(HttpContext context)
     {
-        if (context.Request.Path.Equals(IngestionPath, StringComparison.OrdinalIgnoreCase))
+        // Corrected 2026-08-22: this used to compare context.Request.Path against IngestionPath/
+        // DispatchPath with plain PathString.Equals - exact-match only, no trailing-slash
+        // normalization. BenzeneMessageHttpMiddleware/UrlMatcher/MeshDispatchGuardMiddleware all DO
+        // normalize a trailing slash away before routing, so "/mesh/report/" or "/mesh/dispatch/"
+        // (one added slash) missed this gate's exact-match checks entirely while still reaching the
+        // real handler - the ingestion secret check and the dispatchRole check were both fully
+        // bypassable this way. Canonicalizing through the same rule the guard/router already use
+        // closes that gap; see MeshPathCanonicalizer.Canonicalize's remarks.
+        var canonicalPath = MeshPathCanonicalizer.Canonicalize(context.Request.Path);
+        if (canonicalPath == CanonicalIngestionPath)
         {
             await HandleIngestionAsync(context);
             return;
@@ -196,7 +215,7 @@ public class MeshAuthGate
         // here, matched to the fixed, well-known dispatch path (see DispatchPath) exactly as
         // IngestionPath is above - one gate for the whole host, per the class remarks.
         if (!string.IsNullOrEmpty(_config.DispatchRole) &&
-            context.Request.Path.Equals(DispatchPath, StringComparison.OrdinalIgnoreCase) &&
+            canonicalPath == CanonicalDispatchPath &&
             !HasAnyRole(principal, new[] { _config.DispatchRole }))
         {
             await WriteForbiddenAsync(context,

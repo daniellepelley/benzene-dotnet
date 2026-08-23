@@ -188,7 +188,18 @@ public sealed class BoundedConcurrentDispatcher<T>
             // channel was counted at enqueue and will never be read now (the consumer is dead), so
             // clear the phantom count - otherwise a later DrainLanesAsync on this lane would see a
             // permanently-nonzero outstanding count and burn its full timeout every time.
-            Volatile.Write(ref _laneOutstanding[laneIndex], 0);
+            //
+            // Subtract exactly the amount captured here, rather than blindly writing 0: EnqueueAsync's
+            // own Interlocked.Increment can land in the same instant as this finally, on the fault path,
+            // for a caller that routes to this lane by key. A plain Volatile.Write(0) would silently
+            // erase that legitimate new count, letting DrainLanesAsync report "clean" even though the
+            // item is now permanently stuck in a dead lane nothing will ever read again. Subtracting the
+            // captured amount instead only removes what's provably abandoned (queued/in-flight before
+            // this consumer died); a concurrently-racing enqueue's count survives, so DrainLanesAsync
+            // correctly never sees zero for that lane again - it times out instead, which its own
+            // documented fallback already handles safely (see its remarks and onFault above).
+            var abandoned = Volatile.Read(ref _laneOutstanding[laneIndex]);
+            Interlocked.Add(ref _laneOutstanding[laneIndex], -abandoned);
         }
     }
 

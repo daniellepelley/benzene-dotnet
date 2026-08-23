@@ -10,6 +10,34 @@ using Benzene.Mesh.Dispatch;
 namespace Benzene.Mesh.Artifacts;
 
 /// <summary>
+/// Canonicalizes an HTTP path the same way the router does, so every path-scoped check in the mesh
+/// host agrees on what counts as the same path.
+/// </summary>
+public static class MeshPathCanonicalizer
+{
+    /// <summary>
+    /// Normalizes a path exactly as the router does (query string stripped, empty segments collapsed
+    /// — including a trailing slash — lower-invariant), so every path-scoped check in the mesh host
+    /// agrees with the router on what counts as the same path. Non-generic and public specifically so
+    /// <c>MeshAuthGate</c> — a different assembly, whose own path-scoped checks (the
+    /// <c>dispatchRole</c>/<c>ingestion.mode</c> gate) must never disagree with
+    /// <see cref="MeshDispatchGuardMiddleware{TContext}"/> on this — can canonicalize through the
+    /// identical rule rather than hand-rolling a second one that could silently drift from it. A
+    /// trailing-slash mismatch between an exact-match <c>PathString.Equals</c> here and this
+    /// normalization was exactly this class of bug (corrected 2026-08-22): a request to
+    /// <c>/mesh/dispatch/</c> or <c>/mesh/report/</c> (one added slash) missed the raw exact-match
+    /// check entirely while the router still normalized the slash away and delivered the request to
+    /// the real handler — a full bypass of the dispatch-role and ingestion-secret checks.
+    /// </summary>
+    public static string Canonicalize(string? path)
+    {
+        var beforeQuery = (path ?? string.Empty).Split('?', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+        var segments = (beforeQuery ?? string.Empty).Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return ("/" + string.Join("/", segments)).ToLowerInvariant();
+    }
+}
+
+/// <summary>
 /// Guards the HTTP endpoint that dispatches a caller-supplied payload into a service's real handler.
 /// </summary>
 /// <remarks>
@@ -89,7 +117,7 @@ public class MeshDispatchGuardMiddleware<TContext> : IMiddleware<TContext>
         _responseAdapter = responseAdapter;
         _routeFinder = routeFinder;
         _logger = logger;
-        _guardedPath = Canonicalize(options.Path);
+        _guardedPath = MeshPathCanonicalizer.Canonicalize(options.Path);
     }
 
     /// <summary>Gets the name of the middleware.</summary>
@@ -153,7 +181,7 @@ public class MeshDispatchGuardMiddleware<TContext> : IMiddleware<TContext>
     /// </summary>
     private bool IsGuarded(HttpRequest request)
     {
-        if (Canonicalize(request.Path) == _guardedPath)
+        if (MeshPathCanonicalizer.Canonicalize(request.Path) == _guardedPath)
         {
             return true;
         }
@@ -207,14 +235,6 @@ public class MeshDispatchGuardMiddleware<TContext> : IMiddleware<TContext>
         }
 
         return false;
-    }
-
-    /// <summary>Normalizes a path exactly as the router does, so guard and router agree on every spelling.</summary>
-    internal static string Canonicalize(string? path)
-    {
-        var beforeQuery = (path ?? string.Empty).Split('?', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
-        var segments = (beforeQuery ?? string.Empty).Split('/', StringSplitOptions.RemoveEmptyEntries);
-        return ("/" + string.Join("/", segments)).ToLowerInvariant();
     }
 
     /// <summary>A refusal for a caller who should not be told anything: fixed body, no detail.</summary>
