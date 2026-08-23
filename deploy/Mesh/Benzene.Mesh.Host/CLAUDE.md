@@ -60,14 +60,21 @@ alongside their other infra), rather than only against `examples/Mesh/`'s demo/f
   `app.UseStaticFiles(...)` so it covers both artifact-serving branches (the file store's
   `UseStaticFiles` mount, entirely outside the Benzene pipeline, and the non-file stores'
   `UseMeshArtifacts()` inside it) with one placement - see its own remarks for why. On success it sets
-  `Benzene.Auth.Core.AuthenticationHolder.Principal` (resolved off `HttpContext.RequestServices`, the
-  same provider `Benzene.Microsoft.Dependencies` backs Benzene's own `IServiceResolver` with), so a
-  downstream Benzene-pipeline check sees the same caller. Also decides `auth.ingestion` for
-  `/mesh/report` - exempt from every `auth.mode` above, since a self-reporting service is not a
+  both `Benzene.Auth.Core.AuthenticationHolder.Principal` (resolved off `HttpContext.RequestServices`)
+  AND `context.User`. Only the latter actually crosses into the Benzene pipeline below: `UseBenzene`
+  (the embedding overload `Startup.Configure` uses) resolves the pipeline's handlers/middleware
+  through a SEPARATE, cloned `IServiceProvider`, so a scoped type like `AuthenticationHolder` set via
+  `RequestServices` is a different instance inside the pipeline - a downstream check reading it would
+  see no principal at all. `context.User`, via `IHttpContextAccessor`'s process-wide `AsyncLocal`
+  backing store, is visible from any container that resolves it, including the pipeline's own cloned
+  one - see `MeshAuthGate`'s own class remarks for the full explanation. Also decides `auth.ingestion`
+  for `/mesh/report` - exempt from every `auth.mode` above, since a self-reporting service is not a
   browser session. `EnvBasicAuthCredentialValidator` (same file) is mode `basic`'s
   `Benzene.Auth.Basic.IBasicAuthCredentialValidator`, backed by `MESH_BASIC_USER`/`MESH_BASIC_PASSWORD`.
-  `auth.dispatchRole` is bound/validated but **not yet enforced** - see the comment above
-  `UseMeshDispatch` in `Startup.cs` for why (a pre-existing dispatch-reachability gap, not an auth gap).
+  `auth.dispatchRole`, when set, is enforced here too - directly against `HttpContext`, matched to
+  `MeshAuthGate.DispatchPath` (`mesh:dispatch`'s fixed, well-known envelope path) - not as an
+  `AuthorizationExtensions.RequireRole` on the envelope itself, since that pipeline's own
+  freshly-created DI scope never sees the `AuthenticationHolder` this gate populates.
 - `MeshPollBackgroundService : BackgroundService` - runs `MeshAggregator.RunOnceAsync` on a timer
   (`MeshHostConfig.PollIntervalSeconds`) - new capability local to this Host app only, since a bare
   Compose deployment has no external scheduler the way a real deployment's `mesh:aggregate`
@@ -117,18 +124,15 @@ environment counts as Production). Because `MeshDispatchMessageHandler` carries 
 attribute, the default `.UseMessageHandlers()` scan does **not** expose it — unlike `/mesh/report`,
 it is genuinely absent until `Dispatch.Enabled` is set.
 
-**Found while writing slice 2 (auth) and not yet fixed, flagged rather than silently left:**
-`UseMeshDispatch()` (as wired here) only registers the handler *definition* into DI - unlike the
-fleet-query plane above, it is never placed on a `[HttpEndpoint]` route or a `UseBenzeneMessage`
-envelope. `AspNetMessageTopicGetter` resolves a request's topic purely by matching
-`[HttpEndpoint]`-attributed routes (`ReflectionHttpEndpointFinder` scans only that attribute), so
-even with `Dispatch.Enabled: true` there is today **no HTTP path in this host that reaches
-`mesh:dispatch`** - the registration exists, but nothing routes a request to it. This predates and is
-unrelated to slice 2; it blocked slice 2's `auth.dispatchRole` from being enforced (see
-`MeshAuthGate`'s doc entry above and the comment above `UseMeshDispatch` in `Startup.cs`). Fixing it
-means giving dispatch its own reachable endpoint (mirroring the fleet-query plane's
-`UseBenzeneMessage` pattern) - a deliberate design decision for whoever picks this up next, not made
-here.
+**Fixed 2026-08-22 (was previously a reachability gap, flagged and left for a later pass):**
+`UseMeshDispatch()` alone only registers the handler *definition* into DI - it needs its own
+reachable endpoint, the same way the fleet-query plane does. `Startup.Configure` now gives it one: a
+dedicated `UseBenzeneMessage` envelope at `MeshDispatchGuardOptions`'s default path
+(`/mesh/dispatch`), with `UseMeshDispatchGuard` mounted directly ahead of it (CSRF header, fail-closed
+identity, payload bound, per-identity rate limit). `auth.dispatchRole` is enforced against that same
+path by `MeshAuthGate` (see its doc entry above) - both `MeshAuthGate.DispatchPath` and the envelope's
+guard read the same `MeshDispatchGuardOptions` instance, so the two can never drift apart on what path
+they mean.
 
 ## Dependencies on other Benzene packages
 Config schema v1 pulls in every `Benzene.Mesh.*` adapter package this host can select at runtime -

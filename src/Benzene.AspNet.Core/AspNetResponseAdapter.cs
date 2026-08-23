@@ -53,13 +53,21 @@ public class AspNetResponseAdapter : IBenzeneResponseAdapter<AspNetContext>
     }
 
     /// <summary>
-    /// Buffers the response body to be written to the response in <see cref="FinalizeAsync"/>.
+    /// Buffers the response body to be written to the response in <see cref="FinalizeAsync"/>. A
+    /// <c>null</c> <paramref name="body"/> - which <see cref="Benzene.Core.MessageHandlers.Response.DefaultResponsePayloadMapper{TContext}.Map"/>
+    /// legitimately returns for a handler with no response payload (a fire-and-forget
+    /// <c>IMessageHandler&lt;T&gt;</c>, e.g. <c>MeshReportMessageHandler</c>) - is coerced to
+    /// <see cref="string.Empty"/> here rather than stored verbatim: <see cref="FinalizeAsync"/> passes
+    /// this straight to <c>HttpResponse.WriteAsync</c>, which throws <see cref="ArgumentNullException"/>
+    /// on a null argument (found by actually running a request against such a handler through Kestrel -
+    /// invisible to the in-memory <c>BenzeneMessage</c> transport's adapter, which just stores the
+    /// property).
     /// </summary>
     /// <param name="context">The context (unused; the body is buffered on this instance).</param>
     /// <param name="body">The response body.</param>
     public void SetBody(AspNetContext context, string body)
     {
-        _body = body;
+        _body = body ?? string.Empty;
     }
 
     /// <summary>

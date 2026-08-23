@@ -54,4 +54,24 @@ public class AspNetResponseAdapterTest
         http.Response.Body.Position = 0;
         Assert.Equal("hello", await new StreamReader(http.Response.Body).ReadToEndAsync());
     }
+
+    [Fact]
+    public async Task FinalizeAsync_NullBody_WritesAnEmptyBody_RatherThanThrowing()
+    {
+        // DefaultResponsePayloadMapper.Map legitimately returns null for a handler with no response
+        // payload (a fire-and-forget IMessageHandler<T>, e.g. MeshReportMessageHandler) - SetBody(null)
+        // must not leave a null body for FinalizeAsync to hand to HttpResponse.WriteAsync, which throws
+        // ArgumentNullException on a null argument (found by running such a handler through Kestrel; the
+        // in-memory BenzeneMessage transport's own adapter never surfaces this, since it just stores the
+        // property rather than writing it anywhere).
+        var (adapter, context, http) = Create();
+        adapter.SetStatusCode(context, "200");
+        adapter.SetBody(context, null);
+
+        await adapter.FinalizeAsync(context);
+
+        Assert.Equal(200, http.Response.StatusCode);
+        http.Response.Body.Position = 0;
+        Assert.Equal("", await new StreamReader(http.Response.Body).ReadToEndAsync());
+    }
 }

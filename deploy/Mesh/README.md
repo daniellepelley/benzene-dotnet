@@ -74,10 +74,13 @@ else: one gate (`MeshAuthGate`) covers both `/artifacts/*` (served outside the B
 `artifactStore.type` is `file`, the default) and everything inside the pipeline, in every mode.
 `mode: "none"` (the default) leaves the host exactly as it was before slice 2: no login, everything
 world-readable. **Do not expose this host on a network you don't trust with `mode: "none"`.**
-`auth.dispatchRole` is bound and validated but **not yet enforced** - `mesh:dispatch` (gated behind
-`dispatch.enabled`) has no HTTP route or envelope endpoint of its own yet (a pre-existing gap, see
-`Benzene.Mesh.Dispatch/CLAUDE.md`'s "Follow-ups" and the comment above `UseMeshDispatch` in
-`Startup.cs`), so there's no reachable request to attach a role check to.
+`auth.dispatchRole`, when set (and `dispatch.enabled` is `true`), is enforced by `MeshAuthGate`
+directly against `mesh:dispatch`'s own envelope path - `Startup.cs` mounts it via `UseBenzeneMessage`,
+guarded by `UseMeshDispatchGuard` immediately ahead of it (fixed 2026-08-22; `mesh:dispatch` used to
+have no HTTP route or envelope endpoint of its own, so there was nothing for a role check to attach
+to). See `MeshAuthGate.DispatchPath`/`InvokeAsync`'s remarks for why the check lives on the gate
+itself rather than as `AuthorizationExtensions.RequireRole` on the envelope - that pipeline runs in
+its own, separately-built DI scope, which never sees the principal the gate authenticated.
 
 ### Known limitations (documented, not fixed by this slice)
 
