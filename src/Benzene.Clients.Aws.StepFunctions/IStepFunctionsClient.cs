@@ -33,5 +33,5 @@ public interface IStepFunctionsClient : IDisposable
     /// (AWS generates a UUID name).
     /// </param>
     /// <returns>A task that resolves to the result of starting the execution.</returns>
-    Task<IBenzeneResult<TResponse>> StartExecutionAsync<TMessage, TResponse>(TMessage message, string executionName);
+    Task<IBenzeneResult<TResponse>> StartExecutionAsync<TMessage, TResponse>(TMessage message, string? executionName);
 }

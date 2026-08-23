@@ -16,7 +16,7 @@ public class S3MessageBodyGetter : IMessageBodyGetter<S3RecordContext>
     /// </summary>
     /// <param name="context">The S3 record context to build the body from.</param>
     /// <returns>An <see cref="S3Notification"/> serialized to JSON.</returns>
-    public string GetBody(S3RecordContext context)
+    public string? GetBody(S3RecordContext context)
     {
         var record = context.S3EventNotificationRecord;
 

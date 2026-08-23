@@ -42,7 +42,7 @@ public class SqsMessageTopicGetter : IMessageTopicGetter<SqsMessageContext>
         return new Topic(GetFromAttributes(context, _topicAttributeKey));
     }
 
-    private static string GetFromAttributes(SqsMessageContext context, string key)
+    private static string? GetFromAttributes(SqsMessageContext context, string key)
     {
         // Null-guard the attribute map (a message deserialized from a payload with no attributes can
         // yield null) - the sibling SqsMessageHeadersGetter was already hardened this way; this getter

@@ -14,5 +14,5 @@ public class EventBridgeSendMessageContext
 
     public PutEventsRequest Request { get; }
 
-    public PutEventsResponse Response { get; set; }
+    public PutEventsResponse? Response { get; set; }
 }

@@ -55,7 +55,7 @@ internal class KinesisStreamCheckpointer : IStreamCheckpointer<KinesisEventRecor
     /// should resume the batch from - or <c>null</c> if every record has been checkpointed (or the
     /// batch is empty).
     /// </summary>
-    public string FirstUncheckpointedSequenceNumber =>
+    public string? FirstUncheckpointedSequenceNumber =>
         _lastCheckpointedIndex + 1 < _records.Count
             ? _records[_lastCheckpointedIndex + 1].Kinesis.SequenceNumber
             : null;

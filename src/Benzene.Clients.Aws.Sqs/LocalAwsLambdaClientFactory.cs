@@ -14,7 +14,7 @@ namespace Benzene.Clients.Aws.Sqs
         /// </summary>
         /// <param name="profileName">The name of the local AWS credentials profile to use.</param>
         /// <returns>The created SQS client, or null if the profile could not be found.</returns>
-        public static IAmazonSQS Create(string profileName)
+        public static IAmazonSQS? Create(string profileName)
         {
             var chain = new CredentialProfileStoreChain();
             return chain.TryGetAWSCredentials(profileName, out var awsCredentials)

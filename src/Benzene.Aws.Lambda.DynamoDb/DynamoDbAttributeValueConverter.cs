@@ -36,7 +36,7 @@ public static class DynamoDbAttributeValueConverter
         return jsonObject;
     }
 
-    private static JsonNode ConvertValue(JsonElement attributeValue)
+    private static JsonNode? ConvertValue(JsonElement attributeValue)
     {
         foreach (var property in attributeValue.EnumerateObject())
         {
@@ -47,7 +47,8 @@ public static class DynamoDbAttributeValueConverter
                     return JsonValue.Create(property.Value.GetString());
                 case "N":
                     // DynamoDB numbers are strings on the wire but are valid JSON number literals.
-                    return JsonNode.Parse(property.Value.GetString());
+                    // GetString() is only null for a JSON null node, which a well-formed "N" value never is.
+                    return JsonNode.Parse(property.Value.GetString()!);
                 case "BOOL":
                     return JsonValue.Create(property.Value.GetBoolean());
                 case "NULL":
@@ -60,7 +61,7 @@ public static class DynamoDbAttributeValueConverter
                 case "BS":
                     return ConvertArray(property.Value, item => JsonValue.Create(item.GetString()));
                 case "NS":
-                    return ConvertArray(property.Value, item => JsonNode.Parse(item.GetString()));
+                    return ConvertArray(property.Value, item => JsonNode.Parse(item.GetString()!));
                 default:
                     // Unknown descriptor — pass the raw value through rather than throwing, so a new
                     // DynamoDB type doesn't break existing consumers.
@@ -71,7 +72,7 @@ public static class DynamoDbAttributeValueConverter
         return null;
     }
 
-    private static JsonArray ConvertArray(JsonElement array, System.Func<JsonElement, JsonNode> convertItem)
+    private static JsonArray ConvertArray(JsonElement array, System.Func<JsonElement, JsonNode?> convertItem)
     {
         var jsonArray = new JsonArray();
         foreach (var item in array.EnumerateArray())

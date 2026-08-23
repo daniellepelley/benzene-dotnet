@@ -14,12 +14,12 @@ public class EventBridgeMessageProcessingException : Exception
     /// Initializes a new instance of the <see cref="EventBridgeMessageProcessingException"/> class.
     /// </summary>
     /// <param name="eventId">The EventBridge event id the handler reported a failure for.</param>
-    public EventBridgeMessageProcessingException(string eventId)
+    public EventBridgeMessageProcessingException(string? eventId)
         : base($"Message handler reported an unsuccessful result for EventBridge event {eventId}.")
     {
         EventId = eventId;
     }
 
     /// <summary>Gets the EventBridge event id the handler reported a failure for.</summary>
-    public string EventId { get; }
+    public string? EventId { get; }
 }

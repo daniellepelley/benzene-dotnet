@@ -14,7 +14,7 @@ namespace Benzene.Clients.Aws.Lambda
         /// </summary>
         /// <param name="profileName">The name of the local AWS credentials profile to use.</param>
         /// <returns>The created Lambda client, or null if the profile could not be found.</returns>
-        public static IAmazonLambda Create(string profileName)
+        public static IAmazonLambda? Create(string profileName)
         {
             var chain = new CredentialProfileStoreChain();
             return chain.TryGetAWSCredentials(profileName, out var awsCredentials)

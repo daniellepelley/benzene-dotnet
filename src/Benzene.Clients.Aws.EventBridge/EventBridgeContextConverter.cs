@@ -9,6 +9,7 @@ using Benzene.Abstractions.Results;
 using Benzene.Abstractions.Serialization;
 using Benzene.Clients.Common;
 using Benzene.Results;
+using Void = Benzene.Abstractions.Results.Void;
 
 namespace Benzene.Clients.Aws.EventBridge;
 
@@ -28,13 +29,13 @@ public class EventBridgeContextConverter<T> : IContextConverter<IBenzeneClientCo
 
     private readonly ISerializer _serializer;
     private readonly string _source;
-    private readonly string _eventBusName;
+    private readonly string? _eventBusName;
 
-    public EventBridgeContextConverter(string source, string eventBusName = null)
+    public EventBridgeContextConverter(string source, string? eventBusName = null)
         : this(source, eventBusName, new JsonSerializer())
     { }
 
-    public EventBridgeContextConverter(string source, string eventBusName, ISerializer serializer)
+    public EventBridgeContextConverter(string source, string? eventBusName, ISerializer serializer)
     {
         _source = source;
         _eventBusName = eventBusName;
@@ -97,7 +98,7 @@ public class EventBridgeContextConverter<T> : IContextConverter<IBenzeneClientCo
 /// </summary>
 public static class EventBridgeResultMapper
 {
-    public static IBenzeneResult<TResponse> Map<TResponse>(PutEventsResponse response)
+    public static IBenzeneResult<TResponse> Map<TResponse>(PutEventsResponse? response)
     {
         if (response == null)
         {

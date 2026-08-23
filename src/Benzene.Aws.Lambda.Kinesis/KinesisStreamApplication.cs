@@ -39,7 +39,7 @@ public class KinesisStreamApplication : StreamMiddlewareApplication<KinesisEvent
     /// Checkpointing options. Defaults to a new <see cref="KinesisStreamOptions"/>
     /// (<see cref="KinesisStreamOptions.AutoCheckpointOnSuccess"/> on) if omitted.
     /// </param>
-    public KinesisStreamApplication(IMiddlewarePipeline<StreamContext<KinesisEventRecord>> pipeline, KinesisStreamOptions options = null)
+    public KinesisStreamApplication(IMiddlewarePipeline<StreamContext<KinesisEventRecord>> pipeline, KinesisStreamOptions? options = null)
         : base(
             new CatchAndCheckpointPipeline(
                 new TransportMiddlewarePipeline<StreamContext<KinesisEventRecord>>(TransportNames.Kinesis, pipeline),

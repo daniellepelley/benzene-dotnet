@@ -32,7 +32,7 @@ public class SqsConsumerApplication : IMiddlewareApplication<ReceiveMessageRespo
     /// Configures how the batch is acknowledged. Defaults to a new <see cref="SqsConsumerOptions"/>
     /// instance (<see cref="SqsConsumerAckMode.PerMessage"/>) if omitted.
     /// </param>
-    public SqsConsumerApplication(IMiddlewarePipeline<SqsConsumerMessageContext> pipeline, SqsConsumerOptions options = null)
+    public SqsConsumerApplication(IMiddlewarePipeline<SqsConsumerMessageContext> pipeline, SqsConsumerOptions? options = null)
     {
         _pipeline = new TransportMiddlewarePipeline<SqsConsumerMessageContext>(TransportNames.Sqs, pipeline);
         _options = options ?? new SqsConsumerOptions();
@@ -139,6 +139,7 @@ public class SqsConsumerApplication : IMiddlewareApplication<ReceiveMessageRespo
 
         var failedMessages = results
             .Where(message => message != null)
+            .Select(message => message!)
             .ToList();
 
         var successfulMessages = @event.Messages.Except(failedMessages).ToArray();

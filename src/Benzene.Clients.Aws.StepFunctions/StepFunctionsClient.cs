@@ -50,7 +50,7 @@ public class StepFunctionsClient : IStepFunctionsClient
     }
 
     /// <inheritdoc />
-    public async Task<IBenzeneResult<TResponse>> StartExecutionAsync<TMessage, TResponse>(TMessage message, string executionName)
+    public async Task<IBenzeneResult<TResponse>> StartExecutionAsync<TMessage, TResponse>(TMessage message, string? executionName)
     {
         var name = SanitizeExecutionName(executionName);
 
@@ -86,7 +86,7 @@ public class StepFunctionsClient : IStepFunctionsClient
     /// and caps the name at 80 characters. Disallowed characters are replaced with <c>-</c>. Returns
     /// <c>null</c> for a null/empty token so AWS generates a UUID name.
     /// </summary>
-    private static string SanitizeExecutionName(string executionName)
+    private static string? SanitizeExecutionName(string? executionName)
     {
         if (string.IsNullOrEmpty(executionName))
         {

@@ -2,6 +2,8 @@
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
         <AssemblyName>Benzene.Clients.Aws.StepFunctions</AssemblyName>
         <RootNamespace>Benzene.Clients.Aws.StepFunctions</RootNamespace>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>

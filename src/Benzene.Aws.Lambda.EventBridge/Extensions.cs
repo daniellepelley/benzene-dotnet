@@ -25,7 +25,7 @@ public static class Extensions
     /// cascading them.
     /// </param>
     /// <returns>The pipeline builder for method chaining.</returns>
-    public static IMiddlewarePipelineBuilder<AwsEventStreamContext> UseEventBridge(this IMiddlewarePipelineBuilder<AwsEventStreamContext> app, Action<IMiddlewarePipelineBuilder<EventBridgeContext>> action, Action<EventBridgeOptions> configure = null)
+    public static IMiddlewarePipelineBuilder<AwsEventStreamContext> UseEventBridge(this IMiddlewarePipelineBuilder<AwsEventStreamContext> app, Action<IMiddlewarePipelineBuilder<EventBridgeContext>> action, Action<EventBridgeOptions>? configure = null)
     {
         app.Register(x => x.AddEventBridge());
         var pipeline = app.CreateMiddlewarePipeline<EventBridgeContext>(builder =>

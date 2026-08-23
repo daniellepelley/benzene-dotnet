@@ -75,7 +75,7 @@ public static class Extensions
     /// <param name="eventBusName">The event bus to publish to; null/empty targets the default bus.</param>
     /// <returns>The pipeline builder, for chaining.</returns>
     public static IMiddlewarePipelineBuilder<OutboundContext> UseEventBridge(this IMiddlewarePipelineBuilder<OutboundContext> app,
-        string source, Action<IMiddlewarePipelineBuilder<EventBridgeSendMessageContext>> action, string eventBusName = null)
+        string source, Action<IMiddlewarePipelineBuilder<EventBridgeSendMessageContext>> action, string? eventBusName = null)
     {
         return app.Convert(new OutboundEventBridgeContextConverter(source, eventBusName), action);
     }
@@ -95,7 +95,7 @@ public static class Extensions
     /// </param>
     /// <returns>The pipeline builder, for chaining.</returns>
     public static IMiddlewarePipelineBuilder<OutboundContext> UseEventBridge(this IMiddlewarePipelineBuilder<OutboundContext> app,
-        string source, string eventBusName = null, bool healthCheck = true)
+        string source, string? eventBusName = null, bool healthCheck = true)
     {
         if (healthCheck)
         {
@@ -111,7 +111,7 @@ public static class Extensions
     /// <param name="builder">The health check builder to register against.</param>
     /// <param name="eventBusName">The event bus to check; null/empty targets the default bus.</param>
     /// <returns>The health check builder for method chaining.</returns>
-    public static IHealthCheckBuilder AddEventBridgeHealthCheck(this IHealthCheckBuilder builder, string eventBusName = null)
+    public static IHealthCheckBuilder AddEventBridgeHealthCheck(this IHealthCheckBuilder builder, string? eventBusName = null)
     {
         return builder.AddHealthCheck(resolver => new EventBridgeHealthCheck(resolver.GetService<IAmazonEventBridge>(), eventBusName));
     }

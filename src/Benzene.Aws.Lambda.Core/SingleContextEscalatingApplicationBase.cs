@@ -31,8 +31,8 @@ public abstract class SingleContextEscalatingApplicationBase<TSelf, TContext>
     private readonly IMiddlewarePipeline<TContext> _pipeline;
     private readonly bool _catchExceptions;
     private readonly bool _raiseOnFailureStatus;
-    private readonly Func<TContext, string> _idSelector;
-    private readonly Func<string, Exception> _exceptionFactory;
+    private readonly Func<TContext, string?> _idSelector;
+    private readonly Func<string?, Exception> _exceptionFactory;
     private readonly string _failureLogMessage;
 
     /// <summary>
@@ -59,8 +59,8 @@ public abstract class SingleContextEscalatingApplicationBase<TSelf, TContext>
         IMiddlewarePipeline<TContext> pipeline,
         bool catchExceptions,
         bool raiseOnFailureStatus,
-        Func<TContext, string> idSelector,
-        Func<string, Exception> exceptionFactory,
+        Func<TContext, string?> idSelector,
+        Func<string?, Exception> exceptionFactory,
         string failureLogMessage)
     {
         _pipeline = pipeline;
@@ -114,7 +114,7 @@ public abstract class SingleContextEscalatingApplicationBase<TSelf, TContext>
     /// to label a log line, and a selector that itself faults on a malformed context must never mask
     /// the real exception being logged or escape the catch that's supposed to be swallowing it.
     /// </summary>
-    private string SafeId(TContext context)
+    private string? SafeId(TContext context)
     {
         try
         {

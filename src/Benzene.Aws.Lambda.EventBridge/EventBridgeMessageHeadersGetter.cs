@@ -42,7 +42,8 @@ public class EventBridgeMessageHeadersGetter : IMessageHeadersGetter<EventBridge
             {
                 if (property.Value.ValueKind == JsonValueKind.String)
                 {
-                    headers[property.Name] = property.Value.GetString();
+                    // GetString() is only null when ValueKind is Null, already excluded above.
+                    headers[property.Name] = property.Value.GetString()!;
                 }
             }
         }

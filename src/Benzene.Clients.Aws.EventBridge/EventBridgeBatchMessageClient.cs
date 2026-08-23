@@ -28,7 +28,7 @@ public class EventBridgeBatchMessageClient : IBenzeneBatchMessageClient
 
     private readonly IAmazonEventBridge _amazonEventBridge;
     private readonly string _source;
-    private readonly string _eventBusName;
+    private readonly string? _eventBusName;
     private readonly ISerializer _serializer;
 
     /// <summary>
@@ -37,7 +37,7 @@ public class EventBridgeBatchMessageClient : IBenzeneBatchMessageClient
     /// <param name="source">The event source to publish under.</param>
     /// <param name="amazonEventBridge">The EventBridge client to put events with.</param>
     /// <param name="eventBusName">The target event bus name, or null for the default bus.</param>
-    public EventBridgeBatchMessageClient(string source, IAmazonEventBridge amazonEventBridge, string eventBusName = null)
+    public EventBridgeBatchMessageClient(string source, IAmazonEventBridge amazonEventBridge, string? eventBusName = null)
     {
         _source = source;
         _amazonEventBridge = amazonEventBridge;

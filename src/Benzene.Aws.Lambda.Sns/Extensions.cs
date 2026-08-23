@@ -27,7 +27,7 @@ public static class Extensions
     /// to consume messages a non-Benzene producer routes on another attribute.
     /// </param>
     /// <returns>The pipeline builder for method chaining.</returns>
-    public static IMiddlewarePipelineBuilder<AwsEventStreamContext> UseSns(this IMiddlewarePipelineBuilder<AwsEventStreamContext> app, Action<IMiddlewarePipelineBuilder<SnsRecordContext>> action, Action<SnsOptions> configure = null, string topicAttributeKey = SnsMessageTopicGetter.DefaultTopicAttribute)
+    public static IMiddlewarePipelineBuilder<AwsEventStreamContext> UseSns(this IMiddlewarePipelineBuilder<AwsEventStreamContext> app, Action<IMiddlewarePipelineBuilder<SnsRecordContext>> action, Action<SnsOptions>? configure = null, string topicAttributeKey = SnsMessageTopicGetter.DefaultTopicAttribute)
     {
         app.Register(x => x.AddSns(topicAttributeKey));
         var pipeline = app.CreateMiddlewarePipeline<SnsRecordContext>(builder =>

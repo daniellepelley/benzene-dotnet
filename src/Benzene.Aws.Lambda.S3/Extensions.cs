@@ -23,7 +23,7 @@ namespace Benzene.Aws.Lambda.S3
         /// batch fan-out concurrency.
         /// </param>
         /// <returns>The pipeline builder for method chaining.</returns>
-        public static IMiddlewarePipelineBuilder<AwsEventStreamContext> UseS3(this IMiddlewarePipelineBuilder<AwsEventStreamContext> app, Action<IMiddlewarePipelineBuilder<S3RecordContext>> action, Action<S3Options> configure = null)
+        public static IMiddlewarePipelineBuilder<AwsEventStreamContext> UseS3(this IMiddlewarePipelineBuilder<AwsEventStreamContext> app, Action<IMiddlewarePipelineBuilder<S3RecordContext>> action, Action<S3Options>? configure = null)
         {
             app.Register(x => x.AddS3());
             var pipeline = app.CreateMiddlewarePipeline<S3RecordContext>(builder =>

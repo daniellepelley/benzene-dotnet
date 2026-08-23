@@ -46,7 +46,7 @@ public class EventBridgeMessageBodySetter : IMessageBodySetter<EventBridgeContex
     // Reads the original _benzeneHeaders object (if any) off the pre-hydration detail, detached from
     // its backing JsonDocument (JsonNode.Parse takes an independent copy of the raw text) so it
     // survives past this call irrespective of what happens to the original document.
-    private static JsonObject ReadEmbeddedHeaders(JsonElement originalDetail)
+    private static JsonObject? ReadEmbeddedHeaders(JsonElement originalDetail)
     {
         if (originalDetail.ValueKind != JsonValueKind.Object ||
             !originalDetail.TryGetProperty(EventBridgeMessageHeadersGetter.EmbeddedHeadersKey, out var embedded) ||

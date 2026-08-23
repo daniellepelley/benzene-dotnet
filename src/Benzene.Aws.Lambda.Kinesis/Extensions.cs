@@ -38,7 +38,7 @@ public static class Extensions
     public static IMiddlewarePipelineBuilder<AwsEventStreamContext> UseKinesisStream(
         this IMiddlewarePipelineBuilder<AwsEventStreamContext> app,
         Action<IMiddlewarePipelineBuilder<StreamContext<KinesisEventRecord>>> action,
-        KinesisStreamOptions options = null)
+        KinesisStreamOptions? options = null)
     {
         app.Register(x => x.AddKinesis());
         var pipeline = app.CreateMiddlewarePipeline<StreamContext<KinesisEventRecord>>(builder =>

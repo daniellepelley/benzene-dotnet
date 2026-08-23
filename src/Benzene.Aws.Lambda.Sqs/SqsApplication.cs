@@ -31,7 +31,7 @@ public class SqsApplication : IMiddlewareApplication<SQSEvent, SQSBatchResponse>
     /// <see cref="SqsOptions"/> instance (<see cref="SqsBatchFailureMode.PartialBatchFailure"/>) if
     /// omitted.
     /// </param>
-    public SqsApplication(IMiddlewarePipeline<SqsMessageContext> pipeline, SqsOptions options = null)
+    public SqsApplication(IMiddlewarePipeline<SqsMessageContext> pipeline, SqsOptions? options = null)
     {
         _pipeline = new TransportMiddlewarePipeline<SqsMessageContext>(TransportNames.Sqs, pipeline);
         _options = options ?? new SqsOptions();
@@ -117,6 +117,7 @@ public class SqsApplication : IMiddlewareApplication<SQSEvent, SQSBatchResponse>
 
         var batchItemFailures = results
             .Where(failure => failure != null)
+            .Select(failure => failure!)
             .ToList();
 
         if (batchItemFailures.Count > 0 && _options.BatchFailureMode == SqsBatchFailureMode.FailWholeBatch)

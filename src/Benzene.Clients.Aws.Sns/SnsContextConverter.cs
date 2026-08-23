@@ -8,6 +8,7 @@ using Benzene.Abstractions.Results;
 using Benzene.Abstractions.Serialization;
 using Benzene.Results;
 using Benzene.Abstractions;
+using Void = Benzene.Abstractions.Results.Void;
 
 namespace Benzene.Clients.Aws.Sns;
 
