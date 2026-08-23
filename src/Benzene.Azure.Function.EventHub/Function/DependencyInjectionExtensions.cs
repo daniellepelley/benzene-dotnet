@@ -58,12 +58,12 @@ public static class DependencyInjectionExtensions
     /// <param name="action">The action that configures the Event Hub middleware pipeline.</param>
     /// <param name="maxDegreeOfParallelism">
     /// Optionally caps how many events from a batch run at once; <c>null</c> (the default) leaves the
-    /// fan-out unbounded - the original behavior.
+    /// fan-out unbounded.
     /// </param>
     /// <returns>The Azure Function app builder, for method chaining.</returns>
     /// <remarks>
-    /// Preserved for backward compatibility. To also configure exception isolation
-    /// (<see cref="EventHubOptions.CatchExceptions"/>) or failure-result escalation
+    /// The simple entry point, for callers who only need the fan-out cap. To also configure exception
+    /// isolation (<see cref="EventHubOptions.CatchExceptions"/>) or failure-result escalation
     /// (<see cref="EventHubOptions.RaiseOnFailureStatus"/>), use the
     /// <see cref="UseEventHub(IAzureFunctionAppBuilder, Action{IMiddlewarePipelineBuilder{EventHubContext}}, Action{EventHubOptions})"/>
     /// overload instead.

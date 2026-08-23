@@ -71,34 +71,11 @@ public static class BenzeneResult
     }
 
     /// <summary>
-    /// Builds a failed result carrying the given error messages under <paramref name="status"/>.
-    /// </summary>
-    /// <remarks>
-    /// Obsolete because of an overload-resolution trap: when <typeparamref name="T"/> isn't
-    /// assignable from a single <c>string</c> argument (the common case - <typeparamref name="T"/> is
-    /// usually a response DTO), a call meant for <see cref="Set{T}(string, T)"/> or
-    /// <see cref="Set{T}(string, T, bool)"/> - e.g. <c>Set&lt;OrderConfirmation&gt;(status, someString)</c>
-    /// intending <c>someString</c> as a payload placeholder - silently falls through to THIS overload
-    /// instead (C# expands a single non-array argument into <c>params string[]</c> when no better
-    /// candidate matches), turning what was meant as a payload into an error message and flipping
-    /// <c>IsSuccessful</c> to <c>false</c>. Prefer <see cref="Set{T}(string, T, bool)"/> (explicit
-    /// payload and success flag) or a named failure helper (<see cref="BadRequest{T}"/>,
-    /// <see cref="NotFound{T}"/>, etc.) - both make the failure intentional instead of an overload
-    /// resolution accident.
-    /// </remarks>
-    [Obsolete("Ambiguous when T isn't string/errors-shaped - a single string argument can silently " +
-              "bind here instead of to Set<T>(status, payload). Use SetFailed<T>(status, errors) " +
-              "instead - same behavior, a name that can't be confused with a payload overload.")]
-    public static IBenzeneResult<T> Set<T>(string status, params string[] errors)
-    {
-        return ServiceBenzeneResultInternal<T>.Internal(status, errors);
-    }
-
-    /// <summary>
-    /// Builds a failed result carrying the given structured errors under <paramref name="status"/> -
-    /// the structured, non-<c>params</c> counterpart of <see cref="Set{T}(string, string[])"/>. Unlike
-    /// that overload this one isn't ambiguous with <see cref="Set{T}(string, T)"/> (its argument type
-    /// can never be mistaken for a payload), so it isn't obsolete.
+    /// Builds a failed result carrying the given structured errors under <paramref name="status"/>.
+    /// The unambiguous <c>IReadOnlyList&lt;BenzeneError&gt;</c> counterpart never collides with
+    /// <see cref="Set{T}(string, T)"/> (its argument type can never be mistaken for a payload) - for a
+    /// plain <c>string[]</c> of messages, use <see cref="SetFailed{T}"/> instead, which the same trap
+    /// once applied to under this name.
     /// </summary>
     public static IBenzeneResult<T> Set<T>(string status, IReadOnlyList<BenzeneError> errors)
     {
@@ -107,9 +84,8 @@ public static class BenzeneResult
 
     /// <summary>
     /// Builds a failed result under <paramref name="status"/> carrying the given error messages, with
-    /// no payload (<c>default(T)</c>). The unambiguous replacement for the obsolete
-    /// <see cref="Set{T}(string, string[])"/>: a distinct name means a single string argument here can
-    /// never be mistaken for a payload meant for <see cref="Set{T}(string, T)"/>.
+    /// no payload (<c>default(T)</c>). A distinct name from <see cref="Set{T}(string, T)"/> so a
+    /// single string argument here can never be mistaken for a payload.
     /// </summary>
     public static IBenzeneResult<T> SetFailed<T>(string status, params string[] errors)
     {

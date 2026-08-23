@@ -27,26 +27,10 @@ public class EventHubApplication : EntryPointMiddlewareApplication<EventData[]>
     /// </summary>
     /// <param name="pipeline">The built Event Hub middleware pipeline to run each event through.</param>
     /// <param name="serviceResolverFactory">The service resolver factory used to process each batch.</param>
-    /// <param name="maxDegreeOfParallelism">
-    /// Optionally caps how many events from a batch run at once; <c>null</c> (the default) leaves the
-    /// fan-out unbounded - the original behavior. Preserved for backward compatibility; prefer the
-    /// <see cref="EventHubApplication(IMiddlewarePipeline{EventHubContext}, IServiceResolverFactory, EventHubOptions)"/>
-    /// overload for the exception/failure-status knobs too.
-    /// </param>
-    public EventHubApplication(IMiddlewarePipeline<EventHubContext> pipeline, IServiceResolverFactory serviceResolverFactory, int? maxDegreeOfParallelism = null)
-        : base(new EventHubBatchApplication(pipeline, new EventHubOptions { MaxDegreeOfParallelism = maxDegreeOfParallelism }), serviceResolverFactory)
-    { }
-
-    /// <summary>
-    /// Initializes a new instance of the <see cref="EventHubApplication"/> class.
-    /// </summary>
-    /// <param name="pipeline">The built Event Hub middleware pipeline to run each event through.</param>
-    /// <param name="serviceResolverFactory">The service resolver factory used to process each batch.</param>
     /// <param name="options">
     /// Configures how a handler's exceptions and failure results are handled, and the batch fan-out
-    /// concurrency. Defaults to a new <see cref="EventHubOptions"/> instance (safe-by-default:
-    /// <see cref="EventHubOptions.RaiseOnFailureStatus"/> on, <see cref="EventHubOptions.CatchExceptions"/>
-    /// off, unbounded fan-out) if omitted.
+    /// concurrency (safe-by-default: <see cref="EventHubOptions.RaiseOnFailureStatus"/> on,
+    /// <see cref="EventHubOptions.CatchExceptions"/> off, unbounded fan-out).
     /// </param>
     public EventHubApplication(IMiddlewarePipeline<EventHubContext> pipeline, IServiceResolverFactory serviceResolverFactory, EventHubOptions options)
         : base(new EventHubBatchApplication(pipeline, options), serviceResolverFactory)
