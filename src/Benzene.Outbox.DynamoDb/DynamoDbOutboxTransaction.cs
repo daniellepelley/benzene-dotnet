@@ -43,24 +43,31 @@ public class DynamoDbOutboxTransaction : IDynamoDbOutboxTransaction
     public async Task CommitAsync(IReadOnlyList<TransactWriteItem> applicationItems, CancellationToken cancellationToken = default)
     {
         applicationItems ??= Array.Empty<TransactWriteItem>();
-        var staged = _stage.DrainStaged();
 
-        if (applicationItems.Count == 0 && staged.Count == 0)
+        // Validate against the staged COUNT before draining - DrainStaged() is destructive (it clears
+        // the buffer with no way to put envelopes back), so a commit this method is about to refuse
+        // must not first destroy the very envelopes the caller could otherwise still retry staging
+        // with (e.g. after splitting the write). Only once we know the commit will actually proceed do
+        // we drain and consume the buffer.
+        var stagedCount = _stage.StagedCount;
+
+        if (applicationItems.Count == 0 && stagedCount == 0)
         {
             throw new InvalidOperationException(
                 "Nothing to commit: no outbox envelopes were staged (via UseOutbox in Transactional mode) " +
                 "and no application transact items were supplied.");
         }
 
-        var total = applicationItems.Count + staged.Count;
+        var total = applicationItems.Count + stagedCount;
         if (total > MaxTransactionItems)
         {
             throw new InvalidOperationException(
                 $"Cannot commit {total} item(s) in one DynamoDB transaction " +
-                $"({applicationItems.Count} application item(s) + {staged.Count} staged outbox envelope(s)); " +
+                $"({applicationItems.Count} application item(s) + {stagedCount} staged outbox envelope(s)); " +
                 $"DynamoDB transactions are limited to {MaxTransactionItems} items. Split the write.");
         }
 
+        var staged = _stage.DrainStaged();
         var transactItems = new List<TransactWriteItem>(total);
         transactItems.AddRange(applicationItems);
         foreach (var envelope in staged)

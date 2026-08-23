@@ -36,6 +36,15 @@ public class BufferedOutboxStage : IOutboxStage, IDisposable
     }
 
     /// <summary>
+    /// The number of envelopes currently staged and not yet drained. Lets a caller validate a
+    /// prospective commit (e.g. a transaction-size limit) <em>before</em> calling
+    /// <see cref="DrainStaged"/> - draining is destructive (it clears the buffer with no way to put
+    /// envelopes back), so a caller that must still be able to reject the commit needs to know the
+    /// count without paying that cost.
+    /// </summary>
+    public int StagedCount => _staged.Count;
+
+    /// <summary>
     /// Returns every envelope staged so far and clears the buffer. Called by the outbox-aware unit
     /// of work as part of building its single atomic write.
     /// </summary>
