@@ -91,6 +91,31 @@ public class DynamoDbOutboxTransactionTest
     }
 
     [Fact]
+    public async Task Commit_MoreThanOneHundredItems_LeavesTheStagedEnvelopesInPlace_SoARetryWithFewerItemsStillCommitsThem()
+    {
+        // The too-many-items rejection is a purely local, no-I/O validation failure - it must not
+        // destroy the caller's already-staged outbox envelopes, since a caller that catches this and
+        // retries with a smaller application-item batch should still get those envelopes committed.
+        var dynamo = MockDynamo();
+        var stage = new BufferedOutboxStage();
+        await stage.StageAsync(NewEnvelope("env-1"));
+        var transaction = new DynamoDbOutboxTransaction(dynamo.Object, stage, "outbox");
+        var tooManyAppItems = Enumerable.Range(0, 100).Select(i => AppItem($"order-{i}")).ToList();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => transaction.CommitAsync(tooManyAppItems));
+
+        TransactWriteItemsRequest? captured = null;
+        dynamo.Setup(x => x.TransactWriteItemsAsync(It.IsAny<TransactWriteItemsRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<TransactWriteItemsRequest, CancellationToken>((r, _) => captured = r)
+            .ReturnsAsync(new TransactWriteItemsResponse());
+
+        await transaction.CommitAsync([AppItem("order-1")]);
+
+        Assert.Equal(2, captured!.TransactItems.Count);
+        Assert.Contains(captured.TransactItems, i => i.Put.TableName == "outbox" && i.Put.Item["id"].S == "env-1");
+    }
+
+    [Fact]
     public async Task Commit_NothingStagedAndNoApplicationItems_Throws()
     {
         var dynamo = MockDynamo();
