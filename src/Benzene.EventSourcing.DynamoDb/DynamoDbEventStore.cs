@@ -119,7 +119,14 @@ public class DynamoDbEventStore : IEventStore
                     [":from"] = new AttributeValue { N = fromVersion.ToString() }
                 },
                 ScanIndexForward = true,
-                ExclusiveStartKey = lastKey
+                ExclusiveStartKey = lastKey,
+                // A Query defaults to eventually consistent. The documented command-handler cycle is
+                // rehydrate (ReadAsync) -> decide -> AppendAsync with the version just read; an
+                // eventually-consistent read that misses the most recently committed event would let
+                // the handler decide against stale state - the same read-your-writes discipline
+                // DynamoDbIdempotencyStore/DynamoDbOutboxStore already apply to their own
+                // correctness-critical reads (both request ConsistentRead explicitly).
+                ConsistentRead = true
             }, cancellationToken);
 
             foreach (var item in response.Items)
@@ -154,7 +161,10 @@ public class DynamoDbEventStore : IEventStore
             ExpressionAttributeNames = new Dictionary<string, string> { ["#pk"] = _partitionKey },
             ExpressionAttributeValues = new Dictionary<string, AttributeValue> { [":pk"] = new AttributeValue { S = streamId } },
             ScanIndexForward = false,
-            Limit = 1
+            Limit = 1,
+            // Same reasoning as ReadAsync: a caller may retry its append using ActualVersion, so an
+            // eventually-consistent read here could hand back a stale "actual" version.
+            ConsistentRead = true
         }, cancellationToken);
 
         return response.Items.Count > 0 ? long.Parse(response.Items[0][_sortKey].N) : 0;
