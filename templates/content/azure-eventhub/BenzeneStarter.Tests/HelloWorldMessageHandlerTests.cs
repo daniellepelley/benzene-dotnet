@@ -41,7 +41,7 @@ public class HelloWorldMessageHandlerTests
     }
 
     [Fact]
-    public async Task An_unknown_topic_does_not_reach_the_handler()
+    public async Task An_unknown_topic_throws_instead_of_reaching_the_handler()
     {
         var greeter = new SpyGreeter();
 
@@ -52,7 +52,11 @@ public class HelloWorldMessageHandlerTests
         var eventData = MessageBuilder.Create("does:not-exist", new HelloWorldMessage { Name = "World" })
             .AsEventHubBenzeneMessage();
 
-        await app.HandleEventHub(new[] { eventData });
+        // Nothing handles this topic, so Benzene's router returns a NotFound result. EventHubOptions.
+        // RaiseOnFailureStatus defaults to true, escalating that failure result to a thrown
+        // EventHubMessageProcessingException - so the invocation fails and the trigger re-delivers the
+        // batch, rather than checkpointing past a message nothing handled.
+        await Assert.ThrowsAsync<EventHubMessageProcessingException>(() => app.HandleEventHub(new[] { eventData }));
 
         Assert.Empty(greeter.Greeted);
     }

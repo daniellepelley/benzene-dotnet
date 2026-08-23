@@ -45,7 +45,7 @@ public class HelloWorldMessageHandlerTests
     {
         var response = await SendAsync("hello:world", "{\"name\":\"World\"}");
 
-        Assert.Equal("Ok", response.StatusCode);
+        Assert.Equal("ok", response.StatusCode);
         Assert.Contains("Hello World!", response.Body);
     }
 
@@ -56,6 +56,6 @@ public class HelloWorldMessageHandlerTests
         // behaviour every transport surfaces (e.g. an HTTP 404) when a message has no handler.
         var response = await SendAsync("does:not-exist", "{}");
 
-        Assert.Equal("NotFound", response.StatusCode);
+        Assert.Equal("not-found", response.StatusCode);
     }
 }

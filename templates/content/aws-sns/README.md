@@ -24,9 +24,8 @@ notifications.
 
 - **`HelloWorldMessageHandler.cs`** is where your logic goes - replace it, or add more handlers
   alongside it. The topic is resolved from a `topic` message attribute (or the SNS topic ARN,
-  depending on delivery configuration), not the message body. SNS delivery is fire-and-forget - no
-  response is written back, and the `[HttpEndpoint]` attribute on the starter handler is unused here
-  but harmless to leave in place.
+  depending on delivery configuration), not the message body. This is a fire-and-forget handler
+  (`IMessageHandler<HelloWorldMessage>`, no response type) since SNS delivery writes nothing back.
 - **`StartUp.cs`** wires the AWS event source(s) this function handles - add
   `.UseApiGateway(...)`/`.UseSqs(...)`/`.UseKafka(...)` etc. alongside `.UseSns(...)` in `Configure`
   if this function should also handle other event sources in the same Lambda.
