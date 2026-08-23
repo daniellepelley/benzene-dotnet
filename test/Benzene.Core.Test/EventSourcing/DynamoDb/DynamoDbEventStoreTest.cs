@@ -84,6 +84,50 @@ public class DynamoDbEventStoreTest
     }
 
     [Fact]
+    public async Task Read_UsesConsistentRead_SoARehydrateImmediatelyAfterAnAppendCannotMissIt()
+    {
+        // DynamoDB Query defaults to eventually consistent. A command handler's normal cycle is
+        // rehydrate (ReadAsync) -> decide -> AppendAsync with the version it just read; an
+        // eventually-consistent read that misses the most recent append would let the handler
+        // decide against stale state (the follow-on AppendAsync's own conditional Put would then
+        // often - but not always, since it depends on what else the caller's decision already did -
+        // surface the staleness as a spurious concurrency conflict, not silently succeed wrongly).
+        // This store's sibling read paths (DynamoDbIdempotencyStore/DynamoDbOutboxStore) both request
+        // ConsistentRead for exactly this reason - ReadAsync must match that discipline.
+        var dynamo = new Mock<IAmazonDynamoDB>(MockBehavior.Strict);
+        QueryRequest? captured = null;
+        dynamo.Setup(x => x.QueryAsync(It.IsAny<QueryRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<QueryRequest, CancellationToken>((r, _) => captured = r)
+            .ReturnsAsync(new QueryResponse { Items = new List<Dictionary<string, AttributeValue>>() });
+        var store = new DynamoDbEventStore(dynamo.Object, "events");
+
+        await store.ReadAsync("acct-1");
+
+        Assert.True(captured!.ConsistentRead);
+    }
+
+    [Fact]
+    public async Task Append_WhenTransactionCancelled_ReportsActualVersionViaConsistentRead()
+    {
+        // The actual-version lookup after a cancelled transaction must be just as consistent as the
+        // append it's diagnosing - an eventually-consistent read here could report an ActualVersion
+        // that is itself stale, misleading a caller that retries based on it.
+        var dynamo = new Mock<IAmazonDynamoDB>(MockBehavior.Strict);
+        dynamo.Setup(x => x.TransactWriteItemsAsync(It.IsAny<TransactWriteItemsRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TransactionCanceledException("version taken"));
+        QueryRequest? captured = null;
+        dynamo.Setup(x => x.QueryAsync(It.IsAny<QueryRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<QueryRequest, CancellationToken>((r, _) => captured = r)
+            .ReturnsAsync(new QueryResponse { Items = new List<Dictionary<string, AttributeValue>> { EventItem("acct-1", 3, "Latest") } });
+        var store = new DynamoDbEventStore(dynamo.Object, "events");
+
+        await Assert.ThrowsAsync<EventStoreConcurrencyException>(() =>
+            store.AppendAsync("acct-1", expectedVersion: 0, new[] { new EventEnvelope("Debited", "{}") }));
+
+        Assert.True(captured!.ConsistentRead);
+    }
+
+    [Fact]
     public async Task Append_MoreThanTransactionLimit_Throws()
     {
         var dynamo = new Mock<IAmazonDynamoDB>(MockBehavior.Strict);
