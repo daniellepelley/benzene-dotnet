@@ -23,9 +23,9 @@ SQS section for the event source mapping shape and the IAM permissions your exec
 ## Where to go next
 
 - **`HelloWorldMessageHandler.cs`** is where your logic goes - replace it, or add more handlers
-  alongside it. Note the SQS message body is deserialized directly into the request type; the
-  `[HttpEndpoint]` attribute on the starter handler is unused here (no HTTP concept on this
-  transport) but harmless to leave in place.
+  alongside it. The SQS message body is deserialized directly into the request type. This is a
+  fire-and-forget handler (`IMessageHandler<HelloWorldMessage>`, no response type) since nothing is
+  written back to SQS.
 - **`StartUp.cs`** wires the AWS event source(s) this function handles - add
   `.UseApiGateway(...)`/`.UseSns(...)`/`.UseKafka(...)` etc. alongside `.UseSqs(...)` in `Configure`
   if this function should also handle other event sources in the same Lambda.

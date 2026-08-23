@@ -40,13 +40,19 @@ public class HelloWorldMessageHandlerTests
     }
 
     [Fact]
-    public async Task An_unknown_topic_does_not_reach_the_handler()
+    public async Task An_unknown_topic_throws_instead_of_reaching_the_handler()
     {
         var greeter = new SpyGreeter();
         var app = BuildApp(greeter);
 
-        await app.HandleServiceBusMessages(
-            MessageBuilder.Create("does:not-exist", new HelloWorldMessage { Name = "World" }).AsAzureServiceBusMessage());
+        // Nothing handles this topic, so Benzene's router returns a NotFound result. ServiceBusOptions.
+        // RaiseOnFailureStatus defaults to true, escalating that failure result to a thrown
+        // ServiceBusMessageProcessingException - so the trigger fails and the message is abandoned/
+        // dead-lettered per the queue's own retry policy, rather than silently dropping a message
+        // nothing handled.
+        await Assert.ThrowsAsync<ServiceBusMessageProcessingException>(() =>
+            app.HandleServiceBusMessages(
+                MessageBuilder.Create("does:not-exist", new HelloWorldMessage { Name = "World" }).AsAzureServiceBusMessage()));
 
         Assert.Empty(greeter.Greeted);
     }

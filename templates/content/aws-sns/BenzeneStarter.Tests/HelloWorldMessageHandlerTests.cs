@@ -1,4 +1,5 @@
 using Benzene.Aws.Lambda.Core.TestHelpers;
+using Benzene.Aws.Lambda.Sns;
 using Benzene.Aws.Lambda.Sns.TestHelpers;
 using Benzene.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -38,12 +39,16 @@ public class HelloWorldMessageHandlerTests
     }
 
     [Fact]
-    public async Task An_unknown_topic_does_not_reach_the_handler()
+    public async Task An_unknown_topic_throws_instead_of_reaching_the_handler()
     {
         var greeter = new SpyGreeter();
         using var host = BuildHost(greeter);
 
-        await host.SendEventAsync(MessageBuilder.Create("does:not-exist", new HelloWorldMessage { Name = "World" }).AsSns());
+        // Nothing handles this topic, so Benzene's router returns a NotFound result. SnsOptions.RaiseOnFailureStatus
+        // defaults to true, escalating that failure result to a thrown SnsMessageProcessingException - so the Lambda
+        // invocation fails and SNS can retry/DLQ it, rather than silently dropping a message nothing handled.
+        await Assert.ThrowsAsync<SnsMessageProcessingException>(() =>
+            host.SendEventAsync(MessageBuilder.Create("does:not-exist", new HelloWorldMessage { Name = "World" }).AsSns()));
 
         Assert.Empty(greeter.Greeted);
     }

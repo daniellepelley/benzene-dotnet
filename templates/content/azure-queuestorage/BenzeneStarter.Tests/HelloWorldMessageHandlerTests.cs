@@ -40,13 +40,17 @@ public class HelloWorldMessageHandlerTests
     }
 
     [Fact]
-    public async Task An_unknown_topic_does_not_reach_the_handler()
+    public async Task An_unknown_topic_throws_instead_of_reaching_the_handler()
     {
         var greeter = new SpyGreeter();
         var app = BuildApp(greeter);
 
-        await app.HandleQueueMessages(
-            MessageBuilder.Create("does:not-exist", new HelloWorldMessage { Name = "World" }).AsQueueStorageBenzeneMessage());
+        // Nothing handles this topic, so Benzene's router returns a NotFound result. QueueStorageOptions.
+        // RaiseOnFailureStatus defaults to true, escalating that failure result to a thrown
+        // QueueStorageMessageProcessingException - so the invocation fails and the trigger's own
+        // retry/poison-queue policy takes over, rather than silently dropping a message nothing handled.
+        await Assert.ThrowsAsync<QueueStorageMessageProcessingException>(() => app.HandleQueueMessages(
+            MessageBuilder.Create("does:not-exist", new HelloWorldMessage { Name = "World" }).AsQueueStorageBenzeneMessage()));
 
         Assert.Empty(greeter.Greeted);
     }
