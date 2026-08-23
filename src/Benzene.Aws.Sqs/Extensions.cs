@@ -25,8 +25,9 @@ public static class Extensions
     /// <param name="action">The action that configures the inner SQS message pipeline.</param>
     /// <param name="configure">
     /// Optionally configures <see cref="SqsConsumerOptions"/> - e.g. set <see cref="SqsConsumerOptions.AckMode"/>
-    /// to <see cref="SqsConsumerAckMode.PerMessage"/> to delete only the messages that succeeded in a
-    /// poll batch instead of the default all-or-nothing whole-batch deletion.
+    /// to <see cref="SqsConsumerAckMode.WholeBatch"/> for the older all-or-nothing-on-throw deletion
+    /// behavior; it defaults to <see cref="SqsConsumerAckMode.PerMessage"/>, which deletes only the
+    /// messages that actually succeeded in a poll batch.
     /// </param>
     /// <returns>The worker startup for method chaining.</returns>
     public static IBenzeneWorkerStartup UseSqs(this IBenzeneWorkerStartup app, SqsConsumerConfig sqsConsumerConfig, ISqsClientFactory sqsClientFactory, Action<IMiddlewarePipelineBuilder<SqsConsumerMessageContext>> action, Action<SqsConsumerOptions> configure = null)

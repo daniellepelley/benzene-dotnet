@@ -9,6 +9,8 @@ using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Abstractions.Middleware;
 using Benzene.Aws.Sqs.Consumer;
 using Benzene.Core.MessageHandlers;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
@@ -82,6 +84,11 @@ public class SqsConsumerAckModeTest
     {
         var mockResolver = new Mock<IServiceResolver>();
         mockResolver.Setup(x => x.GetService<ISetCurrentTransport>()).Returns(Mock.Of<ISetCurrentTransport>());
+        // SqsConsumerApplication's per-message catch resolves ILogger<SqsConsumerApplication> to log
+        // every caught exception (see SqsApplicationExceptionLoggingTest for the Lambda-side sibling
+        // that already did this) - a NullLogger keeps these tests focused on the ack/outcome behavior.
+        mockResolver.Setup(x => x.GetService<ILogger<SqsConsumerApplication>>())
+            .Returns(NullLogger<SqsConsumerApplication>.Instance);
         var mockResolverFactory = new Mock<IServiceResolverFactory>();
         mockResolverFactory.Setup(x => x.CreateScope()).Returns(mockResolver.Object);
         return (mockResolver, mockResolverFactory);
@@ -133,6 +140,43 @@ public class SqsConsumerAckModeTest
         Assert.Equal("succeeds", result.SuccessfulMessages[0].MessageId);
         Assert.Single(result.FailedMessages);
         Assert.Equal("fails", result.FailedMessages[0].MessageId);
+    }
+
+    [Fact]
+    public async Task HandleAsync_PipelineThrows_LogsExceptionAgainstTheMessageId()
+    {
+        // The self-hosted SQS worker was the one silent outlier in the "catch per message -> Error
+        // per message" contract every other transport keeps (see docs/diagnosing-failures.md's catch
+        // matrix, and SqsApplicationExceptionLoggingTest for the AWS Lambda SQS sibling this mirrors).
+        // A message that fails must be logged, not just reported, whichever AckMode is configured.
+        var mockPipeline = new Mock<IMiddlewarePipeline<SqsConsumerMessageContext>>();
+        mockPipeline
+            .Setup(x => x.HandleAsync(It.IsAny<SqsConsumerMessageContext>(), It.IsAny<IServiceResolver>()))
+            .ThrowsAsync(new InvalidOperationException("boom"));
+
+        var mockLogger = new Mock<ILogger<SqsConsumerApplication>>();
+        var mockResolver = new Mock<IServiceResolver>();
+        mockResolver.Setup(x => x.GetService<ISetCurrentTransport>()).Returns(Mock.Of<ISetCurrentTransport>());
+        mockResolver.Setup(x => x.GetService<ILogger<SqsConsumerApplication>>()).Returns(mockLogger.Object);
+        var mockResolverFactory = new Mock<IServiceResolverFactory>();
+        mockResolverFactory.Setup(x => x.CreateScope()).Returns(mockResolver.Object);
+
+        var application = new SqsConsumerApplication(mockPipeline.Object, new SqsConsumerOptions { AckMode = SqsConsumerAckMode.PerMessage });
+
+        var response = new ReceiveMessageResponse
+        {
+            Messages = new List<Message> { new Message { MessageId = "some-message-id", ReceiptHandle = "r1" } }
+        };
+
+        var result = await application.HandleAsync(response, mockResolverFactory.Object);
+
+        Assert.Equal("some-message-id", Assert.Single(result.FailedMessages).MessageId);
+        mockLogger.Verify(x => x.Log(
+            LogLevel.Error,
+            It.IsAny<EventId>(),
+            It.Is<It.IsAnyType>((state, _) => state.ToString().Contains("some-message-id")),
+            It.Is<Exception>(ex => ex.Message == "boom"),
+            (Func<It.IsAnyType, Exception, string>)It.IsAny<object>()));
     }
 
     [Fact]

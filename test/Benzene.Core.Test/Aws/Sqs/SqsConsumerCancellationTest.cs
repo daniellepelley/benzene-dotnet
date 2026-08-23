@@ -28,6 +28,10 @@ public class SqsConsumerCancellationTest
     private static IServiceResolverFactory CreateFactory()
     {
         var services = new ServiceCollection();
+        // SqsConsumerApplication's per-message catch now resolves ILogger<SqsConsumerApplication> to
+        // log every caught exception (see SqsConsumerAckModeTest) - AddLogging() registers a real (if
+        // provider-less) ILogger<T>, matching what a real application composition root always has.
+        services.AddLogging();
         services.AddScoped<CancellationTokenAccessor>();
         services.AddScoped<ICancellationTokenAccessor>(x => x.GetService<CancellationTokenAccessor>());
         return new MicrosoftServiceResolverFactory(services);
