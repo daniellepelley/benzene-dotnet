@@ -54,9 +54,11 @@ through the shared internal `IServiceBusMessageSettler` adapter over `ProcessMes
   owns receiving, message-lock renewal, and bounded concurrency (`MaxConcurrentCalls`), and pushes
   messages to the worker's handler. `StartAsync` starts the processor and returns (correct
   `IHostedService` semantics, like `BenzeneKafkaWorker`); `StopAsync` calls
-  `StopProcessingAsync` (which waits for in-flight handlers), then disposes the processor and
-  client. Receive-side errors surface via the processor's error handler and are logged (scope per
-  error, like `SqsConsumer`) without ending the worker.
+  `StopProcessingAsync` (which waits for in-flight handlers), then disposes the processor(s) it
+  created - never the client (see `IServiceBusClientFactory` below for why), matching
+  `BenzeneEventHubWorker`, which never disposes its own factory's client either. Receive-side
+  errors surface via the processor's error handler and are logged (scope per error, like
+  `SqsConsumer`) without ending the worker.
 - `BenzeneServiceBusConfig` - `QueueName` XOR (`TopicName` + `SubscriptionName`), validated at
   `StartAsync` (throws `InvalidOperationException` otherwise - unit-tested without a live bus in
   `test/Benzene.Core.Test/Azure/ServiceBusWorker/BenzeneServiceBusWorkerTest.cs`);
@@ -97,8 +99,14 @@ through the shared internal `IServiceBusMessageSettler` adapter over `ProcessMes
   covered separately by `ServiceBusConsumerRealPipelineTest` (real DI + real `.UseMessageHandlers()`
   routing, no emulator).
 - `IServiceBusClientFactory` / `ServiceBusClientFactory` - like `ISqsClientFactory`: the caller
-  builds the `ServiceBusClient` (connection string, Managed Identity, emulator...), the worker
-  disposes it on stop.
+  builds the `ServiceBusClient` (connection string, Managed Identity, emulator...). Unlike
+  `ISqsClientFactory`, the worker does **not** dispose it on stop: `UseServiceBus(..., healthCheck:
+  true)` (the default) hands this same factory to `AddServiceBusDependencyHealthCheck`, which keeps
+  its own long-lived reference to whatever client `Create()` returns - the same shared instance when
+  the caller uses the shipped `ServiceBusClientFactory` (which always returns one injected client,
+  not a fresh one per call). Disposing it in `StopAsync` would break every health-check probe issued
+  after the worker stops. The caller who built the factory owns the client's lifetime; see
+  `BenzeneServiceBusWorkerTest.StopAsync_DisposesTheProcessor_ButNeverTheClientItDidNotExclusivelyOwn`.
 - `Extensions.UseServiceBus(IBenzeneWorkerStartup, config, clientFactory, action)` - the
   `IBenzeneWorkerStartup` wiring, mirroring `UseSqs`/`UseKafka`; registers
   `AddBenzeneMessage().AddServiceBusConsumer()` and adds the worker.
