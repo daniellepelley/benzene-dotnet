@@ -1,8 +1,13 @@
 using System.Threading.Tasks;
 using Benzene.Abstractions.Hosting;
+using Benzene.Aws.Lambda.Core.AwsEventStream;
 using Benzene.Aws.Lambda.EventBridge;
+using Benzene.Aws.Lambda.EventBridge.TestHelpers;
 using Benzene.Core.Middleware;
 using Benzene.Microsoft.Dependencies;
+using Benzene.Test.Aws.Helpers;
+using Benzene.Test.Examples;
+using Benzene.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -10,6 +15,38 @@ namespace Benzene.Test.Aws.EventBridge;
 
 public class EventBridgeBenzeneInvocationExtensionsTest
 {
+    [Fact]
+    public async Task UseEventBridge_RealEntryPoint_ResolvesIBenzeneInvocationInsideThePipeline()
+    {
+        // Coverage gap closed: the test below exercises UseBenzeneInvocation() directly on a bare
+        // EventBridgeContext builder, never going through the real UseEventBridge(...) entry point an
+        // application actually calls (which wires it up via CreateMiddlewarePipeline + app.Register(...)
+        // against the OUTER AwsEventStreamContext-level container). This test goes through that real
+        // entry point - AwsEventStreamContext -> EventBridgeLambdaHandler -> EventBridgeApplication's
+        // per-event scope -> the pipeline - to prove the wiring actually holds end-to-end.
+        IBenzeneInvocation resolved = null;
+
+        var services = new ServiceCollection();
+        var app = new MiddlewarePipelineBuilder<AwsEventStreamContext>(new MicrosoftBenzeneServiceContainer(services));
+        app.UseEventBridge(eventBridge => eventBridge
+            .Use(null, (resolver, _, next) =>
+            {
+                resolved = resolver.GetService<IBenzeneInvocation>();
+                return next();
+            })
+        );
+
+        var request = MessageBuilder.Create(Defaults.Topic, Defaults.MessageAsObject).AsEventBridge();
+
+        using var factory = new MicrosoftServiceResolverFactory(services);
+        using var resolver = factory.CreateScope();
+        await app.Build().HandleAsync(AwsEventStreamContextBuilder.Build(request), resolver);
+
+        Assert.NotNull(resolved);
+        Assert.Equal(request.Id, resolved.InvocationId);
+        Assert.Equal("AwsLambda", resolved.Platform);
+    }
+
     [Fact]
     public async Task UseBenzeneInvocation_SetsInvocationIdToEventId()
     {
