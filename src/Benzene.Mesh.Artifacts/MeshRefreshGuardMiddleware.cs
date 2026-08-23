@@ -56,8 +56,11 @@ namespace Benzene.Mesh.Artifacts;
 /// <b>Matching.</b> A request is guarded when its path normalizes to
 /// <see cref="MeshRefreshGuardOptions.Path"/> <em>or</em> the registered
 /// <see cref="IRouteFinder"/> resolves it to <see cref="MeshRefreshGuardOptions.Topic"/>. The first
-/// applies the exact normalization <c>Benzene.Http.Routing.RouteFinder</c> itself applies (query string
-/// dropped, empty segments removed, case-insensitive), so no spelling that routes to the handler -
+/// applies <see cref="MeshPathCanonicalizer.Canonicalize"/> - the exact normalization
+/// <c>Benzene.Http.Routing.RouteFinder</c> itself applies (query string dropped, empty segments
+/// removed, case-insensitive), shared with <see cref="MeshDispatchGuardMiddleware{TContext}"/> and
+/// <c>MeshAuthGate</c> so none of the three can silently drift apart on what counts as the same path -
+/// so no spelling that routes to the handler -
 /// <c>/mesh/refresh/</c>, <c>//mesh//refresh</c>, <c>/MESH/REFRESH</c>, <c>/mesh/refresh?x=1</c> - can
 /// slip past the guard while still reaching the handler. The second closes the class of bypass the first
 /// cannot see: a second <c>[HttpEndpoint]</c> alias on the same handler, or a versioned route alias
@@ -106,7 +109,7 @@ public class MeshRefreshGuardMiddleware<TContext> : IMiddleware<TContext> where 
         Func<DateTimeOffset>? clock = null)
     {
         _options = options;
-        _guardedPath = Canonicalize(options.Path);
+        _guardedPath = MeshPathCanonicalizer.Canonicalize(options.Path);
         _store = store;
         _requestAdapter = requestAdapter;
         _responseAdapter = responseAdapter;
@@ -167,7 +170,7 @@ public class MeshRefreshGuardMiddleware<TContext> : IMiddleware<TContext> where 
 
     private bool IsGuarded(HttpRequest request)
     {
-        if (Canonicalize(request.Path) == _guardedPath)
+        if (MeshPathCanonicalizer.Canonicalize(request.Path) == _guardedPath)
         {
             return true;
         }
@@ -229,18 +232,6 @@ public class MeshRefreshGuardMiddleware<TContext> : IMiddleware<TContext> where 
         }
 
         return false;
-    }
-
-    /// <summary>
-    /// Normalizes a path the same way <c>Benzene.Http.Routing.UrlMatcher.SplitPath</c> does before the
-    /// route table is consulted - drop the query string, drop empty segments, compare case-insensitively -
-    /// so this guard and the router agree on every spelling of the same route.
-    /// </summary>
-    internal static string Canonicalize(string? path)
-    {
-        var beforeQuery = (path ?? string.Empty).Split('?', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
-        var segments = (beforeQuery ?? string.Empty).Split('/', StringSplitOptions.RemoveEmptyEntries);
-        return ("/" + string.Join("/", segments)).ToLowerInvariant();
     }
 
     /// <summary>

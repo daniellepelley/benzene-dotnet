@@ -16,9 +16,9 @@ namespace Benzene.Mesh.Test;
 /// rather than an assumed one.
 /// <para>
 /// It also pins the second half of that contract: the exact set of path spellings the router still
-/// accepts for the same route. <see cref="MeshRefreshGuardMiddleware{TContext}"/> re-implements that
-/// normalization to decide what to guard, so the two must agree - a spelling the router accepts but the
-/// guard doesn't recognise would be a straight bypass.
+/// accepts for the same route. <see cref="MeshRefreshGuardMiddleware{TContext}"/> decides what to guard
+/// through <see cref="MeshPathCanonicalizer.Canonicalize"/>, so the two must agree - a spelling the
+/// router accepts but the guard doesn't recognise would be a straight bypass.
 /// </para>
 /// </summary>
 public class MeshRefreshRoutingTest
@@ -115,8 +115,7 @@ public class MeshRefreshRoutingTest
     public void GuardNormalization_AgreesWithTheRouter(string path, bool expected)
     {
         var routed = CreateRouteFinder().Find("POST", path) != null;
-        var guarded = MeshRefreshGuardMiddleware<MeshArtifactMiddlewareTest.FakeHttpContext>
-            .Canonicalize(path) == MeshRefreshGuardOptions.DefaultPath;
+        var guarded = MeshPathCanonicalizer.Canonicalize(path) == MeshRefreshGuardOptions.DefaultPath;
 
         Assert.Equal(expected, routed);
         Assert.Equal(routed, guarded);

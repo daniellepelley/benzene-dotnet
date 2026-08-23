@@ -95,6 +95,17 @@ public class AwsLambdaDiscoveryProvider : IMeshDiscoveryProvider
                 continue;
             }
 
+            // MeshDiscoveryFilter.Regions is documented "AWS/Azure" region scoping, and
+            // MeshDiscoveryRunner passes the SAME filter instance to every provider - so an operator
+            // who sets it expects it honored here too, not silently ignored the way it was before this
+            // fix (corrected 2026-08-23: found by adversarial review of the mesh discovery backends).
+            // The function's region isn't a separate ListFunctions field; it's embedded in FunctionArn
+            // (arn:aws:lambda:{region}:{account}:function:{name}), same as every other AWS ARN.
+            if (filter.Regions != null && !RegionMatches(function.FunctionArn, filter.Regions))
+            {
+                continue;
+            }
+
             var options = new Dictionary<string, string> { ["functionName"] = function.FunctionName };
             if (tags.TryGetValue(MeshPathTag, out var meshPath) && !string.IsNullOrWhiteSpace(meshPath))
             {
@@ -110,5 +121,31 @@ public class AwsLambdaDiscoveryProvider : IMeshDiscoveryProvider
         }
 
         return entries;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="functionArn"/>'s region segment is one of <paramref name="regions"/>
+    /// (case-insensitive, matching <c>AzureAppServiceDiscoveryProvider</c>'s own region comparison). An
+    /// ARN whose region can't be read (null/malformed) is never excluded by this check - unknown is not
+    /// evidence of "wrong region", the same "fail open on an unreadable dimension, not closed" stance
+    /// <c>Benzene.Mesh.Discovery.Azure.AzureAppServiceDiscoveryProvider</c> takes when
+    /// <c>resource.Location</c> is null.
+    /// </summary>
+    private static bool RegionMatches(string? functionArn, IReadOnlyList<string> regions)
+    {
+        var region = RegionFromArn(functionArn);
+        return region == null || regions.Any(r => string.Equals(r, region, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>Extracts the region segment from a Lambda ARN (<c>arn:aws:lambda:{region}:{account}:function:{name}</c>).</summary>
+    private static string? RegionFromArn(string? arn)
+    {
+        if (string.IsNullOrEmpty(arn))
+        {
+            return null;
+        }
+
+        var parts = arn.Split(':');
+        return parts.Length > 3 && !string.IsNullOrEmpty(parts[3]) ? parts[3] : null;
     }
 }

@@ -13,7 +13,10 @@ namespace Benzene.Mesh.Test.Discovery;
 public class AwsLambdaDiscoveryProviderTest
 {
     private static FunctionConfiguration Fn(string name)
-        => new() { FunctionName = name, FunctionArn = $"arn:aws:lambda:eu-west-1:1:function:{name}" };
+        => FnInRegion(name, "eu-west-1");
+
+    private static FunctionConfiguration FnInRegion(string name, string region)
+        => new() { FunctionName = name, FunctionArn = $"arn:aws:lambda:{region}:1:function:{name}" };
 
     private static Mock<IAmazonLambda> LambdaWith(
         IReadOnlyDictionary<string, (FunctionConfiguration Fn, Dictionary<string, string> Tags)> functionsByMarkerPage,
@@ -117,5 +120,44 @@ public class AwsLambdaDiscoveryProviderTest
 
         var entry = Assert.Single(entries);
         Assert.Equal("prod-svc", entry.Name);
+    }
+
+    // Regression: MeshDiscoveryFilter.Regions is documented "AWS/Azure" region scoping and
+    // MeshDiscoveryRunner passes one filter instance to every registered provider, but this provider
+    // used to ignore filter.Regions entirely - a function in a region the operator explicitly excluded
+    // was still discovered and registered. Fixed 2026-08-23 by reading the region out of the
+    // function's ARN, matching AzureAppServiceDiscoveryProviderTest's own
+    // Discover_RegionFilter_ExcludesOtherRegions coverage for the Azure provider.
+    [Fact]
+    public async Task Discover_RegionFilter_ExcludesOtherRegions()
+    {
+        var functions = new Dictionary<string, (FunctionConfiguration, Dictionary<string, string>)>
+        {
+            ["in-region"] = (FnInRegion("in-region", "eu-west-1"), new Dictionary<string, string> { ["benzene"] = "true" }),
+            ["other-region"] = (FnInRegion("other-region", "us-east-1"), new Dictionary<string, string> { ["benzene"] = "true" }),
+        };
+        var mock = LambdaWith(functions, (null, null, new[] { "in-region", "other-region" }));
+
+        var provider = new AwsLambdaDiscoveryProvider(mock.Object);
+        var entries = await provider.DiscoverAsync(new MeshDiscoveryFilter(regions: new[] { "eu-west-1" }));
+
+        var entry = Assert.Single(entries);
+        Assert.Equal("in-region", entry.Name);
+    }
+
+    [Fact]
+    public async Task Discover_RegionFilter_UnreadableArnIsNeverExcluded()
+    {
+        var functions = new Dictionary<string, (FunctionConfiguration, Dictionary<string, string>)>
+        {
+            ["no-arn"] = (new FunctionConfiguration { FunctionName = "no-arn", FunctionArn = null },
+                new Dictionary<string, string> { ["benzene"] = "true" }),
+        };
+        var mock = LambdaWith(functions, (null, null, new[] { "no-arn" }));
+
+        var provider = new AwsLambdaDiscoveryProvider(mock.Object);
+        var entries = await provider.DiscoverAsync(new MeshDiscoveryFilter(regions: new[] { "eu-west-1" }));
+
+        Assert.Single(entries);
     }
 }
