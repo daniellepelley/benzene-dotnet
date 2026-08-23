@@ -10,6 +10,7 @@ using Benzene.Abstractions.Middleware;
 using Benzene.Core;
 using Benzene.Core.MessageHandlers.Info;
 using Benzene.Core.Middleware;
+using Microsoft.Extensions.Logging;
 
 namespace Benzene.Aws.Sqs.Consumer;
 
@@ -43,11 +44,14 @@ public class SqsConsumerApplication : IMiddlewareApplication<ReceiveMessageRespo
     /// <param name="event">The poll batch to process.</param>
     /// <param name="serviceResolverFactory">The service resolver factory used to create a scope per message.</param>
     /// <returns>
-    /// A task that resolves to the batch's per-message outcome. Under <see cref="SqsConsumerAckMode.PerMessage"/>
-    /// (the default), a message's exception is contained (logged nowhere by this class - the message is
-    /// just reported as failed) and never propagates out of this call. Under
-    /// <see cref="SqsConsumerAckMode.WholeBatch"/>, a message's handler throwing propagates out of this
-    /// call entirely - the returned result is only reached when every message ran without throwing.
+    /// A task that resolves to the batch's per-message outcome. Every caught exception is logged
+    /// against its message id (see <see cref="ILogger{TCategoryName}"/> for <see cref="SqsConsumerApplication"/>)
+    /// before anything else happens to it - matching every other self-hosted worker
+    /// (Kafka/RabbitMQ/Event Hub) and the AWS Lambda SQS trigger, none of which fail a message
+    /// silently. Under <see cref="SqsConsumerAckMode.PerMessage"/> (the default), the message is then
+    /// reported as failed and the exception is contained - it never propagates out of this call. Under
+    /// <see cref="SqsConsumerAckMode.WholeBatch"/>, it's rethrown after logging, so it still propagates
+    /// out of this call - the returned result is only reached when every message ran without throwing.
     /// </returns>
     public Task<SqsConsumerBatchResult> HandleAsync(ReceiveMessageResponse @event, IServiceResolverFactory serviceResolverFactory)
         => HandleAsync(@event, serviceResolverFactory, CancellationToken.None);
@@ -69,11 +73,13 @@ public class SqsConsumerApplication : IMiddlewareApplication<ReceiveMessageRespo
     /// instead of lost.
     /// </param>
     /// <returns>
-    /// A task that resolves to the batch's per-message outcome. Under <see cref="SqsConsumerAckMode.PerMessage"/>
-    /// (the default), a message's exception is contained (logged nowhere by this class - the message is
-    /// just reported as failed) and never propagates out of this call. Under
-    /// <see cref="SqsConsumerAckMode.WholeBatch"/>, a message's handler throwing propagates out of this
-    /// call entirely - the returned result is only reached when every message ran without throwing.
+    /// A task that resolves to the batch's per-message outcome. Every caught exception is logged
+    /// against its message id before anything else happens to it - matching every other self-hosted
+    /// worker (Kafka/RabbitMQ/Event Hub) and the AWS Lambda SQS trigger, none of which fail a message
+    /// silently. Under <see cref="SqsConsumerAckMode.PerMessage"/> (the default), the message is then
+    /// reported as failed and the exception is contained - it never propagates out of this call. Under
+    /// <see cref="SqsConsumerAckMode.WholeBatch"/>, it's rethrown after logging, so it still propagates
+    /// out of this call - the returned result is only reached when every message ran without throwing.
     /// </returns>
     public async Task<SqsConsumerBatchResult> HandleAsync(ReceiveMessageResponse @event, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
     {
@@ -104,8 +110,22 @@ public class SqsConsumerApplication : IMiddlewareApplication<ReceiveMessageRespo
                         return pair.Message;
                     }
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
+                    // Logged before anything else happens to the exception - regardless of AckMode -
+                    // so a failure is never silent: matching SqsApplication (the Lambda-triggered SQS
+                    // sibling) and every other self-hosted worker (Kafka/RabbitMQ/Event Hub), all of
+                    // which log a per-message catch. A fresh scope is used rather than the (already
+                    // disposed) per-message one, exactly like SingleContextEscalatingApplicationBase's
+                    // own logging scope.
+                    using (var loggingScope = serviceResolverFactory.CreateScope())
+                    {
+                        loggingScope.GetService<ILogger<SqsConsumerApplication>>()
+                            .LogError(ex, BenzeneFailure.IsInfrastructure(ex)
+                                ? BenzeneFailure.InfrastructureLogPrefix + " Processing SQS message {messageId} failed — this service is mis-wired; the message is not at fault"
+                                : "Processing SQS message {messageId} failed", pair.Message.MessageId);
+                    }
+
                     if (_options.AckMode == SqsConsumerAckMode.WholeBatch)
                     {
                         throw;
