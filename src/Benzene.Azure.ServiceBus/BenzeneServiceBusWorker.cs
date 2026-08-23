@@ -18,7 +18,8 @@ namespace Benzene.Azure.ServiceBus;
 /// and bounded concurrency (<see cref="BenzeneServiceBusConfig.MaxConcurrentCalls"/>) itself, and
 /// pushes each message to this worker's handler. <see cref="StartAsync"/> starts the processor and
 /// returns; <see cref="StopAsync"/> stops it, waiting for in-flight handlers to finish, then
-/// disposes the processor and client. Receive-side failures (e.g. a transient connection error)
+/// disposes the processor (never the client - see <see cref="StopAsync"/>'s own doc comment).
+/// Receive-side failures (e.g. a transient connection error)
 /// surface through the processor's error handler, are logged, and the processor keeps receiving -
 /// they never end the worker.
 /// </remarks>
@@ -124,8 +125,16 @@ public class BenzeneServiceBusWorker : IBenzeneWorker
     }
 
     /// <summary>
-    /// Stops the processor - waiting for in-flight message handlers to finish - then disposes it
-    /// and the client.
+    /// Stops the processor - waiting for in-flight message handlers to finish - then disposes it.
+    /// Does <em>not</em> dispose the <see cref="ServiceBusClient"/> <see cref="IServiceBusClientFactory.Create"/>
+    /// returned: unlike the processor (which this worker alone creates and owns), the client is not
+    /// necessarily this worker's to close - <c>UseServiceBus(..., healthCheck: true)</c> (the default)
+    /// hands the very same factory to the auto-wired dependency health check, which keeps its own
+    /// reference to whatever client <c>Create()</c> returns for the life of the app; disposing it here
+    /// would break every health-check probe after this worker stops even though the bus itself is
+    /// fine. The caller who built the factory owns the client's lifetime - mirroring
+    /// <c>Benzene.Azure.EventHub.BenzeneEventHubWorker</c>, which never disposes the client its own
+    /// factory returns either.
     /// </summary>
     /// <param name="cancellationToken">The token used to abort the wait for in-flight handlers.</param>
     /// <returns>A task that completes when the processor has stopped and been disposed.</returns>
@@ -145,11 +154,7 @@ public class BenzeneServiceBusWorker : IBenzeneWorker
             _sessionProcessor = null;
         }
 
-        if (_client != null)
-        {
-            await _client.DisposeAsync();
-            _client = null;
-        }
+        _client = null;
     }
 
     private Task OnProcessMessageAsync(ProcessMessageEventArgs args)
