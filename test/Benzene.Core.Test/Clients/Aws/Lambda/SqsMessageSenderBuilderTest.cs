@@ -27,6 +27,10 @@ public class LambdaMessageSenderBuilderTest
             .ReturnsAsync(new InvokeResponse
             {
                 Payload = new MemoryStream("{}"u8.ToArray()),
+                // StatusCode (not HttpStatusCode, the API call's own transport status - always 200
+                // regardless of invocation outcome) is what an Event invoke's MapResponseAsync reads:
+                // 202 is what AWS actually returns for a successfully-accepted async invoke.
+                StatusCode = 202,
                 HttpStatusCode = HttpStatusCode.Accepted
             });
 
@@ -53,6 +57,10 @@ public class LambdaMessageSenderBuilderTest
             .ReturnsAsync(new InvokeResponse
             {
                 Payload = new MemoryStream("{}"u8.ToArray()),
+                // StatusCode (not HttpStatusCode, the API call's own transport status - always 200
+                // regardless of invocation outcome) is what an Event invoke's MapResponseAsync reads:
+                // 202 is what AWS actually returns for a successfully-accepted async invoke.
+                StatusCode = 202,
                 HttpStatusCode = HttpStatusCode.Accepted
             });
 
@@ -79,6 +87,10 @@ public class LambdaMessageSenderBuilderTest
             .ReturnsAsync(new InvokeResponse
             {
                 Payload = new MemoryStream("{}"u8.ToArray()),
+                // StatusCode (not HttpStatusCode, the API call's own transport status - always 200
+                // regardless of invocation outcome) is what an Event invoke's MapResponseAsync reads:
+                // 202 is what AWS actually returns for a successfully-accepted async invoke.
+                StatusCode = 202,
                 HttpStatusCode = HttpStatusCode.Accepted
             });
 
