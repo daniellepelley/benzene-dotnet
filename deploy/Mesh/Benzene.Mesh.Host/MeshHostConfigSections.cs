@@ -190,6 +190,18 @@ public class MeshAuthOidcConfig
 
     /// <summary>The scopes used when <see cref="Scopes"/> is empty/unset.</summary>
     public static readonly string[] DefaultScopes = { "openid", "profile", "email" };
+
+    /// <summary>
+    /// Whether the OIDC authority's discovery/JWKS metadata must be fetched over HTTPS. Defaults to
+    /// <c>true</c>: fetching metadata over plain HTTP is a man-in-the-middle risk (nothing before the
+    /// TLS handshake can verify who actually answered), so <see cref="MeshAuthGate.Validate"/> rejects
+    /// a non-<c>https</c> <see cref="Authority"/> at startup unless this is explicitly set to
+    /// <c>false</c>. Flip it only for local development against an authority you are running yourself
+    /// over plain HTTP (e.g. a docker-composed Keycloak on <c>localhost</c> with no TLS) - <b>never in
+    /// production.</b> The value flows straight into
+    /// <c>Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectOptions.RequireHttpsMetadata</c>.
+    /// </summary>
+    public bool RequireHttpsMetadata { get; set; } = true;
 }
 
 /// <summary>

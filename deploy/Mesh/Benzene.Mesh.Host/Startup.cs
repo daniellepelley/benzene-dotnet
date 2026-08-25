@@ -230,6 +230,11 @@ public class Startup
                     options.ClientId = _config.Auth.Oidc.ClientId;
                     options.ClientSecret = Environment.GetEnvironmentVariable(_config.Auth.Oidc.ClientSecretEnvVar);
                     options.CallbackPath = _config.Auth.Oidc.CallbackPath;
+                    // WP-1(b) (#20): defaults true; MeshAuthGate.Validate (run before this ever matters,
+                    // in Configure()) has already rejected a non-https authority unless this was
+                    // explicitly set false, so by the time this option is read the combination is known
+                    // safe.
+                    options.RequireHttpsMetadata = _config.Auth.Oidc.RequireHttpsMetadata;
                     options.ResponseType = "code";
                     options.SaveTokens = true;
                     options.Scope.Clear();

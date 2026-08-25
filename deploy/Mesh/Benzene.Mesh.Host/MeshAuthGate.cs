@@ -64,16 +64,36 @@ public class MeshAuthGate
     public static readonly string DispatchPath = new MeshDispatchGuardOptions().Path;
 
     /// <summary>
-    /// <see cref="IngestionPath"/>/<see cref="DispatchPath"/>, canonicalized once through the exact
-    /// same rule <see cref="MeshDispatchGuardMiddleware"/> and the router use - see
-    /// <see cref="MeshPathCanonicalizer.Canonicalize"/>'s remarks and <c>InvokeAsync</c>'s
+    /// WP-1(c) (#4): <c>POST /mesh/auth/logout</c> - oidc mode only, see <see cref="HandleLogoutAsync"/>.
+    /// A fixed literal (no config knob to move it) so <c>Startup.cs</c>'s <c>UseMeshUi(logoutUrl: ...)</c>
+    /// call and the check below can never drift apart.
+    /// </summary>
+    public const string LogoutPath = "/mesh/auth/logout";
+
+    /// <summary>
+    /// <see cref="IngestionPath"/>/<see cref="DispatchPath"/>/<see cref="LogoutPath"/>, canonicalized
+    /// once through the exact same rule <see cref="MeshDispatchGuardMiddleware"/> and the router use -
+    /// see <see cref="MeshPathCanonicalizer.Canonicalize"/>'s remarks and <c>InvokeAsync</c>'s
     /// trailing-slash correction below.
     /// </summary>
     private static readonly string CanonicalIngestionPath = MeshPathCanonicalizer.Canonicalize(IngestionPath);
     private static readonly string CanonicalDispatchPath = MeshPathCanonicalizer.Canonicalize(DispatchPath);
+    private static readonly string CanonicalLogoutPath = MeshPathCanonicalizer.Canonicalize(LogoutPath);
 
     /// <summary>The header <c>auth.ingestion.mode: "sharedSecret"</c> reads its secret from.</summary>
     public const string IngestSecretHeaderName = "X-Mesh-Ingest-Secret";
+
+    /// <summary>
+    /// WP-1(c) (#4): the CSRF header <see cref="LogoutPath"/> requires, matching the same custom-header
+    /// convention <see cref="MeshRefreshGuardOptions.DefaultHeaderName"/> (<c>X-Benzene-Refresh</c>) and
+    /// <see cref="MeshDispatchGuardOptions.DefaultHeaderName"/> (<c>X-Benzene-Dispatch</c>) already use:
+    /// a cross-site <c>&lt;form method="post"&gt;</c> cannot set a custom header at all, and a
+    /// cross-origin <c>fetch()</c> that tries to triggers a CORS preflight this pipeline never approves -
+    /// so only a genuine same-origin caller can ever supply it. The value sent is not inspected, exactly
+    /// like its siblings - what defends against CSRF is that a cross-site caller cannot set the header at
+    /// all, not what it would have set it to.
+    /// </summary>
+    public const string LogoutHeaderName = "X-Benzene-Logout";
 
     private static readonly string[] ValidModes = { "none", "proxy", "basic", "oidc" };
     private static readonly string[] ValidIngestionModes = { "open", "sharedSecret" };

@@ -111,7 +111,8 @@ public class MeshHostConfigTest
                   "clientId": "my-client-id",
                   "clientSecretEnvVar": "MY_CLIENT_SECRET",
                   "callbackPath": "/custom-callback",
-                  "scopes": [ "openid", "email" ]
+                  "scopes": [ "openid", "email" ],
+                  "requireHttpsMetadata": false
                 },
                 "ingestion": { "mode": "sharedSecret" }
               }
@@ -129,7 +130,22 @@ public class MeshHostConfigTest
         Assert.Equal("MY_CLIENT_SECRET", config.Auth.Oidc.ClientSecretEnvVar);
         Assert.Equal("/custom-callback", config.Auth.Oidc.CallbackPath);
         Assert.Equal(new[] { "openid", "email" }, config.Auth.Oidc.Scopes);
+        Assert.False(config.Auth.Oidc.RequireHttpsMetadata);
         Assert.Equal("sharedSecret", config.Auth.Ingestion.Mode);
+    }
+
+    // WP-1(b) (#20): defaults true - a bare "oidc": {} (no requireHttpsMetadata key at all) must not
+    // silently accept plain HTTP metadata.
+    [Fact]
+    public void OidcSection_RequireHttpsMetadataOmitted_DefaultsToTrue()
+    {
+        var config = Bind("""
+            {
+              "auth": { "mode": "oidc", "oidc": { "authority": "https://accounts.google.com", "clientId": "x" } }
+            }
+            """);
+
+        Assert.True(config.Auth.Oidc.RequireHttpsMetadata);
     }
 
     // Default when "auth" itself is omitted entirely - mode "none" binds and the host behaves exactly
