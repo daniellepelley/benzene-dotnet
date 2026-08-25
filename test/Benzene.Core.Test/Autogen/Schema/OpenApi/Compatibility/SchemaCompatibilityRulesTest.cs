@@ -15,6 +15,8 @@ public class SchemaCompatibilityRulesTest
     [InlineData(SchemaChangeKind.RequiredPropertyAdded, ChangeCompatibility.Compatible)] // consumer tolerates an extra field
     [InlineData(SchemaChangeKind.PropertyBecameRequired, ChangeCompatibility.Compatible)]
     [InlineData(SchemaChangeKind.PropertyBecameOptional, ChangeCompatibility.Warning)]   // consumer may rely on it always being present
+    [InlineData(SchemaChangeKind.UnionVariantRemoved, ChangeCompatibility.Compatible)]   // consumer never sees the removed variant again
+    [InlineData(SchemaChangeKind.UnionVariantAdded, ChangeCompatibility.Breaking)]        // consumer may meet a variant it doesn't know
     public void DefaultFor_Event_MatchesTheResponseConsumerSide(SchemaChangeKind kind, ChangeCompatibility expected)
     {
         Assert.Equal(expected, SchemaCompatibilityRules.DefaultFor(kind, SchemaDirection.Event));
@@ -29,6 +31,8 @@ public class SchemaCompatibilityRulesTest
     [InlineData(SchemaChangeKind.RequiredPropertyAdded, ChangeCompatibility.Breaking)]
     [InlineData(SchemaChangeKind.PropertyBecameRequired, ChangeCompatibility.Breaking)]
     [InlineData(SchemaChangeKind.PropertyBecameOptional, ChangeCompatibility.Compatible)]
+    [InlineData(SchemaChangeKind.UnionVariantRemoved, ChangeCompatibility.Breaking)]      // callers still sending the removed variant are rejected
+    [InlineData(SchemaChangeKind.UnionVariantAdded, ChangeCompatibility.Compatible)]      // service accepting something new never rejects existing callers
     public void DefaultFor_Request_IsUnchanged(SchemaChangeKind kind, ChangeCompatibility expected)
     {
         Assert.Equal(expected, SchemaCompatibilityRules.DefaultFor(kind, SchemaDirection.Request));

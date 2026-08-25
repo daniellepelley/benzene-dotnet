@@ -104,6 +104,24 @@ public class SchemaCompatibilityRules
                     ? ChangeCompatibility.Warning      // client may rely on the field always being present
                     : ChangeCompatibility.Compatible;
 
+            case SchemaChangeKind.UnionVariantRemoved:
+                // Narrowing a oneOf/anyOf/allOf breaks whoever still sends the removed variant (request)
+                // but is safe for whoever only ever receives variants that still exist (response/event) -
+                // the mirror image of RequiredPropertyAdded, not of PropertyRemoved: a request schema
+                // that no longer accepts a variant rejects a caller who sends it; a response/event schema
+                // that no longer sends a variant never surprises a consumer who was reading it.
+                return direction == SchemaDirection.Request
+                    ? ChangeCompatibility.Breaking     // callers still sending the removed variant are rejected
+                    : ChangeCompatibility.Compatible;  // consumers simply never see the removed variant again
+
+            case SchemaChangeKind.UnionVariantAdded:
+                // The mirror image of UnionVariantRemoved: a request schema accepting a new variant never
+                // rejects existing callers; a response/event schema sending a new variant can hand an
+                // existing consumer a shape it has no case for.
+                return direction == SchemaDirection.Request
+                    ? ChangeCompatibility.Compatible   // service now accepts something it previously rejected
+                    : ChangeCompatibility.Breaking;    // consumers may meet a variant they don't know how to handle
+
             default:
                 return ChangeCompatibility.Warning;
         }

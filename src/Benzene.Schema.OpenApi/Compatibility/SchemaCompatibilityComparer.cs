@@ -174,7 +174,221 @@ public class SchemaCompatibilityComparer
             CompareSchemas(Resolve(baseline.Items, baselineDoc), Resolve(current.Items, currentDoc),
                 baselineDoc, currentDoc, direction, topic, $"{path}[]", changes, depth + 1);
         }
+        else if (baseline.Type == "array" && (baseline.Items != null || current.Items != null))
+        {
+            // One side has an item schema and the other doesn't - not "nothing to compare", a type
+            // change: the array's element contract appeared or disappeared entirely.
+            var description = baseline.Items != null
+                ? "Array item schema was removed"
+                : "Array item schema was added";
+            changes.Add(Change(SchemaChangeKind.TypeChanged, direction, topic, $"{path}[]", description));
+        }
+
+        CompareUnionMembers(baseline, current, baselineDoc, currentDoc, direction, topic, path, changes, depth,
+            "oneOf", baseline.OneOf, current.OneOf);
+        CompareUnionMembers(baseline, current, baselineDoc, currentDoc, direction, topic, path, changes, depth,
+            "anyOf", baseline.AnyOf, current.AnyOf);
+        CompareAllOfMembers(baseline, current, baselineDoc, currentDoc, direction, topic, path, changes, depth,
+            baseline.AllOf, current.AllOf);
     }
+
+    /// <summary>
+    /// Walks a <c>oneOf</c>/<c>anyOf</c> member list pairwise between baseline and current. Matching
+    /// priority: (1) discriminator mapping value, when the owning schema declares one; (2) <c>$ref</c>
+    /// target name; (3) position. Unmatched baseline members are <see cref="SchemaChangeKind.UnionVariantRemoved"/>,
+    /// unmatched current members are <see cref="SchemaChangeKind.UnionVariantAdded"/>, and a matched pair
+    /// that differs recurses and is reported as/within <see cref="SchemaChangeKind.UnionVariantChanged"/>.
+    /// </summary>
+    private void CompareUnionMembers(OpenApiSchema baseline, OpenApiSchema current, EventServiceDocument baselineDoc,
+        EventServiceDocument currentDoc, SchemaDirection direction, string topic, string path,
+        List<SchemaChange> changes, int depth, string label, IList<OpenApiSchema>? baselineMembers,
+        IList<OpenApiSchema>? currentMembers)
+    {
+        if ((baselineMembers == null || baselineMembers.Count == 0) && (currentMembers == null || currentMembers.Count == 0))
+        {
+            return;
+        }
+
+        var baselineByKey = IndexVariants(baseline, baselineMembers);
+        var currentByKey = IndexVariants(current, currentMembers);
+
+        foreach (var entry in baselineByKey)
+        {
+            if (!currentByKey.ContainsKey(entry.Key))
+            {
+                var name = VariantName(entry.Value);
+                changes.Add(Change(SchemaChangeKind.UnionVariantRemoved, direction, topic, $"{path}.{label}[{name}]",
+                    $"Union variant '{name}' was removed from {label}"));
+            }
+        }
+
+        foreach (var entry in currentByKey)
+        {
+            if (!baselineByKey.ContainsKey(entry.Key))
+            {
+                var name = VariantName(entry.Value);
+                changes.Add(Change(SchemaChangeKind.UnionVariantAdded, direction, topic, $"{path}.{label}[{name}]",
+                    $"Union variant '{name}' was added to {label}"));
+            }
+        }
+
+        foreach (var entry in baselineByKey)
+        {
+            if (!currentByKey.TryGetValue(entry.Key, out var currentVariant))
+            {
+                continue;
+            }
+
+            var name = VariantName(entry.Value);
+            var variantPath = $"{path}.{label}[{name}]";
+            RecurseIntoMatchedVariant(entry.Value, currentVariant, baselineDoc, currentDoc, direction, topic,
+                variantPath, changes, depth, name);
+        }
+    }
+
+    /// <summary>
+    /// Walks <c>allOf</c> pairwise: <c>$ref</c> members match by target name, inline members match by
+    /// their position among the inline members. Added/removed/changed members are reported the same way
+    /// as <see cref="CompareUnionMembers"/>.
+    /// </summary>
+    private void CompareAllOfMembers(OpenApiSchema baseline, OpenApiSchema current, EventServiceDocument baselineDoc,
+        EventServiceDocument currentDoc, SchemaDirection direction, string topic, string path,
+        List<SchemaChange> changes, int depth, IList<OpenApiSchema>? baselineMembers, IList<OpenApiSchema>? currentMembers)
+    {
+        if ((baselineMembers == null || baselineMembers.Count == 0) && (currentMembers == null || currentMembers.Count == 0))
+        {
+            return;
+        }
+
+        var baselineList = baselineMembers ?? new List<OpenApiSchema>();
+        var currentList = currentMembers ?? new List<OpenApiSchema>();
+
+        var baselineRefs = baselineList.Where(m => !string.IsNullOrEmpty(m.Reference?.Id))
+            .ToDictionary(m => m.Reference!.Id, m => m);
+        var currentRefs = currentList.Where(m => !string.IsNullOrEmpty(m.Reference?.Id))
+            .ToDictionary(m => m.Reference!.Id, m => m);
+        var baselineInline = baselineList.Where(m => string.IsNullOrEmpty(m.Reference?.Id)).ToList();
+        var currentInline = currentList.Where(m => string.IsNullOrEmpty(m.Reference?.Id)).ToList();
+
+        foreach (var entry in baselineRefs)
+        {
+            if (!currentRefs.ContainsKey(entry.Key))
+            {
+                changes.Add(Change(SchemaChangeKind.UnionVariantRemoved, direction, topic, $"{path}.allOf[{entry.Key}]",
+                    $"allOf member '{entry.Key}' was removed"));
+            }
+        }
+
+        foreach (var entry in currentRefs)
+        {
+            if (!baselineRefs.ContainsKey(entry.Key))
+            {
+                changes.Add(Change(SchemaChangeKind.UnionVariantAdded, direction, topic, $"{path}.allOf[{entry.Key}]",
+                    $"allOf member '{entry.Key}' was added"));
+            }
+        }
+
+        foreach (var entry in baselineRefs)
+        {
+            if (currentRefs.TryGetValue(entry.Key, out var currentMember))
+            {
+                RecurseIntoMatchedVariant(entry.Value, currentMember, baselineDoc, currentDoc, direction, topic,
+                    $"{path}.allOf[{entry.Key}]", changes, depth, entry.Key);
+            }
+        }
+
+        for (var i = 0; i < Math.Min(baselineInline.Count, currentInline.Count); i++)
+        {
+            RecurseIntoMatchedVariant(baselineInline[i], currentInline[i], baselineDoc, currentDoc, direction, topic,
+                $"{path}.allOf[{i}]", changes, depth, $"#{i}");
+        }
+
+        for (var i = currentInline.Count; i < baselineInline.Count; i++)
+        {
+            changes.Add(Change(SchemaChangeKind.UnionVariantRemoved, direction, topic, $"{path}.allOf[{i}]",
+                $"allOf member '#{i}' was removed"));
+        }
+
+        for (var i = baselineInline.Count; i < currentInline.Count; i++)
+        {
+            changes.Add(Change(SchemaChangeKind.UnionVariantAdded, direction, topic, $"{path}.allOf[{i}]",
+                $"allOf member '#{i}' was added"));
+        }
+    }
+
+    /// <summary>
+    /// Recurses into a matched pair using the same top-level comparison logic; if that recursion finds
+    /// any difference, a single <see cref="SchemaChangeKind.UnionVariantChanged"/> entry is inserted
+    /// immediately before the differences it found, so the report reads as "variant X changed" followed
+    /// by (within) exactly what changed.
+    /// </summary>
+    private void RecurseIntoMatchedVariant(OpenApiSchema baselineVariant, OpenApiSchema currentVariant,
+        EventServiceDocument baselineDoc, EventServiceDocument currentDoc, SchemaDirection direction, string topic,
+        string variantPath, List<SchemaChange> changes, int depth, string name)
+    {
+        var before = changes.Count;
+        CompareSchemas(Resolve(baselineVariant, baselineDoc), Resolve(currentVariant, currentDoc),
+            baselineDoc, currentDoc, direction, topic, variantPath, changes, depth + 1);
+
+        if (changes.Count > before)
+        {
+            changes.Insert(before, Change(SchemaChangeKind.UnionVariantChanged, direction, topic, variantPath,
+                $"Variant '{name}' changed"));
+        }
+    }
+
+    /// <summary>
+    /// Indexes a <c>oneOf</c>/<c>anyOf</c> member list by its matching key: the discriminator mapping
+    /// value that points at this member when <paramref name="owner"/> declares a discriminator, else its
+    /// <c>$ref</c> target name, else its position.
+    /// </summary>
+    private static Dictionary<string, OpenApiSchema> IndexVariants(OpenApiSchema owner, IList<OpenApiSchema>? members)
+    {
+        var result = new Dictionary<string, OpenApiSchema>();
+        if (members == null)
+        {
+            return result;
+        }
+
+        var mapping = owner.Discriminator?.Mapping;
+
+        for (var i = 0; i < members.Count; i++)
+        {
+            var member = members[i];
+            var key = VariantKey(mapping, member, i);
+            result[key] = member;
+        }
+
+        return result;
+    }
+
+    private static string VariantKey(IDictionary<string, string>? mapping, OpenApiSchema member, int index)
+    {
+        var refId = member.Reference?.Id;
+
+        if (mapping is { Count: > 0 } && !string.IsNullOrEmpty(refId))
+        {
+            foreach (var entry in mapping)
+            {
+                if (RefTargetName(entry.Value) == refId)
+                {
+                    return $"disc:{entry.Key}";
+                }
+            }
+        }
+
+        return !string.IsNullOrEmpty(refId) ? $"ref:{refId}" : $"idx:{index}";
+    }
+
+    /// <summary>The schema name a discriminator mapping value points at, e.g. <c>"Dog"</c> from either
+    /// a bare name or a full <c>"#/components/schemas/Dog"</c> pointer.</summary>
+    private static string RefTargetName(string mappingValue)
+    {
+        var slash = mappingValue.LastIndexOf('/');
+        return slash >= 0 ? mappingValue[(slash + 1)..] : mappingValue;
+    }
+
+    private static string VariantName(OpenApiSchema variant) => variant.Reference?.Id ?? Describe(variant);
 
     /// <summary>Follows a <c>$ref</c> into the document's components, or returns the schema unchanged.</summary>
     private static OpenApiSchema? Resolve(OpenApiSchema? schema, EventServiceDocument doc)
