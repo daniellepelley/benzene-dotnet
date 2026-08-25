@@ -112,17 +112,29 @@ public class OutboundRabbitMqContextConverterTest
     public async Task SendAsync_ThroughTheExplicitInnerPipelineOverload_PublishesToTheGivenExchange()
     {
         // The rung below the channel shorthand: the caller configures the inner publish pipeline, so
-        // publish flags (mandatory/persistent) and extra middleware are available.
-        var mockChannel = PublishingChannel();
+        // publish flags (mandatory/persistent) and extra middleware are available. mandatory: true
+        // requires a publisher-confirms-enabled channel (see RabbitMqMandatoryPublishCoordinator) and
+        // waits for the broker's ack/return, so the mock has to supply both.
+        var mockChannel = new Mock<IChannel>();
+        mockChannel.Setup(x => x.GetNextPublishSequenceNumberAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1UL);
+        mockChannel
+            .Setup(x => x.BasicPublishAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(),
+                It.IsAny<BasicProperties>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()))
+            .Callback(() => mockChannel.Raise(x => x.BasicAcksAsync += null, mockChannel.Object,
+                new RabbitMQ.Client.Events.BasicAckEventArgs(1UL, false)))
+            .Returns(ValueTask.CompletedTask);
+
         var sender = SenderFor(routing => routing
             .Route(Defaults.Topic, pipeline => pipeline.UseRabbitMq("some-exchange",
                 builder => builder.UseRabbitMqClient(mockChannel.Object, mandatory: true))));
 
-        await sender.SendAsync<ExampleRequestPayload, Void>(
+        var result = await sender.SendAsync<ExampleRequestPayload, Void>(
             Defaults.Topic, new ExampleRequestPayload { Id = 42, Name = "foo" });
 
         mockChannel.Verify(x => x.BasicPublishAsync(
             "some-exchange", Defaults.Topic, true,
             It.IsAny<BasicProperties>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()));
+        Assert.Equal(BenzeneResultStatus.Accepted, result.Status);
     }
 }

@@ -262,6 +262,8 @@ services.UsingBenzene(x => x.AddOutboundRouting(routing => routing
 
 The rung below is `.UseRabbitMq(exchange, configure, topicHeaderKey)`, which lets you build the inner publish pipeline yourself (e.g. `builder => builder.UseRabbitMqClient(channel, mandatory: true, persistent: false)`); below that is `.Convert(new OutboundRabbitMqContextConverter(serializer, exchange, topicHeaderKey), configure)`.
 
+`mandatory: true` is a real, awaited guarantee, not just a broker flag passed through: an unroutable message is returned by the broker, correlated back to its publish (by a `MessageId` the middleware stamps if one isn't already set), and resolved as a **failed** send - not the `Accepted` a routed publish gets. This requires `channel` to have publisher confirmations enabled (`connection.CreateChannelAsync(new CreateChannelOptions(publisherConfirmationsEnabled: true, publisherConfirmationTrackingEnabled: false))`); wiring throws immediately if it doesn't, because a returned message can only be reliably correlated back to a specific publish when confirms sequence the channel's publishes. See `Benzene.RabbitMq`'s `RabbitMqMandatoryPublishCoordinator` for the mechanics.
+
 ### HTTP (BenzeneMessage envelope)
 
 Package: `Benzene.Clients.Http`.

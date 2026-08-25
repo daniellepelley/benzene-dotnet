@@ -97,10 +97,33 @@ message, handlers must be idempotent - see [Idempotency](../../docs/cookbooks/id
   broker restart; pass `.UseRabbitMqClient(channel, persistent: false)` for transient delivery. This
   is a behavioral change from earlier versions, which always published transient.
 - Publish is fire-and-forget by default (maps a completed publish to `Accepted`, a thrown publish to
-  `ServiceUnavailable`). Publisher confirms (at-least-once) are opt-in at the **channel** level: build
-  the channel with `CreateChannelOptions { PublisherConfirmationsEnabled = true }` and RabbitMQ.Client
-  v7's `BasicPublishAsync` awaits the broker confirm before completing, so a broker-side rejection
-  surfaces as a thrown publish → `ServiceUnavailable`. The middleware itself needs no change for this.
+  `ServiceUnavailable`). `BasicPublishAsync` returns as soon as the frame is written to the socket -
+  **`CreateChannelOptions.PublisherConfirmationsEnabled = true` alone does not make it await the
+  broker's ack** (verified against the RabbitMQ.Client 7.0.0 source: that only happens when
+  `PublisherConfirmationTrackingEnabled` is *also* set, which is a separate, unrelated feature this
+  package does not use - see the `mandatory: true` bullet below for how outcomes are actually awaited).
+- `mandatory: true` (`RabbitMqClientMiddleware`/`RabbitMqBenzeneMessageClient`/`.UseRabbitMqClient`) is
+  a real, awaited guarantee (WP-8, task board #24 - it used to be documented but not implemented: the
+  middleware set `Published = true` unconditionally and never subscribed to `BasicReturnAsync`).
+  `RabbitMqMandatoryPublishCoordinator` - one instance per `IChannel`, looked up via a
+  `ConditionalWeakTable` so the channel-scoped `BasicReturnAsync`/`BasicAcksAsync`/`BasicNacksAsync`
+  events are subscribed exactly once no matter how many mandatory sends (and `RabbitMqClientMiddleware`
+  instances - one is constructed fresh per publish) run against that channel - stamps a `MessageId` if
+  the caller didn't set one (AMQP's `Basic.Return` carries the message's properties back but no
+  delivery tag, so `MessageId` is the only correlation key available), publishes with a per-channel
+  gate held just long enough to pair `GetNextPublishSequenceNumberAsync()` with the actual
+  `BasicPublishAsync` call atomically (RabbitMQ.Client does not hand a publish its own assigned
+  delivery tag back, so this pairing is the only race-free way to know it), and resolves the outcome
+  from whichever of a `Basic.Return` (unroutable → failed) or `Basic.Ack`/`Basic.Nack` (routed/rejected)
+  fires first for that tag. **Requires `channel` to have publisher confirmations enabled** - wiring
+  throws immediately (not on first publish) if `GetNextPublishSequenceNumberAsync()` shows it doesn't
+  (the only public-API-observable proxy for that setting in RabbitMQ.Client 7.0.0). A channel that
+  closes with mandatory publishes still outstanding faults their callers rather than hanging them.
+  Known boundary: correlation is only as good as the "nothing else races the gate" assumption holds -
+  a channel shared with publishing that bypasses this middleware entirely (not `RabbitMqClientMiddleware`
+  publishing without `mandatory`, which shares the same coordinator once one exists for the channel) can
+  in principle interleave inside that narrow gate window. Dedicate the channel to Benzene's outbound
+  middleware for `mandatory: true` traffic to avoid it.
 
 ## Configurable topic header key
 The topic header key defaults to `RabbitMqConstants.DefaultTopicHeader` (`"topic"`) but is **not

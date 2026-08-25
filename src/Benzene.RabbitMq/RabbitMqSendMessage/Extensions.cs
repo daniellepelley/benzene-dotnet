@@ -15,12 +15,30 @@ public static class Extensions
     /// <summary>Adds the RabbitMQ publish middleware to an outbound pipeline.</summary>
     /// <param name="app">The outbound pipeline builder.</param>
     /// <param name="channel">The RabbitMQ channel to publish on.</param>
-    /// <param name="mandatory">Whether an unroutable message is returned rather than dropped.</param>
+    /// <param name="mandatory">
+    /// Whether an unroutable message is returned by the broker (rather than silently dropped) and made to
+    /// fail the publish - see <see cref="RabbitMqClientMiddleware"/>. Requires <paramref name="channel"/>
+    /// to have publisher confirmations enabled; this call throws immediately (wiring time, not first
+    /// publish) if it doesn't.
+    /// </param>
     /// <param name="persistent">Whether the message is published persistently (delivery mode 2). Defaults to <c>true</c>.</param>
     /// <returns>The same builder, for chaining.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="mandatory"/> is <c>true</c> and <paramref name="channel"/> does not have publisher
+    /// confirmations enabled.
+    /// </exception>
     public static IMiddlewarePipelineBuilder<RabbitMqSendMessageContext> UseRabbitMqClient(
         this IMiddlewarePipelineBuilder<RabbitMqSendMessageContext> app, IChannel channel, bool mandatory = false, bool persistent = true)
     {
+        if (mandatory)
+        {
+            // Fail fast at wiring time (P6 - no inert options), not lazily on the pipeline's first
+            // publish (middleware.Use factories only run when the pipeline is actually driven) - see
+            // RabbitMqMandatoryPublishCoordinator for why a publisher-confirms-enabled channel is
+            // required and how that's verified.
+            RabbitMqMandatoryPublishCoordinator.GetOrCreate(channel);
+        }
+
         return app.Use(_ => new RabbitMqClientMiddleware(channel, mandatory, persistent));
     }
 
