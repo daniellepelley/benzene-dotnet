@@ -117,6 +117,29 @@ eviction, Saga per-run state".
   runs).** Outcome now lives in a run-scoped `SagaStepOutcome` created fresh per run; a built `Saga` is
   documented immutable and concurrency-safe. See WP-7(e).
 
+### Tracked findings round 5–6, WP-5 — Azure: source-generator diagnostics; Service Bus settle ordering (done)
+Decisions, rationale, and the explicitly rejected alternative are ruled in
+[`bug-fix-designs-2026-08.md`](bug-fix-designs-2026-08.md) §"WP-5 — Azure: source-generator
+diagnostics; Service Bus settle ordering".
+- **[RESOLVED] #9 — `AzureFunctionTriggerGenerator` let two triggers of different transports collide
+  on the same `[Function(name)]` name literal, silently emitting ambiguous/invalid output.** Every
+  transport's triggers now merge into one array before emission, so the check is cross-transport (not
+  per-transport as it was); a collision reports `BENZ0001` (error) at each colliding declaration and
+  emits none of them. The Function name is deliberately **not** auto-renamed the way the generated
+  class name already is — rejected alternative, see the ruling — because it's externally meaningful
+  (bindings, host.json, scale rules, portal identity), so silently renaming it would just move the
+  failure to deployment. See WP-5a.
+- **[RESOLVED] #11 — the generator had no diagnostics path at all**, so a reader that hit a problem
+  could only silently skip the declaration (see #9 above and CosmosDb below). Added a
+  `DiagnosticDescriptors` table (`BENZ0001`, `BENZ0002`) as the one place future generator complaints
+  join, and a `TriggerInfo.ForDiagnostic` path that lets a transport reader hand a diagnostic through
+  the same incremental pipeline that carries real triggers to `Execute`, which reports it. See WP-5a.
+- **[RESOLVED] #10 — `ServiceBusApplication.OnPipelineSucceededAsync` set `state.Acked = true` before
+  calling `CompleteMessageAsync`/`AbandonMessageAsync`, not after.** If the settle call itself threw,
+  the base class's exception-recovery fallback-abandon (gated on `!state.Acked`) saw `Acked` already
+  true and skipped — exactly when it was needed. `Acked` is now set only once the settle call returns
+  successfully. See WP-5b.
+
 ---
 
 ## Open — maintainer decisions (the real remaining backlog)
