@@ -22,8 +22,7 @@ namespace Benzene.Mesh.Wire;
 /// "object" with "additionalProperties"</item>
 /// <item>other classes/structs → "object" with "properties" from public readable properties,
 /// honoring <see cref="JsonPropertyNameAttribute"/>/<see cref="JsonIgnoreAttribute"/> and camelCase
-/// naming. A property is listed in "required" (declaration order - determinism feeds the
-/// descriptor hash) unless it is nullable-annotated (NRT for reference types,
+/// naming. A property is listed in "required" unless it is nullable-annotated (NRT for reference types,
 /// Nullable&lt;T&gt; for value types) or marked ignore-when-null/default - the CLR reading of "the
 /// marshaler may omit it"</item>
 /// <item>recursion is cut at the cycle with {} - schemas stay self-contained, no $ref</item>
@@ -31,7 +30,9 @@ namespace Benzene.Mesh.Wire;
 /// </list>
 ///
 /// Schema "properties" objects emit their keys in lexicographic order (the spec's canonical order
-/// for maps, matching the reference implementation); "required" keeps declaration order.
+/// for maps, matching the reference implementation); "required" is sorted the same way
+/// (<see cref="StringComparer.Ordinal"/>) - reflection order is unspecified across runtimes, so
+/// without this the descriptor hash would not be reproducible.
 /// </summary>
 public static class MeshSchemaGenerator
 {
@@ -162,6 +163,7 @@ public static class MeshSchemaGenerator
         var schema = new JsonObject { ["type"] = "object", ["properties"] = propertiesNode };
         if (required.Count > 0)
         {
+            required.Sort(StringComparer.Ordinal);
             schema["required"] = new JsonArray(required.Select(name => (JsonNode)name).ToArray());
         }
         return schema;

@@ -46,10 +46,24 @@ public class MeshTimeRangeTest
     [InlineData(null)]                       // no range at all
     [InlineData("")]                         // no lower bound
     [InlineData("garbage")]                  // unparseable lower bound
+    [InlineData("now-100000000d")]           // count would overflow TimeSpan - unrepresentable, not unparseable
     public void Resolve_NoLowerBound_IsUnfiltered(string? from)
     {
         var range = from == null ? null : new MeshTimeRange { From = from };
         Assert.Null(MeshTimeRangeResolver.Resolve(range, Now));
+    }
+
+    [Fact]
+    public void Resolve_OverflowingDurationCount_DegradesToAbsentBound_NeverThrows()
+    {
+        // Regression for #22 (P5): a count that would overflow TimeSpan (e.g. 1e8 days) must be treated
+        // exactly like an unparseable bound - absent, never thrown - reachable through mesh:query:* (here,
+        // via the correlation/fleet/service/topic read seam's shared Resolve call).
+        var exception = Record.Exception(() =>
+            MeshTimeRangeResolver.Resolve(new MeshTimeRange { From = "now-100000000d" }, Now));
+
+        Assert.Null(exception);
+        Assert.Null(MeshTimeRangeResolver.Resolve(new MeshTimeRange { From = "now-100000000d" }, Now));
     }
 
     private static MeshTraceEvent Event(string traceId, DateTimeOffset startedAt, string? correlationId = null) =>

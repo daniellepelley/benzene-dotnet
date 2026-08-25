@@ -14,7 +14,9 @@ namespace Benzene.Mesh.Collector;
 /// and a unit - <c>s</c> seconds, <c>m</c> minutes, <c>h</c> hours, <c>d</c> days, <c>w</c> weeks, <c>M</c>
 /// months (~30d), <c>y</c> years (~365d). A trailing <c>/unit</c> rounding suffix (e.g. <c>now-1d/d</c>) is
 /// accepted and ignored (the rounding is a UI nicety the read models don't need). Anything else is parsed as
-/// an ISO-8601 absolute instant; an unparseable bound is treated as absent.
+/// an ISO-8601 absolute instant; an unparseable OR unrepresentable bound (e.g. a relative count that
+/// would overflow <see cref="TimeSpan"/>, such as <c>now-100000000d</c>) is treated as absent - P5,
+/// see <c>Benzene.Mesh.Collector/CLAUDE.md</c>.
 /// </remarks>
 public static class MeshTimeRangeResolver
 {
@@ -103,17 +105,27 @@ public static class MeshTimeRangeResolver
             return null;
         }
 
-        // 'm' is minutes, 'M' is months - the case distinction is deliberate (Grafana's grammar).
-        return unit switch
+        try
         {
-            's' => TimeSpan.FromSeconds(n),
-            'm' => TimeSpan.FromMinutes(n),
-            'h' => TimeSpan.FromHours(n),
-            'd' => TimeSpan.FromDays(n),
-            'w' => TimeSpan.FromDays(n * 7),
-            'M' => TimeSpan.FromDays(n * 30),
-            'y' => TimeSpan.FromDays(n * 365),
-            _ => null
-        };
+            // 'm' is minutes, 'M' is months - the case distinction is deliberate (Grafana's grammar).
+            return unit switch
+            {
+                's' => TimeSpan.FromSeconds(n),
+                'm' => TimeSpan.FromMinutes(n),
+                'h' => TimeSpan.FromHours(n),
+                'd' => TimeSpan.FromDays(n),
+                'w' => TimeSpan.FromDays(n * 7),
+                'M' => TimeSpan.FromDays(n * 30),
+                'y' => TimeSpan.FromDays(n * 365),
+                _ => (TimeSpan?)null
+            };
+        }
+        catch (OverflowException)
+        {
+            // A count that would overflow TimeSpan is treated exactly like an unparseable bound: absent,
+            // never thrown (P5 - query-side inputs degrade to absent, mirroring the ingest side's "no feed
+            // fails ingestion" rule; see Benzene.Mesh.Collector/CLAUDE.md).
+            return null;
+        }
     }
 }

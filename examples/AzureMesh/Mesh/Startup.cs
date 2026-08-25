@@ -115,6 +115,13 @@ public class Startup : BenzeneStartUp
             .UseW3CTraceContext()
             .UseBenzeneEnrichment()
             .UseBenzeneMetrics()
+            // This example has no login gate (see README's Security posture) - unlike AwsMesh,
+            // UseMeshRefreshGuard is the ONLY thing standing in front of POST /mesh/refresh: a required
+            // X-Benzene-Refresh header (CSRF - a cross-site form can't set one) plus a manifest-age
+            // throttle. Zero new infra (Benzene.Mesh.Artifacts is already referenced for UseMeshArtifacts
+            // below, and the throttle reads the manifest.json the aggregator already writes) - same
+            // package, same wiring as AwsMesh/Mesh/Startup.cs.
+            .UseMeshRefreshGuard(BuildRefreshGuardOptions())
             .UseMeshUi("/mesh-ui", "manifest.json")
             // The mesh-hosted per-service Spec UI (mesh-ui's "benzene:spec" link). Renders each service's spec
             // from the same-origin services/{name}.json snapshot, so a service only serves JSON.
@@ -124,5 +131,34 @@ public class Startup : BenzeneStartUp
             // any origin, but scoping to Studio's origin keeps the example tight.
             .UseMeshArtifacts(new CorsSettings { AllowedDomains = new[] { "https://studio.asyncapi.com" } })
             .UseMessageHandlers(typeof(Startup).Assembly));
+    }
+
+    /// <summary>
+    /// Builds the refresh endpoint's guard config. Only the throttle window is configurable (via
+    /// <c>MESH_REFRESH_MIN_INTERVAL_SECONDS</c>); the path and the <c>X-Benzene-Refresh</c> header name
+    /// are fixed contracts shared with the mesh UI, so they stay as the guard's own defaults. Mirrors
+    /// <c>examples/AwsMesh/Mesh/Startup.cs</c>'s <c>BuildRefreshGuardOptions</c>. Unlike the OIDC values
+    /// AwsMesh also configures, this one does NOT throw when unset - a missing throttle window is not a
+    /// security hole (the guard's own 30s default applies).
+    /// </summary>
+    private static MeshRefreshGuardOptions BuildRefreshGuardOptions()
+    {
+        // MeshRefreshGuardOptions.Topic defaults to MeshAggregatorTopics.Aggregate
+        // ("benzene:mesh:aggregate") - AwsMesh's MeshAggregateHandler's topic, but NOT this example's:
+        // MeshRefreshHandler here (like its K8sMesh/GoogleCloudMesh/AzureFunctionsMesh siblings) is
+        // "mesh:refresh". The Path match alone already guards the endpoint, but a wrong Topic would
+        // leave the guard's second, route-alias-proof check inertly matching a topic nothing here ever
+        // uses - so it's corrected explicitly rather than left at a default that doesn't apply.
+        var options = new MeshRefreshGuardOptions { Topic = "mesh:refresh" };
+
+        // Parse leniently but reject nonsense: a negative value would disable the throttle by accident,
+        // so only a non-negative parse wins. 0 is honoured as an explicit "throttle off" escape hatch.
+        if (double.TryParse(Environment.GetEnvironmentVariable("MESH_REFRESH_MIN_INTERVAL_SECONDS"),
+                out var seconds) && seconds >= 0)
+        {
+            options.MinimumInterval = TimeSpan.FromSeconds(seconds);
+        }
+
+        return options;
     }
 }

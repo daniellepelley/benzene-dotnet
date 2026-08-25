@@ -19,9 +19,14 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Moq" Version="4.18.4" />
+    <!-- ASP.NET Core TestServer for AzureMeshRefreshEndpointTest (#21) - the ASP.NET Core-hosted
+         counterpart of AwsMeshRefreshEndpointTest's Lambda test host, same pattern GrpcHostingTest
+         uses (Microsoft.AspNetCore.Mvc.Testing pulls in Microsoft.AspNetCore.TestHost). -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="6.0.14" />
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\Benzene.AspNet.Core\Benzene.AspNet.Core.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Mesh.Collector\Benzene.Mesh.Collector.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Mesh.Contracts\Benzene.Mesh.Contracts.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Mesh.Aggregator\Benzene.Mesh.Aggregator.csproj" />
