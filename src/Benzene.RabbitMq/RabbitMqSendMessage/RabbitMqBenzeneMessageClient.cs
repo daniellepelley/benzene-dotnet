@@ -38,8 +38,16 @@ public class RabbitMqBenzeneMessageClient : IBenzeneMessageClient
     /// <param name="logger">Logs a publish failure.</param>
     /// <param name="serviceResolver">The resolver the publish pipeline runs in.</param>
     /// <param name="exchange">The exchange to publish to (empty string for the default exchange).</param>
-    /// <param name="mandatory">Whether an unroutable message is returned rather than dropped.</param>
+    /// <param name="mandatory">
+    /// Whether an unroutable message is returned by the broker and made to fail the publish - see
+    /// <see cref="RabbitMqClientMiddleware"/>. Requires <paramref name="channel"/> to have publisher
+    /// confirmations enabled; the constructor throws immediately if it doesn't.
+    /// </param>
     /// <param name="topicHeaderKey">The message-property header the topic is written to (defaults to <see cref="RabbitMqConstants.DefaultTopicHeader"/>).</param>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="mandatory"/> is <c>true</c> and <paramref name="channel"/> does not have publisher
+    /// confirmations enabled.
+    /// </exception>
     public RabbitMqBenzeneMessageClient(IChannel channel, ILogger<RabbitMqBenzeneMessageClient> logger,
         IServiceResolver serviceResolver, string exchange = "", bool mandatory = false,
         string topicHeaderKey = RabbitMqConstants.DefaultTopicHeader)

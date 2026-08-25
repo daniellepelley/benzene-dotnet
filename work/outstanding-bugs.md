@@ -117,6 +117,27 @@ eviction, Saga per-run state".
   runs).** Outcome now lives in a run-scoped `SagaStepOutcome` created fresh per run; a built `Saga` is
   documented immutable and concurrency-safe. See WP-7(e).
 
+### Tracked findings round 5–6, WP-8 — RabbitMQ `mandatory` made real (done)
+Ruled in [`bug-fix-designs-2026-08.md`](bug-fix-designs-2026-08.md) §"WP-8 — RabbitMQ `mandatory` made
+real".
+- **[RESOLVED] #24 — `RabbitMqClientMiddleware`'s `mandatory: true` was documented ("an unroutable
+  message is returned by the broker rather than silently dropped") but never implemented: the
+  middleware called `BasicPublishAsync(..., mandatory, ...)` and unconditionally set
+  `context.Published = true` right after, never subscribing to `IChannel.BasicReturnAsync` - an
+  unroutable message with `mandatory: true` still silently reported `Accepted`, identical to
+  `mandatory: false`.** Implemented for real (P6 - no inert options), not removed: new
+  `RabbitMqMandatoryPublishCoordinator` (one instance per `IChannel`, shared across every publish -
+  RabbitMQ.Client's `BasicReturnAsync`/`BasicAcksAsync`/`BasicNacksAsync` are channel-scoped events, and
+  `RabbitMqClientMiddleware` is constructed fresh per publish, so subscribing from the middleware itself
+  would pile on a handler per message) stamps a `MessageId` if the caller didn't set one, correlates a
+  `Basic.Return` back to its publish by that `MessageId`, and correlates `Basic.Ack`/`Basic.Nack` by
+  delivery tag (captured race-free by pairing `GetNextPublishSequenceNumberAsync()` with the publish
+  call under a per-channel gate - RabbitMQ.Client 7.0.0 does not hand a publish its own assigned tag
+  back). A returned message now resolves `Published = false` (a failed send), not the old unconditional
+  `true`. Wiring requires (and fails fast on, at setup - not first publish) a channel with publisher
+  confirmations enabled, verified via `GetNextPublishSequenceNumberAsync()` (the only public-API-visible
+  proxy for that setting in this client version). See WP-8.
+
 ---
 
 ## Open — maintainer decisions (the real remaining backlog)

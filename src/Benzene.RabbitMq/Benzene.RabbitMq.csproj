@@ -21,4 +21,12 @@
     <ProjectReference Include="..\Benzene.HealthChecks.Core\Benzene.HealthChecks.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- So RabbitMqMandatoryPublishCoordinatorTest can exercise the internal correlation tracker
+         directly (per-channel identity, tag/MessageId correlation, multiple-ack, shutdown fault-out)
+         instead of only indirectly through the public RabbitMqClientMiddleware/RabbitMqBenzeneMessageClient
+         surface. -->
+    <InternalsVisibleTo Include="Benzene.Test" />
+  </ItemGroup>
+
 </Project>

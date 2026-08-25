@@ -215,7 +215,27 @@ routing key must equal the target queue name, so publishing topic `"orders"` lan
 for topic/direct/fanout exchanges, pass the exchange name and bind your queues to it out-of-band.
 
 Publishing is fire-and-forget by default — a completed publish maps to `accepted`, a thrown publish to
-`service-unavailable`. (Publisher confirms for at-least-once publish are a planned opt-in.)
+`service-unavailable`. `BasicPublishAsync` returns as soon as the frame is written to the socket; opening
+the channel with `CreateChannelOptions.PublisherConfirmationsEnabled = true` alone does not change that.
+
+Pass `mandatory: true` (`RabbitMqBenzeneMessageClient`'s constructor, or `.UseRabbitMqClient(channel,
+mandatory: true)` on the pipeline-builder path) for a real, awaited guarantee that an unroutable message
+(no queue bound for its routing key) fails the send instead of vanishing silently:
+
+```csharp
+await using var channel = await connection.CreateChannelAsync(
+    new CreateChannelOptions(publisherConfirmationsEnabled: true, publisherConfirmationTrackingEnabled: false));
+
+var client = new RabbitMqBenzeneMessageClient(channel,
+    NullLogger<RabbitMqBenzeneMessageClient>.Instance, serviceResolver, exchange: "", mandatory: true);
+```
+
+`channel` **must** have publisher confirmations enabled — construction throws immediately (not on the
+first send) if it doesn't, because a returned message can only be reliably correlated back to the
+publish that sent it when confirms sequence the channel's publishes. The message is stamped with a
+`MessageId` if it doesn't already have one (needed for that correlation), and the send resolves
+`unexpected-error` instead of `accepted` if the broker returns the message as unroutable (a broker-level
+rejection unrelated to routing still surfaces the usual way, as a thrown publish → `service-unavailable`).
 
 For the `OutboundRoutingBuilder` path (so call sites use `IBenzeneMessageSender.SendAsync`), the
 `.UseRabbitMq<T>(exchange, ...)` / `.UseRabbitMqClient(channel)` pipeline extensions are the conversion

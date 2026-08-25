@@ -94,6 +94,46 @@ public class RabbitMqWorkerLiveTest
         mockExampleService.Verify(x => x.Register(Defaults.Name), Times.AtLeastOnce);
     }
 
+    // WP-8 (task board #24): mandatory: true against a real broker. Covers both directions the unit
+    // tests (test/Benzene.Core.Test/RabbitMq/RabbitMqMandatoryPublishTest.cs) fake via a mocked
+    // IChannel - a real Basic.Return for an unroutable message, and a real Basic.Ack for a routed one.
+    [Fact]
+    public async Task SendMessageAsync_Mandatory_UnroutableMessage_DoesNotReportAccepted()
+    {
+        await using var connection = await ConnectRetryingAsync();
+        await using var channel = await connection.CreateChannelAsync(
+            new CreateChannelOptions(publisherConfirmationsEnabled: true, publisherConfirmationTrackingEnabled: false));
+
+        // A routing key with no queue bound to it on the default exchange - guaranteed unroutable.
+        var unroutableTopic = $"wp8-unroutable-{Guid.NewGuid():N}";
+
+        var client = new RabbitMqBenzeneMessageClient(channel,
+            NullLogger<RabbitMqBenzeneMessageClient>.Instance, new NullServiceResolver(), mandatory: true);
+
+        var result = await client.SendMessageAsync<object, object>(unroutableTopic, Defaults.MessageAsObject);
+
+        // The bug this WP fixes: this used to report Accepted unconditionally regardless of mandatory.
+        Assert.NotEqual(BenzeneResultStatus.Accepted, result.Status);
+    }
+
+    [Fact]
+    public async Task SendMessageAsync_Mandatory_RoutedMessage_ReturnsAccepted()
+    {
+        await using var connection = await ConnectRetryingAsync();
+        await using var channel = await connection.CreateChannelAsync(
+            new CreateChannelOptions(publisherConfirmationsEnabled: true, publisherConfirmationTrackingEnabled: false));
+
+        var queueName = $"wp8-routed-{Guid.NewGuid():N}";
+        await channel.QueueDeclareAsync(queueName, durable: false, exclusive: false, autoDelete: true);
+
+        var client = new RabbitMqBenzeneMessageClient(channel,
+            NullLogger<RabbitMqBenzeneMessageClient>.Instance, new NullServiceResolver(), mandatory: true);
+
+        var result = await client.SendMessageAsync<object, object>(queueName, Defaults.MessageAsObject);
+
+        Assert.Equal(BenzeneResultStatus.Accepted, result.Status);
+    }
+
     private static async Task<IConnection> ConnectRetryingAsync()
     {
         var factory = CreateConnectionFactory();
