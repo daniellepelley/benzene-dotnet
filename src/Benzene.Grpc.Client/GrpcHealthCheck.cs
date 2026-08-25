@@ -39,12 +39,14 @@ public class GrpcHealthCheck : IHealthCheck
     public string Type => "Grpc";
 
     /// <summary>Runs the check and reports the outcome.</summary>
-    public async Task<IHealthCheckResult> ExecuteAsync()
+    public async Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var dependencies = new[] { new HealthCheckDependency("Grpc", _channel.Target) };
         // ConnectAsync completes when the channel reaches Ready, or the token cancels — so an unreachable
-        // target surfaces as a timeout rather than hanging.
-        using var cts = new CancellationTokenSource(_timeout);
+        // target surfaces as a timeout rather than hanging. Linked with the caller's token so the
+        // processor's own timeout can also cancel the connect attempt.
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(_timeout);
 
         try
         {

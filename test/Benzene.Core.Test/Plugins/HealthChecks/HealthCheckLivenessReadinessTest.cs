@@ -13,6 +13,7 @@ using Benzene.Results;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
+using System.Threading;
 
 namespace Benzene.Test.Plugins.HealthChecks;
 
@@ -37,7 +38,7 @@ public class HealthCheckLivenessReadinessTest
     {
         var mock = new Mock<IHealthCheck>();
         mock.Setup(x => x.Type).Returns(type);
-        mock.Setup(x => x.ExecuteAsync())
+        mock.Setup(x => x.ExecuteAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(HealthCheckResult.CreateInstance(healthy, type, new Dictionary<string, object>()));
         return mock;
     }
@@ -52,8 +53,8 @@ public class HealthCheckLivenessReadinessTest
         var response = await app.HandleAsync(
             new BenzeneMessageRequest { Topic = HealthCheckConstants.DefaultLivenessTopic }, resolverFactory);
 
-        livenessCheck.Verify(x => x.ExecuteAsync(), Times.Once);
-        readinessCheck.Verify(x => x.ExecuteAsync(), Times.Never);
+        livenessCheck.Verify(x => x.ExecuteAsync(It.IsAny<CancellationToken>()), Times.Once);
+        readinessCheck.Verify(x => x.ExecuteAsync(It.IsAny<CancellationToken>()), Times.Never);
         Assert.Equal(BenzeneResultStatus.Ok, response.StatusCode);
     }
 
@@ -67,8 +68,8 @@ public class HealthCheckLivenessReadinessTest
         var response = await app.HandleAsync(
             new BenzeneMessageRequest { Topic = HealthCheckConstants.DefaultReadinessTopic }, resolverFactory);
 
-        readinessCheck.Verify(x => x.ExecuteAsync(), Times.Once);
-        livenessCheck.Verify(x => x.ExecuteAsync(), Times.Never);
+        readinessCheck.Verify(x => x.ExecuteAsync(It.IsAny<CancellationToken>()), Times.Once);
+        livenessCheck.Verify(x => x.ExecuteAsync(It.IsAny<CancellationToken>()), Times.Never);
         Assert.Equal(BenzeneResultStatus.Ok, response.StatusCode);
     }
 
@@ -85,8 +86,8 @@ public class HealthCheckLivenessReadinessTest
         await app.HandleAsync(
             new BenzeneMessageRequest { Topic = HealthCheckConstants.DefaultHealthCheckTopic }, resolverFactory);
 
-        livenessCheck.Verify(x => x.ExecuteAsync(), Times.Never);
-        readinessCheck.Verify(x => x.ExecuteAsync(), Times.Never);
+        livenessCheck.Verify(x => x.ExecuteAsync(It.IsAny<CancellationToken>()), Times.Never);
+        readinessCheck.Verify(x => x.ExecuteAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

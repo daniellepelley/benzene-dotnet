@@ -7,6 +7,7 @@ using Benzene.Kafka.Core;
 using Confluent.Kafka;
 using Moq;
 using Xunit;
+using System.Threading;
 
 namespace Benzene.Test.Kafka;
 
@@ -47,7 +48,7 @@ public class KafkaHealthCheckTest
         var factory = FactoryReturning(MetadataWithTopics("orders", "invoices"));
         var check = new KafkaHealthCheck(factory, Brokers, new[] { "orders", "invoices" });
 
-        var result = await check.ExecuteAsync();
+        var result = await check.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Ok, result.Status);
         Assert.Equal("Kafka", check.Type);
@@ -62,7 +63,7 @@ public class KafkaHealthCheckTest
         var factory = FactoryReturning(MetadataWithTopics("orders")); // "invoices" not present on the cluster
         var check = new KafkaHealthCheck(factory, Brokers, new[] { "orders", "invoices" });
 
-        var result = await check.ExecuteAsync();
+        var result = await check.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
         Assert.Contains("invoices", result.Data["MissingTopics"].ToString());
@@ -74,7 +75,7 @@ public class KafkaHealthCheckTest
         var factory = FactoryThrowing(new KafkaException(new Error(ErrorCode.Local_Transport, "broker down")));
         var check = new KafkaHealthCheck(factory, Brokers, new[] { "orders" });
 
-        var result = await check.ExecuteAsync();
+        var result = await check.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
         Assert.Equal("Local_Transport", result.Data["ErrorCode"]);
@@ -87,7 +88,7 @@ public class KafkaHealthCheckTest
         var factory = FactoryThrowing(new KafkaException(new Error(ErrorCode.ClusterAuthorizationFailed, "no acl")));
         var check = new KafkaHealthCheck(factory, Brokers, new[] { "orders" });
 
-        var result = await check.ExecuteAsync();
+        var result = await check.ExecuteAsync(CancellationToken.None);
 
         // A Kafka authorization failure is a Warning, not a failure (§3.9).
         Assert.Equal(HealthCheckStatus.Failed, result.Status);

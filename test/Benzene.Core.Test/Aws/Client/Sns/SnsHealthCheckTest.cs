@@ -20,7 +20,7 @@ public class SnsHealthCheckTest
         mock.Setup(x => x.GetTopicAttributesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new GetTopicAttributesResponse { HttpStatusCode = HttpStatusCode.OK });
 
-        var result = await new SnsHealthCheck("arn:aws:sns:us-east-1:123:orders", mock.Object).ExecuteAsync();
+        var result = await new SnsHealthCheck("arn:aws:sns:us-east-1:123:orders", mock.Object).ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Ok, result.Status);
         Assert.Equal("Sns", result.Type);
@@ -36,7 +36,7 @@ public class SnsHealthCheckTest
         mock.Setup(x => x.GetTopicAttributesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new NotFoundException("no such topic"));
 
-        var result = await new SnsHealthCheck("arn:aws:sns:us-east-1:123:orders", mock.Object).ExecuteAsync();
+        var result = await new SnsHealthCheck("arn:aws:sns:us-east-1:123:orders", mock.Object).ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
         Assert.Equal("NotFoundException", result.Data["Error"]);
@@ -54,7 +54,7 @@ public class SnsHealthCheckTest
                 StatusCode = HttpStatusCode.Forbidden
             });
 
-        var result = await new SnsHealthCheck("arn:aws:sns:us-east-1:123:orders", mock.Object).ExecuteAsync();
+        var result = await new SnsHealthCheck("arn:aws:sns:us-east-1:123:orders", mock.Object).ExecuteAsync(CancellationToken.None);
 
         // A least-privilege publisher lacking sns:GetTopicAttributes stays green-ish: Warning, not Failed (§3.9).
         Assert.Equal(HealthCheckStatus.Failed, result.Status);

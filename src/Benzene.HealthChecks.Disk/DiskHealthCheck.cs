@@ -30,7 +30,7 @@ public class DiskHealthCheck : IHealthCheck
     public string Type => "Disk";
 
     /// <inheritdoc />
-    public Task<IHealthCheckResult> ExecuteAsync()
+    public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         try
         {

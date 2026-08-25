@@ -24,7 +24,7 @@ public class HttpBenzeneMessageHealthCheckTest
         var handler = new CapturingHandler(HttpStatusCode.OK);
         var check = new HttpBenzeneMessageHealthCheck(new HttpClient(handler), Url);
 
-        var result = await check.ExecuteAsync();
+        var result = await check.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Ok, result.Status);
         Assert.Equal("HttpBenzeneMessage", result.Type);
@@ -44,7 +44,7 @@ public class HttpBenzeneMessageHealthCheckTest
         var handler = new CapturingHandler(HttpStatusCode.OK);
         var check = new HttpBenzeneMessageHealthCheck(new HttpClient(handler), Url, "benzene:ping");
 
-        await check.ExecuteAsync();
+        await check.ExecuteAsync(CancellationToken.None);
 
         using var doc = JsonDocument.Parse(handler.LastRequestBody!);
         Assert.Equal("benzene:ping", doc.RootElement.GetProperty("topic").GetString());
@@ -59,7 +59,7 @@ public class HttpBenzeneMessageHealthCheckTest
         // even for the auto-wired dependency check rather than being softened to a Warning (§3.9).
         var check = new HttpBenzeneMessageHealthCheck(new HttpClient(new CapturingHandler(statusCode)), Url);
 
-        var result = await check.ExecuteAsync();
+        var result = await check.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
         Assert.True(result.IsPersistent);
@@ -72,7 +72,7 @@ public class HttpBenzeneMessageHealthCheckTest
     {
         var check = new HttpBenzeneMessageHealthCheck(new HttpClient(new CapturingHandler(statusCode)), Url);
 
-        var result = await check.ExecuteAsync();
+        var result = await check.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
     }
@@ -82,7 +82,7 @@ public class HttpBenzeneMessageHealthCheckTest
     {
         var check = new HttpBenzeneMessageHealthCheck(new HttpClient(new ThrowingHandler()), Url);
 
-        var result = await check.ExecuteAsync();
+        var result = await check.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
         // The classified failure reports the exception type, never its (potentially sensitive) message.
@@ -95,7 +95,7 @@ public class HttpBenzeneMessageHealthCheckTest
         var url = "https://user:s3cret@service-b.internal/benzene-message";
         var check = new HttpBenzeneMessageHealthCheck(new HttpClient(new CapturingHandler(HttpStatusCode.OK)), url);
 
-        var result = await check.ExecuteAsync();
+        var result = await check.ExecuteAsync(CancellationToken.None);
 
         Assert.DoesNotContain("s3cret", (string)result.Data["Url"]);
         Assert.Equal("https://service-b.internal/benzene-message", result.Data["Url"]);

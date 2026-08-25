@@ -5,6 +5,7 @@ using Benzene.HealthChecks.Core;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
+using System.Threading;
 
 namespace Benzene.Test.Cache;
 
@@ -18,7 +19,7 @@ public class CacheHealthCheckTest
 
         var healthCheck = new CacheHealthCheck<ICacheService>(mockCacheService.Object, NullLogger<CacheHealthCheck<ICacheService>>.Instance);
 
-        var result = await healthCheck.ExecuteAsync();
+        var result = await healthCheck.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Ok, result.Status);
         Assert.Equal("Cache", healthCheck.Type);
@@ -36,7 +37,7 @@ public class CacheHealthCheckTest
 
         var healthCheck = new CacheHealthCheck<ICacheService>(mockCacheService.Object, NullLogger<CacheHealthCheck<ICacheService>>.Instance);
 
-        var result = await healthCheck.ExecuteAsync();
+        var result = await healthCheck.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
         Assert.Equal(false, result.Data["CanConnect"]);

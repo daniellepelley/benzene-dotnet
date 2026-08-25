@@ -26,13 +26,13 @@ public class DynamoDbHealthCheck : IHealthCheck
     public string Type => "DynamoDb";
 
     /// <inheritdoc />
-    public async Task<IHealthCheckResult> ExecuteAsync()
+    public async Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var dependencies = new[] { new HealthCheckDependency("Table", _tableName) };
 
         try
         {
-            var response = await _dynamoDb.DescribeTableAsync(_tableName);
+            var response = await _dynamoDb.DescribeTableAsync(_tableName, cancellationToken);
             var status = response.Table?.TableStatus?.Value;
 
             return HealthCheckResult.CreateInstance(response.HttpStatusCode == HttpStatusCode.OK, Type,

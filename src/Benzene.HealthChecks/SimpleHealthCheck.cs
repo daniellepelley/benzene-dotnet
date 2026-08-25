@@ -13,7 +13,7 @@ public class SimpleHealthCheck : IHealthCheck
     public string Type => "Simple";
 
     /// <summary>Always returns a successful result.</summary>
-    public Task<IHealthCheckResult> ExecuteAsync()
+    public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         return Task.FromResult(HealthCheckResult.CreateInstance(true, Type));
     }

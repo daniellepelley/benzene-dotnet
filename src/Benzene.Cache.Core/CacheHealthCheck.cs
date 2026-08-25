@@ -16,7 +16,9 @@ public class CacheHealthCheck<TCacheService> : IHealthCheck where TCacheService 
         _logger = logger;
     }
 
-    public async Task<IHealthCheckResult> ExecuteAsync()
+    // ICacheService.CanConnectAsync() has no CancellationToken overload (out of WP-7's scope - only
+    // IHealthCheck's own contract changed here), so the token cannot be forwarded into it.
+    public async Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var dependencies = new[] { new HealthCheckDependency("Cache", typeof(TCacheService).Name) };
 

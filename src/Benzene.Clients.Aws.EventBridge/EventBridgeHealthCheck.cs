@@ -43,13 +43,13 @@ public class EventBridgeHealthCheck : IHealthCheck
     public string Type => "EventBridge";
 
     /// <summary>Runs the check and reports the outcome.</summary>
-    public async Task<IHealthCheckResult> ExecuteAsync()
+    public async Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var dependencies = new[] { new HealthCheckDependency("EventBus", _eventBusName) };
 
         try
         {
-            var response = await _eventBridge.DescribeEventBusAsync(new DescribeEventBusRequest { Name = _eventBusName });
+            var response = await _eventBridge.DescribeEventBusAsync(new DescribeEventBusRequest { Name = _eventBusName }, cancellationToken);
             return HealthCheckResult.CreateInstance(response.HttpStatusCode == HttpStatusCode.OK, Type,
                 new Dictionary<string, object> { { "EventBus", _eventBusName } }, dependencies);
         }

@@ -27,7 +27,7 @@ public class EventHubHealthCheckTest
             .ReturnsAsync((EventHubProperties)null);
 
         var healthCheck = new EventHubHealthCheck(mock.Object, Hub);
-        var result = await healthCheck.ExecuteAsync();
+        var result = await healthCheck.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Ok, result.Status);
         Assert.Equal("EventHub", healthCheck.Type);
@@ -43,7 +43,7 @@ public class EventHubHealthCheckTest
         mock.Setup(x => x.GetEventHubPropertiesAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new EventHubsException(false, "orders-hub", "boom", EventHubsException.FailureReason.GeneralError));
 
-        var result = await new EventHubHealthCheck(mock.Object, Hub).ExecuteAsync();
+        var result = await new EventHubHealthCheck(mock.Object, Hub).ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
         Assert.Equal("orders-hub", Assert.Single(result.Dependencies).Name);
@@ -57,7 +57,7 @@ public class EventHubHealthCheckTest
         mock.Setup(x => x.GetEventHubPropertiesAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new UnauthorizedAccessException("bad token"));
 
-        var result = await new EventHubHealthCheck(mock.Object, Hub).ExecuteAsync();
+        var result = await new EventHubHealthCheck(mock.Object, Hub).ExecuteAsync(CancellationToken.None);
 
         // Event Hubs has no HTTP status; a bad credential surfaces as UnauthorizedAccessException, mapped
         // to 403 so the shared policy degrades it to Warning (§3.9).

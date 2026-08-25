@@ -38,10 +38,10 @@ public class DatabaseHealthCheck<TDbContext> : IHealthCheck where TDbContext : D
     /// exception messages, and this result can flow out to whatever calls the health check topic with
     /// no built-in authorization).
     /// </summary>
-    public async Task<IHealthCheckResult> ExecuteAsync()
+    public async Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
-        var canConnect = await TryConnect(_dbContext);
-        var (appliedMigrations, migrationError) = await TryGetAppliedMigrationsAsync(_dbContext);
+        var canConnect = await TryConnect(_dbContext, cancellationToken);
+        var (appliedMigrations, migrationError) = await TryGetAppliedMigrationsAsync(_dbContext, cancellationToken);
 
         var migrationContains = appliedMigrations.Contains(_targetMigration);
         var migrationMatch = appliedMigrations.LastOrDefault() == _targetMigration;
@@ -67,11 +67,11 @@ public class DatabaseHealthCheck<TDbContext> : IHealthCheck where TDbContext : D
             new[] { new HealthCheckDependency("Database", typeof(TDbContext).Name) });
     }
 
-    private static async Task<(bool, Exception)> TryConnect(DbContext dbContext)
+    private static async Task<(bool, Exception)> TryConnect(DbContext dbContext, CancellationToken cancellationToken)
     {
         try
         {
-            return (await dbContext.Database.CanConnectAsync(), null);
+            return (await dbContext.Database.CanConnectAsync(cancellationToken), null);
         }
         catch(Exception ex)
         {
@@ -79,11 +79,11 @@ public class DatabaseHealthCheck<TDbContext> : IHealthCheck where TDbContext : D
         }
     }
 
-    private static async Task<(string[], Exception)> TryGetAppliedMigrationsAsync(DbContext dbContext)
+    private static async Task<(string[], Exception)> TryGetAppliedMigrationsAsync(DbContext dbContext, CancellationToken cancellationToken)
     {
         try
         {
-            return ((await dbContext.Database.GetAppliedMigrationsAsync()).ToArray(), null);
+            return ((await dbContext.Database.GetAppliedMigrationsAsync(cancellationToken)).ToArray(), null);
         }
         catch (Exception ex)
         {

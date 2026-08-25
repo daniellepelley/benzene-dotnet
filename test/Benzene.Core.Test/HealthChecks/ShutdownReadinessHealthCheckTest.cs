@@ -11,7 +11,7 @@ public class ShutdownReadinessHealthCheckTest
     [Fact]
     public async Task ExecuteAsync_NotShuttingDown_ReturnsHealthy()
     {
-        var result = await new ShutdownReadinessHealthCheck(new ShutdownState()).ExecuteAsync();
+        var result = await new ShutdownReadinessHealthCheck(new ShutdownState()).ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Ok, result.Status);
         Assert.Equal("Shutdown", result.Type);
@@ -24,7 +24,7 @@ public class ShutdownReadinessHealthCheckTest
         var state = new ShutdownState();
         state.MarkShuttingDown();
 
-        var result = await new ShutdownReadinessHealthCheck(state).ExecuteAsync();
+        var result = await new ShutdownReadinessHealthCheck(state).ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
         Assert.Equal(true, result.Data["ShuttingDown"]);
@@ -41,7 +41,7 @@ public class ShutdownReadinessHealthCheckTest
         cts.Cancel();
 
         Assert.True(state.IsShuttingDown);
-        var result = await new ShutdownReadinessHealthCheck(state).ExecuteAsync();
+        var result = await new ShutdownReadinessHealthCheck(state).ExecuteAsync(CancellationToken.None);
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
     }
 

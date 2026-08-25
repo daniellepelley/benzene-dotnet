@@ -32,6 +32,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
 using Void = Benzene.Abstractions.Results.Void;
+using System.Threading;
 
 namespace Benzene.Test.Aws.ApiGateway;
 
@@ -228,7 +229,7 @@ public class ApiGatewayMessagePipelineTest
     public async Task Send_HealthCheck()
     {
         var mockHealthCheck = new Mock<IHealthCheck>();
-        mockHealthCheck.Setup(x => x.ExecuteAsync()).ReturnsAsync(HealthCheckResult.CreateInstance(true,
+        mockHealthCheck.Setup(x => x.ExecuteAsync(It.IsAny<CancellationToken>())).ReturnsAsync(HealthCheckResult.CreateInstance(true,
             null));
 
         var host = new InlineAwsLambdaStartUp()

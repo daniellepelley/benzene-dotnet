@@ -20,7 +20,7 @@ public class TcpHealthCheckTest
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
         try
         {
-            var result = await new TcpHealthCheck("127.0.0.1", port).ExecuteAsync();
+            var result = await new TcpHealthCheck("127.0.0.1", port).ExecuteAsync(CancellationToken.None);
 
             Assert.Equal(HealthCheckStatus.Ok, result.Status);
             var dependency = Assert.Single(result.Dependencies);
@@ -42,7 +42,7 @@ public class TcpHealthCheckTest
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
         listener.Stop();
 
-        var result = await new TcpHealthCheck("127.0.0.1", port).ExecuteAsync();
+        var result = await new TcpHealthCheck("127.0.0.1", port).ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
         Assert.True(result.Data.ContainsKey("Error"));
@@ -65,6 +65,6 @@ public class TcpHealthCheckTest
 
         var check = new TcpHealthCheck("127.0.0.1", 1, accessor);
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => check.ExecuteAsync());
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => check.ExecuteAsync(CancellationToken.None));
     }
 }

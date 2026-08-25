@@ -45,7 +45,7 @@ public class ServiceBusHealthCheck : IHealthCheck
     public string Type => "ServiceBus";
 
     /// <inheritdoc />
-    public async Task<IHealthCheckResult> ExecuteAsync()
+    public async Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var dependencies = new[] { _dependency };
         ServiceBusReceiver? receiver = null;
@@ -58,7 +58,7 @@ public class ServiceBusHealthCheck : IHealthCheck
 
             // Peek is read-only and non-destructive: it neither locks nor removes the message, and
             // returns null on an empty entity - a successful round-trip is the connectivity signal.
-            await receiver.PeekMessageAsync();
+            await receiver.PeekMessageAsync(cancellationToken: cancellationToken);
 
             return HealthCheckResult.CreateInstance(true, Type, BuildData(), dependencies);
         }

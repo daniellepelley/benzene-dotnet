@@ -39,11 +39,13 @@ public class RabbitMqHealthCheck : IHealthCheck
     public string Type => "RabbitMq";
 
     /// <summary>Runs the check and reports the outcome.</summary>
-    public async Task<IHealthCheckResult> ExecuteAsync()
+    public async Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var dependencies = new[] { new HealthCheckDependency("Queue", _queueName) };
         // Bound the broker round-trip so a half-open connection can't hang past the check's budget.
-        using var cts = new CancellationTokenSource(_timeout);
+        // Linked with the caller's token so the processor's own timeout can also cancel the round-trip.
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(_timeout);
         IChannel? channel = null;
 
         try

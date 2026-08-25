@@ -36,13 +36,13 @@ public class SnsHealthCheck : IHealthCheck
     public string Type => "Sns";
 
     /// <inheritdoc />
-    public async Task<IHealthCheckResult> ExecuteAsync()
+    public async Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var dependencies = new[] { new HealthCheckDependency("Topic", _topicArn) };
 
         try
         {
-            var response = await _sns.GetTopicAttributesAsync(_topicArn);
+            var response = await _sns.GetTopicAttributesAsync(_topicArn, cancellationToken);
             return HealthCheckResult.CreateInstance(response.HttpStatusCode == HttpStatusCode.OK, Type,
                 new Dictionary<string, object> { { "TopicArn", _topicArn } }, dependencies);
         }

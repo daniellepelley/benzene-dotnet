@@ -28,7 +28,7 @@ public class QueueStorageHealthCheckTest
             .ReturnsAsync((Response<QueueProperties>)null);
 
         var healthCheck = new QueueStorageHealthCheck(mock.Object);
-        var result = await healthCheck.ExecuteAsync();
+        var result = await healthCheck.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Ok, result.Status);
         Assert.Equal("QueueStorage", healthCheck.Type);
@@ -44,7 +44,7 @@ public class QueueStorageHealthCheckTest
         mock.Setup(x => x.GetPropertiesAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new RequestFailedException(500, "boom", "InternalError", null));
 
-        var result = await new QueueStorageHealthCheck(mock.Object).ExecuteAsync();
+        var result = await new QueueStorageHealthCheck(mock.Object).ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
         Assert.Equal("orders", Assert.Single(result.Dependencies).Name);
@@ -59,7 +59,7 @@ public class QueueStorageHealthCheckTest
         mock.Setup(x => x.GetPropertiesAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new RequestFailedException(403, "no access", "AuthorizationFailure", null));
 
-        var result = await new QueueStorageHealthCheck(mock.Object).ExecuteAsync();
+        var result = await new QueueStorageHealthCheck(mock.Object).ExecuteAsync(CancellationToken.None);
 
         // Lacking read permission on the queue is a Warning, not a failure (§3.9).
         Assert.Equal(HealthCheckStatus.Failed, result.Status);

@@ -31,8 +31,14 @@ public class InlineHealthCheck : IHealthCheck
     /// <inheritdoc />
     public string Type { get; }
 
-    /// <summary>Invokes the delegate supplied at construction and returns its result.</summary>
-    public Task<IHealthCheckResult> ExecuteAsync()
+    /// <summary>
+    /// Invokes the delegate supplied at construction and returns its result. The delegate predates
+    /// per-call cancellation and has no <see cref="CancellationToken"/> parameter of its own, so
+    /// <paramref name="cancellationToken"/> cannot be forwarded into it - an inline check has no I/O
+    /// of its own to cancel; it wraps a caller-supplied closure that is expected to be effectively
+    /// synchronous or already cancellation-aware via whatever it captures.
+    /// </summary>
+    public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         return _func();
     }

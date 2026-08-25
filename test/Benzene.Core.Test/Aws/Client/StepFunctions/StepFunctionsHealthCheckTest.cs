@@ -21,7 +21,7 @@ public class StepFunctionsHealthCheckTest
 
         var healthCheck = new StepFunctionsHealthCheck("some-state-machine-arn", mock.Object);
 
-        var result = await healthCheck.ExecuteAsync();
+        var result = await healthCheck.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Ok, result.Status);
         Assert.Equal("StepFunctions", healthCheck.Type);
@@ -39,7 +39,7 @@ public class StepFunctionsHealthCheckTest
         mock.Setup(x => x.DescribeStateMachineAsync(It.IsAny<DescribeStateMachineRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DescribeStateMachineResponse { HttpStatusCode = HttpStatusCode.InternalServerError });
 
-        var result = await new StepFunctionsHealthCheck("some-state-machine-arn", mock.Object).ExecuteAsync();
+        var result = await new StepFunctionsHealthCheck("some-state-machine-arn", mock.Object).ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
     }
@@ -53,7 +53,7 @@ public class StepFunctionsHealthCheckTest
 
         var healthCheck = new StepFunctionsHealthCheck("some-state-machine-arn", mock.Object, HealthCheckMode.Active);
 
-        var result = await healthCheck.ExecuteAsync();
+        var result = await healthCheck.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Ok, result.Status);
         Assert.Equal("StepFunctions.Active", healthCheck.Type);

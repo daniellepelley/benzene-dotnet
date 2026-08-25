@@ -70,7 +70,7 @@ public class BenzeneHealthCheckBridgeTest
 
         public string Type { get; }
 
-        public Task<IBenzeneHealthCheckResult> ExecuteAsync()
+        public Task<IBenzeneHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
         {
             return Task.FromResult<IBenzeneHealthCheckResult>(new BenzeneHealthCheckResult(_status, Type, new Dictionary<string, object>()));
         }

@@ -21,6 +21,14 @@ namespace Benzene.Clients.Aws.Sqs;
 /// (<c>sqs:GetQueueAttributes</c>) — it does <b>not</b> prove a send would succeed (<c>sqs:SendMessage</c>
 /// is a different permission). Use <see cref="HealthCheckMode.Active"/> only when you need to exercise the
 /// send path, and keep it off a frequent poll and off liveness/readiness probes.
+/// <para>
+/// No internal timeout guard here (unlike an earlier version of this type): the check forwards the
+/// <see cref="CancellationToken"/> it is given straight into the SDK call and relies purely on the
+/// processor's uniform per-check timeout wrap (<c>HealthCheckProcessor</c> via <c>TimeOutHealthCheck</c>),
+/// which - now that <see cref="ExecuteAsync"/> actually forwards its token - genuinely cancels the
+/// in-flight SQS call on timeout rather than merely abandoning the awaited task. Same shape as
+/// <c>SnsHealthCheck</c>/<c>EventBridgeHealthCheck</c>.
+/// </para>
 /// </remarks>
 public class SqsHealthCheck : IHealthCheck
 {
@@ -28,7 +36,6 @@ public class SqsHealthCheck : IHealthCheck
     private readonly string _queueUrl;
     private readonly HealthCheckMode _mode;
     private readonly string _topicAttributeKey;
-    private const int TimeOut = 10000;
 
     /// <summary>Initializes a new instance of the <see cref="SqsHealthCheck"/> class.</summary>
     /// <param name="queueUrl">The URL of the queue to check.</param>
@@ -50,69 +57,50 @@ public class SqsHealthCheck : IHealthCheck
     }
 
     /// <summary>Runs the check and reports the outcome.</summary>
-    public Task<IHealthCheckResult> ExecuteAsync()
+    public async Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var dependencies = new[] { new HealthCheckDependency("Queue", _queueUrl) };
-        var call = _mode == HealthCheckMode.Active
-            ? MapStatus(SendPingAsync())
-            : MapStatus(_amazonSqs.GetQueueAttributesAsync(new GetQueueAttributesRequest
-            {
-                QueueUrl = _queueUrl,
-                AttributeNames = new List<string> { "QueueArn" }
-            }));
 
-        return RunAsync(call, dependencies);
+        try
+        {
+            var statusCode = _mode == HealthCheckMode.Active
+                ? (await SendPingAsync(cancellationToken)).HttpStatusCode
+                : (await _amazonSqs.GetQueueAttributesAsync(new GetQueueAttributesRequest
+                {
+                    QueueUrl = _queueUrl,
+                    AttributeNames = new List<string> { "QueueArn" }
+                }, cancellationToken)).HttpStatusCode;
+
+            if (statusCode == HttpStatusCode.OK)
+            {
+                return HealthCheckResult.CreateInstance(true, Type,
+                    new Dictionary<string, object> { { "QueueUrl", _queueUrl } }, dependencies);
+            }
+
+            return HealthCheckResult.CreateInstance(false, Type,
+                new Dictionary<string, object> { { "QueueUrl", _queueUrl }, { "Error", $"Returned a status of {statusCode}" } }, dependencies);
+        }
+        catch (Exception ex)
+        {
+            // Expected failures (queue missing, no connectivity, no permission) are a classified result,
+            // not a throw. HealthCheckError applies the shared policy: an authorization failure (401/403,
+            // or a known auth error code) is a persistent Failed, anything else a transient Failed,
+            // enriched with the SDK error code + status, never the exception message.
+            var (errorCode, faultStatus) = AwsErrorDetails(ex);
+            return HealthCheckError.Classify(Type, ex, dependencies, errorCode, faultStatus,
+                new Dictionary<string, object> { { "QueueUrl", _queueUrl } },
+                requiredPermission: _mode == HealthCheckMode.Active ? "sqs:SendMessage" : "sqs:GetQueueAttributes");
+        }
     }
 
-    private Task<SendMessageResponse> SendPingAsync()
+    private Task<SendMessageResponse> SendPingAsync(CancellationToken cancellationToken)
         => _amazonSqs.SendMessageAsync(new SendMessageRequest(_queueUrl, "{}")
         {
             MessageAttributes = new Dictionary<string, MessageAttributeValue>
             {
                 { _topicAttributeKey, new MessageAttributeValue { DataType = "String", StringValue = Benzene.Abstractions.BenzeneTopic.Ping } }
             }
-        });
-
-    // Project any AWS response to its HttpStatusCode without losing the task's faulted-ness.
-    private static async Task<HttpStatusCode> MapStatus<TResponse>(Task<TResponse> call) where TResponse : AmazonWebServiceResponse
-        => (await call).HttpStatusCode;
-
-    private async Task<IHealthCheckResult> RunAsync(Task<HttpStatusCode> call, HealthCheckDependency[] dependencies)
-    {
-        using var cts = new CancellationTokenSource();
-        var completed = await Task.WhenAny(call, Task.Delay(TimeOut, cts.Token));
-
-        if (completed != call)
-        {
-            return HealthCheckResult.CreateInstance(false, Type,
-                new Dictionary<string, object> { { "QueueUrl", _queueUrl }, { "Error", $"Timed out, {TimeOut}ms" } }, dependencies);
-        }
-
-        cts.Cancel();
-
-        // IsFaulted, not .Result on a faulted task: reading .Result would rethrow and lose the Queue
-        // dependency to the outer exception wrapper. Classify via the shared policy: an authorization
-        // failure (401/403, or a known auth error code) is a persistent Failed, anything else a transient
-        // Failed, enriched with the SDK error code + status, never the exception message.
-        if (call.IsFaulted)
-        {
-            var ex = (call.Exception?.InnerException ?? call.Exception)!;
-            var (errorCode, faultStatus) = AwsErrorDetails(ex);
-            return HealthCheckError.Classify(Type, ex, dependencies, errorCode, faultStatus,
-                new Dictionary<string, object> { { "QueueUrl", _queueUrl } },
-                requiredPermission: _mode == HealthCheckMode.Active ? "sqs:SendMessage" : "sqs:GetQueueAttributes");
-        }
-
-        var statusCode = call.Result;
-        if (statusCode == HttpStatusCode.OK)
-        {
-            return HealthCheckResult.CreateInstance(true, Type,
-                new Dictionary<string, object> { { "QueueUrl", _queueUrl } }, dependencies);
-        }
-
-        return HealthCheckResult.CreateInstance(false, Type,
-            new Dictionary<string, object> { { "QueueUrl", _queueUrl }, { "Error", $"Returned a status of {statusCode}" } }, dependencies);
-    }
+        }, cancellationToken);
 
     // Pulls the non-sensitive discriminators AWS already returns off an SDK exception; null for a
     // non-AWS exception (e.g. a raw connectivity failure).

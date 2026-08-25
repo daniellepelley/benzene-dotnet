@@ -26,7 +26,7 @@ public class TokenObservingHealthCheck : IHealthCheck
     private readonly ICancellationTokenAccessor _accessor;
     public TokenObservingHealthCheck(ICancellationTokenAccessor accessor) => _accessor = accessor;
     public string Type => "TokenObserver";
-    public Task<IHealthCheckResult> ExecuteAsync() =>
+    public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken) =>
         Task.FromResult(HealthCheckResult.CreateInstance(true, Type, new Dictionary<string, object>
         {
             { "Cancelled", _accessor.CancellationToken.IsCancellationRequested }

@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using Benzene.HealthChecks;
 using Benzene.HealthChecks.Core;
@@ -20,7 +21,7 @@ public class HealthCheckProcessorTest
         public StubCheck(string type, bool ok, bool isNonCritical) { Type = type; _ok = ok; IsNonCritical = isNonCritical; }
         public string Type { get; }
         public bool IsNonCritical { get; }
-        public Task<IHealthCheckResult> ExecuteAsync() => Task.FromResult(HealthCheckResult.CreateInstance(_ok, Type));
+        public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken) => Task.FromResult(HealthCheckResult.CreateInstance(_ok, Type));
     }
 
     // A check that fails with a persistent (deterministic, won't-self-heal) result, e.g. an authorization denial.
@@ -28,7 +29,7 @@ public class HealthCheckProcessorTest
     {
         public PersistentFailCheck(string type) { Type = type; }
         public string Type { get; }
-        public Task<IHealthCheckResult> ExecuteAsync()
+        public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
             => Task.FromResult(HealthCheckResult.CreatePersistentFailure(Type, new System.Collections.Generic.Dictionary<string, object>(), Array.Empty<HealthCheckDependency>()));
     }
 
@@ -39,9 +40,12 @@ public class HealthCheckProcessorTest
         public SlowCheck(string type, TimeSpan delay, TimeSpan? timeout) { Type = type; _delay = delay; Timeout = timeout; }
         public string Type { get; }
         public TimeSpan? Timeout { get; }
-        public async Task<IHealthCheckResult> ExecuteAsync()
+        public async Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
         {
-            await Task.Delay(_delay);
+            // Forwards the token, like a conforming IHealthCheck must (WP-7 #2): this is what lets
+            // the processor's (or a per-check override's) timeout genuinely cancel the wait rather
+            // than merely abandon it.
+            await Task.Delay(_delay, cancellationToken);
             return HealthCheckResult.CreateInstance(true, Type);
         }
     }
@@ -105,11 +109,15 @@ public class HealthCheckProcessorTest
     public async Task PerCheckTimeout_ShorterThanProcessor_TimesTheCheckOut()
     {
         // Processor budget is generous (30s); the check's own 10ms Timeout is what should bite.
+        // Since SlowCheck forwards the token it is given (as every conforming IHealthCheck must -
+        // WP-7 #2), the timeout genuinely cancels its Task.Delay; that cancellation is reported by
+        // ExceptionHandlingHealthCheck (the decorator closest to the raw check) as "Cancelled" - a
+        // more accurate label than "Timed Out", since the call really was cancelled.
         var processor = new HealthCheckProcessor(TimeSpan.FromSeconds(30));
         var response = await RunAsync(processor, new SlowCheck("slow", TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(10)));
 
         Assert.False(response.IsHealthy);
-        Assert.Equal("Timed Out", response.HealthChecks["slow"].Data["Error"]);
+        Assert.Equal("Cancelled", response.HealthChecks["slow"].Data["Error"]);
     }
 
     [Fact]

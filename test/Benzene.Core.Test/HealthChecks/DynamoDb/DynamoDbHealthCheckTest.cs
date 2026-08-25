@@ -24,7 +24,7 @@ public class DynamoDbHealthCheckTest
                 Table = new TableDescription { TableStatus = TableStatus.ACTIVE }
             });
 
-        var result = await new DynamoDbHealthCheck("orders", mock.Object).ExecuteAsync();
+        var result = await new DynamoDbHealthCheck("orders", mock.Object).ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Ok, result.Status);
         Assert.Equal("DynamoDb", result.Type);
@@ -40,7 +40,7 @@ public class DynamoDbHealthCheckTest
         mock.Setup(x => x.DescribeTableAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ResourceNotFoundException("no such table"));
 
-        var result = await new DynamoDbHealthCheck("orders", mock.Object).ExecuteAsync();
+        var result = await new DynamoDbHealthCheck("orders", mock.Object).ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
         Assert.Equal("ResourceNotFoundException", result.Data["Error"]);

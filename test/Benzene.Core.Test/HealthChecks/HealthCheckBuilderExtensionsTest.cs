@@ -7,6 +7,7 @@ using Benzene.HealthChecks.Core;
 using Benzene.Microsoft.Dependencies;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
+using System.Threading;
 
 namespace Benzene.Test.HealthChecks;
 
@@ -35,7 +36,7 @@ public class HealthCheckBuilderExtensionsTest
         using var factory = new MicrosoftServiceResolverFactory(services);
         using var scope = factory.CreateScope();
         var check = builder.GetHealthChecks(scope).Single();
-        return await check.ExecuteAsync();
+        return await check.ExecuteAsync(CancellationToken.None);
     }
 
     [Fact]
@@ -77,5 +78,42 @@ public class HealthCheckBuilderExtensionsTest
         var result = await RunSingle(b => b.AddHealthCheck("Http", "partner-api", () => Task.FromResult(true)));
 
         Assert.Equal(HealthCheckStatus.Ok, result.Status);
+    }
+
+    // A check registered via the factory overload (AddHealthCheck(resolver => new SomeCheck())) - a
+    // very common registration path (e.g. AddSqsHealthCheck) - must still have the real
+    // CancellationToken forwarded into it when the processor runs it. Before WP-7's fix, the factory
+    // path wrapped the resolved check in an InlineHealthCheck whose delegate had no token parameter,
+    // silently dropping cancellation for every check registered this way.
+    [Fact]
+    public async Task FactoryRegisteredCheck_ForwardsTheRealCancellationToken()
+    {
+        CancellationToken observed = default;
+        var check = new DelegatingHealthCheck(token =>
+        {
+            observed = token;
+            return Task.FromResult(HealthCheckResult.CreateInstance(true, "factory"));
+        });
+
+        var services = new ServiceCollection();
+        var builder = new HealthCheckBuilder(new TestRegister(services));
+        builder.AddHealthCheck(_ => check);
+
+        using var factory = new MicrosoftServiceResolverFactory(services);
+        using var scope = factory.CreateScope();
+        var resolved = builder.GetHealthChecks(scope).Single();
+
+        using var cts = new CancellationTokenSource();
+        await resolved.ExecuteAsync(cts.Token);
+
+        Assert.Equal(cts.Token, observed);
+    }
+
+    private sealed class DelegatingHealthCheck : IHealthCheck
+    {
+        private readonly Func<CancellationToken, Task<IHealthCheckResult>> _execute;
+        public DelegatingHealthCheck(Func<CancellationToken, Task<IHealthCheckResult>> execute) => _execute = execute;
+        public string Type => "factory";
+        public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken) => _execute(cancellationToken);
     }
 }

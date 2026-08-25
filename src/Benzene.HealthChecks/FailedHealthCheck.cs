@@ -26,7 +26,7 @@ public class FailedHealthCheck : IHealthCheck
     /// (not its message - see <see cref="ExceptionHandlingHealthCheck"/> for why) under the
     /// <c>"Exception"</c> key.
     /// </summary>
-    public Task<IHealthCheckResult> ExecuteAsync()
+    public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         return Task.FromResult(HealthCheckResult.CreateInstance(false, Type, new Dictionary<string, object>
         {

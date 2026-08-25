@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using Benzene.HealthChecks.Core;
 using Benzene.HealthChecks.Disk;
 using Xunit;
+using System.Threading;
 
 namespace Benzene.Test.HealthChecks.Disk;
 
@@ -13,7 +14,7 @@ public class DiskHealthCheckTest
     [Fact]
     public async Task ExecuteAsync_AmpleFreeSpace_ReturnsHealthy()
     {
-        var result = await new DiskHealthCheck(Path, minimumFreeBytes: 0).ExecuteAsync();
+        var result = await new DiskHealthCheck(Path, minimumFreeBytes: 0).ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Ok, result.Status);
         var dependency = Assert.Single(result.Dependencies);
@@ -24,7 +25,7 @@ public class DiskHealthCheckTest
     [Fact]
     public async Task ExecuteAsync_BelowMinimum_ReturnsFailed()
     {
-        var result = await new DiskHealthCheck(Path, minimumFreeBytes: long.MaxValue).ExecuteAsync();
+        var result = await new DiskHealthCheck(Path, minimumFreeBytes: long.MaxValue).ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
     }
@@ -33,7 +34,7 @@ public class DiskHealthCheckTest
     public async Task ExecuteAsync_BelowWarningButAboveMinimum_ReturnsWarning()
     {
         // Warn threshold impossibly high, min zero -> free space is >= min but < warn -> Warning.
-        var result = await new DiskHealthCheck(Path, minimumFreeBytes: 0, warningFreeBytes: long.MaxValue).ExecuteAsync();
+        var result = await new DiskHealthCheck(Path, minimumFreeBytes: 0, warningFreeBytes: long.MaxValue).ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Warning, result.Status);
     }

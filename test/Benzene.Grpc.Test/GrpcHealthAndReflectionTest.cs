@@ -161,13 +161,13 @@ public class GrpcHealthAndReflectionTest
     private class HealthyLiveCheck : IHealthCheck
     {
         public string Type => "live-check";
-        public Task<IHealthCheckResult> ExecuteAsync() => Task.FromResult(HealthCheckResult.CreateInstance(true, Type));
+        public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken) => Task.FromResult(HealthCheckResult.CreateInstance(true, Type));
     }
 
     private class FailingReadyCheck : IHealthCheck
     {
         public string Type => "ready-check";
-        public Task<IHealthCheckResult> ExecuteAsync() => Task.FromResult(HealthCheckResult.CreateInstance(false, Type));
+        public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken) => Task.FromResult(HealthCheckResult.CreateInstance(false, Type));
     }
 
     private static GrpcChannel CreateChannel(IHost host)
@@ -183,7 +183,7 @@ public class GrpcHealthAndReflectionTest
     {
         public string Type => "fake-failing-check";
 
-        public Task<IHealthCheckResult> ExecuteAsync()
+        public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
         {
             return Task.FromResult(HealthCheckResult.CreateInstance(false, Type));
         }

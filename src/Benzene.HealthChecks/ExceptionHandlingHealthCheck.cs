@@ -29,11 +29,11 @@ internal class ExceptionHandlingHealthCheck : IHealthCheck
     /// ADO.NET providers), and this result can flow out to whatever calls the health check topic with
     /// no built-in authorization.
     /// </summary>
-    public async Task<IHealthCheckResult> ExecuteAsync()
+    public async Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         try
         {
-            return await _inner.ExecuteAsync();
+            return await _inner.ExecuteAsync(cancellationToken);
         }
         catch (OperationCanceledException)
         {

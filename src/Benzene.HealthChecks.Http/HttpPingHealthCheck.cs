@@ -38,7 +38,7 @@ namespace Benzene.HealthChecks.Http
         /// response. The result's <see cref="IHealthCheckResult.Data"/> always includes the
         /// checked <c>Url</c> and the response's <c>StatusCode</c>.
         /// </summary>
-        public async Task<IHealthCheckResult> ExecuteAsync()
+        public async Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
         {
             // Report the URL with any userinfo (basic-auth credentials) stripped - the reported Url and
             // Dependency can flow out to whoever calls the health check topic with no authorization,
@@ -47,7 +47,13 @@ namespace Benzene.HealthChecks.Http
             var reportedUrl = StripUserInfo(_url);
             var dependencies = new[] { new HealthCheckDependency("Http", reportedUrl) };
 
-            var token = _cancellation?.CancellationToken ?? CancellationToken.None;
+            // Link the token ExecuteAsync was called with (the processor's per-check timeout) with the
+            // ambient accessor's token (e.g. application shutdown), if one was supplied - either source
+            // cancels the request.
+            using var cts = _cancellation != null
+                ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _cancellation.CancellationToken)
+                : null;
+            var token = cts?.Token ?? cancellationToken;
             using var response = await _httpClient.GetAsync(_url, token);
             return HealthCheckResult.CreateInstance(response.StatusCode == HttpStatusCode.OK, Type,
                 new Dictionary<string, object> { { "Url", reportedUrl }, { "StatusCode", response.StatusCode } }, dependencies);

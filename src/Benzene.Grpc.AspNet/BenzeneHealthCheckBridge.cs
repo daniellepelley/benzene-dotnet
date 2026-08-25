@@ -45,7 +45,7 @@ public class BenzeneHealthCheckBridge : IHealthCheck
             return HealthCheckResult.Healthy("No Benzene health checks are registered.");
         }
 
-        var results = await Task.WhenAll(checks.Select(x => x.ExecuteAsync()));
+        var results = await Task.WhenAll(checks.Select(x => x.ExecuteAsync(cancellationToken)));
 
         var data = new Dictionary<string, object>();
         foreach (var result in results)

@@ -40,7 +40,7 @@ public class SchemaHealthCheck : IHealthCheck
     public string Type => SchemaHealthCheckConstants.Type;
 
     /// <inheritdoc />
-    public Task<IHealthCheckResult> ExecuteAsync()
+    public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var hashCode = ContractHash.Compute(_lookUp.GetAllHandlers());
 

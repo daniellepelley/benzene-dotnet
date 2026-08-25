@@ -57,8 +57,11 @@ public class HealthCheckProcessor : IHealthCheckProcessor
         // A check may override the processor-wide timeout (IHealthCheck.Timeout) - honour it here.
         var check = new TimeOutHealthCheck(new ExceptionHandlingHealthCheck(healthCheck), healthCheck.Timeout ?? _timeout);
 
+        // PerformHealthChecksAsync takes no ambient CancellationToken (out of scope for this change),
+        // so the only cancellation signal reaching the check is the one TimeOutHealthCheck derives
+        // from its own timeout.
         var stopwatch = Stopwatch.StartNew();
-        var result = await check.ExecuteAsync();
+        var result = await check.ExecuteAsync(CancellationToken.None);
         stopwatch.Stop();
 
         // A non-critical check (IHealthCheck.IsNonCritical == true) normally never flips the probe

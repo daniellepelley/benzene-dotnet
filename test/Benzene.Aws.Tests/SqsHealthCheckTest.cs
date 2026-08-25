@@ -32,7 +32,7 @@ public class SqsHealthCheckTest : IClassFixture<SqsFixture>
 
         var healthCheck = new SqsHealthCheck(createQueueResponse.QueueUrl, amazonSqsClient);
 
-        var result = await healthCheck.ExecuteAsync();
+        var result = await healthCheck.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Ok, result.Status);
     }

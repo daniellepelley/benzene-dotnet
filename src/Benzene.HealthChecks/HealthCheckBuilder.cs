@@ -8,8 +8,8 @@ namespace Benzene.HealthChecks;
 /// Default <see cref="IHealthCheckBuilder"/> implementation. Health checks registered via the
 /// <c>THealthCheck</c> overload are registered as scoped services against <see cref="IHealthCheckFinder"/>
 /// (constructing an <see cref="HealthCheckFinder"/> and wiring it as a scoped service on first use); health
-/// checks registered via the factory-function overload are held in-memory and wrapped as
-/// <see cref="InlineHealthCheck"/>s at resolution time.
+/// checks registered via the factory-function overload are held in-memory and lazily constructed at
+/// resolution time.
 /// </summary>
 public class HealthCheckBuilder : IHealthCheckBuilder
 {
@@ -55,8 +55,8 @@ public class HealthCheckBuilder : IHealthCheckBuilder
     /// <summary>
     /// Combines the checks registered via <see cref="AddHealthCheck{THealthCheck}"/> (resolved through
     /// the registered <see cref="IHealthCheckFinder"/>) with the checks registered via
-    /// <see cref="AddHealthCheck(Func{IServiceResolver,IHealthCheck})"/> (each wrapped as an
-    /// <see cref="InlineHealthCheck"/> so it is not invoked until the aggregated array is executed).
+    /// <see cref="AddHealthCheck(Func{IServiceResolver,IHealthCheck})"/> (each deferred so the factory
+    /// is not invoked until the aggregated array is executed).
     /// </summary>
     /// <param name="resolver">The service resolver used to resolve container-registered checks and to invoke the factory functions.</param>
     /// <returns>Every registered health check, factory-based checks first, followed by container-resolved checks.</returns>
@@ -78,15 +78,43 @@ public class HealthCheckBuilder : IHealthCheckBuilder
     {
         var healthCheckFinder = resolver.GetService<IHealthCheckFinder>();
         var healthChecks = healthCheckFinder.FindHealthChecks();
-        var inlineHealthChecks = _healthCheckBuilders
-            .Select(x => new InlineHealthCheck(() => x(resolver).ExecuteAsync())).ToArray();
+        // Not InlineHealthCheck here: its Func<Task<IHealthCheckResult>> delegate predates per-call
+        // cancellation and takes no token, which would silently drop cancellation for every
+        // factory-registered check (a very common registration path, e.g.
+        // AddHealthCheck(resolver => new SqsHealthCheck(...))). FactoryHealthCheck defers construction
+        // the same way InlineHealthCheck did, but forwards the real token into the resolved check's
+        // own ExecuteAsync.
+        var factoryHealthChecks = _healthCheckBuilders
+            .Select(x => (IHealthCheck)new FactoryHealthCheck(x, resolver)).ToArray();
 
-        var combined = inlineHealthChecks.Concat(healthChecks);
+        var combined = factoryHealthChecks.Concat(healthChecks);
         if (includeDependencyChecks)
         {
             combined = combined.Concat(healthCheckFinder.FindDependencyHealthChecks());
         }
 
         return combined.ToArray();
+    }
+
+    // Lazily resolves and runs a factory-registered IHealthCheck at execution time (not registration
+    // time), forwarding the real CancellationToken into it - the counterpart of what InlineHealthCheck
+    // does for a bare result-producing delegate, but for a delegate that produces a full IHealthCheck.
+    // Type is intentionally empty (matching the prior InlineHealthCheck-based wrapping): the wrapped
+    // check's own Type is not known until it is constructed at execution time.
+    private sealed class FactoryHealthCheck : IHealthCheck
+    {
+        private readonly Func<IServiceResolver, IHealthCheck> _factory;
+        private readonly IServiceResolver _resolver;
+
+        public FactoryHealthCheck(Func<IServiceResolver, IHealthCheck> factory, IServiceResolver resolver)
+        {
+            _factory = factory;
+            _resolver = resolver;
+        }
+
+        public string Type => string.Empty;
+
+        public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
+            => _factory(_resolver).ExecuteAsync(cancellationToken);
     }
 }

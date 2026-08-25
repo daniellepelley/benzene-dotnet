@@ -58,5 +58,5 @@ public class DependencyHealthCheck : IDependencyHealthCheck
     public TimeSpan? Timeout => _inner.Timeout;
 
     /// <inheritdoc />
-    public Task<IHealthCheckResult> ExecuteAsync() => _inner.ExecuteAsync();
+    public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken) => _inner.ExecuteAsync(cancellationToken);
 }

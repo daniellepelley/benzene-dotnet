@@ -4,6 +4,7 @@ using Benzene.HealthChecks.Core;
 using Benzene.HealthChecks.EntityFramework;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
+using System.Threading;
 
 namespace Benzene.Test.HealthChecks.EntityFramework;
 
@@ -31,7 +32,7 @@ public class DatabaseHealthCheckTest
         using var context = CreateContext();
         var healthCheck = new DatabaseHealthCheck<TestDbContext>(context, "20260101000000_Initial");
 
-        var result = await healthCheck.ExecuteAsync();
+        var result = await healthCheck.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
         Assert.Equal("Database", result.Type);
@@ -55,7 +56,7 @@ public class DatabaseHealthCheckTest
         await context.DisposeAsync();
         var healthCheck = new DatabaseHealthCheck<TestDbContext>(context, "20260101000000_Initial");
 
-        var result = await healthCheck.ExecuteAsync();
+        var result = await healthCheck.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
         Assert.Equal(false, result.Data["CanConnect"]);

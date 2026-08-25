@@ -38,7 +38,7 @@ public class RabbitMqHealthCheckTest
             .ReturnsAsync(new QueueDeclareOk("orders", 0, 0));
 
         var check = new RabbitMqHealthCheck(ProviderWith(channel), "orders");
-        var result = await check.ExecuteAsync();
+        var result = await check.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Ok, result.Status);
         Assert.Equal("RabbitMq", check.Type);
@@ -54,7 +54,7 @@ public class RabbitMqHealthCheckTest
         channel.Setup(x => x.QueueDeclarePassiveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new OperationInterruptedException(new ShutdownEventArgs(ShutdownInitiator.Peer, 404, "NOT_FOUND")));
 
-        var result = await new RabbitMqHealthCheck(ProviderWith(channel), "orders").ExecuteAsync();
+        var result = await new RabbitMqHealthCheck(ProviderWith(channel), "orders").ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
         Assert.Equal(404, result.Data["StatusCode"]);
@@ -69,7 +69,7 @@ public class RabbitMqHealthCheckTest
         channel.Setup(x => x.QueueDeclarePassiveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new OperationInterruptedException(new ShutdownEventArgs(ShutdownInitiator.Peer, 403, "ACCESS_REFUSED")));
 
-        var result = await new RabbitMqHealthCheck(ProviderWith(channel), "orders").ExecuteAsync();
+        var result = await new RabbitMqHealthCheck(ProviderWith(channel), "orders").ExecuteAsync(CancellationToken.None);
 
         // AMQP 403 access-refused is a permission problem: Warning, not a failure (§3.9).
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
@@ -83,7 +83,7 @@ public class RabbitMqHealthCheckTest
         var provider = new Mock<IRabbitMqConnectionProvider>();
         provider.Setup(x => x.GetConnectionAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new Exception("connection refused"));
 
-        var result = await new RabbitMqHealthCheck(provider.Object, "orders").ExecuteAsync();
+        var result = await new RabbitMqHealthCheck(provider.Object, "orders").ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
         Assert.Equal("orders", Assert.Single(result.Dependencies).Name);

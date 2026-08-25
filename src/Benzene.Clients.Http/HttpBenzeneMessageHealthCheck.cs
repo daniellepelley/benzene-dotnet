@@ -59,11 +59,18 @@ public class HttpBenzeneMessageHealthCheck : IHealthCheck
     public string Type => "HttpBenzeneMessage";
 
     /// <summary>POSTs the healthcheck-topic envelope and reports the outcome under the §3.9 policy.</summary>
-    public async Task<IHealthCheckResult> ExecuteAsync()
+    public async Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var reportedUrl = StripUserInfo(_url);
         var dependencies = new[] { new HealthCheckDependency("Http", reportedUrl) };
-        var token = _cancellation?.CancellationToken ?? CancellationToken.None;
+
+        // Link the token ExecuteAsync was called with (the processor's per-check timeout) with the
+        // ambient accessor's token (e.g. application shutdown), if one was supplied - either source
+        // cancels the request.
+        using var cts = _cancellation != null
+            ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _cancellation.CancellationToken)
+            : null;
+        var token = cts?.Token ?? cancellationToken;
 
         try
         {

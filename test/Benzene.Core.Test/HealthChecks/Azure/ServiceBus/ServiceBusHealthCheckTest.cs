@@ -21,7 +21,7 @@ public class ServiceBusHealthCheckTest
         var client = new Mock<ServiceBusClient>();
         client.Setup(x => x.CreateReceiver("orders")).Returns(receiver.Object);
 
-        var result = await new ServiceBusHealthCheck(client.Object, "orders").ExecuteAsync();
+        var result = await new ServiceBusHealthCheck(client.Object, "orders").ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Ok, result.Status);
         Assert.Equal("ServiceBus", result.Type);
@@ -40,7 +40,7 @@ public class ServiceBusHealthCheckTest
         var client = new Mock<ServiceBusClient>();
         client.Setup(x => x.CreateReceiver("events", "audit")).Returns(receiver.Object);
 
-        var result = await new ServiceBusHealthCheck(client.Object, "events", "audit").ExecuteAsync();
+        var result = await new ServiceBusHealthCheck(client.Object, "events", "audit").ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Ok, result.Status);
         var dependency = Assert.Single(result.Dependencies);
@@ -59,7 +59,7 @@ public class ServiceBusHealthCheckTest
         var client = new Mock<ServiceBusClient>();
         client.Setup(x => x.CreateReceiver("orders")).Returns(receiver.Object);
 
-        var result = await new ServiceBusHealthCheck(client.Object, "orders").ExecuteAsync();
+        var result = await new ServiceBusHealthCheck(client.Object, "orders").ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
         Assert.Equal("ServiceBusException", result.Data["Error"]);
@@ -79,7 +79,7 @@ public class ServiceBusHealthCheckTest
         var client = new Mock<ServiceBusClient>();
         client.Setup(x => x.CreateReceiver("orders")).Returns(receiver.Object);
 
-        var result = await new ServiceBusHealthCheck(client.Object, "orders").ExecuteAsync();
+        var result = await new ServiceBusHealthCheck(client.Object, "orders").ExecuteAsync(CancellationToken.None);
 
         // Lacking the Listen claim is a permission problem: Warning, not a failure (§3.9).
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
@@ -98,7 +98,7 @@ public class ServiceBusHealthCheckTest
         var client = new Mock<ServiceBusClient>();
         client.Setup(x => x.CreateReceiver("orders")).Returns(receiver.Object);
 
-        await new ServiceBusHealthCheck(client.Object, "orders").ExecuteAsync();
+        await new ServiceBusHealthCheck(client.Object, "orders").ExecuteAsync(CancellationToken.None);
 
         receiver.Verify(x => x.DisposeAsync(), Times.Once);
     }

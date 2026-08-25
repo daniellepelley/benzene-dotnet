@@ -60,7 +60,11 @@ for the full Kubernetes wiring guide.
 ### Execution
 - `IHealthCheckProcessor`/`HealthCheckProcessor` - the injectable execution engine (was a static class).
   Runs every check wrapped in `TimeOutHealthCheck(ExceptionHandlingHealthCheck(check))` and aggregates
-  into a `HealthCheckResponse`. The per-check timeout is **configurable** via the constructor
+  into a `HealthCheckResponse`. `IHealthCheck.ExecuteAsync(CancellationToken)` requires the token (no
+  default parameter, no parallel overload - every implementer forwards it into its own I/O);
+  `TimeOutHealthCheck` links a timeout-derived `CancellationTokenSource` and passes its token into the
+  wrapped check, so a timeout genuinely **cancels** the in-flight call rather than merely abandoning the
+  awaited task while it keeps running in the background. The per-check timeout is **configurable** via the constructor
   (`new HealthCheckProcessor(TimeSpan)`, default 10s); the middleware resolves `IHealthCheckProcessor`
   from DI, registered by the builder with `TryAddSingleton` so a consumer can register their own
   (e.g. a different timeout) and have it win. Each check is **timed** and its duration stamped onto the

@@ -13,6 +13,7 @@ using Benzene.Results;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
+using System.Threading;
 
 namespace Benzene.Test.Clients;
 
@@ -107,7 +108,7 @@ public class ServiceHealthCheckClientTest
         var sender = SenderReturning(BenzeneResult.Ok(ProviderResponse(ServiceHash)));
         var check = new ClientHealthCheck("Payments", new ServiceHealthCheckClient(sender.Object));
 
-        var result = await check.ExecuteAsync();
+        var result = await check.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Ok, result.Status);
         Assert.Equal(true, result.Data["reachable"]);
@@ -119,7 +120,7 @@ public class ServiceHealthCheckClientTest
         var sender = SenderReturning(BenzeneResult.Ok(ProviderResponse(ServiceHash)));
         var check = new ClientHealthCheck("Payments", new ServiceHealthCheckClient(sender.Object, ClientHash));
 
-        var result = await check.ExecuteAsync();
+        var result = await check.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Warning, result.Status);
     }
@@ -163,7 +164,7 @@ public class ServiceHealthCheckClientTest
         using var factory = new MicrosoftServiceResolverFactory(services);
         using var scope = factory.CreateScope();
         var check = Assert.Single(builder.GetHealthChecks(scope));
-        return await check.ExecuteAsync();
+        return await check.ExecuteAsync(CancellationToken.None);
     }
 
     [Fact]

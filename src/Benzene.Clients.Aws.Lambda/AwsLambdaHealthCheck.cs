@@ -48,21 +48,24 @@ public class AwsLambdaHealthCheck : IHealthCheck
     }
 
     /// <summary>Runs the check and reports the outcome.</summary>
-    public Task<IHealthCheckResult> ExecuteAsync()
+    public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var dependencies = new[] { new HealthCheckDependency("Lambda", _lambdaName) };
 
+        // AwsLambdaBenzeneMessageClient.SendMessageAsync has no CancellationToken overload (a separate
+        // client abstraction, out of WP-7's scope), so Active mode's ping cannot forward the token into
+        // the invoke itself; GetFunctionConfigurationAsync does accept one and gets it below.
         return _mode == HealthCheckMode.Active
             ? RunAsync(_awsLambdaBenzeneMessageClient.SendMessageAsync<Void, Void>(Benzene.Abstractions.BenzeneTopic.Ping, null),
-                r => r.Status == BenzeneResultStatus.Accepted, r => ("Status", (object)r.Status), dependencies)
-            : RunAsync(_amazonLambda.GetFunctionConfigurationAsync(_lambdaName),
-                r => r.HttpStatusCode == HttpStatusCode.OK, r => ("Status", (object)r.HttpStatusCode), dependencies);
+                r => r.Status == BenzeneResultStatus.Accepted, r => ("Status", (object)r.Status), dependencies, cancellationToken)
+            : RunAsync(_amazonLambda.GetFunctionConfigurationAsync(_lambdaName, cancellationToken),
+                r => r.HttpStatusCode == HttpStatusCode.OK, r => ("Status", (object)r.HttpStatusCode), dependencies, cancellationToken);
     }
 
     private async Task<IHealthCheckResult> RunAsync<T>(Task<T> call, Func<T, bool> isHealthy,
-        Func<T, (string Key, object Value)> failInfo, HealthCheckDependency[] dependencies)
+        Func<T, (string Key, object Value)> failInfo, HealthCheckDependency[] dependencies, CancellationToken cancellationToken)
     {
-        using var cts = new CancellationTokenSource();
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var completed = await Task.WhenAny(call, Task.Delay(TimeOut, cts.Token));
 
         if (completed != call)

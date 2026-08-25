@@ -23,7 +23,7 @@ public class HttpPingHealthCheckTest
 
         // A cancelled ambient token cancels the request - the exception isolation wrapper turns this
         // into a "Cancelled" result at the processor level; here we assert the check observes it.
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => healthCheck.ExecuteAsync());
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => healthCheck.ExecuteAsync(CancellationToken.None));
     }
 
     [Fact]
@@ -32,7 +32,7 @@ public class HttpPingHealthCheckTest
         var httpClient = new HttpClient(new StubHttpMessageHandler(HttpStatusCode.OK));
         var healthCheck = new HttpPingHealthCheck(httpClient, "https://example.test/ping");
 
-        var result = await healthCheck.ExecuteAsync();
+        var result = await healthCheck.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Ok, result.Status);
         Assert.Equal("HttpPing", result.Type);
@@ -52,7 +52,7 @@ public class HttpPingHealthCheckTest
         var httpClient = new HttpClient(new StubHttpMessageHandler(statusCode));
         var healthCheck = new HttpPingHealthCheck(httpClient, "https://example.test/ping");
 
-        var result = await healthCheck.ExecuteAsync();
+        var result = await healthCheck.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
         Assert.Equal(statusCode, result.Data["StatusCode"]);
@@ -64,7 +64,7 @@ public class HttpPingHealthCheckTest
         var httpClient = new HttpClient(new StubHttpMessageHandler(HttpStatusCode.OK));
         var healthCheck = new HttpPingHealthCheck(httpClient, "https://user:s3cret@example.test/ping");
 
-        var result = await healthCheck.ExecuteAsync();
+        var result = await healthCheck.ExecuteAsync(CancellationToken.None);
 
         // Credentials must not leak into the report (it flows out with no authorization).
         Assert.DoesNotContain("s3cret", (string)result.Data["Url"]);

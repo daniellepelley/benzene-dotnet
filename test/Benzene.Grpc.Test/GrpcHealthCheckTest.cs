@@ -46,7 +46,7 @@ public class GrpcHealthCheckTest
         using var channel = GrpcChannel.ForAddress("http://localhost:1"); // nothing listens on port 1
         var check = new GrpcHealthCheck(channel, TimeSpan.FromMilliseconds(500));
 
-        var result = await check.ExecuteAsync();
+        var result = await check.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
         Assert.Equal("Grpc", check.Type);

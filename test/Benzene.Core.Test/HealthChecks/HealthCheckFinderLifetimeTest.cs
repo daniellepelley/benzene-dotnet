@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using Benzene.Abstractions.DI;
 using Benzene.HealthChecks;
@@ -38,7 +39,7 @@ public class HealthCheckFinderLifetimeTest
     {
         public string Name => "scoped";
         public string Type => "scoped";
-        public Task<IHealthCheckResult> ExecuteAsync() =>
+        public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken) =>
             Task.FromResult<IHealthCheckResult>(HealthCheckResult.CreateInstance(true, "scoped"));
     }
 

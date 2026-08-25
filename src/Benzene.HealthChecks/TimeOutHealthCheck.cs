@@ -11,8 +11,11 @@ namespace Benzene.HealthChecks;
 /// override.
 /// </summary>
 /// <remarks>
-/// This only stops <em>waiting</em> on the inner check - the inner <see cref="ExecuteAsync"/> task is not
-/// cancelled and keeps running to completion in the background even after a timeout is reported.
+/// The timeout is enforced via a linked, timeout-derived <see cref="CancellationTokenSource"/> whose
+/// token is passed into the inner check's <see cref="IHealthCheck.ExecuteAsync"/> - so, provided the
+/// inner check forwards that token into its own I/O (as every conforming <see cref="IHealthCheck"/>
+/// implementer must), a timeout actually <b>cancels</b> the underlying call rather than merely
+/// abandoning the awaited task while it keeps running to completion in the background.
 /// </remarks>
 internal class TimeOutHealthCheck : IHealthCheck
 {
@@ -32,39 +35,40 @@ internal class TimeOutHealthCheck : IHealthCheck
     }
 
     /// <summary>
-    /// Runs the wrapped check, waiting up to the configured timeout. If it has not completed by then,
-    /// returns a failed result instead of the check's actual outcome.
+    /// Runs the wrapped check under a timeout-linked token. If it has not completed by the configured
+    /// timeout, returns a failed result instead of the check's actual outcome.
     /// </summary>
-    public async Task<IHealthCheckResult> ExecuteAsync()
+    public async Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
-        var task = _inner.ExecuteAsync();
+        // Link the caller's token with the configured timeout, and pass the linked token into the
+        // inner check - so the timeout genuinely cancels the in-flight I/O (not just the wait) when
+        // the inner check forwards it, as every conforming implementer does.
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(_timeout);
 
-        // Cancel the delay as soon as the check wins, so a fast check doesn't leave a 10s timer
-        // registered until it fires (health probes run continuously - those timers add up).
-        using var cts = new CancellationTokenSource();
-        var completed = await Task.WhenAny(task, Task.Delay(_timeout, cts.Token));
-        if (completed == task)
+        try
         {
-            cts.Cancel();
             // await (not .Result): unwraps to the real exception rather than an AggregateException.
+            return await _inner.ExecuteAsync(cts.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // The linked token fired from CancelAfter (the timeout), not from the caller's own token -
+            // report it as a timeout. A caller-initiated cancellation (ambient shutdown) is not a
+            // timeout and propagates uncaught instead.
+            return HealthCheckResult.CreateInstance(false, _inner.Type, new Dictionary<string, object>
+            {
+                { "Error", "Timed Out" }
+            });
+        }
+        catch (Exception ex)
+        {
             // The check may still fault if TimeOutHealthCheck is used without the exception-handling
             // decorator, so guard defensively rather than relying on composition order.
-            try
+            return HealthCheckResult.CreateInstance(false, _inner.Type, new Dictionary<string, object>
             {
-                return await task;
-            }
-            catch (Exception ex)
-            {
-                return HealthCheckResult.CreateInstance(false, _inner.Type, new Dictionary<string, object>
-                {
-                    { "Exception", ex.GetType().Name }
-                });
-            }
-        }
-
-        return HealthCheckResult.CreateInstance(false, _inner.Type, new Dictionary<string, object>
-            {
-                { "Error", "Timed Out"}
+                { "Exception", ex.GetType().Name }
             });
+        }
     }
 }

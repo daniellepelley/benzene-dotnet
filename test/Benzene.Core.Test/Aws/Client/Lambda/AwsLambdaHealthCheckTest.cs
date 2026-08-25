@@ -30,7 +30,7 @@ public class AwsLambdaHealthCheckTest
 
         var healthCheck = new AwsLambdaHealthCheck("some-lambda", mockLambdaClient.Object, NullLogger<AwsLambdaHealthCheck>.Instance);
 
-        var result = await healthCheck.ExecuteAsync();
+        var result = await healthCheck.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal("Lambda", healthCheck.Type);
         Assert.Equal(HealthCheckStatus.Ok, result.Status);
@@ -49,7 +49,7 @@ public class AwsLambdaHealthCheckTest
             .Setup(x => x.GetFunctionConfigurationAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new GetFunctionConfigurationResponse { HttpStatusCode = HttpStatusCode.NotFound });
 
-        var result = await new AwsLambdaHealthCheck("some-lambda", mockLambdaClient.Object, NullLogger<AwsLambdaHealthCheck>.Instance).ExecuteAsync();
+        var result = await new AwsLambdaHealthCheck("some-lambda", mockLambdaClient.Object, NullLogger<AwsLambdaHealthCheck>.Instance).ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
     }
@@ -64,7 +64,7 @@ public class AwsLambdaHealthCheckTest
 
         var healthCheck = new AwsLambdaHealthCheck("some-lambda", mockLambdaClient.Object, NullLogger<AwsLambdaHealthCheck>.Instance, HealthCheckMode.Active);
 
-        var result = await healthCheck.ExecuteAsync();
+        var result = await healthCheck.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal("Lambda.Active", healthCheck.Type);
         Assert.Equal(HealthCheckStatus.Ok, result.Status);

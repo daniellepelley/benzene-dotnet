@@ -9,6 +9,7 @@ using Benzene.Testing;
 using Benzene.Aws.Lambda.Core.TestHelpers;
 using Moq;
 using Xunit;
+using System.Threading;
 
 namespace Benzene.Test.Aws.ApiGateway;
 
@@ -18,7 +19,7 @@ public class ApiGatewayLivenessReadinessTest
     public async Task UseLivenessCheck_RespondsAtDefaultPath()
     {
         var mockHealthCheck = new Mock<IHealthCheck>();
-        mockHealthCheck.Setup(x => x.ExecuteAsync()).ReturnsAsync(HealthCheckResult.CreateInstance(true, "Simple"));
+        mockHealthCheck.Setup(x => x.ExecuteAsync(It.IsAny<CancellationToken>())).ReturnsAsync(HealthCheckResult.CreateInstance(true, "Simple"));
 
         var host = new InlineAwsLambdaStartUp()
             .ConfigureServices(services => services.ConfigureServiceCollection())
@@ -31,14 +32,14 @@ public class ApiGatewayLivenessReadinessTest
         var response = await host.SendApiGatewayAsync(request);
 
         Assert.Equal(200, response.StatusCode);
-        mockHealthCheck.Verify(x => x.ExecuteAsync(), Times.Once);
+        mockHealthCheck.Verify(x => x.ExecuteAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
     public async Task UseReadinessCheck_RespondsAtDefaultPath()
     {
         var mockHealthCheck = new Mock<IHealthCheck>();
-        mockHealthCheck.Setup(x => x.ExecuteAsync()).ReturnsAsync(HealthCheckResult.CreateInstance(true, "Database"));
+        mockHealthCheck.Setup(x => x.ExecuteAsync(It.IsAny<CancellationToken>())).ReturnsAsync(HealthCheckResult.CreateInstance(true, "Database"));
 
         var host = new InlineAwsLambdaStartUp()
             .ConfigureServices(services => services.ConfigureServiceCollection())
@@ -51,14 +52,14 @@ public class ApiGatewayLivenessReadinessTest
         var response = await host.SendApiGatewayAsync(request);
 
         Assert.Equal(200, response.StatusCode);
-        mockHealthCheck.Verify(x => x.ExecuteAsync(), Times.Once);
+        mockHealthCheck.Verify(x => x.ExecuteAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
     public async Task UseReadinessCheck_ReportsUnhealthy_AsNonSuccessStatus()
     {
         var mockHealthCheck = new Mock<IHealthCheck>();
-        mockHealthCheck.Setup(x => x.ExecuteAsync()).ReturnsAsync(HealthCheckResult.CreateInstance(false, "Database"));
+        mockHealthCheck.Setup(x => x.ExecuteAsync(It.IsAny<CancellationToken>())).ReturnsAsync(HealthCheckResult.CreateInstance(false, "Database"));
 
         var host = new InlineAwsLambdaStartUp()
             .ConfigureServices(services => services.ConfigureServiceCollection())
@@ -77,9 +78,9 @@ public class ApiGatewayLivenessReadinessTest
     public async Task LivenessAndReadiness_AreIndependent_NeitherShadowsTheOther()
     {
         var livenessCheck = new Mock<IHealthCheck>();
-        livenessCheck.Setup(x => x.ExecuteAsync()).ReturnsAsync(HealthCheckResult.CreateInstance(true, "Liveness"));
+        livenessCheck.Setup(x => x.ExecuteAsync(It.IsAny<CancellationToken>())).ReturnsAsync(HealthCheckResult.CreateInstance(true, "Liveness"));
         var readinessCheck = new Mock<IHealthCheck>();
-        readinessCheck.Setup(x => x.ExecuteAsync()).ReturnsAsync(HealthCheckResult.CreateInstance(true, "Readiness"));
+        readinessCheck.Setup(x => x.ExecuteAsync(It.IsAny<CancellationToken>())).ReturnsAsync(HealthCheckResult.CreateInstance(true, "Readiness"));
 
         var host = new InlineAwsLambdaStartUp()
             .ConfigureServices(services => services.ConfigureServiceCollection())
@@ -90,19 +91,19 @@ public class ApiGatewayLivenessReadinessTest
             .BuildHost();
 
         await host.SendApiGatewayAsync(HttpBuilder.Create("GET", "/livez").AsApiGatewayRequest());
-        livenessCheck.Verify(x => x.ExecuteAsync(), Times.Once);
-        readinessCheck.Verify(x => x.ExecuteAsync(), Times.Never);
+        livenessCheck.Verify(x => x.ExecuteAsync(It.IsAny<CancellationToken>()), Times.Once);
+        readinessCheck.Verify(x => x.ExecuteAsync(It.IsAny<CancellationToken>()), Times.Never);
 
         await host.SendApiGatewayAsync(HttpBuilder.Create("GET", "/readyz").AsApiGatewayRequest());
-        readinessCheck.Verify(x => x.ExecuteAsync(), Times.Once);
-        livenessCheck.Verify(x => x.ExecuteAsync(), Times.Once);
+        readinessCheck.Verify(x => x.ExecuteAsync(It.IsAny<CancellationToken>()), Times.Once);
+        livenessCheck.Verify(x => x.ExecuteAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
     public async Task UseLivenessCheck_CustomPath()
     {
         var mockHealthCheck = new Mock<IHealthCheck>();
-        mockHealthCheck.Setup(x => x.ExecuteAsync()).ReturnsAsync(HealthCheckResult.CreateInstance(true, "Simple"));
+        mockHealthCheck.Setup(x => x.ExecuteAsync(It.IsAny<CancellationToken>())).ReturnsAsync(HealthCheckResult.CreateInstance(true, "Simple"));
 
         var host = new InlineAwsLambdaStartUp()
             .ConfigureServices(services => services.ConfigureServiceCollection())

@@ -41,8 +41,10 @@ public class ClientHealthCheck : IHealthCheck
     /// <inheritdoc />
     public string Type => _serviceName;
 
+    // IHasHealthCheck.HealthCheckAsync() has no CancellationToken overload (a separate seam, out of
+    // WP-7's scope - only IHealthCheck's own contract changed here), so the token cannot be forwarded.
     /// <inheritdoc />
-    public async Task<IHealthCheckResult> ExecuteAsync()
+    public async Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var dependencies = new[] { new HealthCheckDependency("Service", _serviceName) };
 

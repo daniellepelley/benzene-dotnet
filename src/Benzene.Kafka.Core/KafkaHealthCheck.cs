@@ -42,7 +42,7 @@ public class KafkaHealthCheck : IHealthCheck
     public string Type => "Kafka";
 
     /// <summary>Runs the check and reports the outcome.</summary>
-    public async Task<IHealthCheckResult> ExecuteAsync()
+    public async Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var dependencies = new List<HealthCheckDependency> { new("Broker", _bootstrapServers) };
         foreach (var topic in _topics)
@@ -53,10 +53,13 @@ public class KafkaHealthCheck : IHealthCheck
 
         try
         {
-            // GetMetadata is a synchronous librdkafka call bounded by its own timeout; offload it so the
-            // processor's timeout wrapper can still race it. Cluster-level (no topic argument) so it never
-            // triggers the broker-side auto-topic-creation a per-topic metadata request can.
-            var metadata = await Task.Run(() => _adminClientFactory.AdminClient.GetMetadata(_timeout));
+            // GetMetadata is a synchronous librdkafka call bounded by its own timeout (no
+            // CancellationToken overload exists on the underlying client, so cancellationToken cannot
+            // reach the in-flight call itself); offload it so the processor's timeout wrapper can still
+            // race it, and pass the token into Task.Run so a not-yet-started call is still cancelled
+            // rather than queued. Cluster-level (no topic argument) so it never triggers the broker-side
+            // auto-topic-creation a per-topic metadata request can.
+            var metadata = await Task.Run(() => _adminClientFactory.AdminClient.GetMetadata(_timeout), cancellationToken);
 
             var missing = _topics
                 .Where(t => !metadata.Topics.Any(tm => tm.Topic == t && tm.Error.Code == ErrorCode.NoError))

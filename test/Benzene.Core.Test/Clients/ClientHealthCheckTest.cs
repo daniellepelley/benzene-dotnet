@@ -8,6 +8,7 @@ using Benzene.HealthChecks;
 using Benzene.HealthChecks.Core;
 using Benzene.Results;
 using Xunit;
+using System.Threading;
 
 namespace Benzene.Test.Clients;
 
@@ -40,7 +41,7 @@ public class ClientHealthCheckTest
     [Fact]
     public async Task Reachable_ContractsMatch_ReportsOk()
     {
-        var result = await CheckReturning(BenzeneResult.Ok(AnnotatedResponse("same", "same"))).ExecuteAsync();
+        var result = await CheckReturning(BenzeneResult.Ok(AnnotatedResponse("same", "same"))).ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Ok, result.Status);
         Assert.Equal(ServiceName, result.Type);
@@ -50,7 +51,7 @@ public class ClientHealthCheckTest
     [Fact]
     public async Task Reachable_ContractDrift_ReportsWarning()
     {
-        var result = await CheckReturning(BenzeneResult.Ok(AnnotatedResponse("service", "client"))).ExecuteAsync();
+        var result = await CheckReturning(BenzeneResult.Ok(AnnotatedResponse("service", "client"))).ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Warning, result.Status);
         var match = Assert.IsType<ClientHashMatch>(result.Data[SchemaHealthCheckConstants.MatchKey]);
@@ -77,7 +78,7 @@ public class ClientHealthCheckTest
     {
         var response = new HealthCheckResponse(true, new Dictionary<string, HealthCheckResult>());
 
-        var result = await CheckReturning(BenzeneResult.Ok(response)).ExecuteAsync();
+        var result = await CheckReturning(BenzeneResult.Ok(response)).ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Ok, result.Status);
         Assert.False(result.Data.ContainsKey(SchemaHealthCheckConstants.MatchKey));
@@ -87,7 +88,7 @@ public class ClientHealthCheckTest
     public async Task Unreachable_NullPayload_ReportsFailed()
     {
         var result = await CheckReturning(
-            BenzeneResult.Set<HealthCheckResponse>("service-unavailable", false)).ExecuteAsync();
+            BenzeneResult.Set<HealthCheckResponse>("service-unavailable", false)).ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
         Assert.Equal(false, result.Data["reachable"]);
@@ -100,7 +101,7 @@ public class ClientHealthCheckTest
         var check = new ClientHealthCheck(ServiceName,
             new FakeClient(() => throw new InvalidOperationException("connection refused")));
 
-        var result = await check.ExecuteAsync();
+        var result = await check.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
         Assert.Equal(false, result.Data["reachable"]);
@@ -110,7 +111,7 @@ public class ClientHealthCheckTest
     [Fact]
     public async Task ReportsServiceDependencyMetadata()
     {
-        var result = await CheckReturning(BenzeneResult.Ok(AnnotatedResponse("same", "same"))).ExecuteAsync();
+        var result = await CheckReturning(BenzeneResult.Ok(AnnotatedResponse("same", "same"))).ExecuteAsync(CancellationToken.None);
 
         var dependency = Assert.Single(result.Dependencies);
         Assert.Equal("Service", dependency.Kind);

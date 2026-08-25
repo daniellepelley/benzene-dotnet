@@ -24,7 +24,7 @@ public class ShutdownReadinessHealthCheck : IHealthCheck
     public string Type => "Shutdown";
 
     /// <inheritdoc />
-    public Task<IHealthCheckResult> ExecuteAsync()
+    public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var shuttingDown = _shutdownState.IsShuttingDown;
         var data = new Dictionary<string, object> { { "ShuttingDown", shuttingDown } };

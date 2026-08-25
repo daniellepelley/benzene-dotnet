@@ -14,6 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Newtonsoft.Json;
 using Xunit;
+using System.Threading;
 
 namespace Benzene.Test.Plugins.HealthChecks;
 
@@ -23,7 +24,7 @@ public class HealthCheckPipelineTest
     public async Task Send_HealthCheck()
     {
         var mockHealthCheck = new Mock<IHealthCheck>();
-        mockHealthCheck.Setup(x => x.ExecuteAsync())
+        mockHealthCheck.Setup(x => x.ExecuteAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(HealthCheckResult.CreateInstance(true, "some-name", new Dictionary<string, object>()));
         mockHealthCheck.Setup(x => x.Type)
             .Returns("some-name");
@@ -56,7 +57,7 @@ public class HealthCheckPipelineTest
         var serviceResolverFactory = new MicrosoftServiceResolverFactory(services);
         var response = await aws.HandleAsync(request, serviceResolverFactory);
 
-        mockHealthCheck.Verify(x => x.ExecuteAsync());
+        mockHealthCheck.Verify(x => x.ExecuteAsync(It.IsAny<CancellationToken>()));
 
         Assert.NotNull(response);
         Assert.Contains("some-name", response.Body);
@@ -67,7 +68,7 @@ public class HealthCheckPipelineTest
     public async Task Send_HealthCheck_NoName()
     {
         var mockHealthCheck = new Mock<IHealthCheck>();
-        mockHealthCheck.Setup(x => x.ExecuteAsync())
+        mockHealthCheck.Setup(x => x.ExecuteAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(HealthCheckResult.CreateInstance(true, "HealthCheck", new Dictionary<string, object>()));
 
         var services = new ServiceCollection();
@@ -102,7 +103,7 @@ public class HealthCheckPipelineTest
         var serviceResolverFactory = new MicrosoftServiceResolverFactory(services);
         var response = await aws.HandleAsync(request, serviceResolverFactory);
 
-        mockHealthCheck.Verify(x => x.ExecuteAsync());
+        mockHealthCheck.Verify(x => x.ExecuteAsync(It.IsAny<CancellationToken>()));
 
         Assert.NotNull(response);
         Assert.Contains("HealthCheck-1", response.Body);

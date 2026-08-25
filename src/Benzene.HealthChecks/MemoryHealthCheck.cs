@@ -42,7 +42,7 @@ public class MemoryHealthCheck : IHealthCheck
     public string Type => "Memory";
 
     /// <inheritdoc />
-    public Task<IHealthCheckResult> ExecuteAsync()
+    public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         try
         {

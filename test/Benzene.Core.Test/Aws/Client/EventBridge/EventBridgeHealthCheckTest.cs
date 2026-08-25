@@ -20,7 +20,7 @@ public class EventBridgeHealthCheckTest
             .ReturnsAsync(new DescribeEventBusResponse { HttpStatusCode = HttpStatusCode.OK });
 
         var healthCheck = new EventBridgeHealthCheck(mock.Object);
-        var result = await healthCheck.ExecuteAsync();
+        var result = await healthCheck.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Ok, result.Status);
         Assert.Equal("EventBridge", healthCheck.Type);
@@ -38,7 +38,7 @@ public class EventBridgeHealthCheckTest
         mock.Setup(x => x.DescribeEventBusAsync(It.IsAny<DescribeEventBusRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DescribeEventBusResponse { HttpStatusCode = HttpStatusCode.OK });
 
-        var result = await new EventBridgeHealthCheck(mock.Object, "orders-bus").ExecuteAsync();
+        var result = await new EventBridgeHealthCheck(mock.Object, "orders-bus").ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Ok, result.Status);
         Assert.Equal("orders-bus", Assert.Single(result.Dependencies).Name);
@@ -51,7 +51,7 @@ public class EventBridgeHealthCheckTest
         mock.Setup(x => x.DescribeEventBusAsync(It.IsAny<DescribeEventBusRequest>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new AmazonEventBridgeException("connection refused"));
 
-        var result = await new EventBridgeHealthCheck(mock.Object).ExecuteAsync();
+        var result = await new EventBridgeHealthCheck(mock.Object).ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
         Assert.Equal("AmazonEventBridgeException", result.Data["Error"]);
@@ -71,7 +71,7 @@ public class EventBridgeHealthCheckTest
                 StatusCode = HttpStatusCode.Forbidden
             });
 
-        var result = await new EventBridgeHealthCheck(mock.Object).ExecuteAsync();
+        var result = await new EventBridgeHealthCheck(mock.Object).ExecuteAsync(CancellationToken.None);
 
         // Lacking events:DescribeEventBus is a Warning, not a failure (§3.9).
         Assert.Equal(HealthCheckStatus.Failed, result.Status);

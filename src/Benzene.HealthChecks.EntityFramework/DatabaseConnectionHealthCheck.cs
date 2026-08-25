@@ -29,9 +29,9 @@ public class DatabaseConnectionHealthCheck<TDbContext> : IHealthCheck where TDbC
     /// include connection details such as server/credentials in exception messages, and this result
     /// can flow out to whatever calls the health check topic with no built-in authorization).
     /// </summary>
-    public async Task<IHealthCheckResult> ExecuteAsync()
+    public async Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
-        var canConnect = await TryConnect(_dbContext);
+        var canConnect = await TryConnect(_dbContext, cancellationToken);
 
         return HealthCheckResult.CreateInstance(canConnect.Item1, Type, new Dictionary<string, object>
         {
@@ -41,11 +41,11 @@ public class DatabaseConnectionHealthCheck<TDbContext> : IHealthCheck where TDbC
         new[] { new HealthCheckDependency("Database", typeof(TDbContext).Name) });
     }
 
-    private static async Task<(bool, Exception)> TryConnect(DbContext dbContext)
+    private static async Task<(bool, Exception)> TryConnect(DbContext dbContext, CancellationToken cancellationToken)
     {
         try
         {
-            return (await dbContext.Database.CanConnectAsync(), null);
+            return (await dbContext.Database.CanConnectAsync(cancellationToken), null);
         }
         catch(Exception ex)
         {

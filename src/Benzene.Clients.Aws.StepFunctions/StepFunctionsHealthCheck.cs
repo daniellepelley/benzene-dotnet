@@ -42,7 +42,7 @@ public class StepFunctionsHealthCheck : IHealthCheck
     }
 
     /// <summary>Runs the check and reports the outcome.</summary>
-    public Task<IHealthCheckResult> ExecuteAsync()
+    public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var dependencies = new[] { new HealthCheckDependency("StateMachine", _stateMachineArn) };
 
@@ -51,22 +51,25 @@ public class StepFunctionsHealthCheck : IHealthCheck
             {
                 StateMachineArn = _stateMachineArn,
                 Input = "{}"
-            }))
+            }, cancellationToken))
             : MapStatus(_amazonStepFunctions.DescribeStateMachineAsync(new DescribeStateMachineRequest
             {
                 StateMachineArn = _stateMachineArn
-            }));
+            }, cancellationToken));
 
-        return RunAsync(call, dependencies);
+        return RunAsync(call, dependencies, cancellationToken);
     }
 
     // Project any AWS response to its HttpStatusCode without losing the task's faulted-ness.
     private static async Task<HttpStatusCode> MapStatus<TResponse>(Task<TResponse> call) where TResponse : AmazonWebServiceResponse
         => (await call).HttpStatusCode;
 
-    private async Task<IHealthCheckResult> RunAsync(Task<HttpStatusCode> call, HealthCheckDependency[] dependencies)
+    private async Task<IHealthCheckResult> RunAsync(Task<HttpStatusCode> call, HealthCheckDependency[] dependencies, CancellationToken cancellationToken)
     {
-        using var cts = new CancellationTokenSource();
+        // Linked with the caller's token (the processor's timeout wrap) so either source can end the
+        // internal wait; the SDK call itself is also passed cancellationToken directly above so a
+        // cancellation actually stops the in-flight request, not just this wait.
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var completed = await Task.WhenAny(call, Task.Delay(TimeOut, cts.Token));
 
         if (completed != call)

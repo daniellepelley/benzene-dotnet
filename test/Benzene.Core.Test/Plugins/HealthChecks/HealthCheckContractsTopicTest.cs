@@ -13,6 +13,7 @@ using Benzene.Results;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
+using System.Threading;
 
 namespace Benzene.Test.Plugins.HealthChecks;
 
@@ -41,7 +42,7 @@ public class HealthCheckContractsTopicTest
     {
         var mock = new Mock<IHealthCheck>();
         mock.Setup(x => x.Type).Returns(type);
-        mock.Setup(x => x.ExecuteAsync())
+        mock.Setup(x => x.ExecuteAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(HealthCheckResult.CreateInstance(healthy, type, new Dictionary<string, object>()));
         return mock;
     }
@@ -56,8 +57,8 @@ public class HealthCheckContractsTopicTest
         var response = await app.HandleAsync(
             new BenzeneMessageRequest { Topic = HealthCheckConstants.DefaultContractsTopic }, resolverFactory);
 
-        contractCheck.Verify(x => x.ExecuteAsync(), Times.Once);
-        readinessCheck.Verify(x => x.ExecuteAsync(), Times.Never);
+        contractCheck.Verify(x => x.ExecuteAsync(It.IsAny<CancellationToken>()), Times.Once);
+        readinessCheck.Verify(x => x.ExecuteAsync(It.IsAny<CancellationToken>()), Times.Never);
         Assert.Equal(BenzeneResultStatus.Ok, response.StatusCode);
     }
 
@@ -76,7 +77,7 @@ public class HealthCheckContractsTopicTest
 
         await app.HandleAsync(new BenzeneMessageRequest { Topic = topic }, resolverFactory);
 
-        contractCheck.Verify(x => x.ExecuteAsync(), Times.Never);
+        contractCheck.Verify(x => x.ExecuteAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -91,7 +92,7 @@ public class HealthCheckContractsTopicTest
         await app.HandleAsync(
             new BenzeneMessageRequest { Topic = HealthCheckConstants.DefaultReadinessTopic }, resolverFactory);
 
-        readinessCheck.Verify(x => x.ExecuteAsync(), Times.Once);
-        contractCheck.Verify(x => x.ExecuteAsync(), Times.Never);
+        readinessCheck.Verify(x => x.ExecuteAsync(It.IsAny<CancellationToken>()), Times.Once);
+        contractCheck.Verify(x => x.ExecuteAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 }

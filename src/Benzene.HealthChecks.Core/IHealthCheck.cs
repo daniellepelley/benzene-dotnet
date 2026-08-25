@@ -15,7 +15,14 @@ public interface IHealthCheck
     /// Runs the check and returns its outcome. Should not throw for expected failure conditions
     /// (e.g. connection refused) - report them via a failed <see cref="IHealthCheckResult"/> instead.
     /// </summary>
-    Task<IHealthCheckResult> ExecuteAsync();
+    /// <param name="cancellationToken">
+    /// Cancels the check - forward it into whatever I/O the check performs (a DB connection open, an
+    /// SDK call, an HTTP request, a socket connect) so a timeout or shutdown actually stops the
+    /// in-flight call instead of merely abandoning the awaited task. Required, not optional: pre-1.0,
+    /// this interface takes no default-parameter escape hatch and has no parallel overload - every
+    /// implementer accepts and forwards it.
+    /// </param>
+    Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken);
 
     // The four members below are default interface members: adding them is source- and binary-compatible
     // for the 20+ existing IHealthCheck implementers, which keep the defaults. They exist so a check can

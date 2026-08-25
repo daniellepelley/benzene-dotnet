@@ -34,7 +34,7 @@ public class QueueStorageHealthCheck : IHealthCheck
     public string Type => "QueueStorage";
 
     /// <summary>Runs the check and reports the outcome.</summary>
-    public async Task<IHealthCheckResult> ExecuteAsync()
+    public async Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var dependencies = new[] { new HealthCheckDependency("Queue", _queueClient.Name) };
 
@@ -42,7 +42,7 @@ public class QueueStorageHealthCheck : IHealthCheck
         {
             // GetProperties is a read-only metadata read; the Azure SDK throws on any non-success, so a
             // returned response is itself the connectivity signal.
-            await _queueClient.GetPropertiesAsync();
+            await _queueClient.GetPropertiesAsync(cancellationToken);
             return HealthCheckResult.CreateInstance(true, Type,
                 new Dictionary<string, object> { { "Queue", _queueClient.Name } }, dependencies);
         }

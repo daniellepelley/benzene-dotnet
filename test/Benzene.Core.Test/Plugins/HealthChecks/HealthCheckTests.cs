@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using Benzene.Abstractions.DI;
 using Benzene.Core.MessageHandlers.DI;
@@ -23,7 +24,7 @@ public class HealthCheckTests
     public async Task SimpleHealthCheck()
     {
         var sim = new SimpleHealthCheck();
-        var result = await sim.ExecuteAsync();
+        var result = await sim.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(HealthCheckStatus.Ok, result.Status);
     }
@@ -32,7 +33,7 @@ public class HealthCheckTests
     public async Task HandlesExceptions()
     {
         var mockHealthCheck = new Mock<IHealthCheck>();
-        mockHealthCheck.Setup(x => x.ExecuteAsync()).Throws<Exception>();
+        mockHealthCheck.Setup(x => x.ExecuteAsync(It.IsAny<CancellationToken>())).Throws<Exception>();
 
         var result =  await HealthCheckProcessor.PerformHealthChecksAsync(Defaults.HealthCheckTopic, new []{ mockHealthCheck.Object });
 
@@ -45,10 +46,10 @@ public class HealthCheckTests
     {
         var warning = new Mock<IHealthCheck>();
         warning.Setup(x => x.Type).Returns("warn");
-        warning.Setup(x => x.ExecuteAsync()).ReturnsAsync(HealthCheckResult.CreateWarning("warn"));
+        warning.Setup(x => x.ExecuteAsync(It.IsAny<CancellationToken>())).ReturnsAsync(HealthCheckResult.CreateWarning("warn"));
         var ok = new Mock<IHealthCheck>();
         ok.Setup(x => x.Type).Returns("ok");
-        ok.Setup(x => x.ExecuteAsync()).ReturnsAsync(HealthCheckResult.CreateInstance(true, "ok"));
+        ok.Setup(x => x.ExecuteAsync(It.IsAny<CancellationToken>())).ReturnsAsync(HealthCheckResult.CreateInstance(true, "ok"));
 
         var result = await HealthCheckProcessor.PerformHealthChecksAsync(Defaults.HealthCheckTopic, new[] { warning.Object, ok.Object });
 
@@ -63,10 +64,10 @@ public class HealthCheckTests
     {
         var warning = new Mock<IHealthCheck>();
         warning.Setup(x => x.Type).Returns("warn");
-        warning.Setup(x => x.ExecuteAsync()).ReturnsAsync(HealthCheckResult.CreateWarning("warn"));
+        warning.Setup(x => x.ExecuteAsync(It.IsAny<CancellationToken>())).ReturnsAsync(HealthCheckResult.CreateWarning("warn"));
         var failed = new Mock<IHealthCheck>();
         failed.Setup(x => x.Type).Returns("fail");
-        failed.Setup(x => x.ExecuteAsync()).ReturnsAsync(HealthCheckResult.CreateInstance(false, "fail"));
+        failed.Setup(x => x.ExecuteAsync(It.IsAny<CancellationToken>())).ReturnsAsync(HealthCheckResult.CreateInstance(false, "fail"));
 
         var result = await HealthCheckProcessor.PerformHealthChecksAsync(Defaults.HealthCheckTopic, new[] { warning.Object, failed.Object });
 
@@ -80,7 +81,7 @@ public class HealthCheckTests
     {
         var check = new Mock<IHealthCheck>();
         check.Setup(x => x.Type).Returns("c");
-        check.Setup(x => x.ExecuteAsync()).ThrowsAsync(new OperationCanceledException());
+        check.Setup(x => x.ExecuteAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new OperationCanceledException());
 
         var result = await HealthCheckProcessor.PerformHealthChecksAsync(Defaults.HealthCheckTopic, new[] { check.Object });
 
@@ -91,8 +92,15 @@ public class HealthCheckTests
     }
 
     [Fact]
-    public async Task Processor_WithShortTimeout_ReportsSlowCheckAsTimedOut()
+    public async Task Processor_WithShortTimeout_FailsSlowCheck()
     {
+        // Since DelayHealthCheck now forwards the token it is given (as every conforming IHealthCheck
+        // must - WP-7 #2), the processor's timeout genuinely cancels the wait: the check's own
+        // Task.Delay observes the cancellation and throws, which ExceptionHandlingHealthCheck (the
+        // decorator closest to the raw check) reports as "Cancelled" - a more accurate label than the
+        // old "Timed Out" wording, since the call really was cancelled, not merely abandoned while it
+        // kept running in the background. Genuine cancellation reaching the check is asserted directly
+        // by Processor_WithShortTimeout_ActuallyCancelsAConformingCheck below.
         var slow = new DelayHealthCheck("slow", TimeSpan.FromSeconds(5));
 
         var result = await new HealthCheckProcessor(TimeSpan.FromMilliseconds(50)).PerformHealthChecksAsync(new IHealthCheck[] { slow });
@@ -101,7 +109,21 @@ public class HealthCheckTests
         Assert.False(response.IsHealthy);
         var check = response.HealthChecks["slow"];
         Assert.Equal(HealthCheckStatus.Failed, check.Status);
-        Assert.Equal("Timed Out", check.Data["Error"]);
+        Assert.Equal("Cancelled", check.Data["Error"]);
+    }
+
+    [Fact]
+    public async Task Processor_WithShortTimeout_ActuallyCancelsAConformingCheck()
+    {
+        // WP-7 #2's core deliverable: TimeOutHealthCheck links a timeout-derived CancellationTokenSource
+        // and passes its token through, so a timeout genuinely cancels the underlying call instead of
+        // just abandoning the awaited task. Assert this directly - not merely that the reported status
+        // is Failed - by checking the check's own token was the one that requested cancellation.
+        var check = new CancellationObservingHealthCheck(TimeSpan.FromSeconds(5));
+
+        await new HealthCheckProcessor(TimeSpan.FromMilliseconds(50)).PerformHealthChecksAsync(new IHealthCheck[] { check });
+
+        Assert.True(check.WasCancelled);
     }
 
     [Fact]
@@ -132,7 +154,7 @@ public class HealthCheckTests
     {
         var dependencies = new[] { new HealthCheckDependency("Queue", "some-queue-url") };
         var mockHealthCheck = new Mock<IHealthCheck>();
-        mockHealthCheck.Setup(x => x.ExecuteAsync())
+        mockHealthCheck.Setup(x => x.ExecuteAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(HealthCheckResult.CreateInstance(true, "some-name", new Dictionary<string, object>(), dependencies));
         mockHealthCheck.Setup(x => x.Type).Returns("some-name");
 
@@ -223,7 +245,7 @@ public class ExceptionThrowingHealthCheckFactory : IHealthCheckFactory
 public class ExceptionThrowingHealthCheck : IHealthCheck
 {
     public string Type { get; }
-    public Task<IHealthCheckResult> ExecuteAsync()
+    public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         throw new Exception();
     }
@@ -240,12 +262,45 @@ public class DelayHealthCheck : IHealthCheck
 
     public string Type { get; }
 
-    public async Task<IHealthCheckResult> ExecuteAsync()
+    public async Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         if (_delay > TimeSpan.Zero)
         {
-            await Task.Delay(_delay);
+            // Forwards the token, like a conforming IHealthCheck must (WP-7 #2): this is what lets
+            // the processor's timeout genuinely cancel the wait rather than merely abandon it.
+            await Task.Delay(_delay, cancellationToken);
         }
+        return HealthCheckResult.CreateInstance(true, Type);
+    }
+}
+
+// A health check whose ExecuteAsync records whether the token it was given was actually the one that
+// requested cancellation - proof the processor's timeout genuinely cancels the underlying call (WP-7
+// #2), not merely abandons the awaited task while it keeps running in the background.
+public class CancellationObservingHealthCheck : IHealthCheck
+{
+    private readonly TimeSpan _delay;
+    public bool WasCancelled { get; private set; }
+
+    public CancellationObservingHealthCheck(TimeSpan delay)
+    {
+        _delay = delay;
+    }
+
+    public string Type => "cancellation-observing";
+
+    public async Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(_delay, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            WasCancelled = true;
+            throw;
+        }
+
         return HealthCheckResult.CreateInstance(true, Type);
     }
 }

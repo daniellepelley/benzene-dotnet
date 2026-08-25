@@ -36,10 +36,17 @@ public class TcpHealthCheck : IHealthCheck
     public string Type => "Tcp";
 
     /// <inheritdoc />
-    public async Task<IHealthCheckResult> ExecuteAsync()
+    public async Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var dependencies = new[] { new HealthCheckDependency("Tcp", $"{_host}:{_port}") };
-        var token = _cancellation?.CancellationToken ?? CancellationToken.None;
+
+        // Link the token ExecuteAsync was called with (the processor's per-check timeout) with the
+        // ambient accessor's token (e.g. application shutdown), if one was supplied - either source
+        // cancels the connect.
+        using var cts = _cancellation != null
+            ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _cancellation.CancellationToken)
+            : null;
+        var token = cts?.Token ?? cancellationToken;
 
         try
         {

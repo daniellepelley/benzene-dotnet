@@ -8,6 +8,7 @@ using Benzene.HealthChecks.Core;
 using Benzene.HealthChecks.Schema;
 using Moq;
 using Xunit;
+using System.Threading;
 
 namespace Benzene.Test.HealthChecks;
 
@@ -34,7 +35,7 @@ public class SchemaHealthCheckTest
     {
         var handlers = Handlers();
 
-        var result = await new SchemaHealthCheck(Lookup(handlers).Object).ExecuteAsync();
+        var result = await new SchemaHealthCheck(Lookup(handlers).Object).ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(SchemaHealthCheckConstants.Type, result.Type);
         // The provider publishes exactly the spec-pinned contractHash (contract-document.md §6)
@@ -50,7 +51,7 @@ public class SchemaHealthCheckTest
         // A consumer's generated client bakes in ContractHash.Compute(...) at generation time.
         var clientBakedHash = ContractHash.Compute(handlers);
 
-        var schemaResult = (HealthCheckResult)await new SchemaHealthCheck(Lookup(handlers).Object).ExecuteAsync();
+        var schemaResult = (HealthCheckResult)await new SchemaHealthCheck(Lookup(handlers).Object).ExecuteAsync(CancellationToken.None);
         var providerResponse = new HealthCheckResponse(true,
             new Dictionary<string, HealthCheckResult> { [SchemaHealthCheckConstants.Type] = schemaResult });
 
@@ -73,7 +74,7 @@ public class SchemaHealthCheckTest
             MessageHandlerDefinition.CreateInstance("thing:create", typeof(CreateThing), typeof(ThingCreated)),
             MessageHandlerDefinition.CreateInstance("thing:delete", typeof(CreateThing), typeof(ThingCreated)),
         };
-        var schemaResult = (HealthCheckResult)await new SchemaHealthCheck(Lookup(changedHandlers).Object).ExecuteAsync();
+        var schemaResult = (HealthCheckResult)await new SchemaHealthCheck(Lookup(changedHandlers).Object).ExecuteAsync(CancellationToken.None);
         var providerResponse = new HealthCheckResponse(true,
             new Dictionary<string, HealthCheckResult> { [SchemaHealthCheckConstants.Type] = schemaResult });
 

@@ -41,7 +41,7 @@ public class EventHubHealthCheck : IHealthCheck
     public string Type => "EventHub";
 
     /// <summary>Runs the check and reports the outcome.</summary>
-    public async Task<IHealthCheckResult> ExecuteAsync()
+    public async Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var dependencies = new[] { new HealthCheckDependency("EventHub", _eventHubName) };
 
@@ -49,7 +49,7 @@ public class EventHubHealthCheck : IHealthCheck
         {
             // GetEventHubProperties is a read-only metadata read; the SDK throws on any failure, so a
             // returned response is itself the connectivity signal.
-            await _producerClient.GetEventHubPropertiesAsync();
+            await _producerClient.GetEventHubPropertiesAsync(cancellationToken);
             return HealthCheckResult.CreateInstance(true, Type,
                 new Dictionary<string, object> { { "EventHub", _eventHubName } }, dependencies);
         }

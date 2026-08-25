@@ -13,6 +13,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using StackExchange.Redis;
 using Xunit;
+using System.Threading;
 
 namespace Benzene.Test.Cache.Redis;
 
@@ -35,7 +36,7 @@ public class RedisCacheServiceTest
         var factory = new CacheHealthCheckFactory<TestRedisCacheService>();
         var healthcheck = factory.Create(serviceResolver);
 
-        var result = await healthcheck.ExecuteAsync();
+        var result = await healthcheck.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal("ok", result.Status);
         Assert.Equal("Cache", result.Type);
@@ -62,7 +63,7 @@ public class RedisCacheServiceTest
         var factory = new CacheHealthCheckFactory<TestRedisCacheService>();
         var healthcheck = factory.Create(serviceResolver);
 
-        var result = await healthcheck.ExecuteAsync();
+        var result = await healthcheck.ExecuteAsync(CancellationToken.None);
 
         Assert.Equal("failed", result.Status);
         Assert.Equal("Cache", result.Type);

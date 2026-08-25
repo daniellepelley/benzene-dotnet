@@ -14,6 +14,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
+using System.Threading;
 
 namespace Benzene.Test.Hosting;
 
@@ -34,11 +35,11 @@ public class AspNetLivenessAndReadinessStartUp : BenzeneStartUp
     {
         LivenessCheck = new Mock<IHealthCheck>();
         LivenessCheck.Setup(x => x.Type).Returns("Liveness");
-        LivenessCheck.Setup(x => x.ExecuteAsync()).ReturnsAsync(HealthCheckResult.CreateInstance(true, "Liveness"));
+        LivenessCheck.Setup(x => x.ExecuteAsync(It.IsAny<CancellationToken>())).ReturnsAsync(HealthCheckResult.CreateInstance(true, "Liveness"));
 
         ReadinessCheck = new Mock<IHealthCheck>();
         ReadinessCheck.Setup(x => x.Type).Returns("Readiness");
-        ReadinessCheck.Setup(x => x.ExecuteAsync()).ReturnsAsync(HealthCheckResult.CreateInstance(false, "Readiness"));
+        ReadinessCheck.Setup(x => x.ExecuteAsync(It.IsAny<CancellationToken>())).ReturnsAsync(HealthCheckResult.CreateInstance(false, "Readiness"));
 
         services.UsingBenzene(x => x
             .AddBenzene()
@@ -86,8 +87,8 @@ public class AspNetLivenessReadinessTest
     {
         var body = await SendAsync("GET", "/livez");
 
-        AspNetLivenessAndReadinessStartUp.LivenessCheck.Verify(x => x.ExecuteAsync(), Times.Once);
-        AspNetLivenessAndReadinessStartUp.ReadinessCheck.Verify(x => x.ExecuteAsync(), Times.Never);
+        AspNetLivenessAndReadinessStartUp.LivenessCheck.Verify(x => x.ExecuteAsync(It.IsAny<CancellationToken>()), Times.Once);
+        AspNetLivenessAndReadinessStartUp.ReadinessCheck.Verify(x => x.ExecuteAsync(It.IsAny<CancellationToken>()), Times.Never);
         Assert.Contains("Liveness", body);
         Assert.Contains("\"isHealthy\":true", body);
     }
@@ -97,8 +98,8 @@ public class AspNetLivenessReadinessTest
     {
         var body = await SendAsync("GET", "/readyz");
 
-        AspNetLivenessAndReadinessStartUp.ReadinessCheck.Verify(x => x.ExecuteAsync(), Times.Once);
-        AspNetLivenessAndReadinessStartUp.LivenessCheck.Verify(x => x.ExecuteAsync(), Times.Never);
+        AspNetLivenessAndReadinessStartUp.ReadinessCheck.Verify(x => x.ExecuteAsync(It.IsAny<CancellationToken>()), Times.Once);
+        AspNetLivenessAndReadinessStartUp.LivenessCheck.Verify(x => x.ExecuteAsync(It.IsAny<CancellationToken>()), Times.Never);
         Assert.Contains("Readiness", body);
         Assert.Contains("\"isHealthy\":false", body);
     }
