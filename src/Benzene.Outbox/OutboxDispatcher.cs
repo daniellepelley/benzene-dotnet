@@ -91,6 +91,12 @@ public class OutboxDispatcher : IOutboxDispatcher
     {
         using var scope = _serviceResolverFactory.CreateScope();
 
+        // Every envelope handed to this method just came from ClaimDueAsync/ClaimAsync, which always
+        // stamps LeaseToken - see IOutboxStore.ClaimDueAsync's remarks.
+        var leaseToken = envelope.LeaseToken
+            ?? throw new InvalidOperationException(
+                $"Outbox envelope '{envelope.Id}' reached dispatch with no LeaseToken - it must come from a store's ClaimDueAsync/ClaimAsync.");
+
         try
         {
             var dispatchScope = scope.GetService<OutboxDispatchScope>();
@@ -105,7 +111,18 @@ public class OutboxDispatcher : IOutboxDispatcher
             var sender = scope.GetService<IBenzeneMessageSender>();
             await sender.SendAsync<object, Void>(envelope.Topic, payload, new Dictionary<string, string>(envelope.Headers));
 
-            await _store.MarkDispatchedAsync(envelope.Id, cancellationToken);
+            var settled = await _store.MarkDispatchedAsync(envelope.Id, leaseToken, cancellationToken);
+            if (!settled)
+            {
+                // The lease was reclaimed by another worker before this send's settle wrote - that
+                // worker's own claim/dispatch/settle now owns this envelope's fate. Warn, don't error:
+                // this is the fencing contract working as designed under contention, not a failure of
+                // this attempt's send (which did happen).
+                _logger.LogWarning(
+                    "Outbox envelope {EnvelopeId} for topic {Topic} was reclaimed by another worker before " +
+                    "this attempt's dispatch could be recorded; outcome recorded by the new holder.",
+                    envelope.Id, envelope.Topic);
+            }
             return OutboxDispatchOutcome.Dispatched;
         }
         catch (Exception ex)
@@ -119,7 +136,14 @@ public class OutboxDispatcher : IOutboxDispatcher
                     "Outbox envelope {EnvelopeId} for topic {Topic} failed on attempt {Attempt}/{MaxAttempts}; " +
                     "parking (no further automatic retries).",
                     envelope.Id, envelope.Topic, nextAttempt, _options.MaxAttempts);
-                await _store.ParkAsync(envelope.Id, error, cancellationToken);
+                var parked = await _store.ParkAsync(envelope.Id, error, leaseToken, cancellationToken);
+                if (!parked)
+                {
+                    _logger.LogWarning(
+                        "Outbox envelope {EnvelopeId} for topic {Topic} was reclaimed by another worker before " +
+                        "this attempt's park could be recorded; outcome recorded by the new holder.",
+                        envelope.Id, envelope.Topic);
+                }
                 return OutboxDispatchOutcome.Parked;
             }
 
@@ -128,7 +152,14 @@ public class OutboxDispatcher : IOutboxDispatcher
                 "Outbox envelope {EnvelopeId} for topic {Topic} failed on attempt {Attempt}/{MaxAttempts}; " +
                 "rescheduling in {Delay}.",
                 envelope.Id, envelope.Topic, nextAttempt, _options.MaxAttempts, delay);
-            await _store.RescheduleAsync(envelope.Id, nextAttempt, delay, error, cancellationToken);
+            var rescheduled = await _store.RescheduleAsync(envelope.Id, nextAttempt, delay, error, leaseToken, cancellationToken);
+            if (!rescheduled)
+            {
+                _logger.LogWarning(
+                    "Outbox envelope {EnvelopeId} for topic {Topic} was reclaimed by another worker before " +
+                    "this attempt's reschedule could be recorded; outcome recorded by the new holder.",
+                    envelope.Id, envelope.Topic);
+            }
             return OutboxDispatchOutcome.Rescheduled;
         }
     }

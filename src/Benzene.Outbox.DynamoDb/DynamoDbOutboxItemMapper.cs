@@ -94,6 +94,10 @@ internal static class DynamoDbOutboxItemMapper
         var lastError = item.TryGetValue("lastError", out var lastErrorValue) ? lastErrorValue.S : null;
 
         return new OutboxEnvelope(id, topic, payload, payloadType, headers, createdAtUtc, attemptCount, nextAttemptAtUtc, status, lastError);
+        // NOTE: leaseToken is deliberately NOT read back here - it is stamped separately by
+        // DynamoDbOutboxStore.ClaimDueAsync/ClaimAsync via OutboxEnvelope.WithLeaseToken(...) using the
+        // token they just minted, so the caller always gets the exact token they'd need to settle with,
+        // regardless of any read/write ordering against the item this method maps.
     }
 
     /// <summary>

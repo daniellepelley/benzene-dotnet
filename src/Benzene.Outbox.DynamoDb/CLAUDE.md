@@ -32,7 +32,8 @@ staged envelope — see `Benzene.Outbox/CLAUDE.md`'s "Capability boundary" secti
   returning `0`.
 - Other attributes: `topic`, `payload`, `payloadType`, `headers` (a DynamoDB `M` map of string→string,
   possibly empty), `createdAtUtc`, `attemptCount`, `status`, and, when applicable,
-  `nextAttemptAtUtc`/`lastError`/`leaseUntil`. All stored timestamps use UTC round-trip (`"O"`/ISO-8601)
+  `nextAttemptAtUtc`/`lastError`/`leaseUntil`/`leaseToken` (the claim-fencing token — see "Claim
+  fencing" below). All stored timestamps use UTC round-trip (`"O"`/ISO-8601)
   strings so lexical ordering matches chronological ordering (required for `gsiSk`'s sort order).
 - **This store never creates the table** (the GSI, TTL config, and base table are the consumer's
   infrastructure) — matches every other DynamoDB-backed Benzene store (`DynamoDbIdempotencyStore`,
@@ -57,11 +58,22 @@ whole and therefore needs the read-back to distinguish "doesn't exist" from "liv
 claim (`ConditionalCheckFailedException`) is simply excluded from `ClaimDueAsync`'s result, or
 returned as `null` from `ClaimAsync` — no item content leaks either way.
 
+## Claim fencing
+The same conditional `UpdateItem` that wins a claim also writes a freshly minted `leaseToken`
+attribute (`Guid.NewGuid().ToString()`), stamped onto the returned `OutboxEnvelope.LeaseToken`.
+`MarkDispatchedAsync`/`RescheduleAsync`/`ParkAsync` **require** that token and extend their
+`ConditionExpression` with `leaseToken = :leaseToken` alongside the existing `attribute_exists(#pk)`
+check, so a settle whose token no longer matches the current lease (reclaimed by another claimer, or
+already settled) hits the same `ConditionalCheckFailedException` path as "envelope doesn't exist" and
+is reported back as `false` (nothing written) rather than silently succeeding or clobbering the current
+holder. See `Benzene.Outbox/CLAUDE.md`'s "Claim fencing" section for the full contract and what it
+does/doesn't close.
+
 ## Key types
-- `DynamoDbOutboxStore : IOutboxStore` — see "Table shape" and "Claim atomicity" above.
-  `MarkDispatchedAsync`/`RescheduleAsync`/`ParkAsync` are conditional on `attribute_exists`, so a
-  call for an envelope that no longer exists is a no-op per the `IOutboxStore` contract (not an
-  exception).
+- `DynamoDbOutboxStore : IOutboxStore` — see "Table shape", "Claim atomicity", and "Claim fencing"
+  above. `MarkDispatchedAsync`/`RescheduleAsync`/`ParkAsync` return `Task<bool>`: `false` for an
+  envelope that no longer exists OR whose `leaseToken` has moved on — both collapse to the same
+  `ConditionalCheckFailedException` → `false` path; neither is an exception.
 - `IDynamoDbOutboxTransaction` / `DynamoDbOutboxTransaction` (scoped) — drains the scope's
   `BufferedOutboxStage`, appends one `Put` `TransactWriteItem` per staged envelope to the caller's
   own application `TransactWriteItem`s, and issues exactly one `TransactWriteItemsAsync`. Throws

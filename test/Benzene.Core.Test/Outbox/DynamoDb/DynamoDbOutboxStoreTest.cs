@@ -84,7 +84,9 @@ public class DynamoDbOutboxStoreTest
         var claimed = Assert.Single(due);
         Assert.Equal("env-1", claimed.Id);
         Assert.Equal(OutboxStatus.Pending, claimed.Status);
+        Assert.NotNull(claimed.LeaseToken);
         Assert.Contains("leaseUntil", update!.UpdateExpression);
+        Assert.Contains("leaseToken", update.UpdateExpression);
         Assert.Contains("attribute_exists(#pk)", update.ConditionExpression);
     }
 
@@ -141,6 +143,7 @@ public class DynamoDbOutboxStoreTest
 
         Assert.NotNull(claimed);
         Assert.Equal("env-1", claimed!.Id);
+        Assert.NotNull(claimed.LeaseToken);
     }
 
     [Fact]
@@ -153,26 +156,44 @@ public class DynamoDbOutboxStoreTest
             .ReturnsAsync(new UpdateItemResponse());
         var store = new DynamoDbOutboxStore(dynamo.Object, "outbox", retentionPeriod: TimeSpan.FromDays(7), now: () => Now);
 
-        await store.MarkDispatchedAsync("env-1");
+        var dispatched = await store.MarkDispatchedAsync("env-1", "token-1");
 
+        Assert.True(dispatched);
         Assert.Equal("Dispatched", update!.ExpressionAttributeValues[":dispatched"].S);
         Assert.Equal(Now.AddDays(7).ToUnixTimeSeconds().ToString(), update.ExpressionAttributeValues[":expiresAt"].N);
+        Assert.Equal("token-1", update.ExpressionAttributeValues[":leaseToken"].S);
         Assert.Contains("REMOVE", update.UpdateExpression);
         Assert.Contains("#gsiPk", update.UpdateExpression);
         Assert.Contains("#gsiSk", update.UpdateExpression);
         Assert.Contains("leaseUntil", update.UpdateExpression);
+        Assert.Contains("leaseToken", update.UpdateExpression);
+        Assert.Contains("leaseToken = :leaseToken", update.ConditionExpression);
     }
 
     [Fact]
-    public async Task MarkDispatched_WhenEnvelopeNoLongerExists_IsANoOp()
+    public async Task MarkDispatched_WhenEnvelopeNoLongerExists_ReturnsFalse_NoException()
     {
         var dynamo = MockDynamo();
         dynamo.Setup(x => x.UpdateItemAsync(It.IsAny<UpdateItemRequest>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ConditionalCheckFailedException("missing"));
         var store = new DynamoDbOutboxStore(dynamo.Object, "outbox", now: () => Now);
 
-        await store.MarkDispatchedAsync("missing-env");
-        // No exception - a no-op, per the IOutboxStore contract.
+        var dispatched = await store.MarkDispatchedAsync("missing-env", "token-1");
+
+        Assert.False(dispatched);
+    }
+
+    [Fact]
+    public async Task MarkDispatched_WhenLeaseTokenNoLongerMatches_IsRefused_ReturnsFalse()
+    {
+        var dynamo = MockDynamo();
+        dynamo.Setup(x => x.UpdateItemAsync(It.IsAny<UpdateItemRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ConditionalCheckFailedException("stale lease"));
+        var store = new DynamoDbOutboxStore(dynamo.Object, "outbox", now: () => Now);
+
+        var dispatched = await store.MarkDispatchedAsync("env-1", "stale-token");
+
+        Assert.False(dispatched);
     }
 
     [Fact]
@@ -185,12 +206,15 @@ public class DynamoDbOutboxStoreTest
             .ReturnsAsync(new UpdateItemResponse());
         var store = new DynamoDbOutboxStore(dynamo.Object, "outbox", now: () => Now);
 
-        await store.RescheduleAsync("env-1", attemptCount: 2, delay: TimeSpan.FromMinutes(1), error: "boom");
+        var rescheduled = await store.RescheduleAsync("env-1", attemptCount: 2, delay: TimeSpan.FromMinutes(1), error: "boom", leaseToken: "token-1");
 
+        Assert.True(rescheduled);
         Assert.Equal("2", update!.ExpressionAttributeValues[":attemptCount"].N);
         Assert.Equal("boom", update.ExpressionAttributeValues[":error"].S);
+        Assert.Equal("token-1", update.ExpressionAttributeValues[":leaseToken"].S);
         Assert.Contains("#gsiSk", update.UpdateExpression);
-        Assert.Contains("REMOVE leaseUntil", update.UpdateExpression);
+        Assert.Contains("REMOVE leaseUntil, leaseToken", update.UpdateExpression);
+        Assert.Contains("leaseToken = :leaseToken", update.ConditionExpression);
     }
 
     [Fact]
@@ -203,12 +227,15 @@ public class DynamoDbOutboxStoreTest
             .ReturnsAsync(new UpdateItemResponse());
         var store = new DynamoDbOutboxStore(dynamo.Object, "outbox", now: () => Now);
 
-        await store.ParkAsync("env-1", "gave up");
+        var parked = await store.ParkAsync("env-1", "gave up", "token-1");
 
+        Assert.True(parked);
         Assert.Equal("Parked", update!.ExpressionAttributeValues[":parked"].S);
         Assert.Equal("gave up", update.ExpressionAttributeValues[":error"].S);
+        Assert.Equal("token-1", update.ExpressionAttributeValues[":leaseToken"].S);
         Assert.Contains("#gsiPk", update.UpdateExpression);
         Assert.Contains("#gsiSk", update.UpdateExpression);
+        Assert.Contains("leaseToken = :leaseToken", update.ConditionExpression);
     }
 
     [Fact]

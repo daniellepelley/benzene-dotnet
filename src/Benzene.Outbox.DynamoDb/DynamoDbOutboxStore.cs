@@ -39,6 +39,17 @@ namespace Benzene.Outbox.DynamoDb;
 /// The consumer registers <see cref="IAmazonDynamoDB"/> itself (this package resolves it) and
 /// provisions the table (including the GSI and TTL) - this store never creates it.
 /// </para>
+/// <para>
+/// <b>Claim fencing.</b> Every winning claim (<see cref="ClaimDueAsync"/>/<see cref="ClaimAsync"/>)
+/// writes a freshly minted <c>leaseToken</c> attribute alongside <c>leaseUntil</c>, and stamps it onto
+/// the returned <see cref="OutboxEnvelope.LeaseToken"/>. <see cref="MarkDispatchedAsync"/>/
+/// <see cref="RescheduleAsync"/>/<see cref="ParkAsync"/> extend their <c>ConditionExpression</c> with
+/// <c>leaseToken = :leaseToken</c>, so a settle whose token no longer matches the live lease (reclaimed
+/// by another claimer, or already settled) hits <see cref="ConditionalCheckFailedException"/> just
+/// like the "envelope doesn't exist" case already did, and is reported back as <see langword="false"/>
+/// rather than an exception - see <see cref="IOutboxStore.MarkDispatchedAsync"/>'s remarks for what
+/// this closes and what it doesn't.
+/// </para>
 /// </remarks>
 public class DynamoDbOutboxStore : IOutboxStore
 {
@@ -117,9 +128,10 @@ public class DynamoDbOutboxStore : IOutboxStore
         foreach (var item in query.Items)
         {
             var id = item[_partitionKeyAttribute].S;
-            if (await TryClaimAsync(id, now, lease, cancellationToken))
+            var token = await TryClaimAsync(id, now, lease, cancellationToken);
+            if (token != null)
             {
-                claimed.Add(DynamoDbOutboxItemMapper.ToEnvelope(item, _partitionKeyAttribute));
+                claimed.Add(DynamoDbOutboxItemMapper.ToEnvelope(item, _partitionKeyAttribute).WithLeaseToken(token));
             }
         }
 
@@ -130,7 +142,8 @@ public class DynamoDbOutboxStore : IOutboxStore
     public async Task<OutboxEnvelope?> ClaimAsync(string id, TimeSpan lease, CancellationToken cancellationToken = default)
     {
         var now = _now();
-        if (!await TryClaimAsync(id, now, lease, cancellationToken))
+        var token = await TryClaimAsync(id, now, lease, cancellationToken);
+        if (token == null)
         {
             return null;
         }
@@ -143,23 +156,23 @@ public class DynamoDbOutboxStore : IOutboxStore
         }, cancellationToken);
 
         return response.Item is { Count: > 0 }
-            ? DynamoDbOutboxItemMapper.ToEnvelope(response.Item, _partitionKeyAttribute)
+            ? DynamoDbOutboxItemMapper.ToEnvelope(response.Item, _partitionKeyAttribute).WithLeaseToken(token)
             : null;
     }
 
     /// <inheritdoc />
-    public async Task MarkDispatchedAsync(string id, CancellationToken cancellationToken = default)
+    public async Task<bool> MarkDispatchedAsync(string id, string leaseToken, CancellationToken cancellationToken = default)
     {
         var expiresAt = _now() + _retentionPeriod;
 
-        await TryUpdateAsync(id, new UpdateItemRequest
+        return await TryUpdateAsync(id, new UpdateItemRequest
         {
             TableName = _tableName,
             Key = Key(id),
             UpdateExpression =
                 "SET #status = :dispatched, expiresAt = :expiresAt " +
-                "REMOVE #gsiPk, #gsiSk, leaseUntil, nextAttemptAtUtc",
-            ConditionExpression = "attribute_exists(#pk)",
+                "REMOVE #gsiPk, #gsiSk, leaseUntil, leaseToken, nextAttemptAtUtc",
+            ConditionExpression = "attribute_exists(#pk) AND leaseToken = :leaseToken",
             ExpressionAttributeNames = new Dictionary<string, string>
             {
                 ["#pk"] = _partitionKeyAttribute,
@@ -170,24 +183,25 @@ public class DynamoDbOutboxStore : IOutboxStore
             ExpressionAttributeValues = new Dictionary<string, AttributeValue>
             {
                 [":dispatched"] = new AttributeValue { S = "Dispatched" },
-                [":expiresAt"] = new AttributeValue { N = expiresAt.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture) }
+                [":expiresAt"] = new AttributeValue { N = expiresAt.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture) },
+                [":leaseToken"] = new AttributeValue { S = leaseToken }
             }
         }, cancellationToken);
     }
 
     /// <inheritdoc />
-    public async Task RescheduleAsync(string id, int attemptCount, TimeSpan delay, string error, CancellationToken cancellationToken = default)
+    public async Task<bool> RescheduleAsync(string id, int attemptCount, TimeSpan delay, string error, string leaseToken, CancellationToken cancellationToken = default)
     {
         var next = _now() + delay;
 
-        await TryUpdateAsync(id, new UpdateItemRequest
+        return await TryUpdateAsync(id, new UpdateItemRequest
         {
             TableName = _tableName,
             Key = Key(id),
             UpdateExpression =
                 "SET attemptCount = :attemptCount, nextAttemptAtUtc = :next, lastError = :error, #gsiSk = :next " +
-                "REMOVE leaseUntil",
-            ConditionExpression = "attribute_exists(#pk)",
+                "REMOVE leaseUntil, leaseToken",
+            ConditionExpression = "attribute_exists(#pk) AND leaseToken = :leaseToken",
             ExpressionAttributeNames = new Dictionary<string, string>
             {
                 ["#pk"] = _partitionKeyAttribute,
@@ -197,22 +211,23 @@ public class DynamoDbOutboxStore : IOutboxStore
             {
                 [":attemptCount"] = new AttributeValue { N = attemptCount.ToString(CultureInfo.InvariantCulture) },
                 [":next"] = new AttributeValue { S = DynamoDbOutboxItemMapper.FormatTimestamp(next) },
-                [":error"] = new AttributeValue { S = error }
+                [":error"] = new AttributeValue { S = error },
+                [":leaseToken"] = new AttributeValue { S = leaseToken }
             }
         }, cancellationToken);
     }
 
     /// <inheritdoc />
-    public async Task ParkAsync(string id, string error, CancellationToken cancellationToken = default)
+    public async Task<bool> ParkAsync(string id, string error, string leaseToken, CancellationToken cancellationToken = default)
     {
-        await TryUpdateAsync(id, new UpdateItemRequest
+        return await TryUpdateAsync(id, new UpdateItemRequest
         {
             TableName = _tableName,
             Key = Key(id),
             UpdateExpression =
                 "SET #status = :parked, lastError = :error " +
-                "REMOVE #gsiPk, #gsiSk, leaseUntil, nextAttemptAtUtc",
-            ConditionExpression = "attribute_exists(#pk)",
+                "REMOVE #gsiPk, #gsiSk, leaseUntil, leaseToken, nextAttemptAtUtc",
+            ConditionExpression = "attribute_exists(#pk) AND leaseToken = :leaseToken",
             ExpressionAttributeNames = new Dictionary<string, string>
             {
                 ["#pk"] = _partitionKeyAttribute,
@@ -223,7 +238,8 @@ public class DynamoDbOutboxStore : IOutboxStore
             ExpressionAttributeValues = new Dictionary<string, AttributeValue>
             {
                 [":parked"] = new AttributeValue { S = "Parked" },
-                [":error"] = new AttributeValue { S = error }
+                [":error"] = new AttributeValue { S = error },
+                [":leaseToken"] = new AttributeValue { S = leaseToken }
             }
         }, cancellationToken);
     }
@@ -234,24 +250,26 @@ public class DynamoDbOutboxStore : IOutboxStore
         => Task.FromResult(0);
 
     /// <summary>
-    /// Attempts the atomic claim: a conditional <c>UpdateItem</c> setting <c>leaseUntil</c>, winning
-    /// only when the envelope exists, is still <see cref="OutboxStatus.Pending"/>, is due
-    /// (<c>nextAttemptAtUtc</c> absent or in the past), and is unleased or its lease has lapsed. This
-    /// single conditional expression is the whole atomicity story - unlike a claim built on
-    /// <c>PutItem</c> (which can only succeed or fail as a whole and therefore needs a read-back to
-    /// tell "doesn't exist" apart from "live lease"), <c>UpdateItem</c>'s condition expression tests
-    /// exactly the disjunction we need ("free OR lapsed") in the same round trip, so no separate
-    /// lapsed-lease read-back is needed here.
+    /// Attempts the atomic claim: a conditional <c>UpdateItem</c> setting <c>leaseUntil</c> and a
+    /// freshly minted <c>leaseToken</c>, winning only when the envelope exists, is still
+    /// <see cref="OutboxStatus.Pending"/>, is due (<c>nextAttemptAtUtc</c> absent or in the past), and
+    /// is unleased or its lease has lapsed. This single conditional expression is the whole atomicity
+    /// story - unlike a claim built on <c>PutItem</c> (which can only succeed or fail as a whole and
+    /// therefore needs a read-back to tell "doesn't exist" apart from "live lease"), <c>UpdateItem</c>'s
+    /// condition expression tests exactly the disjunction we need ("free OR lapsed") in the same round
+    /// trip, so no separate lapsed-lease read-back is needed here.
     /// </summary>
-    private async Task<bool> TryClaimAsync(string id, DateTimeOffset now, TimeSpan lease, CancellationToken cancellationToken)
+    /// <returns>The freshly minted lease token on a won claim, or <see langword="null"/> if refused.</returns>
+    private async Task<string?> TryClaimAsync(string id, DateTimeOffset now, TimeSpan lease, CancellationToken cancellationToken)
     {
+        var leaseToken = Guid.NewGuid().ToString();
         try
         {
             await _dynamoDb.UpdateItemAsync(new UpdateItemRequest
             {
                 TableName = _tableName,
                 Key = Key(id),
-                UpdateExpression = "SET leaseUntil = :leaseUntil",
+                UpdateExpression = "SET leaseUntil = :leaseUntil, leaseToken = :leaseToken",
                 ConditionExpression =
                     "attribute_exists(#pk) AND #status = :pending " +
                     "AND (attribute_not_exists(nextAttemptAtUtc) OR nextAttemptAtUtc <= :now) " +
@@ -264,30 +282,41 @@ public class DynamoDbOutboxStore : IOutboxStore
                 ExpressionAttributeValues = new Dictionary<string, AttributeValue>
                 {
                     [":leaseUntil"] = new AttributeValue { S = DynamoDbOutboxItemMapper.FormatTimestamp(now + lease) },
+                    [":leaseToken"] = new AttributeValue { S = leaseToken },
                     [":pending"] = new AttributeValue { S = StatusPending },
                     [":now"] = new AttributeValue { S = DynamoDbOutboxItemMapper.FormatTimestamp(now) }
                 }
             }, cancellationToken);
 
-            return true;
+            return leaseToken;
         }
         catch (ConditionalCheckFailedException)
         {
             // Another claimer holds a live lease, the envelope isn't due yet, isn't Pending, or
             // doesn't exist - refuse the claim (caller treats this id as "not claimed").
-            return false;
+            return null;
         }
     }
 
-    private async Task TryUpdateAsync(string id, UpdateItemRequest request, CancellationToken cancellationToken)
+    /// <summary>
+    /// Issues a settle <c>UpdateItem</c> whose <see cref="UpdateItemRequest.ConditionExpression"/> is
+    /// already scoped to <c>attribute_exists(#pk) AND leaseToken = :leaseToken</c> by the caller,
+    /// translating a condition failure (envelope gone, or <c>leaseToken</c> no longer matches - claim
+    /// fencing, see <see cref="IOutboxStore.MarkDispatchedAsync"/>'s remarks) into
+    /// <see langword="false"/> rather than an exception.
+    /// </summary>
+    private async Task<bool> TryUpdateAsync(string id, UpdateItemRequest request, CancellationToken cancellationToken)
     {
         try
         {
             await _dynamoDb.UpdateItemAsync(request, cancellationToken);
+            return true;
         }
         catch (ConditionalCheckFailedException)
         {
-            // The envelope no longer exists - a no-op per the IOutboxStore contract.
+            // The envelope no longer exists, or leaseToken has moved on to another claimer - refuse
+            // the write (a no-op) rather than clobbering whoever holds the lease now.
+            return false;
         }
     }
 

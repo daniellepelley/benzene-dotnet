@@ -48,10 +48,14 @@ Neither write mode is exactly-once. Read this before picking one.
     ever committed), but it means `Transactional` mode without a store package installed is a
     misconfiguration, not a smaller guarantee.
 - **Delivery is always at-least-once**, end to end, regardless of write mode - duplicates are
-  possible (a crash after a successful send but before `MarkDispatchedAsync`; a stream-triggered
-  dispatch racing a sweep). `Benzene.Outbox` and `Benzene.Idempotency` are designed as a pair for
-  exactly this reason (see "Pairs with Benzene.Idempotency" below); there is no exactly-once claim
-  anywhere in this package.
+  possible (a crash after a successful send but before `MarkDispatchedAsync` returns; a send already
+  in flight when a claim's lease lapses). `Benzene.Outbox` and `Benzene.Idempotency` are designed as a
+  pair for exactly this reason (see "Pairs with Benzene.Idempotency" below); there is no exactly-once
+  claim anywhere in this package. **Claim fencing (see below) closes the *other* double-dispatch
+  source** - a live-but-slow claimant whose lease naturally lapses and gets reclaimed while it is still
+  working - by making at most one of the two claimants' settle calls succeed; it does not and cannot
+  recall a message a claimant already handed to the transport before its lease lapsed. Crash-after-send
+  remains an inherent at-least-once window on every outbox implementation.
 - **No ordering guarantee** across envelopes. A sweep orders by `CreatedAtUtc` best-effort only, a
   stream-triggered relay has no such ordering at all, and retries reorder regardless. Per-key
   ordered dispatch is not implemented.
@@ -76,7 +80,7 @@ Neither write mode is exactly-once. Read this before picking one.
   topics cannot be outboxed; a deferred send has no response to give.
 - `OutboxEnvelope` - the immutable captured-send record: id (also the default idempotency key),
   topic, serialized payload + its assembly-qualified type, the post-stamping header snapshot,
-  attempt/retry bookkeeping, and lifecycle status.
+  attempt/retry bookkeeping, lifecycle status, and `LeaseToken` (see "Claim fencing" below).
 - `OutboxStatus` - `Pending` / `Dispatched` / `Parked`.
 - `OutboxOptions` - **one shared instance, with per-route override** (see its own xmldoc remarks):
   `AddOutbox(configure)` registers the one singleton both the dispatch engine (`MaxAttempts`,
@@ -88,8 +92,10 @@ Neither write mode is exactly-once. Read this before picking one.
   any other route.
 - `IOutboxStore` - the pluggable persistence contract: `AddAsync`, `ClaimDueAsync`/`ClaimAsync`
   (**must be atomic/conditional per envelope** - the same hard requirement
-  `IIdempotencyStore.TryClaimAsync` places on its implementations), `MarkDispatchedAsync`,
-  `RescheduleAsync`, `ParkAsync`, `DeleteDispatchedBeforeAsync` (a native-TTL store may no-op this).
+  `IIdempotencyStore.TryClaimAsync` places on its implementations, and stamps `OutboxEnvelope.LeaseToken`
+  on every win), `MarkDispatchedAsync`/`RescheduleAsync`/`ParkAsync` (**fenced** - each now requires the
+  claimed envelope's `leaseToken` and returns `Task<bool>`; see "Claim fencing" below),
+  `DeleteDispatchedBeforeAsync` (a native-TTL store may no-op this).
 - `InMemoryOutboxStore` - the in-process default (dictionary + lock + lease), registered via
   `AddInMemoryOutboxStore()`.
 - `IOutboxStage` / `BufferedOutboxStage` - the scoped staging seam for `Transactional` mode (see
@@ -128,6 +134,33 @@ envelope's own id into that header (`OutboxOptions.StampIdempotencyKey`, default
 running `Benzene.Idempotency`'s `UseIdempotency()` with the default
 `HeaderOrBodyHashIdempotencyKeyStrategy` then dedups relay redeliveries with zero extra
 configuration - the two packages click together by default without either referencing the other.
+
+## Claim fencing (`LeaseToken`)
+Every winning `ClaimDueAsync`/`ClaimAsync` stamps a fresh opaque `OutboxEnvelope.LeaseToken`.
+`MarkDispatchedAsync(id, leaseToken, ct)` / `RescheduleAsync(id, attemptCount, delay, error, leaseToken, ct)`
+/ `ParkAsync(id, error, leaseToken, ct)` **require** that token (no default parameter, no overload;
+pre-1.0, a skippable fence is no fence) and return `Task<bool>`: `false` means the token no longer
+matches the current lease - it was reclaimed by another claimant, or the envelope no longer exists -
+and **nothing was written**. `OutboxDispatcher.DispatchEnvelopeAsync` passes the claimed envelope's own
+token through to whichever settle call the outcome needs and logs a **warning** (not an error) on
+`false`: the new holder owns the outcome, so this is expected under contention.
+
+**What this closes, concretely.** Before fencing: Worker A claims an envelope with a short lease, is
+slow (GC pause, network stall) and runs past it; the lease naturally lapses; Worker B reclaims the same
+envelope and sends it; both A and B eventually call a settle method - whichever wrote last silently won,
+and if both sent, `sendCount == 2` with nothing in the store showing it happened (the round-6 stress
+test this fix closes). With fencing: only the settle call carrying the *current* lease holder's token
+succeeds: at most one settle succeeds and the loser is told so via `false`, so the state clobber is
+prevented and the lost lease becomes visible. **What this does NOT close:** it cannot un-send a message
+a stale claimant already handed to the transport before its lease lapsed, and it cannot close the
+inherent crash-after-send window (send succeeds, process dies before the settle call ever runs) every
+at-least-once outbox has - see "Capability boundary" above. Closing the double-dispatch bug end to end
+also depends on `OutboxDispatcher` actually checking the settle result before treating a message as
+delivered (which it does) - the store-level fence alone stops state corruption, not a caller that
+ignores the result.
+
+A custom `IOutboxStore` MUST implement the same fencing - see `IOutboxStore`'s XML docs (`ClaimDueAsync`'s
+remarks carry the full contract) for the exact semantics each settle method must honor.
 
 ## Relay hosts
 - **`Benzene.HostedService` / `Benzene.SelfHost`:** resolve `OutboxDispatcherWorker` (or
@@ -181,7 +214,8 @@ await sender.SendAsync<CapturePaymentRequest, Void>("payments:capture", request)
 ## Conventions
 - Engine is transport-agnostic and store-pluggable, matching `Benzene.Idempotency`'s shape.
 - `IOutboxStore`'s claim methods MUST be atomic - the dispatch engine's at-least-once (not
-  at-least-twice-by-default) behavior rests entirely on that, exactly like `IIdempotencyStore`.
+  at-least-twice-by-default) behavior rests entirely on that, exactly like `IIdempotencyStore`. Its
+  settle methods MUST be fenced on `leaseToken` - see "Claim fencing" above.
 - All `IOutboxStore`/`IOutboxStage` methods take a `CancellationToken` and forward it to any
   downstream I/O.
 - Time-based logic takes an injectable `Func<DateTimeOffset>` clock (`InMemoryOutboxStore`,

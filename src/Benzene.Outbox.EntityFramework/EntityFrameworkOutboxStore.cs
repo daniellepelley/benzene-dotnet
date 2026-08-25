@@ -42,6 +42,15 @@ namespace Benzene.Outbox.EntityFramework;
 /// <c>ExecuteUpdate</c>, so the fast, single-statement path is what production deployments actually
 /// take.
 /// </para>
+/// <para>
+/// <b>Claim fencing.</b> Every winning claim (either path) mints a fresh <see cref="OutboxRecord.LeaseToken"/>
+/// and stamps it onto the returned <see cref="OutboxEnvelope.LeaseToken"/>. <see cref="MarkDispatchedAsync"/>/
+/// <see cref="RescheduleAsync"/>/<see cref="ParkAsync"/> require that token back and include it in the
+/// row lookup's <c>WHERE</c> (<c>r.Id == id &amp;&amp; r.LeaseToken == leaseToken</c>), so a settle whose
+/// token no longer matches the current lease (reclaimed by another claimer, or already settled) finds
+/// no row and returns <see langword="false"/> - see <see cref="IOutboxStore.MarkDispatchedAsync"/>'s
+/// remarks for what this closes and what it doesn't.
+/// </para>
 /// </remarks>
 /// <typeparam name="TDbContext">The application's own <see cref="DbContext"/> type, mapped via <see cref="ModelBuilderExtensions.AddOutboxEntities"/>.</typeparam>
 public class EntityFrameworkOutboxStore<TDbContext> : IOutboxStore where TDbContext : DbContext
@@ -108,6 +117,7 @@ public class EntityFrameworkOutboxStore<TDbContext> : IOutboxStore where TDbCont
     {
         var now = _now();
         var newLeaseUntil = now + lease;
+        var leaseToken = Guid.NewGuid().ToString();
 
         await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
@@ -119,13 +129,15 @@ public class EntityFrameworkOutboxStore<TDbContext> : IOutboxStore where TDbCont
                     && r.Status == OutboxStatus.Pending
                     && (r.NextAttemptAtUtc == null || r.NextAttemptAtUtc <= now)
                     && (r.LeaseUntil == null || r.LeaseUntil <= now))
-                .ExecuteUpdateAsync(setters => setters.SetProperty(r => r.LeaseUntil, newLeaseUntil), cancellationToken);
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(r => r.LeaseUntil, newLeaseUntil)
+                    .SetProperty(r => r.LeaseToken, leaseToken), cancellationToken);
         }
         catch (InvalidOperationException)
         {
             // The provider doesn't support ExecuteUpdate (e.g. EF Core InMemory) - fall back to
             // optimistic concurrency. See the class remarks.
-            return await ClaimViaOptimisticConcurrencyAsync(dbContext, id, now, newLeaseUntil, cancellationToken);
+            return await ClaimViaOptimisticConcurrencyAsync(dbContext, id, now, newLeaseUntil, leaseToken, cancellationToken);
         }
 
         if (affected == 0)
@@ -138,7 +150,7 @@ public class EntityFrameworkOutboxStore<TDbContext> : IOutboxStore where TDbCont
     }
 
     private static async Task<OutboxEnvelope?> ClaimViaOptimisticConcurrencyAsync(
-        TDbContext dbContext, string id, DateTimeOffset now, DateTimeOffset newLeaseUntil, CancellationToken cancellationToken)
+        TDbContext dbContext, string id, DateTimeOffset now, DateTimeOffset newLeaseUntil, string leaseToken, CancellationToken cancellationToken)
     {
         for (var attempt = 0; attempt < MaxOptimisticConcurrencyAttempts; attempt++)
         {
@@ -149,6 +161,7 @@ public class EntityFrameworkOutboxStore<TDbContext> : IOutboxStore where TDbCont
             }
 
             record.LeaseUntil = newLeaseUntil;
+            record.LeaseToken = leaseToken;
             record.Touch();
 
             try
@@ -171,30 +184,34 @@ public class EntityFrameworkOutboxStore<TDbContext> : IOutboxStore where TDbCont
     }
 
     /// <inheritdoc />
-    public async Task MarkDispatchedAsync(string id, CancellationToken cancellationToken = default)
+    public async Task<bool> MarkDispatchedAsync(string id, string leaseToken, CancellationToken cancellationToken = default)
     {
         await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var record = await dbContext.Set<OutboxRecord>().SingleOrDefaultAsync(r => r.Id == id, cancellationToken);
+        var record = await dbContext.Set<OutboxRecord>().SingleOrDefaultAsync(r => r.Id == id && r.LeaseToken == leaseToken, cancellationToken);
         if (record == null)
         {
-            return;
+            // Gone, or leaseToken no longer matches the current lease holder (reclaimed by another
+            // claimer, or already settled) - refuse rather than clobbering whoever holds it now.
+            return false;
         }
 
         record.Status = OutboxStatus.Dispatched;
         record.LeaseUntil = null;
+        record.LeaseToken = null;
         record.DispatchedAtUtc = _now();
         record.Touch();
         await dbContext.SaveChangesAsync(cancellationToken);
+        return true;
     }
 
     /// <inheritdoc />
-    public async Task RescheduleAsync(string id, int attemptCount, TimeSpan delay, string error, CancellationToken cancellationToken = default)
+    public async Task<bool> RescheduleAsync(string id, int attemptCount, TimeSpan delay, string error, string leaseToken, CancellationToken cancellationToken = default)
     {
         await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var record = await dbContext.Set<OutboxRecord>().SingleOrDefaultAsync(r => r.Id == id, cancellationToken);
+        var record = await dbContext.Set<OutboxRecord>().SingleOrDefaultAsync(r => r.Id == id && r.LeaseToken == leaseToken, cancellationToken);
         if (record == null)
         {
-            return;
+            return false;
         }
 
         record.Status = OutboxStatus.Pending;
@@ -202,25 +219,29 @@ public class EntityFrameworkOutboxStore<TDbContext> : IOutboxStore where TDbCont
         record.NextAttemptAtUtc = _now() + delay;
         record.LastError = error;
         record.LeaseUntil = null;
+        record.LeaseToken = null;
         record.Touch();
         await dbContext.SaveChangesAsync(cancellationToken);
+        return true;
     }
 
     /// <inheritdoc />
-    public async Task ParkAsync(string id, string error, CancellationToken cancellationToken = default)
+    public async Task<bool> ParkAsync(string id, string error, string leaseToken, CancellationToken cancellationToken = default)
     {
         await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var record = await dbContext.Set<OutboxRecord>().SingleOrDefaultAsync(r => r.Id == id, cancellationToken);
+        var record = await dbContext.Set<OutboxRecord>().SingleOrDefaultAsync(r => r.Id == id && r.LeaseToken == leaseToken, cancellationToken);
         if (record == null)
         {
-            return;
+            return false;
         }
 
         record.Status = OutboxStatus.Parked;
         record.LastError = error;
         record.LeaseUntil = null;
+        record.LeaseToken = null;
         record.Touch();
         await dbContext.SaveChangesAsync(cancellationToken);
+        return true;
     }
 
     /// <inheritdoc />

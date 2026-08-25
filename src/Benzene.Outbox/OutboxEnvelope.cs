@@ -41,6 +41,12 @@ public sealed class OutboxEnvelope
     /// </param>
     /// <param name="status">The envelope's lifecycle state. Defaults to <see cref="OutboxStatus.Pending"/>.</param>
     /// <param name="lastError">A description of the most recent dispatch failure, or <see langword="null"/> if none has occurred yet.</param>
+    /// <param name="leaseToken">
+    /// The opaque claim-fencing token stamped by an <see cref="IOutboxStore"/> on a successful
+    /// <see cref="IOutboxStore.ClaimDueAsync"/>/<see cref="IOutboxStore.ClaimAsync"/>, or
+    /// <see langword="null"/> for an envelope that hasn't just been claimed (a fresh capture, or one
+    /// rehydrated outside the claim path). See <see cref="LeaseToken"/>.
+    /// </param>
     public OutboxEnvelope(
         string id,
         string topic,
@@ -51,7 +57,8 @@ public sealed class OutboxEnvelope
         int attemptCount = 0,
         DateTimeOffset? nextAttemptAtUtc = null,
         OutboxStatus status = OutboxStatus.Pending,
-        string? lastError = null)
+        string? lastError = null,
+        string? leaseToken = null)
     {
         Id = id;
         Topic = topic;
@@ -63,6 +70,7 @@ public sealed class OutboxEnvelope
         NextAttemptAtUtc = nextAttemptAtUtc;
         Status = status;
         LastError = lastError;
+        LeaseToken = leaseToken;
     }
 
     /// <summary>Gets the envelope's id (a <see cref="Guid"/> in <c>"N"</c> format by convention).</summary>
@@ -94,4 +102,25 @@ public sealed class OutboxEnvelope
 
     /// <summary>Gets a description of the most recent dispatch failure, or <see langword="null"/>.</summary>
     public string? LastError { get; }
+
+    /// <summary>
+    /// Gets the opaque claim-fencing token stamped by the <see cref="IOutboxStore"/> that most
+    /// recently claimed this envelope, or <see langword="null"/> if it hasn't just been claimed.
+    /// Rotated on every successful claim. The dispatcher MUST present this token, unchanged, to the
+    /// settle call (<see cref="IOutboxStore.MarkDispatchedAsync"/>/<see cref="IOutboxStore.RescheduleAsync"/>/
+    /// <see cref="IOutboxStore.ParkAsync"/>) - a settle whose token no longer matches the live lease
+    /// (it lapsed and was reclaimed by another worker) is refused rather than allowed to clobber
+    /// whoever holds the lease now.
+    /// </summary>
+    public string? LeaseToken { get; }
+
+    /// <summary>
+    /// Returns a copy of this envelope stamped with <paramref name="leaseToken"/>. Used by
+    /// <see cref="IOutboxStore"/> implementations immediately after a successful claim to hand the
+    /// caller the fencing token alongside the envelope, without repeating the full constructor call at
+    /// every claim site.
+    /// </summary>
+    /// <param name="leaseToken">The token to stamp (see <see cref="LeaseToken"/>).</param>
+    public OutboxEnvelope WithLeaseToken(string? leaseToken) =>
+        new(Id, Topic, Payload, PayloadType, Headers, CreatedAtUtc, AttemptCount, NextAttemptAtUtc, Status, LastError, leaseToken);
 }

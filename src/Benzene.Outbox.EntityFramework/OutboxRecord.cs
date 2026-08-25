@@ -60,6 +60,14 @@ public class OutboxRecord
     public DateTimeOffset? LeaseUntil { get; set; }
 
     /// <summary>
+    /// The opaque claim-fencing token minted on the current lease, or <see langword="null"/> if
+    /// unclaimed. Mirrors <see cref="OutboxEnvelope.LeaseToken"/>; <see cref="EntityFrameworkOutboxStore{TDbContext}"/>'s
+    /// settle methods require this back and condition their write on it still matching (see that
+    /// type's remarks).
+    /// </summary>
+    public string? LeaseToken { get; set; }
+
+    /// <summary>
     /// When this row was dispatched, or <see langword="null"/> if it never has been. Drives
     /// <c>DeleteDispatchedBeforeAsync</c>'s retention cutoff.
     /// </summary>
@@ -86,15 +94,21 @@ public class OutboxRecord
         Status = envelope.Status,
         LastError = envelope.LastError,
         LeaseUntil = null,
+        LeaseToken = null,
         DispatchedAtUtc = null,
         RowVersion = Guid.NewGuid().ToString("N"),
     };
 
-    /// <summary>Rehydrates the immutable <see cref="OutboxEnvelope"/> this row currently represents.</summary>
+    /// <summary>
+    /// Rehydrates the immutable <see cref="OutboxEnvelope"/> this row currently represents, including
+    /// stamping <see cref="OutboxEnvelope.LeaseToken"/> from <see cref="LeaseToken"/> - callers that
+    /// use this outside a claim (e.g. reading an unclaimed row) will just see it as
+    /// <see langword="null"/>.
+    /// </summary>
     public OutboxEnvelope ToEnvelope()
     {
         var headers = JsonSerializer.Deserialize<Dictionary<string, string>>(HeadersJson) ?? new Dictionary<string, string>();
-        return new OutboxEnvelope(Id, Topic, Payload, PayloadType, headers, CreatedAtUtc, AttemptCount, NextAttemptAtUtc, Status, LastError);
+        return new OutboxEnvelope(Id, Topic, Payload, PayloadType, headers, CreatedAtUtc, AttemptCount, NextAttemptAtUtc, Status, LastError, LeaseToken);
     }
 
     /// <summary>Whether this row is <see cref="OutboxStatus.Pending"/>, due, and not currently leased - the claim predicate.</summary>

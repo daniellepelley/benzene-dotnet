@@ -70,8 +70,18 @@ lease, bump a hand-rolled `RowVersion` concurrency token, and `SaveChanges` — 
 own bumped `RowVersion` makes this `SaveChanges` throw `DbUpdateConcurrencyException`, retried a
 bounded number of times before giving up (treated as a refused claim, the same outcome as "someone else
 has the lease"). Every other write (`MarkDispatchedAsync`, `RescheduleAsync`, `ParkAsync`) is a plain
-load-mutate-`SaveChanges` — not required to be atomic (the dispatcher only calls them on an envelope it
-already exclusively holds via a live claim).
+load-mutate-`SaveChanges`, **fenced** on the caller's `leaseToken` (see "Claim fencing" below) — not
+required to be atomic beyond that fencing, since a matching token already proves this caller
+exclusively holds (or held, until reclaimed) the lease.
+
+## Claim fencing
+Every winning claim (either the `ExecuteUpdateAsync` fast path or the optimistic-concurrency fallback)
+mints a fresh `OutboxRecord.LeaseToken` and stamps it onto the returned `OutboxEnvelope.LeaseToken`.
+`MarkDispatchedAsync`/`RescheduleAsync`/`ParkAsync` **require** that token and include it in the row
+lookup's `WHERE` (`r.Id == id && r.LeaseToken == leaseToken`), so a settle whose token no longer matches
+the current lease (reclaimed by another claimant, or already settled) finds no row and returns
+`false` — nothing is written. See `Benzene.Outbox/CLAUDE.md`'s "Claim fencing" section for the full
+contract and what it does/doesn't close.
 
 ## Retention — real deletes, no TTL
 Unlike `Benzene.Outbox.DynamoDb` (native TTL, `DeleteDispatchedBeforeAsync` is a no-op),
@@ -82,8 +92,9 @@ touched by it — see `Benzene.Outbox/CLAUDE.md`'s delivery-semantics note.
 ## Key types
 - `OutboxRecord` — the EF Core row shape: everything `OutboxEnvelope` has (headers serialized as JSON,
   since EF Core has no built-in string-dictionary mapping and this package stays off any one database's
-  native JSON column type), plus two store-internal columns `OutboxEnvelope` doesn't carry:
-  `LeaseUntil` (the claim lease) and `DispatchedAtUtc` (the retention cutoff), and the `RowVersion`
+  native JSON column type), plus three store-internal columns `OutboxEnvelope` doesn't carry:
+  `LeaseUntil` (the claim lease), `LeaseToken` (the claim-fencing token — see "Claim fencing" above),
+  and `DispatchedAtUtc` (the retention cutoff), plus the `RowVersion`
   concurrency token used only by the optimistic-concurrency fallback claim path.
 - `ModelBuilderExtensions.AddOutboxEntities(tableName = "BenzeneOutbox")` — maps `OutboxRecord`, with
   an index on `(Status, NextAttemptAtUtc)` for the sweep query. Call from the application's own
