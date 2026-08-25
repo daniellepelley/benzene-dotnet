@@ -7,6 +7,15 @@ namespace Benzene.Saga;
 /// compensated in reverse order, leaving the system back at its starting state so the saga can be
 /// retried. It is all-or-nothing: it either completes in full or rolls back in full.
 /// </summary>
+/// <remarks>
+/// <b>A built <see cref="Saga"/> is immutable and safe for concurrent <see cref="RunAsync()"/> calls.</b>
+/// <see cref="SagaBuilder.Build"/> produces a <see cref="Saga"/> whose stages and steps are read-only
+/// descriptors - no per-execution outcome (a step's state, result, or exception) is ever stored on
+/// them. Each <c>RunAsync</c> call creates its own run-scoped <see cref="SagaStepOutcome"/>s (one per
+/// step, threaded through as a list local to that call) rather than mutating shared state, so the same
+/// built <see cref="Saga"/> instance can be reused - including run concurrently, any number of times -
+/// without one run's outcome corrupting another's.
+/// </remarks>
 public class Saga
 {
     private readonly IReadOnlyList<Stage> _stages;
@@ -71,17 +80,20 @@ public class Saga
             await store.RecordStartedAsync(new SagaRunInfo(sagaId, options.Name, attempt, _stages.Count));
         }
 
+        // Run-scoped: lives only for this one attempt, so nothing here is ever shared across
+        // concurrent or retried runs of the same built Saga.
         var context = new SagaContext();
-        var completedStages = new List<Stage>();
+        var completedStages = new List<(Stage Stage, IReadOnlyList<SagaStepOutcome> Outcomes)>();
 
         for (var i = 0; i < _stages.Count; i++)
         {
             var stage = _stages[i];
+            var outcomes = await stage.ExecuteAsync(context);
 
-            if (await stage.ExecuteAsync(context))
+            if (outcomes.All(o => o.State == SagaStepState.Succeeded))
             {
-                stage.Publish(context);
-                completedStages.Add(stage);
+                stage.Publish(context, outcomes);
+                completedStages.Add((stage, outcomes));
                 if (store != null)
                 {
                     await store.RecordStageCompletedAsync(sagaId!, attempt, i);
@@ -93,16 +105,16 @@ public class Saga
             // Stage i failed. Roll back this stage's concurrently-succeeded steps first, then every
             // completed stage newest-first, so effects are undone in the reverse of the order they
             // were created.
-            var rollbackClean = await RollBackAsync(context, completedStages, stage);
+            var (rollbackClean, failedStageOutcomes, compensationFailures) =
+                await RollBackAsync(context, completedStages, stage, outcomes);
 
-            var failedStep = stage.Steps.FirstOrDefault(step => step.State == SagaStepState.Failed);
-            var compensationFailures = CollectCompensationFailures(completedStages, stage);
+            var failedOutcome = failedStageOutcomes.FirstOrDefault(o => o.State == SagaStepState.Failed);
 
             var failure = new SagaResult(
                 rollbackClean ? SagaOutcome.RolledBack : SagaOutcome.PartiallyRolledBack,
                 i,
-                failedStep?.Result,
-                failedStep?.Exception,
+                failedOutcome?.Result,
+                failedOutcome?.Exception,
                 compensationFailures);
 
             if (store != null)
@@ -113,7 +125,7 @@ public class Saga
             return failure;
         }
 
-        var success = new SagaResult(SagaOutcome.Succeeded, null, null, null, Array.Empty<ISagaStep>());
+        var success = new SagaResult(SagaOutcome.Succeeded, null, null, null, Array.Empty<SagaStepOutcome>());
         if (store != null)
         {
             await store.RecordFinishedAsync(sagaId!, attempt, success);
@@ -122,25 +134,25 @@ public class Saga
         return success;
     }
 
-    private static async Task<bool> RollBackAsync(SagaContext context, List<Stage> completedStages, Stage failedStage)
+    private static async Task<(bool Clean, IReadOnlyList<SagaStepOutcome> FailedStageOutcomes, IReadOnlyList<SagaStepOutcome> CompensationFailures)> RollBackAsync(
+        SagaContext context,
+        List<(Stage Stage, IReadOnlyList<SagaStepOutcome> Outcomes)> completedStages,
+        Stage failedStage,
+        IReadOnlyList<SagaStepOutcome> failedStageOutcomes)
     {
-        var clean = await failedStage.CompensateAsync(context);
+        var compensatedFailedStage = await failedStage.CompensateAsync(context, failedStageOutcomes);
+        var allOutcomes = new List<SagaStepOutcome>(compensatedFailedStage);
 
         for (var j = completedStages.Count - 1; j >= 0; j--)
         {
-            var stageClean = await completedStages[j].CompensateAsync(context);
-            clean = clean && stageClean;
+            var (stage, outcomes) = completedStages[j];
+            var compensated = await stage.CompensateAsync(context, outcomes);
+            allOutcomes.AddRange(compensated);
         }
 
-        return clean;
-    }
+        var clean = allOutcomes.All(o => o.State != SagaStepState.CompensationFailed);
+        var compensationFailures = allOutcomes.Where(o => o.State == SagaStepState.CompensationFailed).ToArray();
 
-    private static IReadOnlyList<ISagaStep> CollectCompensationFailures(List<Stage> completedStages, Stage failedStage)
-    {
-        return completedStages
-            .Append(failedStage)
-            .SelectMany(stage => stage.Steps)
-            .Where(step => step.State == SagaStepState.CompensationFailed)
-            .ToArray();
+        return (clean, compensatedFailedStage, compensationFailures);
     }
 }

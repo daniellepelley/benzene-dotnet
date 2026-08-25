@@ -15,9 +15,9 @@ public class SagaResult
     /// <param name="failedStageIndex">The zero-based index of the stage that failed, or <c>null</c> on success.</param>
     /// <param name="failure">The failing step's result, or <c>null</c> on success.</param>
     /// <param name="failureException">The exception the failing step threw, if any.</param>
-    /// <param name="compensationFailures">Steps whose compensation itself failed during rollback.</param>
+    /// <param name="compensationFailures">The outcomes of steps whose compensation itself failed during rollback.</param>
     public SagaResult(SagaOutcome outcome, int? failedStageIndex, IBenzeneResult? failure,
-        Exception? failureException, IReadOnlyList<ISagaStep> compensationFailures)
+        Exception? failureException, IReadOnlyList<SagaStepOutcome> compensationFailures)
     {
         Outcome = outcome;
         FailedStageIndex = failedStageIndex;
@@ -42,9 +42,9 @@ public class SagaResult
     public Exception? FailureException { get; }
 
     /// <summary>
-    /// Gets the steps whose compensation itself failed during rollback - non-empty only when
-    /// <see cref="Outcome"/> is <see cref="SagaOutcome.PartiallyRolledBack"/>. Their effects may
+    /// Gets the outcomes of steps whose compensation itself failed during rollback - non-empty only
+    /// when <see cref="Outcome"/> is <see cref="SagaOutcome.PartiallyRolledBack"/>. Their effects may
     /// still exist and need manual attention.
     /// </summary>
-    public IReadOnlyList<ISagaStep> CompensationFailures { get; }
+    public IReadOnlyList<SagaStepOutcome> CompensationFailures { get; }
 }

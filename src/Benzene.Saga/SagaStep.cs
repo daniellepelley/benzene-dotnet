@@ -5,15 +5,22 @@ namespace Benzene.Saga;
 
 /// <summary>
 /// A saga step whose forward action produces a <typeparamref name="T"/> result, with an optional
-/// compensation that undoes the effect using that result.
+/// compensation that undoes it using that result.
 /// </summary>
 /// <typeparam name="T">The type of the forward action's payload.</typeparam>
+/// <remarks>
+/// Immutable once constructed: it holds only the forward/compensation delegates and the optional
+/// context key, never a per-execution outcome (see <see cref="ISagaStep"/> and the "immutable and
+/// concurrency-safe" contract on <see cref="Saga"/>). Every run's state/result/exception lives in the
+/// <see cref="SagaStepOutcome"/> returned by <see cref="ExecuteAsync"/>/<see cref="CompensateAsync"/>,
+/// not on this instance - so one <see cref="SagaStep{T}"/> instance can be part of multiple concurrent
+/// saga runs at once without one run's outcome leaking into another's.
+/// </remarks>
 public class SagaStep<T> : ISagaStep
 {
     private readonly Func<SagaContext, Task<IBenzeneResult<T>>> _forward;
     private readonly Func<SagaContext, T, Task<IBenzeneResult>>? _compensate;
     private readonly string? _key;
-    private IBenzeneResult<T>? _result;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SagaStep{T}"/> class.
@@ -30,75 +37,60 @@ public class SagaStep<T> : ISagaStep
     }
 
     /// <inheritdoc />
-    public SagaStepState State { get; private set; } = SagaStepState.Pending;
-
-    /// <inheritdoc />
-    public IBenzeneResult? Result => _result;
-
-    /// <inheritdoc />
-    public Exception? Exception { get; private set; }
-
-    /// <inheritdoc />
-    public async Task ExecuteAsync(SagaContext context)
+    public async Task<SagaStepOutcome> ExecuteAsync(SagaContext context)
     {
-        // Reset per run: a step instance is reused across retry attempts, so an Exception left over
-        // from an earlier attempt would otherwise still be reported as this attempt's FailureException
-        // even when this attempt failed by returning a failed result rather than throwing.
-        Exception = null;
         try
         {
-            _result = await _forward(context);
-            State = _result.IsSuccessful ? SagaStepState.Succeeded : SagaStepState.Failed;
+            var result = await _forward(context);
+            var state = result.IsSuccessful ? SagaStepState.Succeeded : SagaStepState.Failed;
+            return new SagaStepOutcome(this, state, result, null);
         }
         catch (Exception ex)
         {
-            Exception = ex;
-            _result = BenzeneResult.Set<T>(BenzeneResultStatus.UnexpectedError, false);
-            State = SagaStepState.Failed;
+            var result = BenzeneResult.Set<T>(BenzeneResultStatus.UnexpectedError, false);
+            return new SagaStepOutcome(this, SagaStepState.Failed, result, ex);
         }
     }
 
     /// <inheritdoc />
-    public void Publish(SagaContext context)
+    public void Publish(SagaContext context, SagaStepOutcome outcome)
     {
-        if (State == SagaStepState.Succeeded && _result != null)
+        if (outcome.State == SagaStepState.Succeeded && outcome.Result is IBenzeneResult<T> typed)
         {
-            context.Set(_result.Payload, _key);
+            context.Set(typed.Payload, _key);
         }
     }
 
     /// <inheritdoc />
-    public async Task<bool> CompensateAsync(SagaContext context)
+    public async Task<SagaStepOutcome> CompensateAsync(SagaContext context, SagaStepOutcome outcome)
     {
         // Only a step that actually succeeded created an effect worth undoing.
-        if (State != SagaStepState.Succeeded)
+        if (outcome.State != SagaStepState.Succeeded)
         {
-            return true;
+            return outcome;
         }
 
         // A succeeded step with no compensation is treated as "nothing to undo" - author a
         // compensation for any step that creates a side effect.
         if (_compensate == null)
         {
-            State = SagaStepState.RolledBack;
-            return true;
+            return outcome.WithState(SagaStepState.RolledBack);
         }
 
         try
         {
-            var compensationResult = await _compensate(context, _result!.Payload);
+            var payload = ((IBenzeneResult<T>)outcome.Result!).Payload;
+            var compensationResult = await _compensate(context, payload);
             if (compensationResult.IsSuccessful)
             {
-                State = SagaStepState.RolledBack;
-                return true;
+                return outcome.WithState(SagaStepState.RolledBack);
             }
         }
         catch (Exception ex)
         {
-            Exception = ex;
+            return outcome.WithState(SagaStepState.CompensationFailed, ex);
         }
 
-        State = SagaStepState.CompensationFailed;
-        return false;
+        return outcome.WithState(SagaStepState.CompensationFailed);
     }
 }

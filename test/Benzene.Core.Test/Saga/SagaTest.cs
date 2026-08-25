@@ -193,4 +193,65 @@ public class SagaTest
         Assert.Throws<InvalidOperationException>(() =>
             new SagaBuilder().Stage(stage => stage.Step<string>(_ => { })).Build());
     }
+
+    // WP-7 #15: a built Saga's steps/stages must be immutable descriptors, safe for concurrent
+    // RunAsync() calls - no per-execution outcome may be stored on the shared step/stage instances.
+    // Before the fix, SagaStep<T> stored its forward result/state/exception on itself; two concurrent
+    // RunAsync() calls sharing the same built Saga (and so the same step instances) could race on
+    // those fields, so one run's Publish could read back a DIFFERENT run's value out of the SAME
+    // step's shared field (the round-5 finding reproduced 6/300 corrupted runs this way). This test
+    // reproduces that scenario directly and asserts 0/N corrupted runs.
+    [Fact]
+    public async Task RunAsync_ManyConcurrentRunsOnOneBuiltSaga_NeverCrossContaminate()
+    {
+        // AsyncLocal correctly follows this particular logical call chain (including every await
+        // inside saga.RunAsync()) regardless of which OS thread actually executes it - so it is
+        // ground truth for "which concurrent run is this", independent of (and unaffected by) any
+        // race on the step's own fields. This is what lets the test detect cross-run contamination
+        // unambiguously rather than merely suspecting it from a flaky final answer.
+        var runId = new AsyncLocal<int>();
+        var crossContaminated = 0;
+
+        var saga = new SagaBuilder()
+            .Stage(stage => stage.Step<int>(step => step
+                .Do(async _ =>
+                {
+                    var mine = runId.Value;
+                    // Widen the race window: without this, concurrent runs might not actually
+                    // interleave their ExecuteAsync/Publish calls on the shared step instance.
+                    await Task.Yield();
+                    return BenzeneResult.Ok(mine);
+                })))
+            .Stage(stage => stage.Step<int>(step => step
+                .Do(async ctx =>
+                {
+                    var mine = runId.Value;
+                    var publishedByStage1 = ctx.Get<int>();
+                    if (publishedByStage1 != mine)
+                    {
+                        Interlocked.Increment(ref crossContaminated);
+                    }
+
+                    await Task.Yield();
+                    return BenzeneResult.Ok(publishedByStage1);
+                })))
+            .Build();
+
+        const int concurrentRuns = 300;
+        var tasks = new Task[concurrentRuns];
+        for (var i = 0; i < concurrentRuns; i++)
+        {
+            var id = i;
+            tasks[i] = Task.Run(async () =>
+            {
+                runId.Value = id;
+                var result = await saga.RunAsync();
+                Assert.True(result.IsSuccess);
+            });
+        }
+
+        await Task.WhenAll(tasks);
+
+        Assert.Equal(0, crossContaminated);
+    }
 }

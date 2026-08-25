@@ -46,7 +46,12 @@ Saga  ── ordered ──▶  Stage  ── concurrent ──▶  Step (forwar
 - `SagaContext` — typed result bag; steps publish their result after their stage succeeds.
 - `SagaResult` — `Outcome` (`Succeeded` / `RolledBack` / `PartiallyRolledBack`), `IsSuccess`,
   `FailedStageIndex`, `Failure` (the failing step's result), `FailureException`, and
-  `CompensationFailures` (steps whose compensation itself failed — orphaned effects to attend to).
+  `CompensationFailures` — `IReadOnlyList<SagaStepOutcome>`, the run-scoped outcomes of steps whose
+  compensation itself failed (orphaned effects to attend to).
+- `SagaStepOutcome` — an immutable, per-run snapshot of one step's outcome (`Step`, `State`, `Result`,
+  `Exception`), returned by `ISagaStep.ExecuteAsync`/`CompensateAsync` instead of being stored on the
+  step. This is the run-scoped state object the immutability/concurrency-safety contract above depends
+  on.
 - `SagaStepState` — `Pending` / `Succeeded` / `Failed` / `RolledBack` / `CompensationFailed`.
 - `Saga.RunAsync(SagaRunOptions)` — the opt-in overload for the §7 fast-follows (`RunAsync()` stays
   the zero-overhead default: one attempt, no store, no id). `SagaRunOptions` carries an optional
@@ -89,10 +94,23 @@ Saga  ── ordered ──▶  Stage  ── concurrent ──▶  Step (forwar
 - Concurrency safety: steps in a stage run concurrently but only **read** earlier stages' context
   values during that phase; writes happen single-threaded after each stage barrier (`Stage.Publish`),
   so `SagaContext` needs no locking.
+- **A built `Saga` is immutable and safe for concurrent `RunAsync()` calls.** `ISagaStep`/`SagaStep<T>`/
+  `Stage` are read-only descriptors after `Build()` — no per-execution outcome (a step's state, result,
+  exception) is ever stored on them. Every run's outcome lives in a `SagaStepOutcome`, created fresh and
+  threaded through as a run-scoped list local to that one `RunAsync`/`RunOnceAsync` call, so the same
+  built `Saga` instance can be reused — including run concurrently, any number of times — without one
+  run's outcome corrupting another's. (Pre-fix, outcome fields lived on the step/stage instances
+  themselves, shared across concurrent runs — a round-5 stress test reproduced 6/300 corrupted runs;
+  see `work/bug-fix-designs-2026-08.md` WP-7(e).) `SagaResult.CompensationFailures` is
+  `IReadOnlyList<SagaStepOutcome>`, not `IReadOnlyList<ISagaStep>` — a per-run snapshot, not a live
+  reference to shared state.
 - Test coverage lives in `test/Benzene.Core.Test/Saga/` — `SagaTest.cs` (happy path, mid-stage
   failure + rollback, cross-stage LIFO rollback, compensation-failure → `PartiallyRolledBack`,
-  forward-throws) and `SagaRetryAndStateStoreTest.cs` (retry recovers a flaky step, exhausts to
-  `RolledBack`, refuses to retry `PartiallyRolledBack`; state store records start/stage/finish, only
-  completed stages on failure, one `Started` per retry attempt, and generates an id when none given).
+  forward-throws, and a 300-concurrent-`RunAsync()` stress test on one built `Saga` asserting zero
+  cross-run contamination), `SagaStepTest.cs` (a step instance returns an independent outcome per call,
+  even under concurrent calls) and `SagaRetryAndStateStoreTest.cs` (retry recovers a flaky step,
+  exhausts to `RolledBack`, refuses to retry `PartiallyRolledBack`; state store records
+  start/stage/finish, only completed stages on failure, one `Started` per retry attempt, and generates
+  an id when none given).
 - Vocabulary note: the legacy code called the forward+compensation unit a "Part" and the parallel
   group a "Step"; this package renames them **Step** and **Stage** respectively.
