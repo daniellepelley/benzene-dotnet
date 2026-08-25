@@ -140,12 +140,20 @@ namespace App { public class OrderDoc { } }
         Assert.Contains("HandleCosmosDbChanges<global::App.OrderDoc>(_app, documents, cancellationToken)", output);
     }
 
+    // BENZ0002: a CosmosDb trigger missing DocumentType used to be silently skipped (the change feed
+    // is generic over it, so there's nothing valid to emit) - a declared trigger that's silently NOT
+    // generated is the worst outcome, so this must now fail the build with a clear diagnostic instead.
     [Fact]
-    public void CosmosDb_WithoutDocumentType_EmitsNothing()
+    public void CosmosDb_WithoutDocumentType_ReportsBENZ0002AndEmitsNothing()
     {
-        var output = Generate(@"[assembly: Benzene.Azure.Function.CosmosDb.BenzeneCosmosDbTrigger(Name = ""c"", DatabaseName = ""shop"", ContainerName = ""orders"")]");
+        var (output, diagnostics) = GenerateResult(@"[assembly: Benzene.Azure.Function.CosmosDb.BenzeneCosmosDbTrigger(Name = ""c"", DatabaseName = ""shop"", ContainerName = ""orders"")]");
 
         Assert.DoesNotContain("CosmosDBTrigger", output);
+
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal("BENZ0002", diagnostic.Id);
+        Assert.Equal(DiagnosticSeverity.Error, diagnostic.Severity);
+        Assert.Contains("\"c\"", diagnostic.GetMessage());
     }
 
     [Fact]

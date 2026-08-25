@@ -192,15 +192,20 @@ namespace Benzene.Azure.Function.SourceGenerators
             var builder = ImmutableArray.CreateBuilder<TriggerInfo>();
             foreach (var a in context.Attributes)
             {
+                var name = AttributeReading.NamedString(a, "Name", "benzene-cosmos");
                 var documentType = AttributeReading.NamedType(a, "DocumentType");
                 if (documentType == null)
                 {
-                    // DocumentType is required (the change feed is generic over it); skip silently here -
-                    // a diagnostic is a natural follow-up.
+                    // DocumentType is required (the change feed is generic over it). A declared
+                    // trigger that's silently *not* generated is the worst outcome, so report BENZ0002
+                    // instead of skipping it - see DiagnosticDescriptors.
+                    builder.Add(TriggerInfo.ForDiagnostic(Diagnostic.Create(
+                        DiagnosticDescriptors.CosmosDbTriggerMissingDocumentType,
+                        AttributeReading.AttributeLocation(a),
+                        AttributeReading.Literal(name))));
                     continue;
                 }
 
-                var name = AttributeReading.NamedString(a, "Name", "benzene-cosmos");
                 var database = AttributeReading.NamedString(a, "DatabaseName", "");
                 var container = AttributeReading.NamedString(a, "ContainerName", "");
                 var connection = AttributeReading.NamedString(a, "Connection", "CosmosDbConnection");
