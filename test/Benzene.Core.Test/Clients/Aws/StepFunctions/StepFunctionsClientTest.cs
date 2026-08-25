@@ -77,18 +77,61 @@ public class StepFunctionsClientTest
     }
 
     [Fact]
-    public async Task Start_ExecutionAlreadyExists_IsTreatedAsIdempotentSuccess()
+    public async Task Start_ExecutionAlreadyExists_MatchingInput_IsTreatedAsIdempotentSuccess()
     {
+        // #13: on ExecutionAlreadyExistsException, the client must call DescribeExecution and compare
+        // the existing execution's input to this call's input before deciding - a bare name collision
+        // is not, on its own, proof of a true idempotent duplicate.
+        //
+        // The existing execution's Input is echoed back from whatever this call's own StartExecution
+        // attempt sent - i.e. the exact serialized string the client under test produced - rather than
+        // reproduced with a second (Newtonsoft) serializer, since the two need not agree byte-for-byte
+        // on casing/formatting even for the "same" logical payload.
+        string capturedInput = null;
         var mockAmazonStepFunctions = new Mock<IAmazonStepFunctions>();
         mockAmazonStepFunctions.Setup(x => x.StartExecutionAsync(It.IsAny<StartExecutionRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<StartExecutionRequest, CancellationToken>((request, _) => capturedInput = request.Input)
             .ThrowsAsync(new ExecutionAlreadyExistsException("already started"));
+        mockAmazonStepFunctions.Setup(x => x.DescribeExecutionAsync(It.IsAny<DescribeExecutionRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new DescribeExecutionResponse { Input = capturedInput });
 
         var client = new StepFunctionsClientFactory(Defaults.StateMachineArn, mockAmazonStepFunctions.Object, NullLogger<StepFunctionsClient>.Instance).Create();
 
         var result = await client.StartExecutionAsync<ExampleRequestPayload, ExampleResponsePayload>(
             new ExampleRequestPayload { Id = 42, Name = "hi" }, "stable-token");
 
-        // A retry after a lost response must not surface as a failure - the execution already exists.
+        // A retry after a lost response must not surface as a failure - the execution already exists
+        // with the exact same input, verified via DescribeExecution.
+        mockAmazonStepFunctions.Verify(x => x.DescribeExecutionAsync(It.IsAny<DescribeExecutionRequest>(), It.IsAny<CancellationToken>()), Times.Once);
         Assert.Equal(BenzeneResultStatus.Accepted, result.Status);
+    }
+
+    [Fact]
+    public async Task Start_ExecutionAlreadyExists_MismatchedInput_ReturnsConflict()
+    {
+        // #13: a name collision with a DIFFERENT input must not be silently reported as Accepted - the
+        // caller's payload was NOT started, and it needs to know that (never the rejected "already
+        // started, unverified" success alternative - see StepFunctionsClient.HandleExecutionAlreadyExistsAsync).
+        var mockAmazonStepFunctions = new Mock<IAmazonStepFunctions>();
+        mockAmazonStepFunctions.Setup(x => x.StartExecutionAsync(It.IsAny<StartExecutionRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ExecutionAlreadyExistsException("already started"));
+        mockAmazonStepFunctions.Setup(x => x.DescribeExecutionAsync(It.IsAny<DescribeExecutionRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DescribeExecutionResponse
+            {
+                // The already-existing execution was started with a DIFFERENT input.
+                Input = "{\"id\":999,\"name\":\"someone-else\"}"
+            });
+
+        var client = new StepFunctionsClientFactory(Defaults.StateMachineArn, mockAmazonStepFunctions.Object, NullLogger<StepFunctionsClient>.Instance).Create();
+
+        var result = await client.StartExecutionAsync<ExampleRequestPayload, ExampleResponsePayload>(
+            new ExampleRequestPayload { Id = 42, Name = "hi" }, "stable-token");
+
+        Assert.Equal(BenzeneResultStatus.Conflict, result.Status);
+        Assert.False(result.IsSuccessful);
+
+        // The original (mismatched) execution must be left untouched - no further StartExecution/other
+        // mutating call is made once the mismatch is detected.
+        mockAmazonStepFunctions.Verify(x => x.StartExecutionAsync(It.IsAny<StartExecutionRequest>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 }

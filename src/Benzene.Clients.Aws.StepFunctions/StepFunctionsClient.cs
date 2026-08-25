@@ -50,16 +50,27 @@ public class StepFunctionsClient : IStepFunctionsClient
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Callers relying on the idempotency name (<paramref name="executionName"/>) must serialize
+    /// <paramref name="message"/> deterministically - the same logical input must always produce the
+    /// exact same serialized string. On an <see cref="ExecutionAlreadyExistsException"/>, the already-
+    /// started execution's input is compared to this call's serialized input as an exact string, so a
+    /// non-deterministic serializer (e.g. one that doesn't sort dictionary keys, or embeds a
+    /// timestamp) would make an actually-idempotent retry look like a conflicting input and get
+    /// rejected. See <see cref="BenzeneResultStatus.Conflict"/> below for what happens on a genuine
+    /// mismatch.
+    /// </remarks>
     public async Task<IBenzeneResult<TResponse>> StartExecutionAsync<TMessage, TResponse>(TMessage message, string? executionName)
     {
         var name = SanitizeExecutionName(executionName);
+        var input = _serializer.Serialize(message);
 
         try
         {
             await _amazonStepFunctionsClient.StartExecutionAsync(new StartExecutionRequest
             {
                 StateMachineArn = _stateMachineArn,
-                Input = _serializer.Serialize(message),
+                Input = input,
                 // Null Name lets AWS generate a UUID (the original behavior); a supplied name makes the
                 // start idempotent for the same (state machine, name, input).
                 Name = name
@@ -69,15 +80,95 @@ public class StepFunctionsClient : IStepFunctionsClient
         }
         catch (ExecutionAlreadyExistsException)
         {
-            // The idempotency name was already used: a prior attempt (e.g. before a lost response)
-            // already started this execution. Treat the retry as success rather than a failure.
-            return BenzeneResult.Accepted<TResponse>();
+            return await HandleExecutionAlreadyExistsAsync<TResponse>(name, input);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Sending message to {receiver} failed", _stateMachineArn);
             return BenzeneResult.ServiceUnavailable<TResponse>(ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Resolves an <see cref="ExecutionAlreadyExistsException"/> caught starting an execution named
+    /// <paramref name="name"/> with the given serialized <paramref name="input"/>. The idempotency
+    /// name was already used - but a name collision alone doesn't prove this call's payload is what
+    /// actually started, so the existing execution's input is fetched and compared byte-for-byte
+    /// before deciding.
+    /// </summary>
+    /// <remarks>
+    /// <b>Rejected alternative (recorded, do not reintroduce):</b> a distinct "already started,
+    /// unverified" success status was considered and rejected - it would recreate exactly the silent
+    /// wrong-input hazard this method exists to close (a caller seeing any flavor of success has no
+    /// reason to suspect its payload never ran). A verified match is <see cref="BenzeneResultStatus.Accepted"/>;
+    /// anything else is an explicit failure. See <c>work/bug-fix-designs-2026-08.md</c> WP-6b.
+    /// </remarks>
+    private async Task<IBenzeneResult<TResponse>> HandleExecutionAlreadyExistsAsync<TResponse>(string? name, string input)
+    {
+        if (name is null)
+        {
+            // Only reachable if AWS's own randomly-generated UUID execution name collided - not
+            // practically possible (there is no caller-supplied name to have collided on, and this
+            // call therefore can't be a genuine idempotent retry of a previous call). Preserve the
+            // historical treat-as-success behavior for this vanishingly unlikely case.
+            return BenzeneResult.Accepted<TResponse>();
+        }
+
+        DescribeExecutionResponse existingExecution;
+        try
+        {
+            existingExecution = await _amazonStepFunctionsClient.DescribeExecutionAsync(new DescribeExecutionRequest
+            {
+                ExecutionArn = BuildExecutionArn(name)
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Execution name {name} on {receiver} already exists, but DescribeExecution to verify its input failed",
+                name, _stateMachineArn);
+            return BenzeneResult.ServiceUnavailable<TResponse>(ex.Message);
+        }
+
+        if (existingExecution.Input == input)
+        {
+            // A true idempotent duplicate: the same (state machine, name, input) as a prior attempt
+            // (e.g. before a lost response). Treat the retry as success rather than a failure.
+            return BenzeneResult.Accepted<TResponse>();
+        }
+
+        // The name collided but the input differs - this call's payload was NOT started. Reporting
+        // Accepted here would be a false positive the caller has no way to detect; report Conflict
+        // instead so it can decide (retry with a fresh name, alert, etc.). The original execution
+        // (whatever input it actually holds) is left completely untouched by this path.
+        _logger.LogWarning(
+            "Execution name {name} on {receiver} already exists with different input - this call's payload was not started",
+            name, _stateMachineArn);
+        return BenzeneResult.Conflict<TResponse>(
+            $"An execution named '{name}' already exists on '{_stateMachineArn}' with a different input. This call's payload was not started.");
+    }
+
+    /// <summary>
+    /// Builds the execution ARN for <paramref name="executionName"/> under this client's state machine,
+    /// by substituting the state machine ARN's <c>stateMachine</c> resource segment for <c>execution</c>
+    /// and appending the execution name (the AWS-documented execution ARN shape:
+    /// <c>arn:&lt;partition&gt;:states:&lt;region&gt;:&lt;account&gt;:execution:&lt;state-machine-name&gt;:&lt;execution-name&gt;</c>).
+    /// </summary>
+    private string BuildExecutionArn(string executionName)
+    {
+        const string stateMachineMarker = ":stateMachine:";
+        var markerIndex = _stateMachineArn.IndexOf(stateMachineMarker, StringComparison.Ordinal);
+
+        if (markerIndex < 0)
+        {
+            // Not a recognizable state machine ARN shape (e.g. a test double) - fall back to a
+            // deterministic derived value rather than throwing.
+            return $"{_stateMachineArn}:execution:{executionName}";
+        }
+
+        var prefix = _stateMachineArn.Substring(0, markerIndex);
+        var stateMachineName = _stateMachineArn.Substring(markerIndex + stateMachineMarker.Length);
+        return $"{prefix}:execution:{stateMachineName}:{executionName}";
     }
 
     /// <summary>
