@@ -184,6 +184,25 @@ public class MeshAuthGate
                         $"('{config.Oidc.ClientSecretEnvVar}') to be set.");
                 }
 
+                // WP-1(b) (#20): a non-https authority used to reach the OIDC handler unvalidated and
+                // crash with an unhandled 500 the first time discovery metadata was actually fetched
+                // (mid-request, not at startup). Reject it here instead - fail-fast (P1) - unless the
+                // operator has explicitly opted into plain HTTP via auth.oidc.requireHttpsMetadata:
+                // false, which exists for the host's own Docker-first local story (a docker-composed
+                // IdP with no TLS in front of it).
+                if (config.Oidc.RequireHttpsMetadata &&
+                    Uri.TryCreate(config.Oidc.Authority, UriKind.Absolute, out var authorityUri) &&
+                    string.Equals(authorityUri.Scheme, "http", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        $"auth.oidc.authority ('{config.Oidc.Authority}') is not https, and " +
+                        "auth.oidc.requireHttpsMetadata is true (the default) - fetching OIDC discovery/" +
+                        "JWKS metadata over plain HTTP is a man-in-the-middle risk with nothing to detect " +
+                        "a spoofed authority. This is allowed ONLY for local development against an " +
+                        "authority you run yourself with no TLS: set auth.oidc.requireHttpsMetadata to " +
+                        "false explicitly if that's genuinely the case here - never in production.");
+                }
+
                 break;
         }
 
