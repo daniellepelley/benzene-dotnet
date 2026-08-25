@@ -11,6 +11,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Lets InMemoryClaimCheckStoreTest assert on reclamation (entry count) without a public API surface for it. -->
+    <InternalsVisibleTo Include="Benzene.Test" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Benzene.Abstractions\Benzene.Abstractions.csproj" />
     <ProjectReference Include="..\Benzene.Abstractions.Middleware\Benzene.Abstractions.Middleware.csproj" />
     <ProjectReference Include="..\Benzene.Abstractions.Messages\Benzene.Abstractions.Messages.csproj" />

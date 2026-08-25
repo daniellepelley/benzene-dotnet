@@ -109,4 +109,65 @@ public class InMemoryClaimCheckStoreTest
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => store.PutAsync("body", new ClaimCheckPutContext("orders:create"), cts.Token));
     }
+
+    // WP-7 #18: a Get on an expired entry must actually remove it from the backing dictionary, not
+    // merely report null while leaving it in place forever (the old "expired lazily" wording implied a
+    // release that never happened).
+    [Fact]
+    public async Task Get_OnExpiredEntry_RemovesItFromTheStore()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var store = new InMemoryClaimCheckStore(timeToLive: TimeSpan.FromMinutes(10), now: () => now);
+        var reference = await store.PutAsync("body", new ClaimCheckPutContext("orders:create"));
+        Assert.Equal(1, store.EntryCount);
+
+        now = now.AddMinutes(11);
+        var body = await store.GetAsync(reference);
+
+        Assert.Null(body);
+        Assert.Equal(0, store.EntryCount);
+    }
+
+    // WP-7 #18: PutAsync sweeps every expired entry - including ones that are never read back at all
+    // (a fan-out sibling nobody consumes, an undelivered message) - so growth is bounded wherever it
+    // originates, not just on the read path.
+    [Fact]
+    public async Task Put_SweepsExpiredEntries_EvenOnesNeverRead()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var store = new InMemoryClaimCheckStore(timeToLive: TimeSpan.FromMinutes(10), now: () => now);
+
+        await store.PutAsync("never-read-1", new ClaimCheckPutContext("orders:create"));
+        await store.PutAsync("never-read-2", new ClaimCheckPutContext("orders:create"));
+        Assert.Equal(2, store.EntryCount);
+
+        // Past the entries' TTL and past the sweep's own minimum interval.
+        now = now.AddMinutes(11) + InMemoryClaimCheckStore.SweepInterval;
+        await store.PutAsync("triggers-the-sweep", new ClaimCheckPutContext("orders:create"));
+
+        // The two never-read, now-expired entries are gone; only the fresh one that triggered the
+        // sweep (and isn't itself expired) remains.
+        Assert.Equal(1, store.EntryCount);
+    }
+
+    // The sweep is time-gated (at most once per SweepInterval) - deliberately, so a busy producer does
+    // not pay a full-dictionary scan on every single put.
+    [Fact]
+    public async Task Put_DoesNotSweep_MoreThanOncePerSweepInterval()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var store = new InMemoryClaimCheckStore(timeToLive: TimeSpan.FromSeconds(10), now: () => now);
+
+        // The first put's sweep runs immediately (nothing swept yet at construction-relative time
+        // zero), which starts the SweepInterval clock.
+        await store.PutAsync("never-read", new ClaimCheckPutContext("orders:create"));
+
+        // Past the entry's TTL (10s), but well within the sweep's own SweepInterval (1 minute).
+        now = now.AddSeconds(20);
+        await store.PutAsync("too-soon-for-a-sweep", new ClaimCheckPutContext("orders:create"));
+
+        // Both entries still present: the second put's sweep was skipped as too soon, even though the
+        // first entry is already expired.
+        Assert.Equal(2, store.EntryCount);
+    }
 }
