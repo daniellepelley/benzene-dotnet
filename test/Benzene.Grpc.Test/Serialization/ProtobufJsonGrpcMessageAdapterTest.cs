@@ -119,11 +119,13 @@ public class ProtobufJsonGrpcMessageAdapterTest
     }
 
     [Fact]
-    public void ConvertResponse_WhenPayloadIsNull_ThrowsBenzeneException()
+    public void ConvertResponse_WhenPayloadIsNull_ReturnsAnEmptyResponseMessage()
     {
         var adapter = new ProtobufJsonGrpcMessageAdapter();
 
-        Assert.Throws<BenzeneException>(() => adapter.ConvertResponse<EchoReply>(null));
+        var result = adapter.ConvertResponse<EchoReply>(null);
+
+        Assert.Equal(new EchoReply(), result);
     }
 
     [Fact]

@@ -10,6 +10,10 @@ service TestService {
   rpc Subscribe (SubscribeRequest) returns (stream SubscribeReply);
   rpc Upload (stream UploadItem) returns (UploadSummary);
   rpc Chat (stream ChatMessage) returns (stream ChatMessage);
+  // Fire-and-forget shapes: the handler produces no response payload (regression coverage for
+  // ConvertResponse's null-payload handling, WP-4).
+  rpc EchoFireAndForget (EchoRequest) returns (EchoReply);
+  rpc UploadFireAndForget (stream UploadItem) returns (UploadSummary);
 }
 
 message EchoRequest {

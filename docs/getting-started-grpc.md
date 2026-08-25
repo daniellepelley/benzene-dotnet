@@ -339,6 +339,17 @@ A non-OK status throws `RpcException(new Status(mappedCode, detail))` — `detai
 a Benzene.Grpc client can recover the original status precisely (see
 [Clients — gRPC](clients.md#grpc)) even where several statuses collapse to the same `StatusCode`.
 
+### Fire-and-forget handlers (unary and client-streaming)
+
+A handler that returns `BenzeneResult.Accepted<TResponse>()` (or `Ok<TResponse>()`, etc.) with no
+payload — a genuinely fire-and-forget shape — completes the call with the mapped `StatusCode`
+(`accepted → OK`, per the table above) and an **empty** `TResponse` message. This applies to both
+unary and client-streaming RPCs: a `null` payload is a success with nothing to report, not an
+error, so it no longer surfaces as an opaque `StatusCode.Unknown`. Server-streaming and
+bidirectional RPCs are unaffected by this — a stream-shaped response that never materializes is a
+wiring error, not fire-and-forget, and still fails the call with `RpcException(Internal, "The
+message handler did not produce a response stream.")`.
+
 ## 9. Deadlines and cancellation (D6)
 
 `GrpcContext.CancellationToken` (from the call's `ServerCallContext`) is available to any pipeline

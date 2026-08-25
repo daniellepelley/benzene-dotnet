@@ -97,6 +97,19 @@ lock-in; retry `Task.Delay` overflow; RabbitMq failed-startup lane leak; mesh pa
 SSRF/URL-restructuring; codegen NRE + int64 truncation + non-incremental generator; CORS
 wildcard+credentials and full Fetch-spec preflight compliance; spec-output caching.
 
+### Tracked findings round 5–6, WP-4 — gRPC null-response crash (done)
+Decision, rationale, and why server-streaming/duplex are deliberately untouched are ruled in
+[`bug-fix-designs-2026-08.md`](bug-fix-designs-2026-08.md) §"WP-4 — gRPC null-response crash (unary +
+client-streaming)".
+- **[RESOLVED] #8 — a fire-and-forget unary handler (no response payload) crashed instead of
+  succeeding.** `ProtobufJsonGrpcMessageAdapter.ConvertResponse<TResponse>` threw `BenzeneException`
+  on a `null` payload, which `GrpcMethodHandler.HandleAsync`'s unary call site surfaced as an opaque
+  `RpcException(Unknown)` instead of the mapped `accepted → OK`. A `null` payload now converts to an
+  empty `TResponse` message instance. See WP-4.
+- **[RESOLVED] #23 — the same crash on the client-streaming call site.** One adapter fix
+  (`ConvertResponse`) closes both #8 and #23, since `GrpcMethodHandler.ClientStreamingAsync` calls the
+  same method. See WP-4.
+
 ### Tracked findings round 5–6, WP-7 — cross-cutting hygiene (done)
 Decisions, rationale, and rejected alternatives for all five are ruled in
 [`bug-fix-designs-2026-08.md`](bug-fix-designs-2026-08.md) §"WP-7 — Cross-cutting hygiene: cancellation,

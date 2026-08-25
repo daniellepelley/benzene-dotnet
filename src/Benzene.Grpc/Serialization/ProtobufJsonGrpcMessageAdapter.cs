@@ -53,7 +53,13 @@ public class ProtobufJsonGrpcMessageAdapter : IGrpcMessageAdapter
     }
 
     /// <inheritdoc />
-    /// <exception cref="BenzeneException">The payload is null, or cannot be converted to <typeparamref name="TResponse"/>.</exception>
+    /// <remarks>
+    /// A null <paramref name="payload"/> is a fire-and-forget success, not an error: it yields an
+    /// empty <typeparamref name="TResponse"/> message instance (every protobuf-generated message
+    /// type has a public parameterless constructor), so the pipeline's mapped status (spec:
+    /// <c>accepted → OK</c>) reaches the client instead of an opaque <see cref="Grpc.Core.StatusCode.Unknown"/>.
+    /// </remarks>
+    /// <exception cref="BenzeneException">The payload cannot be converted to <typeparamref name="TResponse"/>.</exception>
     public TResponse ConvertResponse<TResponse>(object? payload)
     {
         if (payload is TResponse direct)
@@ -63,7 +69,7 @@ public class ProtobufJsonGrpcMessageAdapter : IGrpcMessageAdapter
 
         if (payload == null)
         {
-            throw new BenzeneException($"Cannot convert a null payload to {typeof(TResponse).Name}.");
+            return Activator.CreateInstance<TResponse>();
         }
 
         var descriptor = GetDescriptor(typeof(TResponse));
