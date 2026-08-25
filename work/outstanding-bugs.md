@@ -117,6 +117,31 @@ eviction, Saga per-run state".
   runs).** Outcome now lives in a run-scoped `SagaStepOutcome` created fresh per run; a built `Saga` is
   documented immutable and concurrency-safe. See WP-7(e).
 
+### Tracked findings round 5–6, WP-3 — claim fencing for Outbox and Idempotency stores (done)
+Decisions, rationale, and the breaking-change ruling (pre-1.0, no compatibility overloads) are ruled in
+[`bug-fix-designs-2026-08.md`](bug-fix-designs-2026-08.md) §"WP-3 — Claim fencing for Outbox and
+Idempotency stores".
+- **[RESOLVED] #16 — `IIdempotencyStore.CompleteAsync`/`ReleaseAsync` took no claim token, so a
+  stale/slow holder's late settle (arriving after its claim legitimately lapsed and was reclaimed by
+  another worker) could silently clobber the new holder's outcome (round-5 deterministic repro).**
+  `ClaimResult` now carries a `ClaimToken` (non-null exactly when `Claimed`); `CompleteAsync`/
+  `ReleaseAsync` require it and return `Task<bool>` — `false` means no live claim matched and nothing
+  was written. `InMemoryIdempotencyStore` checks the token under its existing lock;
+  `DynamoDbIdempotencyStore` conditions the settle `PutItem`/`DeleteItem` on a `claimToken` attribute
+  match. `IdempotencyMiddleware` logs a warning (not an error) on a `false` settle. See WP-3.
+- **[RESOLVED] #17 — `IOutboxStore.MarkDispatchedAsync`/`RescheduleAsync`/`ParkAsync` took no lease
+  token, so a live-but-slow claimant whose lease naturally lapsed and was reclaimed by another worker
+  could have its late settle silently clobber (or, via a stale `RescheduleAsync`, resurrect) the new
+  holder's state — the round-6 stress-test double-dispatch (`sendCount == 2`) with the store unable to
+  tell the difference.** `OutboxEnvelope` now carries a `LeaseToken`, stamped/rotated on every
+  successful `ClaimDueAsync`/`ClaimAsync`; the three settle methods require it and return `Task<bool>`.
+  All three stores (`InMemoryOutboxStore`, `DynamoDbOutboxStore`, `EntityFrameworkOutboxStore`) fence
+  their settle writes on it; `OutboxDispatcher` passes the claimed envelope's token through and logs a
+  warning on a `false` settle. Fencing closes the state-clobber/resurrection hole and makes a lost
+  lease visible — it does **not** and cannot recall a message a stale claimant already handed to the
+  transport before its lease lapsed; crash-after-send remains an inherent at-least-once window. See
+  WP-3.
+
 ---
 
 ## Open — maintainer decisions (the real remaining backlog)
