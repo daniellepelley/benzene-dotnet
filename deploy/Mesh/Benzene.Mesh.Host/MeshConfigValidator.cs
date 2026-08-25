@@ -41,7 +41,7 @@ public static class MeshConfigValidator
         // Same fail-fast rules Startup.Configure() runs via MeshAuthGate.Validate (e.g. mode "proxy"
         // with an empty trustedProxies list) - catch a config that would under-protect the host before
         // a deploy, not after one.
-        MeshAuthGate.Validate(config.Auth);
+        MeshAuthGate.Validate(config.Auth, config.Dispatch.Enabled);
 
         return config;
     }

@@ -104,6 +104,19 @@ XML/contract docs updated in the same commit as the behavior; one logical change
 **Tasks #3, #6, #19, #27, #20, #4, #5.** Files: `deploy/Mesh/Benzene.Mesh.Host/{MeshAuthGate.cs,
 Startup.cs, CONFIG.md, README.md}`, `src/Benzene.Mesh.Artifacts/` (UI wiring), host tests.
 
+> **Implementation note (2026-08-25):** the "UI wiring" pointer above is corrected here rather than
+> left to mislead a future reader — `UseMeshUi`/`MeshUiMiddleware`/`MeshUiPage` (the `dispatchUrl`/
+> `logoutUrl` parameters (c)/(d) rely on) live in `src/Benzene.Mesh.Ui/`, not
+> `src/Benzene.Mesh.Artifacts/` (that package holds `MeshRefreshGuardMiddleware`/
+> `MeshDispatchGuardMiddleware` - the CSRF-header convention (c) reuses - plus `UseMeshArtifacts()`,
+> but not the UI page itself). Both `UseMeshUi`'s `dispatchUrl`/`logoutUrl` parameters and the C#-side
+> plumbing to render them (`data-dispatch-url`/`data-logout-url` on the page root) had already landed
+> in `Benzene.Mesh.Ui` before this work package, covered by `MeshUiPageTest`; what was actually
+> missing and is fixed here is (1) `Startup.cs` never calling `UseMeshUi` with either parameter, and
+> (2) the mesh UI's Sign-out control being a plain `<a href>` GET link (`src/Benzene.Mesh.Ui/mesh-ui.html`),
+> which a GET-rejecting logout endpoint would have made silently non-functional - it now POSTs with
+> the CSRF header and navigates on the JSON response, per (c)'s spec below.
+
 **(a) The mode×option satisfiability matrix (#3, #6, #19, #27).** Extend `MeshAuthGate.Validate()`
 — which already rejects `dispatchRole`+`mode:"none"` — into a complete matrix. `Validate()` MUST
 reject, at startup, with a message naming the keys:

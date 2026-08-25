@@ -108,6 +108,31 @@ public class MeshConfigValidatorTest
         }
     }
 
+    // WP-1(a) (#19): --validate-config runs the exact same MeshAuthGate.Validate rules Startup.Configure
+    // does, including the dispatch.enabled x auth.mode satisfiability check - this catches the
+    // misconfiguration before a deploy, not after one.
+    [Fact]
+    public void DispatchEnabledWithAuthModeNone_ThrowsNamingBothKeys()
+    {
+        var path = WriteTempConfig("""
+            {
+              "dispatch": { "enabled": true },
+              "auth": { "mode": "none" }
+            }
+            """);
+        try
+        {
+            var exception = Assert.Throws<InvalidOperationException>(() => MeshConfigValidator.Validate(path));
+
+            Assert.Contains("dispatch.enabled", exception.Message);
+            Assert.Contains("none", exception.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     [Fact]
     public void MeshConfigPathSetToMissingFile_ThrowsNamingThePath()
     {

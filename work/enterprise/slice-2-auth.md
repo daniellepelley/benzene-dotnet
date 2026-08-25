@@ -4,6 +4,18 @@
 covered by `MeshAuthGateTest` and `MeshAuthAcceptanceTest` (which is the `/artifacts/*`-is-protected test
 this slice asked for).
 
+> **WP-1 (2026-08-25):** the round-5/6 tracked-findings ruling
+> (`work/bug-fix-designs-2026-08.md`'s "WP-1 — Mesh host: auth satisfiability matrix, OIDC hardening,
+> logout, dispatch wiring") extended `MeshAuthGate.Validate` from the single `dispatchRole`+`mode:
+> "none"` check into the full mode×option satisfiability matrix (`requiredGroups`/`dispatchRole`/
+> `allowedEmailDomains`/`dispatch.enabled`, each rejected under whichever modes can't satisfy it — see
+> `deploy/Mesh/CONFIG.md`'s "Which options work under which auth modes"); added
+> `auth.oidc.requireHttpsMetadata` (default `true`, rejects a non-https authority at startup instead
+> of an unhandled 500 mid-request); and added `POST /mesh/auth/logout` (oidc mode only, CSRF-headered,
+> IdP end-session redirect when discovered) plus `dispatchUrl`/`logoutUrl` wiring into `UseMeshUi`.
+> Covered by `MeshAuthGateTest`, `MeshAuthSatisfiabilityAcceptanceTest`, `MeshAuthLogoutAcceptanceTest`,
+> and `MeshUiWiringAcceptanceTest`.
+
 > **CORRECTION (2026-08-22):** the 2026-08-20 "SHIPPED"/"verified against source" line above and the
 > task 2.5 checkbox below were wrong about the dispatch gate. Re-verifying against source found
 > `Startup.cs` calling `UseMeshDispatch()` alone — no `[HttpEndpoint]` route, no `UseBenzeneMessage`

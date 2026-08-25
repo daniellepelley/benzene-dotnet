@@ -121,7 +121,44 @@ plane at it.
 | `auth.oidc.clientSecretEnvVar` | string | `"MESH_OIDC_CLIENT_SECRET"` | The **named** environment variable must be set when `mode: "oidc"` | The **name** of the environment variable holding the client secret — never the secret itself (`mesh.json` gets committed to customers' repos). |
 | `auth.oidc.callbackPath` | string | `"/signin-oidc"` | Optional, `mode: "oidc"` only | The path the authority redirects back to after login. |
 | `auth.oidc.scopes` | string[] | `["openid", "profile", "email"]` | Optional, `mode: "oidc"` only | The OIDC scopes requested at login. |
+| `auth.oidc.requireHttpsMetadata` | bool | `true` | Optional, `mode: "oidc"` only | Whether `auth.oidc.authority`'s discovery/JWKS metadata must be fetched over HTTPS. `true` (the default) rejects a non-`https` authority at startup, naming it, instead of letting the OIDC handler crash with an unhandled 500 the first time it tried to fetch metadata over plain HTTP. **Set to `false` ONLY for local development** against an authority you run yourself with no TLS (e.g. a docker-composed Keycloak on `localhost`) — **never in production**: HTTP metadata is a man-in-the-middle risk with nothing to detect a spoofed authority. |
 | `auth.ingestion.mode` | string: `open` \| `sharedSecret` | `"open"` | Always applies | Independent of `auth.mode` — `/mesh/report` is a service self-reporting, not a browser session. `open`: no check (today's behaviour). `sharedSecret`: the request must carry `X-Mesh-Ingest-Secret` matching the `MESH_INGEST_SECRET` environment variable (compared in constant time). |
+
+**`POST /mesh/auth/logout`** — always present in `mode: "oidc"`, not itself config-gated. Requires the
+custom header `X-Benzene-Logout` (any non-empty value — the same CSRF convention as
+`X-Benzene-Refresh`/`X-Benzene-Dispatch`: a cross-site request cannot set a custom header at all).
+GET is rejected (`405`) — a GET-triggered logout is itself a CSRF hazard. Signs out the session cookie
+and answers `{"redirect": <url or null>}`: the URL is the authority's discovered `end_session_endpoint`
+(with `post_logout_redirect_uri`) when discovery provides one, else `null` (local sign-out only). The
+mesh UI's Sign-out control (shown automatically once `mode: "oidc"` wires `logoutUrl` into
+`UseMeshUi`) POSTs here, then navigates to `redirect` if non-null, else reloads.
+
+## Which options work under which auth modes
+
+Not every `auth.*` option is satisfiable under every `auth.mode` — some need a mode that establishes
+group/role claims or an email-bearing identity, or (for `dispatch.enabled`) any identity at all. An
+unsatisfiable combination is rejected at startup (`MeshAuthGate.Validate`, also run by
+`--validate-config`), naming the offending key(s) and the mode — never silently ignored or
+silently under-enforced. See `work/bug-fix-designs-2026-08.md`'s "WP-1" for the ruling.
+
+| Option set | `none` | `basic` | `proxy` (no groupsHeader) | `proxy` (+groupsHeader) | `oidc` |
+|---|---|---|---|---|---|
+| `RequiredGroups` | ✗ reject | ✗ reject | ✗ reject | ✓ | ✓ |
+| `dispatchRole` | ✗ reject (exists) | ✗ reject (#27) | ✗ reject (#6) | ✓ | ✓ |
+| `AllowedEmailDomains` | ✗ reject (#3) | ✗ reject | ✓ | ✓ | ✓ |
+| `dispatch.enabled` | ✗ reject (#19) | ✓ | ✓ | ✓ | ✓ |
+
+Rationale: group/role options (`requiredGroups`, `dispatchRole`) need a mode that can carry group
+claims (`oidc`, or `proxy` with `auth.proxy.groupsHeader` configured). `allowedEmailDomains` needs an
+email-bearing identity (`proxy`/`oidc`) — under `basic` the operator defines the one account
+themselves, so domain-filtering it is meaningless, and it is rejected rather than silently ignored.
+`dispatch.enabled` needs *any* established identity, since `MeshDispatchGate`'s identity check is
+fail-closed — `none` establishes none at all, so it is rejected; `basic` is allowed (its Name-claim
+identity satisfies the guard).
+
+**`basic` stays a deliberately minimal single-account mode — there is no `MESH_BASIC_ROLES` knob.**
+Anyone needing roles has outgrown `basic` and should use `proxy`/`oidc`; do not add that knob without
+first amending the WP-1 ruling.
 
 **Authorization**, once authenticated (any mode): a caller who authenticates but fails
 `allowedEmailDomains`/`requiredGroups` gets `403 Forbidden`, not `401 Unauthorized`. There is no

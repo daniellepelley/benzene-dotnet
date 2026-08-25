@@ -110,6 +110,33 @@ client-streaming)".
   (`ConvertResponse`) closes both #8 and #23, since `GrpcMethodHandler.ClientStreamingAsync` calls the
   same method. See WP-4.
 
+### Tracked findings round 5–6, WP-1 — mesh host auth (done)
+Decisions, rationale, and rejected alternatives for all seven are ruled in
+[`bug-fix-designs-2026-08.md`](bug-fix-designs-2026-08.md) §"WP-1 — Mesh host: auth satisfiability
+matrix, OIDC hardening, logout, dispatch wiring".
+- **[RESOLVED] #3 — `AllowedEmailDomains` was satisfiable under `auth.mode: "none"`, which establishes
+  no identity to filter at all.** `MeshAuthGate.Validate` now rejects it at startup. See WP-1(a).
+- **[RESOLVED] #6 — `dispatchRole` was satisfiable under `proxy` with no `groupsHeader`, which carries
+  no role claims at all.** Rejected at startup, naming both keys. See WP-1(a).
+- **[RESOLVED] #19 — `dispatch.enabled: true` under `auth.mode: "none"` booted cleanly and then
+  permanently 403'd every `mesh:dispatch` request** (mode `"none"` sets no identity, and
+  `MeshDispatchGate`'s identity check is fail-closed), with nothing telling the operator why. Rejected
+  at startup instead. See WP-1(a).
+- **[RESOLVED] #20 — a non-https `auth.oidc.authority` reached the OIDC handler unvalidated and
+  crashed with an unhandled 500 the first time discovery metadata was fetched, mid-request.** New
+  `auth.oidc.requireHttpsMetadata` (default `true`) rejects it at startup instead; set `false`
+  explicitly for a local, TLS-less authority only. See WP-1(b).
+- **[RESOLVED] #4 — no way to sign out of an oidc-mode session.** `POST /mesh/auth/logout` (CSRF
+  header required, GET rejected) signs out the cookie and answers `{"redirect": ...}` from the IdP's
+  discovered `end_session_endpoint` when available; the mesh UI's Sign-out control now POSTs and
+  navigates on the response instead of a plain `<a href>` GET link. See WP-1(c).
+- **[RESOLVED] #5 — `dispatchUrl` was never passed to `UseMeshUi(...)`, so the Test Console's send
+  button stayed invisible even with dispatch wired.** `Startup.cs` now passes it whenever
+  `dispatch.enabled`. See WP-1(d).
+- **[RESOLVED] #27 — `dispatchRole` was satisfiable under `basic`, a single hand-configured account
+  with no roles.** Rejected at startup; **no `MESH_BASIC_ROLES` knob was added** (rejected
+  alternative — `basic` stays deliberately minimal). See WP-1(a).
+
 ### Tracked findings round 5–6, WP-7 — cross-cutting hygiene (done)
 Decisions, rationale, and rejected alternatives for all five are ruled in
 [`bug-fix-designs-2026-08.md`](bug-fix-designs-2026-08.md) §"WP-7 — Cross-cutting hygiene: cancellation,

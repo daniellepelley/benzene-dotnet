@@ -2,14 +2,18 @@ using System.Net;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Benzene.Auth.Basic;
 using Benzene.Auth.Core;
 using Benzene.Mesh.Artifacts;
 using Benzene.Mesh.Dispatch;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace Benzene.Mesh.Host;
 
@@ -64,16 +68,36 @@ public class MeshAuthGate
     public static readonly string DispatchPath = new MeshDispatchGuardOptions().Path;
 
     /// <summary>
-    /// <see cref="IngestionPath"/>/<see cref="DispatchPath"/>, canonicalized once through the exact
-    /// same rule <see cref="MeshDispatchGuardMiddleware"/> and the router use - see
-    /// <see cref="MeshPathCanonicalizer.Canonicalize"/>'s remarks and <c>InvokeAsync</c>'s
+    /// WP-1(c) (#4): <c>POST /mesh/auth/logout</c> - oidc mode only, see <see cref="HandleLogoutAsync"/>.
+    /// A fixed literal (no config knob to move it) so <c>Startup.cs</c>'s <c>UseMeshUi(logoutUrl: ...)</c>
+    /// call and the check below can never drift apart.
+    /// </summary>
+    public const string LogoutPath = "/mesh/auth/logout";
+
+    /// <summary>
+    /// <see cref="IngestionPath"/>/<see cref="DispatchPath"/>/<see cref="LogoutPath"/>, canonicalized
+    /// once through the exact same rule <see cref="MeshDispatchGuardMiddleware"/> and the router use -
+    /// see <see cref="MeshPathCanonicalizer.Canonicalize"/>'s remarks and <c>InvokeAsync</c>'s
     /// trailing-slash correction below.
     /// </summary>
     private static readonly string CanonicalIngestionPath = MeshPathCanonicalizer.Canonicalize(IngestionPath);
     private static readonly string CanonicalDispatchPath = MeshPathCanonicalizer.Canonicalize(DispatchPath);
+    private static readonly string CanonicalLogoutPath = MeshPathCanonicalizer.Canonicalize(LogoutPath);
 
     /// <summary>The header <c>auth.ingestion.mode: "sharedSecret"</c> reads its secret from.</summary>
     public const string IngestSecretHeaderName = "X-Mesh-Ingest-Secret";
+
+    /// <summary>
+    /// WP-1(c) (#4): the CSRF header <see cref="LogoutPath"/> requires, matching the same custom-header
+    /// convention <see cref="MeshRefreshGuardOptions.DefaultHeaderName"/> (<c>X-Benzene-Refresh</c>) and
+    /// <see cref="MeshDispatchGuardOptions.DefaultHeaderName"/> (<c>X-Benzene-Dispatch</c>) already use:
+    /// a cross-site <c>&lt;form method="post"&gt;</c> cannot set a custom header at all, and a
+    /// cross-origin <c>fetch()</c> that tries to triggers a CORS preflight this pipeline never approves -
+    /// so only a genuine same-origin caller can ever supply it. The value sent is not inspected, exactly
+    /// like its siblings - what defends against CSRF is that a cross-site caller cannot set the header at
+    /// all, not what it would have set it to.
+    /// </summary>
+    public const string LogoutHeaderName = "X-Benzene-Logout";
 
     private static readonly string[] ValidModes = { "none", "proxy", "basic", "oidc" };
     private static readonly string[] ValidIngestionModes = { "open", "sharedSecret" };
@@ -83,10 +107,18 @@ public class MeshAuthGate
     private readonly IBasicAuthCredentialValidator? _basicValidator;
 
     /// <summary>Initializes a new instance of the <see cref="MeshAuthGate"/> class.</summary>
+    /// <param name="next">The next middleware in the pipeline.</param>
+    /// <param name="config">The auth config to enforce.</param>
+    /// <param name="dispatchEnabled">
+    /// Whether <c>dispatch.enabled</c> is set (<see cref="MeshDispatchConfig.Enabled"/>) - needed only
+    /// for the satisfiability check in <see cref="Validate"/> (#19); defaults to <c>false</c> so every
+    /// existing single-argument call site (this constructor is resolved positionally by
+    /// <c>UseMiddleware&lt;MeshAuthGate&gt;</c>) keeps behaving exactly as before.
+    /// </param>
     /// <exception cref="InvalidOperationException">The config is unsafe or incomplete for the selected mode - see <see cref="Validate"/>.</exception>
-    public MeshAuthGate(RequestDelegate next, MeshAuthConfig config)
+    public MeshAuthGate(RequestDelegate next, MeshAuthConfig config, bool dispatchEnabled = false)
     {
-        Validate(config);
+        Validate(config, dispatchEnabled);
         _next = next;
         _config = config;
         if (string.Equals(config.Mode, "basic", StringComparison.OrdinalIgnoreCase))
@@ -103,7 +135,13 @@ public class MeshAuthGate
     /// constructor (so the running host refuses to start) and from <see cref="MeshConfigValidator"/>
     /// (so <c>--validate-config</c> catches it before a deploy).
     /// </summary>
-    public static void Validate(MeshAuthConfig config)
+    /// <param name="config">The auth config to validate.</param>
+    /// <param name="dispatchEnabled">
+    /// Whether <c>dispatch.enabled</c> is set (<see cref="MeshDispatchConfig.Enabled"/>) - feeds only
+    /// the satisfiability check below (#19); defaults to <c>false</c> so every existing call site that
+    /// doesn't care about dispatch keeps validating exactly as before.
+    /// </param>
+    public static void Validate(MeshAuthConfig config, bool dispatchEnabled = false)
     {
         if (!ValidModes.Contains(config.Mode, StringComparer.OrdinalIgnoreCase))
         {
@@ -150,6 +188,25 @@ public class MeshAuthGate
                         $"('{config.Oidc.ClientSecretEnvVar}') to be set.");
                 }
 
+                // WP-1(b) (#20): a non-https authority used to reach the OIDC handler unvalidated and
+                // crash with an unhandled 500 the first time discovery metadata was actually fetched
+                // (mid-request, not at startup). Reject it here instead - fail-fast (P1) - unless the
+                // operator has explicitly opted into plain HTTP via auth.oidc.requireHttpsMetadata:
+                // false, which exists for the host's own Docker-first local story (a docker-composed
+                // IdP with no TLS in front of it).
+                if (config.Oidc.RequireHttpsMetadata &&
+                    Uri.TryCreate(config.Oidc.Authority, UriKind.Absolute, out var authorityUri) &&
+                    string.Equals(authorityUri.Scheme, "http", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        $"auth.oidc.authority ('{config.Oidc.Authority}') is not https, and " +
+                        "auth.oidc.requireHttpsMetadata is true (the default) - fetching OIDC discovery/" +
+                        "JWKS metadata over plain HTTP is a man-in-the-middle risk with nothing to detect " +
+                        "a spoofed authority. This is allowed ONLY for local development against an " +
+                        "authority you run yourself with no TLS: set auth.oidc.requireHttpsMetadata to " +
+                        "false explicitly if that's genuinely the case here - never in production.");
+                }
+
                 break;
         }
 
@@ -159,20 +216,77 @@ public class MeshAuthGate
             throw new InvalidOperationException("auth.ingestion.mode 'sharedSecret' requires the MESH_INGEST_SECRET environment variable to be set.");
         }
 
-        // Found by adversarial review (corrected 2026-08-23): InvokeAsync's "mode none" branch returns
-        // straight to _next(context) before the dispatchRole check further down ever runs (see
-        // InvokeAsync's remarks) - mode "none" establishes no principal at all, so a dispatchRole
-        // requirement configured alongside it could never be enforced. That combination isn't a
-        // harmless no-op; it is a config that reads as "gate mesh:dispatch by role" but actually leaves
-        // mesh:dispatch reachable by any caller, role or no role - precisely the silent under-protection
-        // this whole Validate method exists to catch before a deploy, not discover after one.
-        if (!string.IsNullOrEmpty(config.DispatchRole) && string.Equals(config.Mode, "none", StringComparison.OrdinalIgnoreCase))
+        // WP-1(a) (#3, #6, #19, #27): the mode x option satisfiability matrix - see
+        // deploy/Mesh/CONFIG.md's "Which options work under which auth modes" (the same table,
+        // verbatim) and work/bug-fix-designs-2026-08.md's "WP-1" for the ruling this implements. Every
+        // rejection below names the offending config key(s) and the mode, so an operator who wrote a
+        // config that reads as "gate X by role/domain/dispatch" but would actually leave X reachable by
+        // any caller regardless finds out at startup, not by discovering the gap in production.
+        //
+        //                          | none    | basic   | proxy (no groupsHeader) | proxy (+groupsHeader) | oidc |
+        // requiredGroups           | reject  | reject  | reject                  | allow                  | allow |
+        // dispatchRole             | reject  | reject  | reject                  | allow                  | allow |
+        // allowedEmailDomains      | reject  | reject  | allow                   | allow                  | allow |
+        // dispatch.enabled         | reject  | allow   | allow                   | allow                  | allow |
+        //
+        // Rejected alternative (recorded - do not add this casually, amend the ruling first): a
+        // MESH_BASIC_ROLES env knob to let the basic-auth account carry roles. "basic" stays a
+        // deliberately minimal single-account mode; anyone needing roles has outgrown it.
+        var mode = config.Mode.ToLowerInvariant();
+        var proxyCarriesGroupClaims = mode == "proxy" && !string.IsNullOrEmpty(config.Proxy.GroupsHeader);
+        var carriesGroupClaims = mode == "oidc" || proxyCarriesGroupClaims;
+        var carriesEmailIdentity = mode == "proxy" || mode == "oidc";
+
+        if (config.RequiredGroups.Length > 0 && !carriesGroupClaims)
         {
             throw new InvalidOperationException(
-                "auth.dispatchRole is set but auth.mode is 'none' - mode 'none' establishes no caller " +
-                "identity, so a dispatchRole requirement could never be enforced and mesh:dispatch would " +
-                "be reachable by any caller regardless of role. Choose an auth mode that establishes an " +
-                "identity (proxy/basic/oidc), or remove auth.dispatchRole.");
+                $"auth.requiredGroups is set but auth.mode '{config.Mode}' cannot carry group claims - " +
+                "requiredGroups needs mode 'oidc', or mode 'proxy' with auth.proxy.groupsHeader " +
+                "configured. Choose one of those, or remove auth.requiredGroups.");
+        }
+
+        // Found by adversarial review (corrected 2026-08-23), then generalized here from "mode none"
+        // to the full matrix: InvokeAsync's dispatchRole check can only ever fire against a principal
+        // that actually carries group/role claims - none of "none" (no principal at all), "basic" (a
+        // single hand-configured account with no roles - #27), or "proxy" without a groupsHeader (an
+        // identity with no role claims at all - #6) can ever satisfy a dispatchRole requirement, so
+        // configuring one alongside any of those modes silently leaves mesh:dispatch reachable by any
+        // caller regardless of role - precisely the silent under-protection this method exists to catch.
+        if (!string.IsNullOrEmpty(config.DispatchRole) && !carriesGroupClaims)
+        {
+            throw new InvalidOperationException(
+                $"auth.dispatchRole is set but auth.mode '{config.Mode}' cannot carry group claims - " +
+                "dispatchRole needs mode 'oidc', or mode 'proxy' with auth.proxy.groupsHeader " +
+                "configured. Choose one of those, or remove auth.dispatchRole.");
+        }
+
+        // #3: under "none" there is no identity to filter at all. Also rejected under "basic" - not
+        // part of #3's own repro, but the same rationale extends to it: the operator defines the one
+        // basic-auth account themselves, so domain-filtering it is meaningless busywork, not a real
+        // control - reject rather than silently ignore.
+        if (config.AllowedEmailDomains.Length > 0 && !carriesEmailIdentity)
+        {
+            throw new InvalidOperationException(
+                $"auth.allowedEmailDomains is set but auth.mode '{config.Mode}' does not establish an " +
+                "email-bearing identity - allowedEmailDomains needs mode 'proxy' or 'oidc'. Under " +
+                "'basic' the operator defines the one account themselves, so domain-filtering it is " +
+                "meaningless; under 'none' there is no identity to filter at all. Choose 'proxy'/'oidc', " +
+                "or remove auth.allowedEmailDomains.");
+        }
+
+        // #19 - the live-reproduced bug: with dispatch.enabled true and auth.mode "none", mesh:dispatch
+        // was reachable at the HTTP layer but MeshDispatchGate's own fail-closed identity check refuses
+        // every request anyway (mode "none" never sets an identity) - so dispatch was permanently
+        // 403'd regardless of a valid CSRF header, with nothing telling the operator why. Reject the
+        // combination at startup instead, naming both keys.
+        if (dispatchEnabled && mode == "none")
+        {
+            throw new InvalidOperationException(
+                "dispatch.enabled is true but auth.mode is 'none' - mode 'none' establishes no caller " +
+                "identity at all, so mesh:dispatch (which invokes a real handler) would be permanently " +
+                "refused by MeshDispatchGate's fail-closed identity check regardless of a valid CSRF " +
+                "header. Choose an auth mode that establishes an identity (basic/proxy/oidc), or leave " +
+                "dispatch.enabled false.");
         }
     }
 
@@ -191,6 +305,16 @@ public class MeshAuthGate
         if (canonicalPath == CanonicalIngestionPath)
         {
             await HandleIngestionAsync(context);
+            return;
+        }
+
+        // WP-1(c) (#4): oidc mode only - see HandleLogoutAsync's remarks. Matched here, ahead of the
+        // mode dispatch below, the same way IngestionPath is: logout must succeed even for a caller
+        // whose session cookie has already expired (nothing to authenticate against, still fine to
+        // sign out of), so it is not routed through AuthenticateOidcAsync's challenge/redirect branch.
+        if (canonicalPath == CanonicalLogoutPath && string.Equals(_config.Mode, "oidc", StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleLogoutAsync(context);
             return;
         }
 
@@ -400,6 +524,64 @@ public class MeshAuthGate
         }
 
         await _next(context);
+    }
+
+    /// <summary>
+    /// WP-1(c) (#4): <c>POST /mesh/auth/logout</c>, oidc mode only. GET is rejected (<c>405</c>) - a
+    /// GET-triggered logout is a CSRF hazard in its own right (a bare <c>&lt;img src=".../logout"&gt;</c>
+    /// on another site would sign the victim out); a POST additionally requires
+    /// <see cref="LogoutHeaderName"/> (<c>403</c> if absent), the same custom-header CSRF convention
+    /// <see cref="MeshRefreshGuardMiddleware{TContext}"/>/<see cref="MeshDispatchGuardMiddleware{TContext}"/>
+    /// already use. Signs out the cookie session, then answers
+    /// <c>{"redirect": &lt;end_session_url or null&gt;}</c> - the end-session URL built from the OIDC
+    /// authority's discovered <c>end_session_endpoint</c> (with <c>post_logout_redirect_uri</c>) when
+    /// discovery provides one, else <c>null</c> (local sign-out only; the caller reloads instead of
+    /// navigating away). A discovery failure here does not fail the whole logout - the cookie is
+    /// already cleared by the time discovery is even attempted, so the caller still ends up signed out
+    /// locally, just without an IdP-side redirect.
+    /// </summary>
+    private async Task HandleLogoutAsync(HttpContext context)
+    {
+        if (!string.Equals(context.Request.Method, "POST", StringComparison.OrdinalIgnoreCase))
+        {
+            context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
+            await context.Response.WriteAsync("Method not allowed - mesh logout must be POSTed (a GET-triggered logout is a CSRF hazard).");
+            return;
+        }
+
+        if (!context.Request.Headers.TryGetValue(LogoutHeaderName, out var header) || string.IsNullOrWhiteSpace(header))
+        {
+            await WriteForbiddenAsync(context, "forbidden");
+            return;
+        }
+
+        await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+
+        string? redirect = null;
+        var oidcOptions = context.RequestServices.GetService<IOptionsMonitor<OpenIdConnectOptions>>()
+            ?.Get(OpenIdConnectDefaults.AuthenticationScheme);
+        if (oidcOptions?.ConfigurationManager != null)
+        {
+            try
+            {
+                var configuration = await oidcOptions.ConfigurationManager.GetConfigurationAsync(context.RequestAborted);
+                if (!string.IsNullOrEmpty(configuration.EndSessionEndpoint))
+                {
+                    var postLogoutRedirectUri = $"{context.Request.Scheme}://{context.Request.Host}/";
+                    redirect = QueryHelpers.AddQueryString(
+                        configuration.EndSessionEndpoint, "post_logout_redirect_uri", postLogoutRedirectUri);
+                }
+            }
+            catch
+            {
+                // Discovery unreachable/failed - the local sign-out above already happened, so this
+                // does not fail the request. redirect stays null: local sign-out only.
+            }
+        }
+
+        context.Response.StatusCode = StatusCodes.Status200OK;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(JsonSerializer.Serialize(new { redirect }));
     }
 
     private async Task ChallengeBasicAsync(HttpContext context, string detail)

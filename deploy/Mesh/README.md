@@ -82,6 +82,15 @@ to). See `MeshAuthGate.DispatchPath`/`InvokeAsync`'s remarks for why the check l
 itself rather than as `AuthorizationExtensions.RequireRole` on the envelope - that pipeline runs in
 its own, separately-built DI scope, which never sees the principal the gate authenticated.
 
+Not every `auth.*` option works under every `auth.mode` - `requiredGroups`/`dispatchRole` need a mode
+that carries group claims (`oidc`, or `proxy` with `groupsHeader`), `allowedEmailDomains` needs an
+email-bearing identity (`proxy`/`oidc`), and `dispatch.enabled` needs any established identity at all
+(not `none`). An unsatisfiable combination is rejected at startup, naming the offending key(s) and the
+mode - see [`CONFIG.md`](CONFIG.md#which-options-work-under-which-auth-modes)'s full matrix.
+
+In `mode: "oidc"`, `POST /mesh/auth/logout` is always present (CSRF-headered, see `CONFIG.md`); the
+mesh UI's Sign-out control shows automatically once this host wires `logoutUrl` into `UseMeshUi`.
+
 ### Known limitations (documented, not fixed by this slice)
 
 - **`fleet` composes one trace source.** `CompositeMeshFleetReadModel` (`Benzene.Mesh.Collector`)
