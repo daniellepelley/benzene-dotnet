@@ -24,6 +24,14 @@
 Legend: **[DECISION]** real issue, fix is a behaviour/API/policy call (needs a maintainer's decision
 first). **[PERF]** performance hygiene, not a correctness bug. **[RESOLVED]** verified fixed in source.
 
+> **Tracked findings, 2026-08-25 (review rounds 5–6).** A separate batch of 27 verified findings
+> (evidence-backed: live repros, stress tests, compiler-driven probes) is tracked on the shared task
+> board (tasks #1–#27) and is **not duplicated into this file** while open. Their fix designs — with
+> decisions, rationale, and rejected alternatives — are ruled in
+> **[`bug-fix-designs-2026-08.md`](bug-fix-designs-2026-08.md)**; do not re-decide or re-review those
+> areas without reading that ruling first. As each work package lands, its items are added to the
+> Resolved half below with a pointer to the ruling's section.
+
 ---
 
 ## Resolved since the prior triage (verified in current source)
