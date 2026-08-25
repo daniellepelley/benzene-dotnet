@@ -2,14 +2,18 @@ using System.Net;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Benzene.Auth.Basic;
 using Benzene.Auth.Core;
 using Benzene.Mesh.Artifacts;
 using Benzene.Mesh.Dispatch;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace Benzene.Mesh.Host;
 
@@ -304,6 +308,16 @@ public class MeshAuthGate
             return;
         }
 
+        // WP-1(c) (#4): oidc mode only - see HandleLogoutAsync's remarks. Matched here, ahead of the
+        // mode dispatch below, the same way IngestionPath is: logout must succeed even for a caller
+        // whose session cookie has already expired (nothing to authenticate against, still fine to
+        // sign out of), so it is not routed through AuthenticateOidcAsync's challenge/redirect branch.
+        if (canonicalPath == CanonicalLogoutPath && string.Equals(_config.Mode, "oidc", StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleLogoutAsync(context);
+            return;
+        }
+
         if (string.Equals(_config.Mode, "none", StringComparison.OrdinalIgnoreCase))
         {
             await _next(context);
@@ -510,6 +524,64 @@ public class MeshAuthGate
         }
 
         await _next(context);
+    }
+
+    /// <summary>
+    /// WP-1(c) (#4): <c>POST /mesh/auth/logout</c>, oidc mode only. GET is rejected (<c>405</c>) - a
+    /// GET-triggered logout is a CSRF hazard in its own right (a bare <c>&lt;img src=".../logout"&gt;</c>
+    /// on another site would sign the victim out); a POST additionally requires
+    /// <see cref="LogoutHeaderName"/> (<c>403</c> if absent), the same custom-header CSRF convention
+    /// <see cref="MeshRefreshGuardMiddleware{TContext}"/>/<see cref="MeshDispatchGuardMiddleware{TContext}"/>
+    /// already use. Signs out the cookie session, then answers
+    /// <c>{"redirect": &lt;end_session_url or null&gt;}</c> - the end-session URL built from the OIDC
+    /// authority's discovered <c>end_session_endpoint</c> (with <c>post_logout_redirect_uri</c>) when
+    /// discovery provides one, else <c>null</c> (local sign-out only; the caller reloads instead of
+    /// navigating away). A discovery failure here does not fail the whole logout - the cookie is
+    /// already cleared by the time discovery is even attempted, so the caller still ends up signed out
+    /// locally, just without an IdP-side redirect.
+    /// </summary>
+    private async Task HandleLogoutAsync(HttpContext context)
+    {
+        if (!string.Equals(context.Request.Method, "POST", StringComparison.OrdinalIgnoreCase))
+        {
+            context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
+            await context.Response.WriteAsync("Method not allowed - mesh logout must be POSTed (a GET-triggered logout is a CSRF hazard).");
+            return;
+        }
+
+        if (!context.Request.Headers.TryGetValue(LogoutHeaderName, out var header) || string.IsNullOrWhiteSpace(header))
+        {
+            await WriteForbiddenAsync(context, "forbidden");
+            return;
+        }
+
+        await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+
+        string? redirect = null;
+        var oidcOptions = context.RequestServices.GetService<IOptionsMonitor<OpenIdConnectOptions>>()
+            ?.Get(OpenIdConnectDefaults.AuthenticationScheme);
+        if (oidcOptions?.ConfigurationManager != null)
+        {
+            try
+            {
+                var configuration = await oidcOptions.ConfigurationManager.GetConfigurationAsync(context.RequestAborted);
+                if (!string.IsNullOrEmpty(configuration.EndSessionEndpoint))
+                {
+                    var postLogoutRedirectUri = $"{context.Request.Scheme}://{context.Request.Host}/";
+                    redirect = QueryHelpers.AddQueryString(
+                        configuration.EndSessionEndpoint, "post_logout_redirect_uri", postLogoutRedirectUri);
+                }
+            }
+            catch
+            {
+                // Discovery unreachable/failed - the local sign-out above already happened, so this
+                // does not fail the request. redirect stays null: local sign-out only.
+            }
+        }
+
+        context.Response.StatusCode = StatusCodes.Status200OK;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(JsonSerializer.Serialize(new { redirect }));
     }
 
     private async Task ChallengeBasicAsync(HttpContext context, string detail)
