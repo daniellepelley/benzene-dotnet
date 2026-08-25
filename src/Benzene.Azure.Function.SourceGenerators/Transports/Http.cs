@@ -31,7 +31,8 @@ namespace Benzene.Azure.Function.SourceGenerators
                     functionNameLiteral: AttributeReading.Literal(name),
                     parameterList: $"[{binding}] global::Microsoft.AspNetCore.Http.HttpRequest req",
                     returnType: "global::System.Threading.Tasks.Task<global::Microsoft.AspNetCore.Mvc.IActionResult>",
-                    dispatchExpression: "global::Benzene.Azure.Function.AspNet.Extensions.HandleHttpRequest(_app, req)"));
+                    dispatchExpression: "global::Benzene.Azure.Function.AspNet.Extensions.HandleHttpRequest(_app, req)",
+                    location: AttributeReading.AttributeLocation(attribute)));
             }
 
             return builder.ToImmutable();

@@ -122,6 +122,15 @@ namespace Benzene.Azure.Function.SourceGenerators
             return null;
         }
 
+        /// <summary>
+        /// The source location of an attribute application, for diagnostics (e.g. BENZ0001, BENZ0002).
+        /// Falls back to <see cref="Location.None"/> when the syntax isn't available (e.g. the
+        /// attribute came from metadata rather than source, which shouldn't happen here but shouldn't
+        /// crash the generator either).
+        /// </summary>
+        public static Location AttributeLocation(AttributeData attribute) =>
+            attribute.ApplicationSyntaxReference?.GetSyntax().GetLocation() ?? Location.None;
+
         /// <summary>Turns an arbitrary trigger name into a valid, stable C# identifier for the generated class.</summary>
         public static string ToIdentifier(string name)
         {

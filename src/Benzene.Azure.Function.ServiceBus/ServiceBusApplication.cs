@@ -123,8 +123,13 @@ public class ServiceBusBatchApplication : AzureFunctionBatchApplicationBase<Serv
             return;
         }
 
-        state.Acked = true;
-
+        // state.Acked is set only AFTER the settle call below returns successfully - not before. The
+        // base class's exception-recovery fallback-abandon (OnExceptionCaughtAsync /
+        // ShouldCleanUpBeforeRethrow, both gated on !state.Acked) exists precisely for the case where
+        // settling the message itself throws; marking Acked=true up front would tell that fallback
+        // "already handled" for a message that was never actually completed or abandoned, skipping the
+        // one safety net that's supposed to catch this.
+        //
         // Abandon on failure OR a null result (a pipeline that short-circuited without setting one),
         // completing only on genuine success - matching the SQS reference so an unestablished outcome
         // errs toward redelivery, not silent completion/loss.
@@ -136,6 +141,8 @@ public class ServiceBusBatchApplication : AzureFunctionBatchApplicationBase<Serv
         {
             await state.MessageActions!.CompleteMessageAsync(context.Message);
         }
+
+        state.Acked = true;
     }
 
     /// <inheritdoc/>

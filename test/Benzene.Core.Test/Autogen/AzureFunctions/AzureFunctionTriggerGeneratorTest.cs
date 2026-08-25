@@ -28,7 +28,9 @@ namespace Benzene.Azure.Function.Timer { [System.AttributeUsage(System.Attribute
 namespace App { public class OrderDoc { } }
 ";
 
-    private static string Generate(string declarations)
+    private static string Generate(string declarations) => GenerateResult(declarations).Output;
+
+    private static (string Output, System.Collections.Immutable.ImmutableArray<Diagnostic> Diagnostics) GenerateResult(string declarations)
     {
         var compilation = CSharpCompilation.Create(
             "TestAsm",
@@ -38,11 +40,13 @@ namespace App { public class OrderDoc { } }
             new[] { MetadataReference.CreateFromFile(typeof(object).Assembly.Location) },
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
-        var driver = CSharpGeneratorDriver
+        var runResult = CSharpGeneratorDriver
             .Create(new AzureFunctionTriggerGenerator().AsSourceGenerator())
-            .RunGenerators(compilation);
+            .RunGenerators(compilation)
+            .GetRunResult();
 
-        return string.Join("\n\n", driver.GetRunResult().GeneratedTrees.Select(t => t.ToString()));
+        var output = string.Join("\n\n", runResult.GeneratedTrees.Select(t => t.ToString()));
+        return (output, runResult.Diagnostics);
     }
 
     [Fact]
@@ -136,12 +140,20 @@ namespace App { public class OrderDoc { } }
         Assert.Contains("HandleCosmosDbChanges<global::App.OrderDoc>(_app, documents, cancellationToken)", output);
     }
 
+    // BENZ0002: a CosmosDb trigger missing DocumentType used to be silently skipped (the change feed
+    // is generic over it, so there's nothing valid to emit) - a declared trigger that's silently NOT
+    // generated is the worst outcome, so this must now fail the build with a clear diagnostic instead.
     [Fact]
-    public void CosmosDb_WithoutDocumentType_EmitsNothing()
+    public void CosmosDb_WithoutDocumentType_ReportsBENZ0002AndEmitsNothing()
     {
-        var output = Generate(@"[assembly: Benzene.Azure.Function.CosmosDb.BenzeneCosmosDbTrigger(Name = ""c"", DatabaseName = ""shop"", ContainerName = ""orders"")]");
+        var (output, diagnostics) = GenerateResult(@"[assembly: Benzene.Azure.Function.CosmosDb.BenzeneCosmosDbTrigger(Name = ""c"", DatabaseName = ""shop"", ContainerName = ""orders"")]");
 
         Assert.DoesNotContain("CosmosDBTrigger", output);
+
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal("BENZ0002", diagnostic.Id);
+        Assert.Equal(DiagnosticSeverity.Error, diagnostic.Severity);
+        Assert.Contains("\"c\"", diagnostic.GetMessage());
     }
 
     [Fact]
@@ -166,5 +178,58 @@ namespace App { public class OrderDoc { } }
 
         Assert.Contains(@"[global::Microsoft.Azure.Functions.Worker.Function(""a"")]", output);
         Assert.Contains(@"[global::Microsoft.Azure.Functions.Worker.Function(""b"")]", output);
+    }
+
+    // BENZ0001: a Function name must be unique across the whole app, checked globally across every
+    // transport - not per-transport - because Azure Functions doesn't know or care which binding
+    // produced the name. Round 6 proved the collision is cross-transport: a
+    // BenzeneQueueTrigger(Name="dup") and a BenzeneKafkaTrigger(Name="dup") in the same compilation
+    // collide exactly as two queue triggers named "dup" would.
+    [Fact]
+    public void DuplicateFunctionName_AcrossDifferentTransports_ReportsBENZ0001AndEmitsNeither()
+    {
+        var (output, diagnostics) = GenerateResult(
+            @"[assembly: Benzene.Azure.Function.QueueStorage.BenzeneQueueTrigger(Name = ""dup"", QueueName = ""qa"")]" +
+            @"[assembly: Benzene.Azure.Function.Kafka.BenzeneKafkaTrigger(Name = ""dup"", Topic = ""orders"")]");
+
+        // Neither colliding declaration is emitted - which one would be "correct" to keep is exactly
+        // the ambiguity the user needs to resolve, so the generator doesn't guess.
+        Assert.DoesNotContain(@"[global::Microsoft.Azure.Functions.Worker.Function(""dup"")]", output);
+
+        Assert.Equal(2, diagnostics.Length);
+        Assert.All(diagnostics, d =>
+        {
+            Assert.Equal("BENZ0001", d.Id);
+            Assert.Equal(DiagnosticSeverity.Error, d.Severity);
+            Assert.Contains("\"dup\"", d.GetMessage());
+        });
+    }
+
+    // The ruling explicitly rejects auto-renaming the Function name the way the generated class name
+    // is auto-uniquified: the Function name is externally meaningful (bindings, host.json, scale
+    // rules, portal identity), so silently picking a different one would just move the failure to
+    // deployment. A build-time error, with no renamed name anywhere in the output, is the fix.
+    [Fact]
+    public void DuplicateFunctionName_IsNeverAutoRenamed()
+    {
+        var (output, _) = GenerateResult(
+            @"[assembly: Benzene.Azure.Function.QueueStorage.BenzeneQueueTrigger(Name = ""dup"", QueueName = ""qa"")]" +
+            @"[assembly: Benzene.Azure.Function.Kafka.BenzeneKafkaTrigger(Name = ""dup"", Topic = ""orders"")]");
+
+        Assert.DoesNotContain("dup2", output);
+    }
+
+    // A distinct, non-colliding trigger declared alongside the duplicates is unaffected - only the
+    // colliding pair is withheld.
+    [Fact]
+    public void DuplicateFunctionName_DoesNotAffectUnrelatedTriggers()
+    {
+        var (output, diagnostics) = GenerateResult(
+            @"[assembly: Benzene.Azure.Function.QueueStorage.BenzeneQueueTrigger(Name = ""dup"", QueueName = ""qa"")]" +
+            @"[assembly: Benzene.Azure.Function.Kafka.BenzeneKafkaTrigger(Name = ""dup"", Topic = ""orders"")]" +
+            @"[assembly: Benzene.Azure.Function.Timer.BenzeneTimerTrigger(Name = ""ok"", Schedule = ""0 */5 * * * *"")]");
+
+        Assert.Contains(@"[global::Microsoft.Azure.Functions.Worker.Function(""ok"")]", output);
+        Assert.Equal(2, diagnostics.Length);
     }
 }
