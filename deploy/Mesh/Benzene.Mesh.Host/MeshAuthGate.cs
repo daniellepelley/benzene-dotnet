@@ -83,10 +83,18 @@ public class MeshAuthGate
     private readonly IBasicAuthCredentialValidator? _basicValidator;
 
     /// <summary>Initializes a new instance of the <see cref="MeshAuthGate"/> class.</summary>
+    /// <param name="next">The next middleware in the pipeline.</param>
+    /// <param name="config">The auth config to enforce.</param>
+    /// <param name="dispatchEnabled">
+    /// Whether <c>dispatch.enabled</c> is set (<see cref="MeshDispatchConfig.Enabled"/>) - needed only
+    /// for the satisfiability check in <see cref="Validate"/> (#19); defaults to <c>false</c> so every
+    /// existing single-argument call site (this constructor is resolved positionally by
+    /// <c>UseMiddleware&lt;MeshAuthGate&gt;</c>) keeps behaving exactly as before.
+    /// </param>
     /// <exception cref="InvalidOperationException">The config is unsafe or incomplete for the selected mode - see <see cref="Validate"/>.</exception>
-    public MeshAuthGate(RequestDelegate next, MeshAuthConfig config)
+    public MeshAuthGate(RequestDelegate next, MeshAuthConfig config, bool dispatchEnabled = false)
     {
-        Validate(config);
+        Validate(config, dispatchEnabled);
         _next = next;
         _config = config;
         if (string.Equals(config.Mode, "basic", StringComparison.OrdinalIgnoreCase))
@@ -103,7 +111,13 @@ public class MeshAuthGate
     /// constructor (so the running host refuses to start) and from <see cref="MeshConfigValidator"/>
     /// (so <c>--validate-config</c> catches it before a deploy).
     /// </summary>
-    public static void Validate(MeshAuthConfig config)
+    /// <param name="config">The auth config to validate.</param>
+    /// <param name="dispatchEnabled">
+    /// Whether <c>dispatch.enabled</c> is set (<see cref="MeshDispatchConfig.Enabled"/>) - feeds only
+    /// the satisfiability check below (#19); defaults to <c>false</c> so every existing call site that
+    /// doesn't care about dispatch keeps validating exactly as before.
+    /// </param>
+    public static void Validate(MeshAuthConfig config, bool dispatchEnabled = false)
     {
         if (!ValidModes.Contains(config.Mode, StringComparer.OrdinalIgnoreCase))
         {
@@ -159,20 +173,77 @@ public class MeshAuthGate
             throw new InvalidOperationException("auth.ingestion.mode 'sharedSecret' requires the MESH_INGEST_SECRET environment variable to be set.");
         }
 
-        // Found by adversarial review (corrected 2026-08-23): InvokeAsync's "mode none" branch returns
-        // straight to _next(context) before the dispatchRole check further down ever runs (see
-        // InvokeAsync's remarks) - mode "none" establishes no principal at all, so a dispatchRole
-        // requirement configured alongside it could never be enforced. That combination isn't a
-        // harmless no-op; it is a config that reads as "gate mesh:dispatch by role" but actually leaves
-        // mesh:dispatch reachable by any caller, role or no role - precisely the silent under-protection
-        // this whole Validate method exists to catch before a deploy, not discover after one.
-        if (!string.IsNullOrEmpty(config.DispatchRole) && string.Equals(config.Mode, "none", StringComparison.OrdinalIgnoreCase))
+        // WP-1(a) (#3, #6, #19, #27): the mode x option satisfiability matrix - see
+        // deploy/Mesh/CONFIG.md's "Which options work under which auth modes" (the same table,
+        // verbatim) and work/bug-fix-designs-2026-08.md's "WP-1" for the ruling this implements. Every
+        // rejection below names the offending config key(s) and the mode, so an operator who wrote a
+        // config that reads as "gate X by role/domain/dispatch" but would actually leave X reachable by
+        // any caller regardless finds out at startup, not by discovering the gap in production.
+        //
+        //                          | none    | basic   | proxy (no groupsHeader) | proxy (+groupsHeader) | oidc |
+        // requiredGroups           | reject  | reject  | reject                  | allow                  | allow |
+        // dispatchRole             | reject  | reject  | reject                  | allow                  | allow |
+        // allowedEmailDomains      | reject  | reject  | allow                   | allow                  | allow |
+        // dispatch.enabled         | reject  | allow   | allow                   | allow                  | allow |
+        //
+        // Rejected alternative (recorded - do not add this casually, amend the ruling first): a
+        // MESH_BASIC_ROLES env knob to let the basic-auth account carry roles. "basic" stays a
+        // deliberately minimal single-account mode; anyone needing roles has outgrown it.
+        var mode = config.Mode.ToLowerInvariant();
+        var proxyCarriesGroupClaims = mode == "proxy" && !string.IsNullOrEmpty(config.Proxy.GroupsHeader);
+        var carriesGroupClaims = mode == "oidc" || proxyCarriesGroupClaims;
+        var carriesEmailIdentity = mode == "proxy" || mode == "oidc";
+
+        if (config.RequiredGroups.Length > 0 && !carriesGroupClaims)
         {
             throw new InvalidOperationException(
-                "auth.dispatchRole is set but auth.mode is 'none' - mode 'none' establishes no caller " +
-                "identity, so a dispatchRole requirement could never be enforced and mesh:dispatch would " +
-                "be reachable by any caller regardless of role. Choose an auth mode that establishes an " +
-                "identity (proxy/basic/oidc), or remove auth.dispatchRole.");
+                $"auth.requiredGroups is set but auth.mode '{config.Mode}' cannot carry group claims - " +
+                "requiredGroups needs mode 'oidc', or mode 'proxy' with auth.proxy.groupsHeader " +
+                "configured. Choose one of those, or remove auth.requiredGroups.");
+        }
+
+        // Found by adversarial review (corrected 2026-08-23), then generalized here from "mode none"
+        // to the full matrix: InvokeAsync's dispatchRole check can only ever fire against a principal
+        // that actually carries group/role claims - none of "none" (no principal at all), "basic" (a
+        // single hand-configured account with no roles - #27), or "proxy" without a groupsHeader (an
+        // identity with no role claims at all - #6) can ever satisfy a dispatchRole requirement, so
+        // configuring one alongside any of those modes silently leaves mesh:dispatch reachable by any
+        // caller regardless of role - precisely the silent under-protection this method exists to catch.
+        if (!string.IsNullOrEmpty(config.DispatchRole) && !carriesGroupClaims)
+        {
+            throw new InvalidOperationException(
+                $"auth.dispatchRole is set but auth.mode '{config.Mode}' cannot carry group claims - " +
+                "dispatchRole needs mode 'oidc', or mode 'proxy' with auth.proxy.groupsHeader " +
+                "configured. Choose one of those, or remove auth.dispatchRole.");
+        }
+
+        // #3: under "none" there is no identity to filter at all. Also rejected under "basic" - not
+        // part of #3's own repro, but the same rationale extends to it: the operator defines the one
+        // basic-auth account themselves, so domain-filtering it is meaningless busywork, not a real
+        // control - reject rather than silently ignore.
+        if (config.AllowedEmailDomains.Length > 0 && !carriesEmailIdentity)
+        {
+            throw new InvalidOperationException(
+                $"auth.allowedEmailDomains is set but auth.mode '{config.Mode}' does not establish an " +
+                "email-bearing identity - allowedEmailDomains needs mode 'proxy' or 'oidc'. Under " +
+                "'basic' the operator defines the one account themselves, so domain-filtering it is " +
+                "meaningless; under 'none' there is no identity to filter at all. Choose 'proxy'/'oidc', " +
+                "or remove auth.allowedEmailDomains.");
+        }
+
+        // #19 - the live-reproduced bug: with dispatch.enabled true and auth.mode "none", mesh:dispatch
+        // was reachable at the HTTP layer but MeshDispatchGate's own fail-closed identity check refuses
+        // every request anyway (mode "none" never sets an identity) - so dispatch was permanently
+        // 403'd regardless of a valid CSRF header, with nothing telling the operator why. Reject the
+        // combination at startup instead, naming both keys.
+        if (dispatchEnabled && mode == "none")
+        {
+            throw new InvalidOperationException(
+                "dispatch.enabled is true but auth.mode is 'none' - mode 'none' establishes no caller " +
+                "identity at all, so mesh:dispatch (which invokes a real handler) would be permanently " +
+                "refused by MeshDispatchGate's fail-closed identity check regardless of a valid CSRF " +
+                "header. Choose an auth mode that establishes an identity (basic/proxy/oidc), or leave " +
+                "dispatch.enabled false.");
         }
     }
 

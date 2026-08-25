@@ -20,6 +20,7 @@ namespace Benzene.Mesh.Host.Test;
 /// into <see cref="Startup"/> - in both artifact-store branches - lives in
 /// <see cref="MeshAuthAcceptanceTest"/>.
 /// </summary>
+[Collection(EnvVarMutatingTestCollection.Name)]
 public class MeshAuthGateTest
 {
     private static DefaultHttpContext NewContext(string path = "/mesh-ui")
@@ -153,6 +154,282 @@ public class MeshAuthGateTest
         var exception = Record.Exception(() => MeshAuthGate.Validate(config));
 
         Assert.Null(exception);
+    }
+
+    // --- WP-1(a): the mode x option satisfiability matrix (work/bug-fix-designs-2026-08.md "WP-1",
+    // tasks #3, #6, #19, #27) - deploy/Mesh/CONFIG.md's "Which options work under which auth modes"
+    // carries the same table this exercises. ------------------------------------------------------
+
+    // requiredGroups (#6's sibling: it needs group claims exactly like dispatchRole does)
+
+    [Theory]
+    [InlineData("none")]
+    [InlineData("basic")]
+    public void Validate_RequiredGroupsSetWithModeThatCannotCarryGroups_Throws(string mode)
+    {
+        WithEnvVars(("MESH_BASIC_USER", "admin"), ("MESH_BASIC_PASSWORD", "s3cret"), () =>
+        {
+            var config = new MeshAuthConfig { Mode = mode, RequiredGroups = new[] { "mesh-admins" } };
+
+            var exception = Assert.Throws<InvalidOperationException>(() => MeshAuthGate.Validate(config));
+
+            Assert.Contains("requiredGroups", exception.Message);
+            Assert.Contains(mode, exception.Message);
+        });
+    }
+
+    [Fact]
+    public void Validate_RequiredGroupsSetWithProxyModeWithoutGroupsHeader_Throws()
+    {
+        var config = ProxyConfig("10.0.0.5");
+        config.RequiredGroups = new[] { "mesh-admins" };
+
+        var exception = Assert.Throws<InvalidOperationException>(() => MeshAuthGate.Validate(config));
+
+        Assert.Contains("requiredGroups", exception.Message);
+        Assert.Contains("proxy", exception.Message);
+    }
+
+    [Fact]
+    public void Validate_RequiredGroupsSetWithProxyModeWithGroupsHeader_DoesNotThrow()
+    {
+        var config = ProxyConfig("10.0.0.5");
+        config.RequiredGroups = new[] { "mesh-admins" };
+        config.Proxy.GroupsHeader = "X-Forwarded-Groups";
+
+        var exception = Record.Exception(() => MeshAuthGate.Validate(config));
+
+        Assert.Null(exception);
+    }
+
+    [Fact]
+    public void Validate_RequiredGroupsSetWithOidcMode_DoesNotThrow()
+    {
+        WithEnvVars(("MESH_OIDC_CLIENT_SECRET", "shh"), () =>
+        {
+            var config = new MeshAuthConfig { Mode = "oidc", RequiredGroups = new[] { "mesh-admins" } };
+            config.Oidc.Authority = "https://idp.example.com";
+            config.Oidc.ClientId = "client-id";
+
+            var exception = Record.Exception(() => MeshAuthGate.Validate(config));
+
+            Assert.Null(exception);
+        });
+    }
+
+    // dispatchRole (#6, #27) - the existing mode "none" case above already covers that leg
+
+    [Fact]
+    public void Validate_DispatchRoleSetWithModeBasic_Throws()
+    {
+        // #27: basic is a deliberately minimal single-account mode - anyone needing roles has
+        // outgrown it. Do NOT "fix" this by adding a MESH_BASIC_ROLES knob; that alternative is
+        // explicitly rejected in the ruling (work/bug-fix-designs-2026-08.md "WP-1").
+        WithEnvVars(("MESH_BASIC_USER", "admin"), ("MESH_BASIC_PASSWORD", "s3cret"), () =>
+        {
+            var config = new MeshAuthConfig { Mode = "basic", DispatchRole = "mesh-admins" };
+
+            var exception = Assert.Throws<InvalidOperationException>(() => MeshAuthGate.Validate(config));
+
+            Assert.Contains("dispatchRole", exception.Message);
+            Assert.Contains("basic", exception.Message);
+        });
+    }
+
+    [Fact]
+    public void Validate_DispatchRoleSetWithProxyModeWithoutGroupsHeader_Throws()
+    {
+        // #6: proxy without a groupsHeader establishes an identity but no group/role claims at all,
+        // so a dispatchRole requirement could never be satisfied by any caller.
+        var config = ProxyConfig("10.0.0.5");
+        config.DispatchRole = "mesh-admins";
+
+        var exception = Assert.Throws<InvalidOperationException>(() => MeshAuthGate.Validate(config));
+
+        Assert.Contains("dispatchRole", exception.Message);
+        Assert.Contains("proxy", exception.Message);
+    }
+
+    [Fact]
+    public void Validate_DispatchRoleSetWithProxyModeWithGroupsHeader_DoesNotThrow()
+    {
+        var config = ProxyConfig("10.0.0.5");
+        config.DispatchRole = "mesh-admins";
+        config.Proxy.GroupsHeader = "X-Forwarded-Groups";
+
+        var exception = Record.Exception(() => MeshAuthGate.Validate(config));
+
+        Assert.Null(exception);
+    }
+
+    [Fact]
+    public void Validate_DispatchRoleSetWithOidcMode_DoesNotThrow()
+    {
+        WithEnvVars(("MESH_OIDC_CLIENT_SECRET", "shh"), () =>
+        {
+            var config = new MeshAuthConfig { Mode = "oidc", DispatchRole = "mesh-admins" };
+            config.Oidc.Authority = "https://idp.example.com";
+            config.Oidc.ClientId = "client-id";
+
+            var exception = Record.Exception(() => MeshAuthGate.Validate(config));
+
+            Assert.Null(exception);
+        });
+    }
+
+    // allowedEmailDomains (#3)
+
+    [Fact]
+    public void Validate_AllowedEmailDomainsSetWithModeNone_Throws()
+    {
+        var config = new MeshAuthConfig { Mode = "none", AllowedEmailDomains = new[] { "example.com" } };
+
+        var exception = Assert.Throws<InvalidOperationException>(() => MeshAuthGate.Validate(config));
+
+        Assert.Contains("allowedEmailDomains", exception.Message);
+        Assert.Contains("none", exception.Message);
+    }
+
+    [Fact]
+    public void Validate_AllowedEmailDomainsSetWithModeBasic_Throws()
+    {
+        // Under "basic" the operator IS the one account - domain-filtering it is meaningless, so this
+        // is rejected rather than silently ignored (matching the ruling's rationale, not #3's own
+        // repro, which used "none").
+        WithEnvVars(("MESH_BASIC_USER", "admin"), ("MESH_BASIC_PASSWORD", "s3cret"), () =>
+        {
+            var config = new MeshAuthConfig { Mode = "basic", AllowedEmailDomains = new[] { "example.com" } };
+
+            var exception = Assert.Throws<InvalidOperationException>(() => MeshAuthGate.Validate(config));
+
+            Assert.Contains("allowedEmailDomains", exception.Message);
+            Assert.Contains("basic", exception.Message);
+        });
+    }
+
+    [Fact]
+    public void Validate_AllowedEmailDomainsSetWithProxyMode_DoesNotThrow()
+    {
+        var config = ProxyConfig("10.0.0.5");
+        config.AllowedEmailDomains = new[] { "example.com" };
+
+        var exception = Record.Exception(() => MeshAuthGate.Validate(config));
+
+        Assert.Null(exception);
+    }
+
+    [Fact]
+    public void Validate_AllowedEmailDomainsSetWithOidcMode_DoesNotThrow()
+    {
+        WithEnvVars(("MESH_OIDC_CLIENT_SECRET", "shh"), () =>
+        {
+            var config = new MeshAuthConfig { Mode = "oidc", AllowedEmailDomains = new[] { "example.com" } };
+            config.Oidc.Authority = "https://idp.example.com";
+            config.Oidc.ClientId = "client-id";
+
+            var exception = Record.Exception(() => MeshAuthGate.Validate(config));
+
+            Assert.Null(exception);
+        });
+    }
+
+    // dispatch.enabled (#19 - the live-reproduced "dispatch is permanently 403'd" bug: mode "none"
+    // establishes no identity at all, so MeshDispatchGate's fail-closed identity check refuses every
+    // dispatch regardless of a valid CSRF header. The fix turns that into a clear startup-time
+    // rejection instead of a confusing always-403 at request time.)
+
+    [Fact]
+    public void Validate_DispatchEnabledWithModeNone_Throws()
+    {
+        var config = new MeshAuthConfig { Mode = "none" };
+
+        var exception = Assert.Throws<InvalidOperationException>(() => MeshAuthGate.Validate(config, dispatchEnabled: true));
+
+        Assert.Contains("dispatch.enabled", exception.Message);
+        Assert.Contains("none", exception.Message);
+    }
+
+    [Fact]
+    public void Validate_DispatchDisabledWithModeNone_DoesNotThrow()
+    {
+        var config = new MeshAuthConfig { Mode = "none" };
+
+        var exception = Record.Exception(() => MeshAuthGate.Validate(config, dispatchEnabled: false));
+
+        Assert.Null(exception);
+    }
+
+    [Theory]
+    [InlineData("basic")]
+    [InlineData("proxy")]
+    [InlineData("oidc")]
+    public void Validate_DispatchEnabledWithModeThatEstablishesIdentity_DoesNotThrow(string mode)
+    {
+        WithEnvVars(("MESH_BASIC_USER", "admin"), ("MESH_BASIC_PASSWORD", "s3cret"), () =>
+        {
+            WithEnvVars(("MESH_OIDC_CLIENT_SECRET", "shh"), () =>
+            {
+                var config = new MeshAuthConfig { Mode = mode };
+                config.Proxy.TrustedProxies = new[] { "10.0.0.5" };
+                config.Oidc.Authority = "https://idp.example.com";
+                config.Oidc.ClientId = "client-id";
+
+                var exception = Record.Exception(() => MeshAuthGate.Validate(config, dispatchEnabled: true));
+
+                Assert.Null(exception);
+            });
+        });
+    }
+
+    // --- WP-1(b): auth.oidc.requireHttpsMetadata (#20 - a non-https authority used to reach the
+    // OIDC handler and crash with an unhandled 500 at request time; this rejects it at startup
+    // instead). ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void Validate_OidcModeWithHttpAuthorityAndDefaultRequireHttpsMetadata_Throws()
+    {
+        WithEnvVars(("MESH_OIDC_CLIENT_SECRET", "shh"), () =>
+        {
+            var config = new MeshAuthConfig { Mode = "oidc" };
+            config.Oidc.Authority = "http://idp.internal.example.com";
+            config.Oidc.ClientId = "client-id";
+
+            var exception = Assert.Throws<InvalidOperationException>(() => MeshAuthGate.Validate(config));
+
+            Assert.Contains("requireHttpsMetadata", exception.Message);
+            Assert.Contains("http://idp.internal.example.com", exception.Message);
+        });
+    }
+
+    [Fact]
+    public void Validate_OidcModeWithHttpAuthorityAndRequireHttpsMetadataFalse_DoesNotThrow()
+    {
+        WithEnvVars(("MESH_OIDC_CLIENT_SECRET", "shh"), () =>
+        {
+            var config = new MeshAuthConfig { Mode = "oidc" };
+            config.Oidc.Authority = "http://localhost:8080";
+            config.Oidc.ClientId = "client-id";
+            config.Oidc.RequireHttpsMetadata = false;
+
+            var exception = Record.Exception(() => MeshAuthGate.Validate(config));
+
+            Assert.Null(exception);
+        });
+    }
+
+    [Fact]
+    public void Validate_OidcModeWithHttpsAuthority_DoesNotThrow()
+    {
+        WithEnvVars(("MESH_OIDC_CLIENT_SECRET", "shh"), () =>
+        {
+            var config = new MeshAuthConfig { Mode = "oidc" };
+            config.Oidc.Authority = "https://idp.example.com";
+            config.Oidc.ClientId = "client-id";
+
+            var exception = Record.Exception(() => MeshAuthGate.Validate(config));
+
+            Assert.Null(exception);
+        });
     }
 
     // --- mode none -----------------------------------------------------------------------------
@@ -343,6 +620,10 @@ public class MeshAuthGateTest
         var next = NextDelegate(out var wasCalled);
         var config = ProxyConfig("10.0.0.5");
         config.RequiredGroups = new[] { "mesh-admins" };
+        // requiredGroups needs a mode that can carry group claims (WP-1(a)) - proxy only does with a
+        // groupsHeader configured. Alice's request below still sends no X-Forwarded-Groups header, so
+        // this is still a "caller authenticated but holds no group" case, just a satisfiable config.
+        config.Proxy.GroupsHeader = "X-Forwarded-Groups";
         var gate = new MeshAuthGate(next, config);
         var context = NewContext();
         context.Request.Headers["X-Forwarded-User"] = "alice@example.com";

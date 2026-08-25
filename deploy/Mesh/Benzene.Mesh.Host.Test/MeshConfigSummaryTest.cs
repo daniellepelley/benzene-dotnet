@@ -89,6 +89,30 @@ public class MeshConfigSummaryTest
         Assert.Contains($"{key}=plain-value", summary);
     }
 
+    // WP-1(a) (#27's startup-summary omission): auth.dispatchRole was bound and validated but never
+    // printed in the startup summary, so an operator debugging "why is dispatch refusing everyone" had
+    // no way to see it was even set without opening mesh.json.
+    [Fact]
+    public void AuthDispatchRoleSet_AppearsInSummary()
+    {
+        var config = new MeshHostConfig
+        {
+            Auth = new MeshAuthConfig { Mode = "oidc", DispatchRole = "mesh-admins" },
+        };
+
+        var summary = MeshConfigSummary.Format(config);
+
+        Assert.Contains("dispatchRole=mesh-admins", summary);
+    }
+
+    [Fact]
+    public void AuthDispatchRoleUnset_DoesNotAppearInSummary()
+    {
+        var summary = MeshConfigSummary.Format(new MeshHostConfig());
+
+        Assert.DoesNotContain("dispatchRole", summary);
+    }
+
     [Fact]
     public void DefaultConfig_FormatsWithoutThrowing()
     {

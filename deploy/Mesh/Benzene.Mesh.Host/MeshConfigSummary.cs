@@ -62,6 +62,14 @@ public static class MeshConfigSummary
             authLine += $", requiredGroups={string.Join(",", config.Auth.RequiredGroups)}";
         }
 
+        // WP-1(a) (#27): this was bound and validated but never printed here - an operator debugging
+        // "why is dispatch refusing everyone" had no way to see it was even set without opening
+        // mesh.json directly.
+        if (!string.IsNullOrEmpty(config.Auth.DispatchRole))
+        {
+            authLine += $", dispatchRole={config.Auth.DispatchRole}";
+        }
+
         lines.Add(authLine);
 
         return string.Join(Environment.NewLine, lines);

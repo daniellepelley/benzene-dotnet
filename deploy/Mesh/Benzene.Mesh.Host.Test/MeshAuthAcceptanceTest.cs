@@ -33,6 +33,7 @@ namespace Benzene.Mesh.Host.Test;
 /// "blocked" assertion below into a failure (404/500 instead of 401), for both artifact-store branches -
 /// proving this test is actually pinned to the gate's placement, not merely to *a* 401 from somewhere else.
 /// </remarks>
+[Collection(EnvVarMutatingTestCollection.Name)]
 public class MeshAuthAcceptanceTest
 {
     private static string[] BlockedPaths(bool fileStore) => fileStore
