@@ -43,7 +43,9 @@ public class DynamoDbIdempotencyStoreTest
 
         Assert.True(claim.Claimed);
         Assert.Null(claim.ExistingRecord);
+        Assert.NotNull(claim.ClaimToken);
         Assert.Equal("InProgress", put!.Item["status"].S);
+        Assert.Equal(claim.ClaimToken, put.Item["claimToken"].S);
         Assert.Contains("attribute_not_exists", put.ConditionExpression);
     }
 
@@ -98,7 +100,7 @@ public class DynamoDbIdempotencyStoreTest
     }
 
     [Fact]
-    public async Task Complete_WritesCompletedWithOutcome()
+    public async Task Complete_WritesCompletedWithOutcome_ConditionedOnClaimToken()
     {
         var dynamo = MockDynamo();
         PutItemRequest? put = null;
@@ -107,15 +109,31 @@ public class DynamoDbIdempotencyStoreTest
             .ReturnsAsync(new PutItemResponse());
         var store = new DynamoDbIdempotencyStore(dynamo.Object, "idempotency", now: () => Now);
 
-        await store.CompleteAsync("key-1", wasSuccessful: true);
+        var settled = await store.CompleteAsync("key-1", "token-1", wasSuccessful: true);
 
+        Assert.True(settled);
         Assert.Equal("Completed", put!.Item["status"].S);
         Assert.True(put.Item["wasSuccessful"].BOOL);
-        Assert.Null(put.ConditionExpression);   // Complete is unconditional
+        Assert.Equal("token-1", put.Item["claimToken"].S);
+        Assert.Contains("claimToken", put.ConditionExpression);
+        Assert.Equal("token-1", put.ExpressionAttributeValues[":claimToken"].S);
     }
 
     [Fact]
-    public async Task Release_DeletesTheKey()
+    public async Task Complete_WhenClaimTokenNoLongerMatches_IsRefused_AndWritesNothing()
+    {
+        var dynamo = MockDynamo();
+        dynamo.Setup(x => x.PutItemAsync(It.IsAny<PutItemRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ConditionalCheckFailedException("stale token"));
+        var store = new DynamoDbIdempotencyStore(dynamo.Object, "idempotency", now: () => Now);
+
+        var settled = await store.CompleteAsync("key-1", "stale-token", wasSuccessful: true);
+
+        Assert.False(settled);
+    }
+
+    [Fact]
+    public async Task Release_DeletesTheKey_ConditionedOnClaimToken()
     {
         var dynamo = MockDynamo();
         DeleteItemRequest? del = null;
@@ -124,8 +142,24 @@ public class DynamoDbIdempotencyStoreTest
             .ReturnsAsync(new DeleteItemResponse());
         var store = new DynamoDbIdempotencyStore(dynamo.Object, "idempotency", now: () => Now);
 
-        await store.ReleaseAsync("key-1");
+        var released = await store.ReleaseAsync("key-1", "token-1");
 
+        Assert.True(released);
         Assert.Equal("key-1", del!.Key["pk"].S);
+        Assert.Contains("claimToken", del.ConditionExpression);
+        Assert.Equal("token-1", del.ExpressionAttributeValues[":claimToken"].S);
+    }
+
+    [Fact]
+    public async Task Release_WhenClaimTokenNoLongerMatches_IsRefused()
+    {
+        var dynamo = MockDynamo();
+        dynamo.Setup(x => x.DeleteItemAsync(It.IsAny<DeleteItemRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ConditionalCheckFailedException("stale token"));
+        var store = new DynamoDbIdempotencyStore(dynamo.Object, "idempotency", now: () => Now);
+
+        var released = await store.ReleaseAsync("key-1", "stale-token");
+
+        Assert.False(released);
     }
 }

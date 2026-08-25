@@ -31,6 +31,7 @@ public class InMemoryOutboxStoreTest
         var envelope = Assert.Single(due);
         Assert.Equal("env-1", envelope.Id);
         Assert.Equal(OutboxStatus.Pending, envelope.Status);
+        Assert.NotNull(envelope.LeaseToken);
     }
 
     [Fact]
@@ -77,7 +78,8 @@ public class InMemoryOutboxStoreTest
         var now = DateTimeOffset.UtcNow;
         var store = new InMemoryOutboxStore(() => now);
         await store.AddAsync([NewEnvelope()]);
-        await store.RescheduleAsync("env-1", 1, TimeSpan.FromMinutes(5), "boom");
+        var claimed = Assert.Single(await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1)));
+        await store.RescheduleAsync("env-1", 1, TimeSpan.FromMinutes(5), "boom", claimed.LeaseToken!);
 
         var due = await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1));
 
@@ -90,9 +92,10 @@ public class InMemoryOutboxStoreTest
         var now = DateTimeOffset.UtcNow;
         var store = new InMemoryOutboxStore(() => now);
         await store.AddAsync([NewEnvelope()]);
-        await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1));
+        var claimed = Assert.Single(await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1)));
 
-        await store.RescheduleAsync("env-1", 1, TimeSpan.FromMinutes(5), "transient failure");
+        var rescheduled = await store.RescheduleAsync("env-1", 1, TimeSpan.FromMinutes(5), "transient failure", claimed.LeaseToken!);
+        Assert.True(rescheduled);
 
         // Not due yet.
         Assert.Empty(await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1)));
@@ -106,16 +109,49 @@ public class InMemoryOutboxStoreTest
     }
 
     [Fact]
+    public async Task Reschedule_WithStaleLeaseToken_IsRefused_AndDoesNotClobberTheNewHolder()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var store = new InMemoryOutboxStore(() => now);
+        await store.AddAsync([NewEnvelope()]);
+        var claimA = Assert.Single(await store.ClaimDueAsync(10, TimeSpan.FromSeconds(1)));
+
+        now = now.AddSeconds(2); // A's lease lapses
+        var claimB = await store.ClaimAsync("env-1", TimeSpan.FromMinutes(1));
+        Assert.NotNull(claimB);
+        Assert.NotEqual(claimA.LeaseToken, claimB!.LeaseToken);
+
+        var staleReschedule = await store.RescheduleAsync("env-1", 99, TimeSpan.FromMinutes(5), "stale", claimA.LeaseToken!);
+
+        Assert.False(staleReschedule);
+        // B's own claim is untouched: still leased, attempt count unchanged by A's stale write.
+        Assert.Null(await store.ClaimAsync("env-1", TimeSpan.FromMinutes(1)));
+    }
+
+    [Fact]
     public async Task Park_MarksEnvelopeParked_AndItIsNeverClaimedAgain()
+    {
+        var store = new InMemoryOutboxStore();
+        await store.AddAsync([NewEnvelope()]);
+        var claimed = Assert.Single(await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1)));
+
+        var parked = await store.ParkAsync("env-1", "exhausted retries", claimed.LeaseToken!);
+
+        Assert.True(parked);
+        Assert.Empty(await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1)));
+        Assert.Null(await store.ClaimAsync("env-1", TimeSpan.FromMinutes(1)));
+    }
+
+    [Fact]
+    public async Task Park_WithStaleLeaseToken_IsRefused()
     {
         var store = new InMemoryOutboxStore();
         await store.AddAsync([NewEnvelope()]);
         await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1));
 
-        await store.ParkAsync("env-1", "exhausted retries");
+        var parked = await store.ParkAsync("env-1", "boom", "not-the-real-token");
 
-        Assert.Empty(await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1)));
-        Assert.Null(await store.ClaimAsync("env-1", TimeSpan.FromMinutes(1)));
+        Assert.False(parked);
     }
 
     [Fact]
@@ -123,11 +159,40 @@ public class InMemoryOutboxStoreTest
     {
         var store = new InMemoryOutboxStore();
         await store.AddAsync([NewEnvelope()]);
-        await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1));
+        var claimed = Assert.Single(await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1)));
 
-        await store.MarkDispatchedAsync("env-1");
+        var dispatched = await store.MarkDispatchedAsync("env-1", claimed.LeaseToken!);
 
+        Assert.True(dispatched);
         Assert.Empty(await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1)));
+    }
+
+    [Fact]
+    public async Task MarkDispatched_WithStaleLeaseToken_IsRefused_AndDoesNotClobberTheNewHolder()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var store = new InMemoryOutboxStore(() => now);
+        await store.AddAsync([NewEnvelope()]);
+        var claimA = Assert.Single(await store.ClaimDueAsync(10, TimeSpan.FromSeconds(1)));
+
+        now = now.AddSeconds(2); // A's lease lapses
+        var claimB = await store.ClaimAsync("env-1", TimeSpan.FromMinutes(1));
+        Assert.NotNull(claimB);
+
+        var staleDispatch = await store.MarkDispatchedAsync("env-1", claimA.LeaseToken!);
+        Assert.False(staleDispatch);
+
+        // B's own settle still works - its lease was never touched by A's stale write.
+        var bDispatch = await store.MarkDispatchedAsync("env-1", claimB!.LeaseToken!);
+        Assert.True(bDispatch);
+    }
+
+    [Fact]
+    public async Task MarkDispatched_UnknownId_ReturnsFalse()
+    {
+        var store = new InMemoryOutboxStore();
+
+        Assert.False(await store.MarkDispatchedAsync("does-not-exist", "any-token"));
     }
 
     [Fact]
@@ -136,11 +201,11 @@ public class InMemoryOutboxStoreTest
         var now = DateTimeOffset.UtcNow;
         var store = new InMemoryOutboxStore(() => now);
         await store.AddAsync([NewEnvelope("old-dispatched"), NewEnvelope("recent-dispatched"), NewEnvelope("still-pending")]);
-        await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1));
-        await store.MarkDispatchedAsync("old-dispatched");
+        var claimed = await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1));
+        await store.MarkDispatchedAsync("old-dispatched", claimed.Single(e => e.Id == "old-dispatched").LeaseToken!);
 
         now = now.AddDays(1);
-        await store.MarkDispatchedAsync("recent-dispatched");
+        await store.MarkDispatchedAsync("recent-dispatched", claimed.Single(e => e.Id == "recent-dispatched").LeaseToken!);
 
         var deleted = await store.DeleteDispatchedBeforeAsync(now.AddHours(-1));
 

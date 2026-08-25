@@ -149,9 +149,10 @@ public class EntityFrameworkOutboxStoreTest
         var now = DateTimeOffset.UtcNow;
         var store = NewStore(nameof(Reschedule_MakesEnvelopeDueAfterTheDelay_AndRecordsAttemptAndError), () => now);
         await store.AddAsync([NewEnvelope()]);
-        await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1));
+        var claimed = Assert.Single(await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1)));
 
-        await store.RescheduleAsync("env-1", 1, TimeSpan.FromMinutes(5), "transient failure");
+        var rescheduled = await store.RescheduleAsync("env-1", 1, TimeSpan.FromMinutes(5), "transient failure", claimed.LeaseToken!);
+        Assert.True(rescheduled);
 
         Assert.Empty(await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1)));
 
@@ -164,16 +165,41 @@ public class EntityFrameworkOutboxStoreTest
     }
 
     [Fact]
+    public async Task Reschedule_WithStaleLeaseToken_IsRefused()
+    {
+        var store = NewStore(nameof(Reschedule_WithStaleLeaseToken_IsRefused));
+        await store.AddAsync([NewEnvelope()]);
+        await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1));
+
+        var rescheduled = await store.RescheduleAsync("env-1", 1, TimeSpan.FromMinutes(5), "boom", "not-the-real-token");
+
+        Assert.False(rescheduled);
+    }
+
+    [Fact]
     public async Task Park_MarksEnvelopeParked_AndItIsNeverClaimedAgain()
     {
         var store = NewStore(nameof(Park_MarksEnvelopeParked_AndItIsNeverClaimedAgain));
         await store.AddAsync([NewEnvelope()]);
-        await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1));
+        var claimed = Assert.Single(await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1)));
 
-        await store.ParkAsync("env-1", "exhausted retries");
+        var parked = await store.ParkAsync("env-1", "exhausted retries", claimed.LeaseToken!);
 
+        Assert.True(parked);
         Assert.Empty(await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1)));
         Assert.Null(await store.ClaimAsync("env-1", TimeSpan.FromMinutes(1)));
+    }
+
+    [Fact]
+    public async Task Park_WithStaleLeaseToken_IsRefused()
+    {
+        var store = NewStore(nameof(Park_WithStaleLeaseToken_IsRefused));
+        await store.AddAsync([NewEnvelope()]);
+        await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1));
+
+        var parked = await store.ParkAsync("env-1", "boom", "not-the-real-token");
+
+        Assert.False(parked);
     }
 
     [Fact]
@@ -181,11 +207,36 @@ public class EntityFrameworkOutboxStoreTest
     {
         var store = NewStore(nameof(MarkDispatched_RemovesEnvelopeFromDueClaims));
         await store.AddAsync([NewEnvelope()]);
-        await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1));
+        var claimed = Assert.Single(await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1)));
 
-        await store.MarkDispatchedAsync("env-1");
+        var dispatched = await store.MarkDispatchedAsync("env-1", claimed.LeaseToken!);
 
+        Assert.True(dispatched);
         Assert.Empty(await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1)));
+    }
+
+    [Fact]
+    public async Task MarkDispatched_WithStaleLeaseToken_IsRefused_AndDoesNotClobberTheNewHolder()
+    {
+        var databaseName = nameof(MarkDispatched_WithStaleLeaseToken_IsRefused_AndDoesNotClobberTheNewHolder);
+        var writer = NewStore(databaseName);
+        await writer.AddAsync([NewEnvelope()]);
+
+        var claimA = await writer.ClaimAsync("env-1", TimeSpan.FromSeconds(0));
+        Assert.NotNull(claimA);
+
+        // A's lease is already effectively expired (zero-length), so a second store can reclaim it.
+        var storeB = NewStore(databaseName);
+        var claimB = await storeB.ClaimAsync("env-1", TimeSpan.FromMinutes(5));
+        Assert.NotNull(claimB);
+        Assert.NotEqual(claimA!.LeaseToken, claimB!.LeaseToken);
+
+        var staleDispatch = await writer.MarkDispatchedAsync("env-1", claimA.LeaseToken!);
+        Assert.False(staleDispatch);
+
+        // B's own settle still succeeds - A's stale write did not touch B's lease.
+        var bDispatch = await storeB.MarkDispatchedAsync("env-1", claimB.LeaseToken!);
+        Assert.True(bDispatch);
     }
 
     [Fact]
@@ -194,11 +245,11 @@ public class EntityFrameworkOutboxStoreTest
         var now = DateTimeOffset.UtcNow;
         var store = NewStore(nameof(DeleteDispatchedBefore_OnlyDeletesDispatchedEnvelopesOlderThanCutoff), () => now);
         await store.AddAsync([NewEnvelope("old-dispatched"), NewEnvelope("recent-dispatched"), NewEnvelope("still-pending")]);
-        await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1));
-        await store.MarkDispatchedAsync("old-dispatched");
+        var claimed = await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1));
+        await store.MarkDispatchedAsync("old-dispatched", claimed.Single(e => e.Id == "old-dispatched").LeaseToken!);
 
         now = now.AddDays(1);
-        await store.MarkDispatchedAsync("recent-dispatched");
+        await store.MarkDispatchedAsync("recent-dispatched", claimed.Single(e => e.Id == "recent-dispatched").LeaseToken!);
 
         var deleted = await store.DeleteDispatchedBeforeAsync(now.AddHours(-1));
 
@@ -213,8 +264,8 @@ public class EntityFrameworkOutboxStoreTest
         var now = DateTimeOffset.UtcNow;
         var store = NewStore(nameof(DeleteDispatchedBefore_NeverDeletesParkedEnvelopes), () => now);
         await store.AddAsync([NewEnvelope()]);
-        await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1));
-        await store.ParkAsync("env-1", "poison");
+        var claimed = Assert.Single(await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1)));
+        await store.ParkAsync("env-1", "poison", claimed.LeaseToken!);
 
         var deleted = await store.DeleteDispatchedBeforeAsync(now.AddDays(30));
 

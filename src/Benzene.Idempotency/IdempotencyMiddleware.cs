@@ -1,6 +1,8 @@
 using Benzene.Abstractions.MessageHandlers;
 using Benzene.Abstractions.Middleware;
 using Benzene.Results;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Benzene.Idempotency;
 
@@ -24,18 +26,25 @@ public class IdempotencyMiddleware<TContext> : IMiddleware<TContext>
     private readonly IIdempotencyStore _store;
     private readonly IIdempotencyKeyStrategy<TContext> _keyStrategy;
     private readonly IdempotencyOptions _options;
+    private readonly ILogger _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="IdempotencyMiddleware{TContext}"/> class.
     /// </summary>
+    /// <param name="store">The store claims are made against and settled through.</param>
+    /// <param name="keyStrategy">Derives the idempotency key for each message.</param>
+    /// <param name="options">De-duplication behaviour options.</param>
+    /// <param name="logger">The logger used to record a reclaimed-claim warning. Defaults to <see cref="NullLogger.Instance"/>.</param>
     public IdempotencyMiddleware(
         IIdempotencyStore store,
         IIdempotencyKeyStrategy<TContext> keyStrategy,
-        IdempotencyOptions options)
+        IdempotencyOptions options,
+        ILogger? logger = null)
     {
         _store = store;
         _keyStrategy = keyStrategy;
         _options = options;
+        _logger = logger ?? NullLogger.Instance;
     }
 
     /// <inheritdoc />
@@ -59,6 +68,8 @@ public class IdempotencyMiddleware<TContext> : IMiddleware<TContext>
             return;
         }
 
+        var claimToken = claim.ClaimToken!;
+
         try
         {
             await next();
@@ -66,18 +77,38 @@ public class IdempotencyMiddleware<TContext> : IMiddleware<TContext>
         catch
         {
             // The handler threw. Release the claim so a redelivery can reprocess the message.
-            await _store.ReleaseAsync(key);
+            await ReleaseAsync(key, claimToken);
             throw;
         }
 
         if (WasSuccessful(context))
         {
-            await _store.CompleteAsync(key, true);
+            var settled = await _store.CompleteAsync(key, claimToken, true);
+            if (!settled)
+            {
+                // The claim was reclaimed by another worker before this attempt finished (it lapsed
+                // and someone else won it) - the new holder owns the outcome now, so this is expected
+                // under contention, not an error.
+                _logger.LogWarning(
+                    "Idempotency claim for key {Key} was reclaimed by another worker before this attempt " +
+                    "could complete it; outcome recorded by the new holder.", key);
+            }
         }
         else
         {
             // The handler ran but reported failure. Release so the redelivery retries.
-            await _store.ReleaseAsync(key);
+            await ReleaseAsync(key, claimToken);
+        }
+    }
+
+    private async Task ReleaseAsync(string key, string claimToken)
+    {
+        var released = await _store.ReleaseAsync(key, claimToken);
+        if (!released)
+        {
+            _logger.LogWarning(
+                "Idempotency claim for key {Key} was reclaimed by another worker before this attempt " +
+                "could release it; outcome recorded by the new holder.", key);
         }
     }
 

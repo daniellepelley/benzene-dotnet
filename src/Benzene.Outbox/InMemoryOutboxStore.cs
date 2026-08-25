@@ -10,6 +10,14 @@ namespace Benzene.Outbox;
 /// shared store (e.g. <c>Benzene.Outbox.DynamoDb</c>, Phase 2) for a fleet. This store also cannot
 /// provide the transactional (<see cref="OutboxWriteMode.Transactional"/>) atomic-commit story -
 /// that needs a store that shares a transaction with the application's own state write.
+/// <para>
+/// <b>Claim fencing.</b> Every successful <see cref="ClaimDueAsync"/>/<see cref="ClaimAsync"/> mints a
+/// fresh lease token, stored on the entry and stamped onto the returned <see cref="OutboxEnvelope.LeaseToken"/>.
+/// <see cref="MarkDispatchedAsync"/>/<see cref="RescheduleAsync"/>/<see cref="ParkAsync"/> compare the
+/// presented token against the entry's current one under the same lock the claim itself uses, and
+/// refuse (return <see langword="false"/>, write nothing) on a mismatch - see
+/// <see cref="IOutboxStore.MarkDispatchedAsync"/>'s remarks for what this closes.
+/// </para>
 /// </remarks>
 public class InMemoryOutboxStore : IOutboxStore
 {
@@ -17,6 +25,7 @@ public class InMemoryOutboxStore : IOutboxStore
     {
         public required OutboxEnvelope Envelope { get; set; }
         public DateTimeOffset? LeaseUntil { get; set; }
+        public string? LeaseToken { get; set; }
         public DateTimeOffset? DispatchedAtUtc { get; set; }
     }
 
@@ -66,8 +75,10 @@ public class InMemoryOutboxStore : IOutboxStore
             var claimed = new List<OutboxEnvelope>(due.Count);
             foreach (var entry in due)
             {
+                var token = Guid.NewGuid().ToString();
                 entry.LeaseUntil = now + lease;
-                claimed.Add(entry.Envelope);
+                entry.LeaseToken = token;
+                claimed.Add(entry.Envelope.WithLeaseToken(token));
             }
 
             return Task.FromResult<IReadOnlyList<OutboxEnvelope>>(claimed);
@@ -87,63 +98,88 @@ public class InMemoryOutboxStore : IOutboxStore
                 return Task.FromResult<OutboxEnvelope?>(null);
             }
 
+            var token = Guid.NewGuid().ToString();
             entry.LeaseUntil = now + lease;
-            return Task.FromResult<OutboxEnvelope?>(entry.Envelope);
+            entry.LeaseToken = token;
+            return Task.FromResult<OutboxEnvelope?>(entry.Envelope.WithLeaseToken(token));
         }
     }
 
     /// <inheritdoc />
-    public Task MarkDispatchedAsync(string id, CancellationToken cancellationToken = default)
+    public Task<bool> MarkDispatchedAsync(string id, string leaseToken, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         lock (_gate)
         {
-            if (_entries.TryGetValue(id, out var entry))
+            if (!IsCurrentLeaseHolder(id, leaseToken, out var entry))
             {
-                var now = _now();
-                entry.Envelope = Rebuild(entry.Envelope, OutboxStatus.Dispatched, entry.Envelope.AttemptCount, null, entry.Envelope.LastError);
-                entry.LeaseUntil = null;
-                entry.DispatchedAtUtc = now;
+                return Task.FromResult(false);
             }
-        }
 
-        return Task.CompletedTask;
+            var now = _now();
+            entry.Envelope = Rebuild(entry.Envelope, OutboxStatus.Dispatched, entry.Envelope.AttemptCount, null, entry.Envelope.LastError);
+            entry.LeaseUntil = null;
+            entry.LeaseToken = null;
+            entry.DispatchedAtUtc = now;
+            return Task.FromResult(true);
+        }
     }
 
     /// <inheritdoc />
-    public Task RescheduleAsync(string id, int attemptCount, TimeSpan delay, string error, CancellationToken cancellationToken = default)
+    public Task<bool> RescheduleAsync(string id, int attemptCount, TimeSpan delay, string error, string leaseToken, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         lock (_gate)
         {
-            if (_entries.TryGetValue(id, out var entry))
+            if (!IsCurrentLeaseHolder(id, leaseToken, out var entry))
             {
-                var now = _now();
-                entry.Envelope = Rebuild(entry.Envelope, OutboxStatus.Pending, attemptCount, now + delay, error);
-                entry.LeaseUntil = null;
+                return Task.FromResult(false);
             }
-        }
 
-        return Task.CompletedTask;
+            var now = _now();
+            entry.Envelope = Rebuild(entry.Envelope, OutboxStatus.Pending, attemptCount, now + delay, error);
+            entry.LeaseUntil = null;
+            entry.LeaseToken = null;
+            return Task.FromResult(true);
+        }
     }
 
     /// <inheritdoc />
-    public Task ParkAsync(string id, string error, CancellationToken cancellationToken = default)
+    public Task<bool> ParkAsync(string id, string error, string leaseToken, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         lock (_gate)
         {
-            if (_entries.TryGetValue(id, out var entry))
+            if (!IsCurrentLeaseHolder(id, leaseToken, out var entry))
             {
-                entry.Envelope = Rebuild(entry.Envelope, OutboxStatus.Parked, entry.Envelope.AttemptCount, null, error);
-                entry.LeaseUntil = null;
+                return Task.FromResult(false);
             }
+
+            entry.Envelope = Rebuild(entry.Envelope, OutboxStatus.Parked, entry.Envelope.AttemptCount, null, error);
+            entry.LeaseUntil = null;
+            entry.LeaseToken = null;
+            return Task.FromResult(true);
+        }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="id"/> exists and its current lease token is <paramref name="leaseToken"/>.
+    /// Must be called under <see cref="_gate"/>. This is the fencing check every settle method uses -
+    /// see <see cref="IOutboxStore.MarkDispatchedAsync"/>'s remarks.
+    /// </summary>
+    private bool IsCurrentLeaseHolder(string id, string leaseToken, out Entry entry)
+    {
+        if (_entries.TryGetValue(id, out var found) && found.LeaseToken == leaseToken)
+        {
+            entry = found;
+            return true;
         }
 
-        return Task.CompletedTask;
+        entry = null!;
+        return false;
     }
 
     /// <inheritdoc />

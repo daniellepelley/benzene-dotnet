@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using Benzene.Abstractions.Serialization;
 using Benzene.Clients;
@@ -7,7 +8,9 @@ using Benzene.Core.Middleware;
 using Benzene.Microsoft.Dependencies;
 using Benzene.Outbox;
 using Benzene.Results;
+using Benzene.Test.Logging.Helpers;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Xunit;
 using Void = Benzene.Abstractions.Results.Void;
 
@@ -44,6 +47,23 @@ public class OutboxDispatcherTest
 
         var factory = new MicrosoftServiceResolverFactory(services.BuildServiceProvider());
         return (factory, store);
+    }
+
+    // Same as BuildFactory, but wires an already-constructed store instead of creating its own - used
+    // to simulate two independent worker processes (each its own DI container / IBenzeneMessageSender)
+    // racing the same outbox.
+    private static MicrosoftServiceResolverFactory BuildFactoryOnStore(
+        IOutboxStore store, Action<OutboundRoutingBuilder> configureRouting)
+    {
+        var services = new ServiceCollection();
+        services.AddTransient<ISerializer, JsonSerializer>();
+        var container = new MicrosoftBenzeneServiceContainer(services);
+        container.AddOutbox();
+        services.AddSingleton(store);
+
+        container.AddOutboundRouting(configureRouting);
+
+        return new MicrosoftServiceResolverFactory(services.BuildServiceProvider());
     }
 
     [Fact]
@@ -120,8 +140,8 @@ public class OutboxDispatcherTest
             routing => routing.Route("test:topic", pipeline => pipeline.OnRequest(ctx => ctx.Response = BenzeneResult.Accepted<Void>())),
             () => now);
         await store.AddAsync([NewEnvelope("old-dispatched", createdAtUtc: now)]);
-        await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1));
-        await store.MarkDispatchedAsync("old-dispatched");
+        var claimed = Assert.Single(await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1)));
+        await store.MarkDispatchedAsync("old-dispatched", claimed.LeaseToken!);
 
         now = now.AddDays(10);
         var dispatcher = new OutboxDispatcher(store, factory, new OutboxOptions { RetentionPeriod = TimeSpan.FromDays(7) }, now: () => now);
@@ -174,5 +194,104 @@ public class OutboxDispatcherTest
         Assert.Equal(OutboxDispatchOutcome.Dispatched, outcome);
 
         factory.Dispose();
+    }
+
+    /// <summary>
+    /// Regression test for the round-6 stress-test finding: Worker A claims with a short lease and its
+    /// send stalls in flight; while A is still "sending" (inside its own route handler, below), A's
+    /// lease naturally lapses and Worker B reclaims the same envelope and fully dispatches it (claim +
+    /// send + settle). A's send then completes (the real double-send: <c>sendCount == 2</c> - fencing
+    /// cannot recall a send already committed to the transport) and <see cref="OutboxDispatcher"/>
+    /// tries to settle A's claim with its now-stale token.
+    /// </summary>
+    /// <remarks>
+    /// Before fencing this settle would have silently succeeded (or worse, raced B's own write), so a
+    /// spurious double-write and a corrupted final state were both possible. After fencing, exactly one
+    /// settle (B's) succeeds and the double-dispatch bug is closed at the STORE level: A's stale write
+    /// is rejected (logged as a warning, not an error - B legitimately owns the outcome now) and the
+    /// envelope is exactly as B left it - Dispatched, not reopened for a third claim. Closing the
+    /// double-<em>send</em> itself (not just the store-level double-write) additionally depends on
+    /// <see cref="OutboxDispatcher"/> checking the settle result before treating the message as
+    /// delivered, which it does (that's the warning asserted below) - but no fencing scheme can un-send
+    /// a message a stale claimant already handed to the transport before its lease lapsed; see
+    /// <c>Benzene.Outbox/CLAUDE.md</c>'s "Claim fencing" section.
+    /// </remarks>
+    [Fact]
+    public async Task LiveButSlowClaimant_ReclaimedByAnotherWorker_ExactlyOneSettleSucceeds_NoStateCorruption()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var store = new InMemoryOutboxStore(() => now);
+        var sendCount = 0;
+
+        var factoryA = BuildFactoryOnStore(store, routing => routing.Route("test:topic", pipeline => pipeline.OnRequest(ctx =>
+        {
+            // This is Worker A's send actually reaching the transport. While it's "in flight", A's
+            // lease lapses and Worker B reclaims + fully dispatches the same envelope independently -
+            // simulating a GC pause/network stall that outlives A's lease.
+            Interlocked.Increment(ref sendCount);
+            now = now.AddSeconds(2);
+            var claimB = store.ClaimAsync("env-1", TimeSpan.FromMinutes(5)).GetAwaiter().GetResult();
+            Interlocked.Increment(ref sendCount); // Worker B's own, independent send.
+            var bSettled = store.MarkDispatchedAsync("env-1", claimB!.LeaseToken!).GetAwaiter().GetResult();
+            Assert.True(bSettled);
+
+            ctx.Response = BenzeneResult.Accepted<Void>();
+        })));
+        await store.AddAsync([NewEnvelope()]);
+
+        var loggerFactory = new FakeLoggerFactory();
+        var dispatcherA = new OutboxDispatcher(
+            store, factoryA, new OutboxOptions { ClaimLease = TimeSpan.FromSeconds(1) },
+            logger: loggerFactory.CreateLogger("WorkerA"), now: () => now);
+
+        // Worker A's own dispatch: claims, sends (triggering B's reclaim+dispatch above mid-send), and
+        // then tries to settle with what is now a stale token.
+        var outcomeA = await dispatcherA.DispatchOneAsync("env-1");
+
+        // A's own send genuinely happened, so its dispatch outcome is still "Dispatched" from A's point
+        // of view - it is the STORE write, not the send, that fencing refuses.
+        Assert.Equal(OutboxDispatchOutcome.Dispatched, outcomeA);
+        Assert.Equal(2, sendCount); // Both workers really sent - fencing cannot prevent that part.
+
+        // A's stale settle was refused and logged as a warning (not an error - B owns the outcome now).
+        Assert.Contains(loggerFactory.Collector.Entries, e =>
+            e.Level == LogLevel.Warning && e.Message.Contains("reclaimed"));
+
+        // The envelope is exactly as B left it - Dispatched, not reopened for a third claim.
+        Assert.Empty(await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1)));
+
+        factoryA.Dispose();
+    }
+
+    /// <summary>
+    /// The more severe form of the round-6 bug: without fencing, a stale claimant whose OWN send
+    /// failed could call <see cref="IOutboxStore.RescheduleAsync"/> with its stale token and flip an
+    /// envelope the new holder already marked <see cref="OutboxStatus.Dispatched"/> back to
+    /// <see cref="OutboxStatus.Pending"/> - resurrecting an already-delivered envelope for a THIRD
+    /// send. Fencing must reject that stale reschedule too.
+    /// </summary>
+    [Fact]
+    public async Task StaleClaimant_RescheduleAfterReclaim_DoesNotResurrectAnAlreadyDispatchedEnvelope()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var store = new InMemoryOutboxStore(() => now);
+        await store.AddAsync([NewEnvelope()]);
+
+        var claimA = await store.ClaimAsync("env-1", TimeSpan.FromSeconds(1));
+        Assert.NotNull(claimA);
+
+        now = now.AddSeconds(2); // A's lease lapses
+        var claimB = await store.ClaimAsync("env-1", TimeSpan.FromMinutes(5));
+        Assert.NotNull(claimB);
+        var dispatched = await store.MarkDispatchedAsync("env-1", claimB!.LeaseToken!);
+        Assert.True(dispatched);
+
+        // A, believing its send failed, tries to reschedule with its stale token.
+        var staleRescheduled = await store.RescheduleAsync("env-1", 1, TimeSpan.FromMinutes(1), "A thinks it failed", claimA!.LeaseToken!);
+
+        Assert.False(staleRescheduled);
+        // Still Dispatched - not resurrected as Pending, so no third claim/send is possible.
+        Assert.Empty(await store.ClaimDueAsync(10, TimeSpan.FromMinutes(1)));
+        Assert.Null(await store.ClaimAsync("env-1", TimeSpan.FromMinutes(1)));
     }
 }

@@ -6,10 +6,11 @@ namespace Benzene.Idempotency;
 /// </summary>
 public class ClaimResult
 {
-    private ClaimResult(bool claimed, IdempotencyRecord? existingRecord)
+    private ClaimResult(bool claimed, IdempotencyRecord? existingRecord, string? claimToken)
     {
         Claimed = claimed;
         ExistingRecord = existingRecord;
+        ClaimToken = claimToken;
     }
 
     /// <summary>
@@ -24,10 +25,21 @@ public class ClaimResult
     /// </summary>
     public IdempotencyRecord? ExistingRecord { get; }
 
+    /// <summary>
+    /// Gets the opaque token the store minted for this claim. Non-<see langword="null"/> exactly when
+    /// <see cref="Claimed"/> is <c>true</c>. The caller MUST present this token, unchanged, to
+    /// <see cref="IIdempotencyStore.CompleteAsync"/>/<see cref="IIdempotencyStore.ReleaseAsync"/> - a
+    /// settle call whose token no longer matches the live claim (it lapsed and was reclaimed by
+    /// another worker, or was already settled) is refused rather than allowed to clobber whoever holds
+    /// the claim now.
+    /// </summary>
+    public string? ClaimToken { get; }
+
     /// <summary>Creates a result indicating the caller won the claim.</summary>
-    public static ClaimResult Won() => new(true, null);
+    /// <param name="claimToken">The opaque token minted for this claim; presented back on settle.</param>
+    public static ClaimResult Won(string claimToken) => new(true, null, claimToken);
 
     /// <summary>Creates a result indicating a record already existed (the message is a duplicate).</summary>
     /// <param name="existing">The record already present in the store.</param>
-    public static ClaimResult AlreadyExists(IdempotencyRecord existing) => new(false, existing);
+    public static ClaimResult AlreadyExists(IdempotencyRecord existing) => new(false, existing, null);
 }
