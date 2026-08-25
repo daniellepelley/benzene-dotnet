@@ -85,6 +85,21 @@ Insights and grants the mesh identity **Log Analytics Reader**. Coarse counts by
 in App Insights/Grafana. (Per-service attribution and duration are documented follow-ups — the counter
 isn't tagged by service, which the UI surfaces honestly as an absent dimension.)
 
+## Security posture
+
+**The mesh Web App itself is publicly reachable and unauthenticated — not just the three services it
+polls.** `/mesh-ui`, the catalog artifacts, and `POST /mesh/refresh` all answer any caller who can
+reach the App Service URL; there is no login gate in front of any of them (contrast `AwsMesh`, whose
+mesh Lambda sits behind `Benzene.Mesh.Auth.Oidc`). The only thing standing in front of
+`POST /mesh/refresh` is `UseMeshRefreshGuard` — a CSRF header (`X-Benzene-Refresh`, which a cross-site
+form or a bare cross-origin `fetch()` cannot set) plus a manifest-age throttle — which bounds *abuse of
+the refresh trigger*, not *who can read the catalog or open the UI*. This is demo-only posture, the
+same as the K8sMesh/GoogleCloudMesh/AzureFunctionsMesh siblings: the services being polled are
+themselves unauthenticated (`/benzene/spec|health` need no credential, matching the discovery model),
+and the mesh that polls them carries no auth of its own either. Do not copy this posture into a real
+deployment — put a login gate (OIDC, an App Service auth proxy, a private network) in front of the
+mesh Web App, the way `AwsMesh` does, before anything here is internet-facing for real.
+
 ## Discovery scope
 
 Discovery is pinned to this deployment's subscription and resource group via two app settings on the
