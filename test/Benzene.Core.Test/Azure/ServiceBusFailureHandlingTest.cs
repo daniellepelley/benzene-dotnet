@@ -198,6 +198,40 @@ public class ServiceBusFailureHandlingTest
         mockActions.Verify(x => x.AbandonMessageAsync(message, null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    // Regression for #10: state.Acked used to be set to true BEFORE the settle call
+    // (CompleteMessageAsync/AbandonMessageAsync), not after. So when the settle call itself threw, the
+    // base class's fallback-abandon (OnExceptionCaughtAsync / ShouldCleanUpBeforeRethrow, both gated on
+    // !state.Acked) saw Acked already true and skipped - exactly when the message most needed to be
+    // abandoned. Reverting the OnPipelineSucceededAsync fix (moving `state.Acked = true;` back above
+    // the settle call) turns this red: AbandonMessageAsync.Verify(Times.Once) fails because the
+    // fallback never fires.
+    [Fact]
+    public async Task HandleAsync_ExplicitAckMode_CompleteMessageThrows_FallbackAbandonStillFires()
+    {
+        var mockPipeline = new Mock<IMiddlewarePipeline<ServiceBusContext>>();
+        mockPipeline.Setup(x => x.HandleAsync(It.IsAny<ServiceBusContext>(), It.IsAny<IServiceResolver>()))
+            .Callback<ServiceBusContext, IServiceResolver>((context, _) => context.MessageResult = BenzeneResult.Ok())
+            .Returns(Task.CompletedTask);
+
+        var (_, resolverFactory) = CreateResolver();
+        var mockActions = new Mock<ServiceBusMessageActions>();
+        var message = CreateEvent()[0];
+        mockActions
+            .Setup(x => x.CompleteMessageAsync(message, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Service Bus is unavailable"));
+
+        // CatchExceptions off (the default) so the settle failure cascades - the fallback-abandon must
+        // still fire via ShouldCleanUpBeforeRethrow/CleanUpBeforeRethrowAsync before it does.
+        var application = new ServiceBusBatchApplication(mockPipeline.Object, new ServiceBusOptions { AckMode = ServiceBusAckMode.Explicit });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            ((IMiddlewareApplication<ServiceBusTriggerBatch>)application)
+                .HandleAsync(new ServiceBusTriggerBatch(mockActions.Object, [message]), resolverFactory.Object));
+
+        mockActions.Verify(x => x.CompleteMessageAsync(message, It.IsAny<CancellationToken>()), Times.Once);
+        mockActions.Verify(x => x.AbandonMessageAsync(message, null, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     [Fact]
     public async Task HandleAsync_ReceivedMessageArrayOverload_NeverTouchesMessageActions()
     {
