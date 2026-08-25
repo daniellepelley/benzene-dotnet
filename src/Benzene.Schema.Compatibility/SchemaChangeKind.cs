@@ -30,5 +30,27 @@ public enum SchemaChangeKind
     PropertyBecameOptional,
 
     /// <summary>A property's data type or format changed.</summary>
-    TypeChanged
+    TypeChanged,
+
+    /// <summary>
+    /// A <c>oneOf</c>/<c>anyOf</c>/<c>allOf</c> member present on the current side had no match on the
+    /// baseline side (see the comparer's matching rule: discriminator mapping value, then <c>$ref</c>
+    /// target name, then position).
+    /// </summary>
+    UnionVariantAdded,
+
+    /// <summary>
+    /// A <c>oneOf</c>/<c>anyOf</c>/<c>allOf</c> member present on the baseline side had no match on the
+    /// current side.
+    /// </summary>
+    UnionVariantRemoved,
+
+    /// <summary>
+    /// A <c>oneOf</c>/<c>anyOf</c>/<c>allOf</c> member matched between baseline and current (same
+    /// discriminator value, <c>$ref</c> target, or position), but the matched pair's schemas differ.
+    /// The differences themselves are reported immediately after this entry, using their own kinds
+    /// (<see cref="TypeChanged"/>, <see cref="PropertyAdded"/>, etc.), from a recursive comparison of
+    /// the matched pair.
+    /// </summary>
+    UnionVariantChanged
 }

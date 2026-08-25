@@ -120,6 +120,56 @@ Feed the uploaded `spec.json` into the `benzene` CLI's `diff` command as a compa
 [contract testing](cookbooks/contract-testing.md)), or the `service.json` into a mesh artifact store
 to seed/refresh it without a live deploy.
 
+## What the compatibility comparer detects
+
+`SchemaCompatibilityComparer` (OpenAPI-backed) and `JsonSchemaComparer` (`JsonNode`-backed, used where
+a component must classify a change without an OpenAPI toolchain dependency — e.g. the mesh aggregator)
+walk a `spec.json` pair field by field and classify every difference as `SchemaChangeKind`:
+
+| `SchemaChangeKind` | Meaning |
+| --- | --- |
+| `TopicAdded` / `TopicRemoved` | A topic exists on only one side. |
+| `PropertyAdded` / `RequiredPropertyAdded` | A property exists on only the current side (required or not). |
+| `PropertyRemoved` | A property exists on only the baseline side. |
+| `PropertyBecameRequired` / `PropertyBecameOptional` | A property's `required` membership changed. |
+| `TypeChanged` | A schema's `type`/`format` changed — also used for an `items` null-asymmetry (below). |
+| `UnionVariantAdded` | A `oneOf`/`anyOf`/`allOf` member exists on only the current side. |
+| `UnionVariantRemoved` | A `oneOf`/`anyOf`/`allOf` member exists on only the baseline side. |
+| `UnionVariantChanged` | A member matched between baseline and current, but the matched pair's schemas differ. The specific differences are reported immediately after this entry (their own kinds, from a recursive comparison of the matched pair). |
+
+**Matching a `oneOf`/`anyOf`/`allOf` member across baseline and current** (so a reordered or
+renumbered union doesn't manufacture spurious adds/removes) uses this priority, per member:
+
+1. The discriminator mapping value, when the owning schema declares a `discriminator` — matches by the
+   discriminator's semantic name (e.g. `"dog"`), independent of position.
+2. Else the member's `$ref` target name (e.g. `"Dog"` from `#/components/schemas/Dog`).
+3. Else its position in the array.
+
+`allOf` matches its `$ref` members by target name and its inline members by position among the inline
+members (the two pools are matched independently).
+
+An `items` schema present on only one side (while both sides agree on `type: array`) is treated as a
+`TypeChanged`, not silently skipped — the array's element contract appeared or disappeared entirely.
+
+### Breaking-direction table
+
+Classification is direction-aware — see [contract testing](cookbooks/contract-testing.md) for the
+full default table including the older kinds. The rows added for union-aware comparison:
+
+| Change | Request schema (what the service accepts) | Response schema (what consumers receive) |
+|---|---|---|
+| Union variant **removed** | **Breaking** (callers still sending it are rejected) | Non-breaking |
+| Union variant **added** | Non-breaking | **Breaking** (consumers meet an unknown variant) |
+| `Items` appears/disappears on one side | Breaking (as type change) | Breaking (as type change) |
+
+This table is reproduced verbatim from the design ruling
+(`work/bug-fix-designs-2026-08.md` §"WP-9 — Schema compatibility: union-aware walkers") and applies
+identically to `oneOf`/`anyOf` variants and to `allOf` members (both use the `UnionVariantAdded`/
+`UnionVariantRemoved` kinds — there is no separate `allOf`-specific kind). `UnionVariantChanged` itself
+carries no direction-specific rule; its compatibility falls to the rules table's default (`Warning`) —
+the concrete impact of a changed variant is carried by the nested changes reported alongside it, which
+are independently classified by their own kind.
+
 ## The version-pinning caveat
 
 `benzene-descriptor` loads the service assembly into a plugin `AssemblyLoadContext` that **prefers

@@ -120,9 +120,15 @@ The default rules are direction-aware (see `SchemaCompatibilityRules.DefaultFor`
 | Required property added | **breaking** | compatible |
 | Property removed | warning | **breaking** |
 | Type changed | **breaking** | **breaking** |
+| Union variant (`oneOf`/`anyOf`/`allOf`) added | compatible | **breaking** |
+| Union variant (`oneOf`/`anyOf`/`allOf`) removed | **breaking** | compatible |
+| `items` schema appears/disappears on one side (type change) | **breaking** | **breaking** |
 
 Pass `SchemaCompatibilityRules.Strict()` to treat every non-compatible change as breaking, or
 `.Set(kind, direction, compatibility)` to override individual rules.
+
+See [Contract Artifacts](../contract-artifacts.md#what-the-compatibility-comparer-detects) for the
+full `SchemaChangeKind` vocabulary and the `oneOf`/`anyOf`/`allOf` member-matching rule.
 
 ## Further reading
 

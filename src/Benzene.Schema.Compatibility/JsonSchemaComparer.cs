@@ -123,11 +123,233 @@ public static class JsonSchemaComparer
                 $"{path}.{prop.Key}", changes, rules, depth + 1);
         }
 
-        if (baseline["items"] is JsonObject baselineItems && current["items"] is JsonObject currentItems)
+        var baselineHasItems = baseline["items"] is JsonObject;
+        var currentHasItems = current["items"] is JsonObject;
+
+        if (baselineHasItems && currentHasItems)
         {
-            Walk(baselineItems, currentItems, direction, topic, $"{path}[]", changes, rules, depth + 1);
+            Walk(baseline["items"] as JsonObject, current["items"] as JsonObject, direction, topic,
+                $"{path}[]", changes, rules, depth + 1);
+        }
+        else if (Str(baseline, "type") == "array" && (baselineHasItems || currentHasItems))
+        {
+            // One side has an item schema and the other doesn't - not "nothing to compare", a type
+            // change: the array's element contract appeared or disappeared entirely.
+            var description = baselineHasItems ? "Array item schema was removed" : "Array item schema was added";
+            changes.Add(Change(SchemaChangeKind.TypeChanged, direction, topic, $"{path}[]", description, rules));
+        }
+
+        CompareUnionMembers(baseline, current, direction, topic, path, changes, rules, depth, "oneOf");
+        CompareUnionMembers(baseline, current, direction, topic, path, changes, rules, depth, "anyOf");
+        CompareAllOfMembers(baseline, current, direction, topic, path, changes, rules, depth);
+    }
+
+    /// <summary>
+    /// Walks a <c>oneOf</c>/<c>anyOf</c> member array pairwise between baseline and current. Matching
+    /// priority: (1) discriminator mapping value, when the owning schema declares one; (2) <c>$ref</c>
+    /// target name; (3) position. Unmatched baseline members are <see cref="SchemaChangeKind.UnionVariantRemoved"/>,
+    /// unmatched current members are <see cref="SchemaChangeKind.UnionVariantAdded"/>, and a matched pair
+    /// that differs recurses and is reported as/within <see cref="SchemaChangeKind.UnionVariantChanged"/>.
+    /// </summary>
+    private static void CompareUnionMembers(JsonObject baseline, JsonObject current, SchemaDirection direction,
+        string topic, string path, List<SchemaChange> changes, SchemaCompatibilityRules rules, int depth, string keyword)
+    {
+        var baselineMembers = baseline[keyword] as JsonArray;
+        var currentMembers = current[keyword] as JsonArray;
+
+        if ((baselineMembers == null || baselineMembers.Count == 0) && (currentMembers == null || currentMembers.Count == 0))
+        {
+            return;
+        }
+
+        var baselineByKey = IndexVariants(baseline, baselineMembers);
+        var currentByKey = IndexVariants(current, currentMembers);
+
+        foreach (var entry in baselineByKey)
+        {
+            if (!currentByKey.ContainsKey(entry.Key))
+            {
+                var name = VariantName(entry.Value);
+                changes.Add(Change(SchemaChangeKind.UnionVariantRemoved, direction, topic, $"{path}.{keyword}[{name}]",
+                    $"Union variant '{name}' was removed from {keyword}", rules));
+            }
+        }
+
+        foreach (var entry in currentByKey)
+        {
+            if (!baselineByKey.ContainsKey(entry.Key))
+            {
+                var name = VariantName(entry.Value);
+                changes.Add(Change(SchemaChangeKind.UnionVariantAdded, direction, topic, $"{path}.{keyword}[{name}]",
+                    $"Union variant '{name}' was added to {keyword}", rules));
+            }
+        }
+
+        foreach (var entry in baselineByKey)
+        {
+            if (!currentByKey.TryGetValue(entry.Key, out var currentVariant))
+            {
+                continue;
+            }
+
+            var name = VariantName(entry.Value);
+            var variantPath = $"{path}.{keyword}[{name}]";
+            RecurseIntoMatchedVariant(entry.Value, currentVariant, direction, topic, variantPath, changes, rules,
+                depth, name);
         }
     }
+
+    /// <summary>
+    /// Walks <c>allOf</c> pairwise: <c>$ref</c> members match by target name, inline members match by
+    /// their position among the inline members. Added/removed/changed members are reported the same way
+    /// as <see cref="CompareUnionMembers"/>.
+    /// </summary>
+    private static void CompareAllOfMembers(JsonObject baseline, JsonObject current, SchemaDirection direction,
+        string topic, string path, List<SchemaChange> changes, SchemaCompatibilityRules rules, int depth)
+    {
+        var baselineMembers = baseline["allOf"] as JsonArray;
+        var currentMembers = current["allOf"] as JsonArray;
+
+        if ((baselineMembers == null || baselineMembers.Count == 0) && (currentMembers == null || currentMembers.Count == 0))
+        {
+            return;
+        }
+
+        var baselineList = (baselineMembers ?? new JsonArray()).OfType<JsonObject>().ToList();
+        var currentList = (currentMembers ?? new JsonArray()).OfType<JsonObject>().ToList();
+
+        var baselineRefs = baselineList.Where(m => RefId(m) != null).ToDictionary(m => RefId(m)!, m => m);
+        var currentRefs = currentList.Where(m => RefId(m) != null).ToDictionary(m => RefId(m)!, m => m);
+        var baselineInline = baselineList.Where(m => RefId(m) == null).ToList();
+        var currentInline = currentList.Where(m => RefId(m) == null).ToList();
+
+        foreach (var entry in baselineRefs)
+        {
+            if (!currentRefs.ContainsKey(entry.Key))
+            {
+                changes.Add(Change(SchemaChangeKind.UnionVariantRemoved, direction, topic, $"{path}.allOf[{entry.Key}]",
+                    $"allOf member '{entry.Key}' was removed", rules));
+            }
+        }
+
+        foreach (var entry in currentRefs)
+        {
+            if (!baselineRefs.ContainsKey(entry.Key))
+            {
+                changes.Add(Change(SchemaChangeKind.UnionVariantAdded, direction, topic, $"{path}.allOf[{entry.Key}]",
+                    $"allOf member '{entry.Key}' was added", rules));
+            }
+        }
+
+        foreach (var entry in baselineRefs)
+        {
+            if (currentRefs.TryGetValue(entry.Key, out var currentMember))
+            {
+                RecurseIntoMatchedVariant(entry.Value, currentMember, direction, topic, $"{path}.allOf[{entry.Key}]",
+                    changes, rules, depth, entry.Key);
+            }
+        }
+
+        for (var i = 0; i < Math.Min(baselineInline.Count, currentInline.Count); i++)
+        {
+            RecurseIntoMatchedVariant(baselineInline[i], currentInline[i], direction, topic, $"{path}.allOf[{i}]",
+                changes, rules, depth, $"#{i}");
+        }
+
+        for (var i = currentInline.Count; i < baselineInline.Count; i++)
+        {
+            changes.Add(Change(SchemaChangeKind.UnionVariantRemoved, direction, topic, $"{path}.allOf[{i}]",
+                $"allOf member '#{i}' was removed", rules));
+        }
+
+        for (var i = baselineInline.Count; i < currentInline.Count; i++)
+        {
+            changes.Add(Change(SchemaChangeKind.UnionVariantAdded, direction, topic, $"{path}.allOf[{i}]",
+                $"allOf member '#{i}' was added", rules));
+        }
+    }
+
+    /// <summary>
+    /// Recurses into a matched pair using the same top-level comparison logic; if that recursion finds
+    /// any difference, a single <see cref="SchemaChangeKind.UnionVariantChanged"/> entry is inserted
+    /// immediately before the differences it found, so the report reads as "variant X changed" followed
+    /// by (within) exactly what changed.
+    /// </summary>
+    private static void RecurseIntoMatchedVariant(JsonObject baselineVariant, JsonObject currentVariant,
+        SchemaDirection direction, string topic, string variantPath, List<SchemaChange> changes,
+        SchemaCompatibilityRules rules, int depth, string name)
+    {
+        var before = changes.Count;
+        Walk(baselineVariant, currentVariant, direction, topic, variantPath, changes, rules, depth + 1);
+
+        if (changes.Count > before)
+        {
+            changes.Insert(before, Change(SchemaChangeKind.UnionVariantChanged, direction, topic, variantPath,
+                $"Variant '{name}' changed", rules));
+        }
+    }
+
+    /// <summary>
+    /// Indexes a <c>oneOf</c>/<c>anyOf</c> member array by its matching key: the discriminator mapping
+    /// value that points at this member when <paramref name="owner"/> declares one, else its <c>$ref</c>
+    /// target name, else its position.
+    /// </summary>
+    private static Dictionary<string, JsonObject> IndexVariants(JsonObject owner, JsonArray? members)
+    {
+        var result = new Dictionary<string, JsonObject>();
+        if (members == null)
+        {
+            return result;
+        }
+
+        var mapping = owner["discriminator"] is JsonObject discriminator ? discriminator["mapping"] as JsonObject : null;
+
+        for (var i = 0; i < members.Count; i++)
+        {
+            if (members[i] is not JsonObject member)
+            {
+                continue;
+            }
+
+            result[VariantKey(mapping, member, i)] = member;
+        }
+
+        return result;
+    }
+
+    private static string VariantKey(JsonObject? mapping, JsonObject member, int index)
+    {
+        var refId = RefId(member);
+
+        if (mapping != null && refId != null)
+        {
+            foreach (var entry in mapping)
+            {
+                if (entry.Value is JsonValue value && value.TryGetValue<string>(out var target)
+                    && RefTargetName(target) == refId)
+                {
+                    return $"disc:{entry.Key}";
+                }
+            }
+        }
+
+        return refId != null ? $"ref:{refId}" : $"idx:{index}";
+    }
+
+    /// <summary>The <c>$ref</c> target name of a member, e.g. <c>"Dog"</c> from
+    /// <c>"#/components/schemas/Dog"</c>, or <c>null</c> when the member is inline.</summary>
+    private static string? RefId(JsonObject member) =>
+        member["$ref"] is JsonValue value && value.TryGetValue<string>(out var text) ? RefTargetName(text) : null;
+
+    /// <summary>The schema name a <c>$ref</c>/discriminator-mapping pointer targets, e.g. <c>"Dog"</c>
+    /// from either a bare name or a full <c>"#/components/schemas/Dog"</c> pointer.</summary>
+    private static string RefTargetName(string pointer)
+    {
+        var slash = pointer.LastIndexOf('/');
+        return slash >= 0 ? pointer[(slash + 1)..] : pointer;
+    }
+
+    private static string VariantName(JsonObject variant) => RefId(variant) ?? Describe(variant);
 
     /// <summary>
     /// The properties map, or an empty one. Ordinal comparison matches JSON's own semantics and the

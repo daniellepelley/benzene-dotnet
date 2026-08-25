@@ -209,6 +209,218 @@ public class JsonSchemaComparerTest
         Assert.Contains(viaJson, c => c.Item1 == SchemaChangeKind.PropertyRemoved && c.Item3 == $"{Topic}.request.matrix[][].flag");
     }
 
+    // ---- oneOf / anyOf / allOf (union-aware walkers, WP-9) ----
+    // Each case drives the same schema pair through both walkers and asserts identical tuples, the
+    // same discipline as the corpus above and NestedArrayItems - plus the exact verdict the ruling's
+    // breaking-direction table calls for, so a parity match alone can't hide both walkers agreeing on
+    // the wrong answer.
+
+    [Fact]
+    public void BothWalkers_ProduceIdenticalChangeSets_UnionVariantRemoved_ResponseIsNonBreaking()
+    {
+        // The exact round-6 probe: oneOf:[Dog,Cat] response narrows to oneOf:[Dog]. Before WP-9 this
+        // was reported as zero changes on both walkers. Per the ruling's table, a response variant
+        // removal is non-breaking - consumers simply never see the removed variant again.
+        var openApiReport = new SchemaCompatibilityComparer().Compare(
+            DocWithComponents(PetComponentsOpenApi(), Req(Topic, OpenApi(NoFields), OneOfOpenApi("Dog", "Cat"))),
+            DocWithComponents(PetComponentsOpenApi(), Req(Topic, OpenApi(NoFields), OneOfOpenApi("Dog"))));
+        var viaOpenApi = openApiReport.Changes.Where(c => c.Direction == SchemaDirection.Response).Select(Tuple).ToArray();
+
+        var viaJson = JsonSchemaComparer
+            .Compare(OneOfJson("Dog", "Cat"), OneOfJson("Dog"), SchemaDirection.Response, Topic, $"{Topic}.response")
+            .Select(Tuple).ToArray();
+
+        Assert.Equal(viaOpenApi, viaJson);
+
+        var change = Assert.Single(viaJson);
+        Assert.Equal(SchemaChangeKind.UnionVariantRemoved, change.Item1);
+        Assert.Equal(ChangeCompatibility.Compatible, change.Item5);
+    }
+
+    [Fact]
+    public void BothWalkers_ProduceIdenticalChangeSets_UnionVariantAdded_RequestIsNonBreaking()
+    {
+        var openApiReport = new SchemaCompatibilityComparer().Compare(
+            DocWithComponents(PetComponentsOpenApi(), Req(Topic, OneOfOpenApi("Dog"), OpenApi(NoFields))),
+            DocWithComponents(PetComponentsOpenApi(), Req(Topic, OneOfOpenApi("Dog", "Cat"), OpenApi(NoFields))));
+        var viaOpenApi = openApiReport.Changes.Where(c => c.Direction == SchemaDirection.Request).Select(Tuple).ToArray();
+
+        var viaJson = JsonSchemaComparer
+            .Compare(OneOfJson("Dog"), OneOfJson("Dog", "Cat"), SchemaDirection.Request, Topic, $"{Topic}.request")
+            .Select(Tuple).ToArray();
+
+        Assert.Equal(viaOpenApi, viaJson);
+
+        var change = Assert.Single(viaJson);
+        Assert.Equal(SchemaChangeKind.UnionVariantAdded, change.Item1);
+        Assert.Equal(ChangeCompatibility.Compatible, change.Item5);
+    }
+
+    [Fact]
+    public void BothWalkers_ProduceIdenticalChangeSets_DiscriminatorMatching_ReorderedVariantsProduceNoChanges()
+    {
+        // Same two variants, same discriminator mapping, opposite order. Index-based matching would
+        // pair baseline[0]=Dog against current[0]=Cat and report spurious changes; discriminator-value
+        // matching must still pair Dog-with-Dog and Cat-with-Cat and find nothing.
+        var openApiReport = new SchemaCompatibilityComparer().Compare(
+            DocWithComponents(PetComponentsOpenApi(), Req(Topic, OpenApi(NoFields), DiscriminatedOneOfOpenApi("Dog", "Cat"))),
+            DocWithComponents(PetComponentsOpenApi(), Req(Topic, OpenApi(NoFields), DiscriminatedOneOfOpenApi("Cat", "Dog"))));
+        var viaOpenApi = openApiReport.Changes.Where(c => c.Direction == SchemaDirection.Response).Select(Tuple).ToArray();
+
+        var viaJson = JsonSchemaComparer
+            .Compare(DiscriminatedOneOfJson("Dog", "Cat"), DiscriminatedOneOfJson("Cat", "Dog"), SchemaDirection.Response,
+                Topic, $"{Topic}.response")
+            .Select(Tuple).ToArray();
+
+        Assert.Equal(viaOpenApi, viaJson);
+        Assert.Empty(viaJson);
+    }
+
+    [Fact]
+    public void BothWalkers_ProduceIdenticalChangeSets_UnionVariantChanged_MatchedPairDiffers()
+    {
+        var currentComponents = PetComponentsOpenApi();
+        currentComponents.Schemas["Dog"].Properties["size"] = new OpenApiSchema { Type = "string" };
+
+        var openApiReport = new SchemaCompatibilityComparer().Compare(
+            DocWithComponents(PetComponentsOpenApi(), Req(Topic, OpenApi(NoFields), OneOfOpenApi("Dog", "Cat"))),
+            DocWithComponents(currentComponents, Req(Topic, OpenApi(NoFields), OneOfOpenApi("Dog", "Cat"))));
+        var viaOpenApi = openApiReport.Changes.Where(c => c.Direction == SchemaDirection.Response).Select(Tuple).ToArray();
+
+        var baselineJson = OneOfJson("Dog", "Cat");
+        var currentJson = OneOfJson("Dog", "Cat");
+        ((JsonObject)currentJson["oneOf"]![0]!)["properties"]!["size"] = new JsonObject { ["type"] = "string" };
+
+        var viaJson = JsonSchemaComparer
+            .Compare(baselineJson, currentJson, SchemaDirection.Response, Topic, $"{Topic}.response")
+            .Select(Tuple).ToArray();
+
+        Assert.Equal(viaOpenApi, viaJson);
+        Assert.Equal(2, viaJson.Length);
+        Assert.Equal(SchemaChangeKind.UnionVariantChanged, viaJson[0].Item1);
+        Assert.Equal(SchemaChangeKind.PropertyAdded, viaJson[1].Item1);
+    }
+
+    [Fact]
+    public void BothWalkers_ProduceIdenticalChangeSets_AllOfMemberRemoved_RequestIsBreaking()
+    {
+        var openApiReport = new SchemaCompatibilityComparer().Compare(
+            DocWithComponents(PetComponentsOpenApi(), Req(Topic, AllOfOpenApi("Dog", "Cat"), OpenApi(NoFields))),
+            DocWithComponents(PetComponentsOpenApi(), Req(Topic, AllOfOpenApi("Dog"), OpenApi(NoFields))));
+        var viaOpenApi = openApiReport.Changes.Where(c => c.Direction == SchemaDirection.Request).Select(Tuple).ToArray();
+
+        var viaJson = JsonSchemaComparer
+            .Compare(AllOfJson("Dog", "Cat"), AllOfJson("Dog"), SchemaDirection.Request, Topic, $"{Topic}.request")
+            .Select(Tuple).ToArray();
+
+        Assert.Equal(viaOpenApi, viaJson);
+
+        var change = Assert.Single(viaJson);
+        Assert.Equal(SchemaChangeKind.UnionVariantRemoved, change.Item1);
+        Assert.Equal(ChangeCompatibility.Breaking, change.Item5);
+    }
+
+    [Fact]
+    public void BothWalkers_ProduceIdenticalChangeSets_AllOfMemberRemoved_ResponseIsNonBreaking()
+    {
+        var openApiReport = new SchemaCompatibilityComparer().Compare(
+            DocWithComponents(PetComponentsOpenApi(), Req(Topic, OpenApi(NoFields), AllOfOpenApi("Dog", "Cat"))),
+            DocWithComponents(PetComponentsOpenApi(), Req(Topic, OpenApi(NoFields), AllOfOpenApi("Dog"))));
+        var viaOpenApi = openApiReport.Changes.Where(c => c.Direction == SchemaDirection.Response).Select(Tuple).ToArray();
+
+        var viaJson = JsonSchemaComparer
+            .Compare(AllOfJson("Dog", "Cat"), AllOfJson("Dog"), SchemaDirection.Response, Topic, $"{Topic}.response")
+            .Select(Tuple).ToArray();
+
+        Assert.Equal(viaOpenApi, viaJson);
+
+        var change = Assert.Single(viaJson);
+        Assert.Equal(SchemaChangeKind.UnionVariantRemoved, change.Item1);
+        Assert.Equal(ChangeCompatibility.Compatible, change.Item5);
+    }
+
+    [Fact]
+    public void BothWalkers_ProduceIdenticalChangeSets_AllOfMemberAdded_RequestIsNonBreaking()
+    {
+        var openApiReport = new SchemaCompatibilityComparer().Compare(
+            DocWithComponents(PetComponentsOpenApi(), Req(Topic, AllOfOpenApi("Dog"), OpenApi(NoFields))),
+            DocWithComponents(PetComponentsOpenApi(), Req(Topic, AllOfOpenApi("Dog", "Cat"), OpenApi(NoFields))));
+        var viaOpenApi = openApiReport.Changes.Where(c => c.Direction == SchemaDirection.Request).Select(Tuple).ToArray();
+
+        var viaJson = JsonSchemaComparer
+            .Compare(AllOfJson("Dog"), AllOfJson("Dog", "Cat"), SchemaDirection.Request, Topic, $"{Topic}.request")
+            .Select(Tuple).ToArray();
+
+        Assert.Equal(viaOpenApi, viaJson);
+
+        var change = Assert.Single(viaJson);
+        Assert.Equal(SchemaChangeKind.UnionVariantAdded, change.Item1);
+        Assert.Equal(ChangeCompatibility.Compatible, change.Item5);
+    }
+
+    [Fact]
+    public void BothWalkers_ProduceIdenticalChangeSets_AllOfMemberAdded_ResponseIsBreaking()
+    {
+        var openApiReport = new SchemaCompatibilityComparer().Compare(
+            DocWithComponents(PetComponentsOpenApi(), Req(Topic, OpenApi(NoFields), AllOfOpenApi("Dog"))),
+            DocWithComponents(PetComponentsOpenApi(), Req(Topic, OpenApi(NoFields), AllOfOpenApi("Dog", "Cat"))));
+        var viaOpenApi = openApiReport.Changes.Where(c => c.Direction == SchemaDirection.Response).Select(Tuple).ToArray();
+
+        var viaJson = JsonSchemaComparer
+            .Compare(AllOfJson("Dog"), AllOfJson("Dog", "Cat"), SchemaDirection.Response, Topic, $"{Topic}.response")
+            .Select(Tuple).ToArray();
+
+        Assert.Equal(viaOpenApi, viaJson);
+
+        var change = Assert.Single(viaJson);
+        Assert.Equal(SchemaChangeKind.UnionVariantAdded, change.Item1);
+        Assert.Equal(ChangeCompatibility.Breaking, change.Item5);
+    }
+
+    [Fact]
+    public void BothWalkers_ProduceIdenticalChangeSets_ItemsAsymmetry_RequestIsBreaking()
+    {
+        var openApiReport = new SchemaCompatibilityComparer().Compare(
+            DocOf(Req(Topic, new OpenApiSchema { Type = "array" }, OpenApi(NoFields))),
+            DocOf(Req(Topic, new OpenApiSchema { Type = "array", Items = new OpenApiSchema { Type = "string" } }, OpenApi(NoFields))));
+        var viaOpenApi = openApiReport.Changes.Where(c => c.Direction == SchemaDirection.Request).Select(Tuple).ToArray();
+
+        var baselineJson = new JsonObject { ["type"] = "array" };
+        var currentJson = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" } };
+
+        var viaJson = JsonSchemaComparer
+            .Compare(baselineJson, currentJson, SchemaDirection.Request, Topic, $"{Topic}.request")
+            .Select(Tuple).ToArray();
+
+        Assert.Equal(viaOpenApi, viaJson);
+
+        var change = Assert.Single(viaJson);
+        Assert.Equal(SchemaChangeKind.TypeChanged, change.Item1);
+        Assert.Equal(ChangeCompatibility.Breaking, change.Item5);
+    }
+
+    [Fact]
+    public void BothWalkers_ProduceIdenticalChangeSets_ItemsAsymmetry_ResponseIsBreaking()
+    {
+        var openApiReport = new SchemaCompatibilityComparer().Compare(
+            DocOf(Req(Topic, OpenApi(NoFields), new OpenApiSchema { Type = "array", Items = new OpenApiSchema { Type = "string" } })),
+            DocOf(Req(Topic, OpenApi(NoFields), new OpenApiSchema { Type = "array" })));
+        var viaOpenApi = openApiReport.Changes.Where(c => c.Direction == SchemaDirection.Response).Select(Tuple).ToArray();
+
+        var baselineJson = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" } };
+        var currentJson = new JsonObject { ["type"] = "array" };
+
+        var viaJson = JsonSchemaComparer
+            .Compare(baselineJson, currentJson, SchemaDirection.Response, Topic, $"{Topic}.response")
+            .Select(Tuple).ToArray();
+
+        Assert.Equal(viaOpenApi, viaJson);
+
+        var change = Assert.Single(viaJson);
+        Assert.Equal(SchemaChangeKind.TypeChanged, change.Item1);
+        Assert.Equal(ChangeCompatibility.Breaking, change.Item5);
+    }
+
     private static OpenApiSchema MatrixCell(bool includeFlag)
     {
         var properties = new Dictionary<string, OpenApiSchema> { ["cell"] = new OpenApiSchema { Type = "string" } };
@@ -303,6 +515,69 @@ public class JsonSchemaComparerTest
         new() { Topic = topic, Version = "", Request = request, Response = response };
 
     private static EventServiceDocument DocOf(params RequestResponse[] requests) =>
-        new(new OpenApiInfo(), [], requests, [],
-            new OpenApiComponents { Schemas = new Dictionary<string, OpenApiSchema>() });
+        DocWithComponents(new OpenApiComponents { Schemas = new Dictionary<string, OpenApiSchema>() }, requests);
+
+    private static EventServiceDocument DocWithComponents(OpenApiComponents components, params RequestResponse[] requests) =>
+        new(new OpenApiInfo(), [], requests, [], components);
+
+    // ---- oneOf / anyOf / allOf helpers (WP-9) ----
+    // "Dog" and "Cat" are the fixed pair used throughout: each carries one distinguishing property
+    // (sound) so a matched-pair recursion has something to find when a test deliberately changes one.
+
+    private static OpenApiSchema RefSchema(string name) =>
+        new() { Reference = new OpenApiReference { Type = ReferenceType.Schema, Id = name } };
+
+    private static OpenApiSchema OneOfOpenApi(params string[] names) => new() { OneOf = names.Select(RefSchema).ToList() };
+
+    private static OpenApiSchema AllOfOpenApi(params string[] names) => new() { AllOf = names.Select(RefSchema).ToList() };
+
+    private static OpenApiSchema DiscriminatedOneOfOpenApi(params string[] names) => new()
+    {
+        OneOf = names.Select(RefSchema).ToList(),
+        Discriminator = new OpenApiDiscriminator
+        {
+            PropertyName = "petType",
+            Mapping = names.ToDictionary(n => n.ToLowerInvariant(), n => $"#/components/schemas/{n}")
+        }
+    };
+
+    private static OpenApiComponents PetComponentsOpenApi() => new()
+    {
+        Schemas = new Dictionary<string, OpenApiSchema>
+        {
+            ["Dog"] = PetOpenApi(),
+            ["Cat"] = PetOpenApi()
+        }
+    };
+
+    private static OpenApiSchema PetOpenApi() =>
+        new() { Type = "object", Properties = new Dictionary<string, OpenApiSchema> { ["sound"] = new() { Type = "string" } } };
+
+    private static JsonObject PetJson(string name) => new()
+    {
+        ["type"] = "object",
+        ["$ref"] = $"#/components/schemas/{name}",
+        ["properties"] = new JsonObject { ["sound"] = new JsonObject { ["type"] = "string" } }
+    };
+
+    private static JsonObject OneOfJson(params string[] names) =>
+        new() { ["oneOf"] = new JsonArray(names.Select(n => (JsonNode)PetJson(n)).ToArray()) };
+
+    private static JsonObject AllOfJson(params string[] names) =>
+        new() { ["allOf"] = new JsonArray(names.Select(n => (JsonNode)PetJson(n)).ToArray()) };
+
+    private static JsonObject DiscriminatedOneOfJson(params string[] names)
+    {
+        var mapping = new JsonObject();
+        foreach (var name in names)
+        {
+            mapping[name.ToLowerInvariant()] = $"#/components/schemas/{name}";
+        }
+
+        return new JsonObject
+        {
+            ["oneOf"] = new JsonArray(names.Select(n => (JsonNode)PetJson(n)).ToArray()),
+            ["discriminator"] = new JsonObject { ["propertyName"] = "petType", ["mapping"] = mapping }
+        };
+    }
 }
