@@ -198,6 +198,13 @@ hosted a live cross-language fleet (Go and C# services in one view - see the roa
   rendered as reduced - traces from an unregistered service create an anonymous-but-live row,
   a registered service with no traffic is a catalog entry with no stats, and no missing feed
   ever fails ingestion or a query.
+- **P5 (2026-08, WP-2a) - query-side inputs get the same "never throw, degrade to absent"
+  discipline as ingest.** The ingest-side rule above ("no missing feed ever fails ingestion") has
+  a query-side mirror: `MeshTimeRangeResolver`'s parsers treat an unparseable **or unrepresentable**
+  bound as absent, never an exception - `ParseBound` already did this for a malformed string;
+  `ParseDuration` now does it for a count that would overflow `TimeSpan` too (e.g.
+  `now-100000000d`), so a bad/extreme window on `mesh:query:*` degrades to unfiltered rather than
+  500ing the request. Any new query-side parser added to this package follows the same contract.
 - The query shapes are asserted by `mesh-collector-cases.json` as the observable surface for
   the ingest/derivation rules; treat them as fixture-pinned even though the spec doesn't promote
   them as cross-port contracts yet (spec §4's note).
