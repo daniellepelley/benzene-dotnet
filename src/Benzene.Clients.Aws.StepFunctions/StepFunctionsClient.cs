@@ -1,4 +1,5 @@
 using System;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using Amazon.StepFunctions;
@@ -171,12 +172,39 @@ public class StepFunctionsClient : IStepFunctionsClient
         return $"{prefix}:execution:{stateMachineName}:{executionName}";
     }
 
+    // 71 (truncated sanitized prefix) + 1 ('-' separator) + 8 (hex hash) = 80, Step Functions' name
+    // length cap.
+    private const int TruncatedNamePrefixLength = 71;
+    private const int HashSuffixLength = 8;
+
     /// <summary>
     /// Sanitizes an idempotency token into a valid Step Functions execution name: Step Functions
     /// rejects whitespace, control characters, and the set <c>&lt; &gt; { } [ ] ? * " # % \ ^ | ~ ` $ &amp; , ; : /</c>,
-    /// and caps the name at 80 characters. Disallowed characters are replaced with <c>-</c>. Returns
-    /// <c>null</c> for a null/empty token so AWS generates a UUID name.
+    /// and caps the name at 80 characters. Returns <c>null</c> for a null/empty token so AWS generates
+    /// a UUID name.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An already-clean name (no disallowed character, no more than 80 characters) is returned
+    /// unchanged. Otherwise, disallowed characters are first replaced with <c>-</c>, and then - because
+    /// EITHER that replacement OR the 80-character cap makes the result no longer uniquely identify the
+    /// original input - the result is the replaced name truncated to <see cref="TruncatedNamePrefixLength"/>
+    /// characters, a <c>-</c>, and the first <see cref="HashSuffixLength"/> lowercase hex characters of
+    /// SHA-256(original name, UTF-8).
+    /// </para>
+    /// <para>
+    /// Both cases this guards against are otherwise silent: two distinct names that replace to the
+    /// SAME string (e.g. <c>"a/b"</c> and <c>"a.b"</c>, if both <c>/</c> and <c>.</c> mapped to the same
+    /// replacement) or that are identical for the first 80 characters would, without the hash suffix,
+    /// collide onto the same Step Functions execution name. That collision would then defeat (b)'s
+    /// <see cref="ExecutionAlreadyExistsException"/>/<c>DescribeExecution</c> idempotency check - two
+    /// callers with genuinely different inputs would appear to be retrying the SAME logical call. The
+    /// hash is computed from the ORIGINAL (pre-replacement, pre-truncation) name specifically so it
+    /// stays deterministic (same input always produces the same execution name, which (b)'s idempotent
+    /// start relies on) while being collision-resistant across distinct originals that happen to
+    /// sanitize or truncate alike.
+    /// </para>
+    /// </remarks>
     private static string? SanitizeExecutionName(string? executionName)
     {
         if (string.IsNullOrEmpty(executionName))
@@ -192,8 +220,23 @@ public class StepFunctionsClient : IStepFunctionsClient
             builder.Append(allowed ? c : '-');
         }
 
-        var sanitized = builder.ToString();
-        return sanitized.Length > 80 ? sanitized.Substring(0, 80) : sanitized;
+        var replaced = builder.ToString();
+
+        if (replaced == executionName && executionName.Length <= TruncatedNamePrefixLength + 1 + HashSuffixLength)
+        {
+            // Nothing was replaced, and the name is already within Step Functions' 80-character cap:
+            // leave it exactly as given.
+            return executionName;
+        }
+
+        var truncated = replaced.Length > TruncatedNamePrefixLength ? replaced.Substring(0, TruncatedNamePrefixLength) : replaced;
+        return $"{truncated}-{HashOriginalName(executionName)}";
+    }
+
+    private static string HashOriginalName(string executionName)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(executionName));
+        return Convert.ToHexStringLower(hash)[..HashSuffixLength];
     }
 
     /// <summary>
