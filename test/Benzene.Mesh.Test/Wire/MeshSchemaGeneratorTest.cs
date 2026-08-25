@@ -148,6 +148,18 @@ public class MeshSchemaGeneratorTest
     }
 
     [Fact]
+    public void Derive_Required_IsEmittedInOrdinalOrder_RegardlessOfDeclarationOrder()
+    {
+        // Regression for #7: reflection order is unspecified across runtimes, so "required" must be sorted
+        // the same way "properties" already is (StringComparer.Ordinal), not left in declaration order -
+        // otherwise the descriptor hash isn't reproducible.
+        var schema = MeshSchemaGenerator.Derive(typeof(OutOfOrderRequiredProperties));
+
+        var required = schema["required"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
+        Assert.Equal(new[] { "alpha", "mike", "zeta" }, required);
+    }
+
+    [Fact]
     public void Derive_RecursiveType_CutsTheCycleWithAnUnconstrainedSchema()
     {
         var schema = MeshSchemaGenerator.Derive(typeof(RecursiveNode));
@@ -183,6 +195,13 @@ public class MeshSchemaGeneratorTest
     }
 
     private class OutOfOrderProperties
+    {
+        public string Zeta { get; set; } = string.Empty;
+        public string Alpha { get; set; } = string.Empty;
+        public string Mike { get; set; } = string.Empty;
+    }
+
+    private class OutOfOrderRequiredProperties
     {
         public string Zeta { get; set; } = string.Empty;
         public string Alpha { get; set; } = string.Empty;
