@@ -117,6 +117,29 @@ eviction, Saga per-run state".
   runs).** Outcome now lives in a run-scoped `SagaStepOutcome` created fresh per run; a built `Saga` is
   documented immutable and concurrency-safe. See WP-7(e).
 
+### Tracked findings round 5–6, WP-2 — Mesh collector robustness, deterministic schema, example posture (done)
+Decisions, rationale, and rejected alternatives for all three are ruled in
+[`bug-fix-designs-2026-08.md`](bug-fix-designs-2026-08.md) §"WP-2 — Mesh collector robustness,
+deterministic schema, example posture".
+- **[RESOLVED] #22 — `MeshTimeRangeResolver.ParseDuration` threw `OverflowException` on a count too
+  large for `TimeSpan` (e.g. `now-100000000d`), surfacing as an unhandled 500 on `mesh:query:*`.**
+  `ParseDuration` now treats an overflowing count exactly like an unparseable one — absent, never
+  thrown — extending `ParseBound`'s existing contract. Recorded as principle P5 ("query-side inputs
+  degrade to absent, never throw, mirroring the ingest side's 'no feed fails ingestion' rule") in
+  `src/Benzene.Mesh.Collector/CLAUDE.md`. See WP-2(a).
+- **[RESOLVED] #7 — `MeshSchemaGenerator`'s `required` array followed CLR reflection order, which is
+  unspecified across runtimes, making descriptor hashes non-reproducible.** `required` is now sorted
+  `StringComparer.Ordinal`, the same ordering `properties` already used. Accepted, one-time
+  consequence: descriptor hashes shift for any service whose reflection order wasn't already
+  alphabetical (pre-1.0, determinism is the contract). See WP-2(b).
+- **[RESOLVED] #21 — `examples/AzureMesh`'s `POST /mesh/refresh` had no guard at all (unlike
+  AwsMesh), and its README carried no unauthenticated-posture disclaimer for the mesh host itself.**
+  `UseMeshRefreshGuard` is now wired in front of the endpoint (CSRF header + manifest-age throttle,
+  same package AwsMesh already uses); the README's new "Security posture" section states plainly that
+  the mesh host itself — not just the polled services — is publicly reachable and unauthenticated,
+  demo-only posture, matching the K8sMesh/GoogleCloudMesh/AzureFunctionsMesh siblings (P7). Full OIDC
+  for this example stays out of scope. See WP-2(c).
+
 ---
 
 ## Open — maintainer decisions (the real remaining backlog)
