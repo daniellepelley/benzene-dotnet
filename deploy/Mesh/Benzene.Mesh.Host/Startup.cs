@@ -304,7 +304,7 @@ public class Startup
         // Fail fast on a config that would silently under-protect the host - see
         // MeshAuthGate.Validate's remarks. Run before UseAuthentication/the gate itself so a bad
         // config never gets as far as accepting a single request.
-        MeshAuthGate.Validate(_config.Auth);
+        MeshAuthGate.Validate(_config.Auth, _config.Dispatch.Enabled);
 
         if (string.Equals(_config.Auth.Mode, "oidc", StringComparison.OrdinalIgnoreCase))
         {
@@ -319,7 +319,7 @@ public class Startup
         // in the Benzene pipeline (including the non-file branch's UseMeshArtifacts()). Placing this
         // only inside UseHttp below would leave /artifacts world-readable whenever
         // artifactStore.type is "file" (the default) - see work/enterprise/slice-2-auth.md's "trap".
-        app.UseMiddleware<MeshAuthGate>(_config.Auth);
+        app.UseMiddleware<MeshAuthGate>(_config.Auth, _config.Dispatch.Enabled);
 
         string manifestUrl;
         if (IsFileArtifactStore)
@@ -354,7 +354,22 @@ public class Startup
                     asp.UseMeshArtifacts();
                 }
 
-                asp.UseMeshUi(path: "/mesh-ui", manifestUrl: manifestUrl, envelopeUrl: _fleetEnabled ? "/benzene/invoke" : null);
+                // WP-1(c)/(d) (#4, #5): dispatchUrl and logoutUrl are opt-in UseMeshUi parameters that
+                // existed already (Benzene.Mesh.Ui.MeshUiExtensions/MeshUiMiddleware/MeshUiPage) but
+                // this host never passed - the Test Console's send button and the Sign-out control
+                // stayed invisible even when dispatch/oidc were both wired. dispatchUrl mirrors
+                // envelopeUrl's condition but on Dispatch.Enabled instead of _fleetEnabled (with (a),
+                // dispatch.enabled now implies an auth mode where dispatch can actually work);
+                // logoutUrl only makes sense in oidc mode - MeshAuthGate.LogoutPath is the same
+                // constant HandleLogoutAsync matches against, so this and that can never drift apart.
+                asp.UseMeshUi(
+                    path: "/mesh-ui",
+                    manifestUrl: manifestUrl,
+                    envelopeUrl: _fleetEnabled ? "/benzene/invoke" : null,
+                    dispatchUrl: _config.Dispatch.Enabled ? MeshUiExtensions.DefaultDispatchUrl : null,
+                    logoutUrl: string.Equals(_config.Auth.Mode, "oidc", StringComparison.OrdinalIgnoreCase)
+                        ? MeshAuthGate.LogoutPath
+                        : null);
                 // The mesh-hosted per-service Spec UI (mesh-ui's "spec" link resolves to
                 // /mesh-spec-ui.html when the dashboard is served from this pipeline). Without it,
                 // every service card's "spec" drill-in 404s.
