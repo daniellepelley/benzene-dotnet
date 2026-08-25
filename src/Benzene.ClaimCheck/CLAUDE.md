@@ -36,6 +36,9 @@ the message, which an in-process dictionary cannot do across a fleet.
   type when no setter is registered for that transport - see `Benzene.Abstractions.Messages`'s
   `IMessageBodySetter<TContext>`, which exists today with zero implementations; the transport packages
   supply them, one 5-line setter per transport).
+- Both middlewares resolve the scope's ambient `ICancellationTokenAccessor` (optional; `null` observes
+  no cancellation) and pass its token into the `Get`/`PutAsync` call, read fresh at the point of use -
+  so a wrapping `UseTimeout` or a real transport cancellation actually bounds the store call.
 - `IClaimCheckStore` - the pluggable persistence contract: `PutAsync(body, context)` stores a
   serialized wire body and returns an opaque, store-issued reference in URI form
   (`scheme://location/key`); `GetAsync(reference)` resolves it, returning `null` for not-found/expired
@@ -43,7 +46,10 @@ the message, which an in-process dictionary cannot do across a fleet.
   configuration - a store must never fetch a reference it did not (or could not have) issued.
 - `InMemoryClaimCheckStore` - default in-process store (dictionary + lock + TTL), issuing
   `memory://{topic}/{key}` references. Single-instance only, same caveat as
-  `InMemoryIdempotencyStore`.
+  `InMemoryIdempotencyStore`. Reclamation, without a background thread: `GetAsync` evicts an entry it
+  finds expired at read time; `PutAsync` also sweeps every expired entry (at most once per
+  `SweepInterval`, 1 minute) so a payload that is never read back at all - a fan-out sibling nobody
+  consumes, an undelivered message - still gets reclaimed, bounding growth wherever it originates.
 - `ClaimCheckOptions` - `ThresholdBytes` (default 192 KiB / 196,608 bytes), `AlwaysOffload`,
   `HeaderName` (default `ClaimCheckHeaders.ClaimCheck`), `Serializer` (`null` -&gt; `JsonSerializer`).
 - `ClaimCheckHeaders.ClaimCheck` - the reserved default header name, `benzene-claim-check`.
@@ -131,7 +137,8 @@ separate packages rather than folded in here).
 - `test/Benzene.Core.Test/ClaimCheck/ClaimCheckHydrateMiddlewareTest.cs` - no-header passthrough,
   header hydration, missing blob, no setter registered.
 - `test/Benzene.Core.Test/ClaimCheck/InMemoryClaimCheckStoreTest.cs` - put/get round-trip, TTL expiry,
-  foreign-scheme mismatch, independent keys.
+  foreign-scheme mismatch, independent keys, expired-entry eviction on `GetAsync`, `PutAsync`'s sweep
+  (including entries never read back) and its once-per-`SweepInterval` gating.
 - `test/Benzene.Core.Test/ClaimCheck/ClaimCheckRoundTripTest.cs` - offload through a real
   `MiddlewarePipelineBuilder<OutboundContext>`, hydrate through a real pipeline against a fake
   transport context, both wired via DI with `InMemoryClaimCheckStore` - the stored body a real

@@ -97,6 +97,26 @@ lock-in; retry `Task.Delay` overflow; RabbitMq failed-startup lane leak; mesh pa
 SSRF/URL-restructuring; codegen NRE + int64 truncation + non-incremental generator; CORS
 wildcard+credentials and full Fetch-spec preflight compliance; spec-output caching.
 
+### Tracked findings round 5–6, WP-7 — cross-cutting hygiene (done)
+Decisions, rationale, and rejected alternatives for all five are ruled in
+[`bug-fix-designs-2026-08.md`](bug-fix-designs-2026-08.md) §"WP-7 — Cross-cutting hygiene: cancellation,
+eviction, Saga per-run state".
+- **[RESOLVED] #2 — `IHealthCheck.ExecuteAsync()` had no `CancellationToken`.** Interface now requires
+  one; every implementer (20+) forwards it into its own I/O. See WP-7(a).
+- **[RESOLVED] #26 — `SqsHealthCheck` ran its own internal timeout guard, duplicating the processor's.**
+  Guard deleted; it now relies purely on the processor's uniform timeout wrap, matching
+  `SnsHealthCheck`/`EventBridgeHealthCheck`'s shape. See WP-7(b).
+- **[RESOLVED] #1 — claim-check middleware never passed the ambient cancellation token into the store.**
+  `ClaimCheckHydrateMiddleware`/`ClaimCheckOffloadMiddleware` now resolve it via
+  `ICancellationTokenAccessor` and pass it into `IClaimCheckStore.Get/PutAsync`. See WP-7(c).
+- **[RESOLVED] #18 — `InMemoryClaimCheckStore` never actually reclaimed an expired entry.** `GetAsync`
+  now evicts an entry it finds expired; `PutAsync` also sweeps all expired entries, at most once per
+  minute, with no background thread. See WP-7(d).
+- **[RESOLVED] #15 — `SagaStep<T>`/`Stage` stored per-execution outcome as instance fields, so
+  concurrent `RunAsync()` calls on one built `Saga` could corrupt each other (round-5: 6/300 corrupted
+  runs).** Outcome now lives in a run-scoped `SagaStepOutcome` created fresh per run; a built `Saga` is
+  documented immutable and concurrency-safe. See WP-7(e).
+
 ---
 
 ## Open — maintainer decisions (the real remaining backlog)
