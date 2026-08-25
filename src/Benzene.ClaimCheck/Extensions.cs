@@ -34,7 +34,8 @@ public static class Extensions
 
         return app.Use(resolver => new ClaimCheckOffloadMiddleware(
             resolver.GetService<IClaimCheckStore>(),
-            options));
+            options,
+            resolver.TryGetService<ICancellationTokenAccessor>()));
     }
 
     /// <summary>
@@ -65,7 +66,8 @@ public static class Extensions
             resolver.GetService<IClaimCheckStore>(),
             resolver.GetService<IMessageHeadersGetter<TContext>>(),
             resolver.TryGetService<IMessageBodySetter<TContext>>(),
-            options));
+            options,
+            resolver.TryGetService<ICancellationTokenAccessor>()));
     }
 
     /// <summary>

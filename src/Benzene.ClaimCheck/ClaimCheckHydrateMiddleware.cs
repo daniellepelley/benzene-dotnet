@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Text;
+using System.Threading;
+using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Messages.Mappers;
 using Benzene.Abstractions.Middleware;
 
@@ -42,6 +44,7 @@ public class ClaimCheckHydrateMiddleware<TContext> : IMiddleware<TContext>
     private readonly IMessageHeadersGetter<TContext> _headersGetter;
     private readonly IMessageBodySetter<TContext>? _bodySetter;
     private readonly ClaimCheckOptions _options;
+    private readonly ICancellationTokenAccessor? _cancellation;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ClaimCheckHydrateMiddleware{TContext}"/> class.
@@ -55,16 +58,19 @@ public class ClaimCheckHydrateMiddleware<TContext> : IMiddleware<TContext>
     /// only when a message actually needs hydrating, not for every transport whether it ever carries
     /// a claim check or not.</param>
     /// <param name="options">Header name configuration.</param>
+    /// <param name="cancellation">Supplies the ambient cancellation token to pass into the store call; null observes no cancellation.</param>
     public ClaimCheckHydrateMiddleware(
         IClaimCheckStore store,
         IMessageHeadersGetter<TContext> headersGetter,
         IMessageBodySetter<TContext>? bodySetter,
-        ClaimCheckOptions options)
+        ClaimCheckOptions options,
+        ICancellationTokenAccessor? cancellation = null)
     {
         _store = store;
         _headersGetter = headersGetter;
         _bodySetter = bodySetter;
         _options = options;
+        _cancellation = cancellation;
     }
 
     /// <inheritdoc />
@@ -89,7 +95,10 @@ public class ClaimCheckHydrateMiddleware<TContext> : IMiddleware<TContext>
                 $"or remove UseClaimCheck<{typeof(TContext).Name}>() from the pipeline.");
         }
 
-        var body = await _store.GetAsync(reference!);
+        // Read at the point of use (not captured earlier): the ambient token can be replaced by a
+        // wrapping middleware (e.g. a timeout) for the duration of an inner call.
+        var token = _cancellation?.CancellationToken ?? CancellationToken.None;
+        var body = await _store.GetAsync(reference!, token);
         if (body == null)
         {
             throw new ClaimCheckNotFoundException(reference!);

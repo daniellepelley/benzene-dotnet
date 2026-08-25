@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Benzene.Abstractions.Serialization;
 using Benzene.ClaimCheck;
 using Benzene.Clients;
+using Benzene.Core;
 using Moq;
 using Xunit;
 
@@ -128,5 +129,24 @@ public class ClaimCheckOffloadMiddlewareTest
 
         Assert.True(context.Headers.ContainsKey("x-claim-check"));
         Assert.False(context.Headers.ContainsKey(ClaimCheckHeaders.ClaimCheck));
+    }
+
+    // WP-7 #1: IClaimCheckStore.PutAsync already accepts a CancellationToken - the bug was only that
+    // the middleware never passed the ambient one through.
+    [Fact]
+    public async Task AmbientTokenIsPassedIntoTheStoreCall()
+    {
+        using var cts = new CancellationTokenSource();
+        var accessor = new CancellationTokenAccessor { CancellationToken = cts.Token };
+        var store = new Mock<IClaimCheckStore>();
+        store.Setup(x => x.PutAsync(It.IsAny<string>(), It.IsAny<ClaimCheckPutContext>(), cts.Token))
+            .ReturnsAsync("memory://topic/1");
+        var options = new ClaimCheckOptions { ThresholdBytes = 1 };
+        var middleware = new ClaimCheckOffloadMiddleware(store.Object, options, accessor);
+        var context = new OutboundContext("orders:create", new SmallRequest());
+
+        await middleware.HandleAsync(context, () => Task.CompletedTask);
+
+        store.Verify(x => x.PutAsync(It.IsAny<string>(), It.IsAny<ClaimCheckPutContext>(), cts.Token), Times.Once);
     }
 }

@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Text;
+using System.Threading;
+using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Middleware;
 using Benzene.Abstractions.Serialization;
 using Benzene.Clients;
@@ -47,17 +49,20 @@ public class ClaimCheckOffloadMiddleware : IMiddleware<OutboundContext>
     private readonly IClaimCheckStore _store;
     private readonly ClaimCheckOptions _options;
     private readonly ISerializer _serializer;
+    private readonly ICancellationTokenAccessor? _cancellation;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ClaimCheckOffloadMiddleware"/> class.
     /// </summary>
     /// <param name="store">The store offloaded bodies are put into.</param>
     /// <param name="options">Threshold, header name, and serializer configuration.</param>
-    public ClaimCheckOffloadMiddleware(IClaimCheckStore store, ClaimCheckOptions options)
+    /// <param name="cancellation">Supplies the ambient cancellation token to pass into the store call; null observes no cancellation.</param>
+    public ClaimCheckOffloadMiddleware(IClaimCheckStore store, ClaimCheckOptions options, ICancellationTokenAccessor? cancellation = null)
     {
         _store = store;
         _options = options;
         _serializer = options.Serializer ?? new JsonSerializer();
+        _cancellation = cancellation;
     }
 
     /// <inheritdoc />
@@ -75,7 +80,10 @@ public class ClaimCheckOffloadMiddleware : IMiddleware<OutboundContext>
             return;
         }
 
-        var reference = await _store.PutAsync(body, new ClaimCheckPutContext(context.Topic));
+        // Read at the point of use (not captured earlier): the ambient token can be replaced by a
+        // wrapping middleware (e.g. a timeout) for the duration of an inner call.
+        var token = _cancellation?.CancellationToken ?? CancellationToken.None;
+        var reference = await _store.PutAsync(body, new ClaimCheckPutContext(context.Topic), token);
 
         context.Headers[_options.HeaderName] = reference;
         context.Request = new ClaimCheckPlaceholder(reference);

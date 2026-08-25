@@ -2,8 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Messages.Mappers;
 using Benzene.ClaimCheck;
+using Benzene.Core;
 using Moq;
 using Xunit;
 
@@ -35,8 +37,9 @@ public class ClaimCheckHydrateMiddlewareTest
     }
 
     private static ClaimCheckHydrateMiddleware<TestContext> Middleware(
-        IClaimCheckStore store, IMessageBodySetter<TestContext>? bodySetter, ClaimCheckOptions? options = null)
-        => new(store, new TestHeadersGetter(), bodySetter, options ?? new ClaimCheckOptions());
+        IClaimCheckStore store, IMessageBodySetter<TestContext>? bodySetter, ClaimCheckOptions? options = null,
+        ICancellationTokenAccessor? cancellation = null)
+        => new(store, new TestHeadersGetter(), bodySetter, options ?? new ClaimCheckOptions(), cancellation);
 
     [Fact]
     public async Task NoHeader_PassesThrough_WithoutTouchingStore()
@@ -113,5 +116,57 @@ public class ClaimCheckHydrateMiddlewareTest
         await Middleware(store.Object, bodySetter, options).HandleAsync(context, () => Task.CompletedTask);
 
         Assert.Equal("body", bodySetter.BodySetWith);
+    }
+
+    // WP-7 #1: IClaimCheckStore.GetAsync already accepts a CancellationToken - the bug was only that
+    // the middleware never passed the ambient one through. Proves the ambient token (resolved via
+    // ICancellationTokenAccessor, the same mechanism the batch applications seed) actually reaches the
+    // store call - not just that CancellationToken.None was silently passed regardless.
+    [Fact]
+    public async Task AmbientTokenIsPassedIntoTheStoreCall()
+    {
+        using var cts = new CancellationTokenSource();
+        var accessor = new CancellationTokenAccessor { CancellationToken = cts.Token };
+        var store = new Mock<IClaimCheckStore>();
+        store.Setup(x => x.GetAsync("memory://topic/1", cts.Token)).ReturnsAsync("body");
+        var bodySetter = new TestBodySetter();
+        var context = new TestContext();
+        context.Headers[ClaimCheckHeaders.ClaimCheck] = "memory://topic/1";
+
+        await Middleware(store.Object, bodySetter, cancellation: accessor)
+            .HandleAsync(context, () => Task.CompletedTask);
+
+        store.Verify(x => x.GetAsync("memory://topic/1", cts.Token), Times.Once);
+    }
+
+    // A hung store call is bounded once the ambient token is cancelled - proof the token genuinely
+    // reaches the store's own in-flight call (the ruling's "hung fake store + UseTimeout" scenario,
+    // reproduced directly against the store call rather than a full pipeline).
+    [Fact]
+    public async Task AmbientTokenCancellation_BoundsAHungStoreCall()
+    {
+        using var cts = new CancellationTokenSource();
+        var accessor = new CancellationTokenAccessor { CancellationToken = cts.Token };
+        var store = new Mock<IClaimCheckStore>();
+        store.Setup(x => x.GetAsync("memory://topic/1", It.IsAny<CancellationToken>()))
+            .Returns(async (string _, CancellationToken token) =>
+            {
+                // Never completes on its own - only cancellation can end this await.
+                await Task.Delay(Timeout.Infinite, token);
+                return (string?)"unreachable";
+            });
+        var bodySetter = new TestBodySetter();
+        var context = new TestContext();
+        context.Headers[ClaimCheckHeaders.ClaimCheck] = "memory://topic/1";
+
+        var handleTask = Middleware(store.Object, bodySetter, cancellation: accessor)
+            .HandleAsync(context, () => Task.CompletedTask);
+
+        cts.Cancel();
+
+        // A generous outer bound: this only guards against a genuine "never returns" regression, not
+        // ordinary scheduling latency under host contention - the cancellation itself is immediate.
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => handleTask)
+            .WaitAsync(TimeSpan.FromSeconds(30));
     }
 }
