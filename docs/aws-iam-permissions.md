@@ -141,7 +141,7 @@ per-transport package (`Benzene.Clients.Aws.Sqs`, `.Sns`, `.Lambda`, `.StepFunct
 | `SqsBenzeneMessageClient` | `Benzene.Clients.Aws.Sqs` | `sqs:SendMessage` | `src/Benzene.Clients.Aws.Sqs/SqsClientMiddleware.cs` |
 | `SnsBenzeneMessageClient` | `Benzene.Clients.Aws.Sns` | `sns:Publish` | `src/Benzene.Clients.Aws.Sns/SnsClientMiddleware.cs` |
 | `AwsLambdaBenzeneMessageClient` / `AwsLambdaClient` | `Benzene.Clients.Aws.Lambda` | `lambda:InvokeFunction` | `src/Benzene.Clients.Aws.Lambda/AwsLambdaClient.cs` |
-| `StepFunctionsClient` | `Benzene.Clients.Aws.StepFunctions` | `states:StartExecution` | `src/Benzene.Clients.Aws.StepFunctions/StepFunctionsClient.cs` |
+| `StepFunctionsClient` | `Benzene.Clients.Aws.StepFunctions` | `states:StartExecution`, `states:DescribeExecution` | `src/Benzene.Clients.Aws.StepFunctions/StepFunctionsClient.cs` |
 
 ```json
 {
@@ -150,12 +150,17 @@ per-transport package (`Benzene.Clients.Aws.Sqs`, `.Sns`, `.Lambda`, `.StepFunct
     { "Effect": "Allow", "Action": "sqs:SendMessage", "Resource": "arn:aws:sqs:REGION:ACCOUNT_ID:QUEUE_NAME" },
     { "Effect": "Allow", "Action": "sns:Publish", "Resource": "arn:aws:sns:REGION:ACCOUNT_ID:TOPIC_NAME" },
     { "Effect": "Allow", "Action": "lambda:InvokeFunction", "Resource": "arn:aws:lambda:REGION:ACCOUNT_ID:function:FUNCTION_NAME" },
-    { "Effect": "Allow", "Action": "states:StartExecution", "Resource": "arn:aws:states:REGION:ACCOUNT_ID:stateMachine:STATE_MACHINE_NAME" }
+    { "Effect": "Allow", "Action": "states:StartExecution", "Resource": "arn:aws:states:REGION:ACCOUNT_ID:stateMachine:STATE_MACHINE_NAME" },
+    { "Effect": "Allow", "Action": "states:DescribeExecution", "Resource": "arn:aws:states:REGION:ACCOUNT_ID:execution:STATE_MACHINE_NAME:*" }
   ]
 }
 ```
 
-Only include the statements for the clients you actually use.
+Only include the statements for the clients you actually use. `states:DescribeExecution` is required as of the idempotent-start fix (task board #13,
+`work/bug-fix-designs-2026-08.md` WP-6b): when `StartExecutionAsync(message, executionName)` hits `ExecutionAlreadyExistsException`, `StepFunctionsClient`
+calls `DescribeExecution` on the already-existing execution to compare its input against this call's before treating the retry as a true idempotent
+duplicate — without this permission that verification call fails and the start is reported as `ServiceUnavailable` rather than `Accepted`/`Conflict`.
+Note the resource for `DescribeExecution` is an **execution** ARN (`:execution:STATE_MACHINE_NAME:*`), not the **state machine** ARN `StartExecution` uses.
 
 ## `Benzene.Aws.Sqs` standalone consumer
 

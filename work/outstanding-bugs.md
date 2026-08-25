@@ -240,6 +240,28 @@ deterministic schema, example posture".
   demo-only posture, matching the K8sMesh/GoogleCloudMesh/AzureFunctionsMesh siblings (P7). Full OIDC
   for this example stays out of scope. See WP-2(c).
 
+### Tracked findings round 5–6, WP-6 — AWS clients: Lambda invocation semantics; Step Functions idempotent starts (done)
+Decisions, rationale, and the rejected alternative for #13 are ruled in
+[`bug-fix-designs-2026-08.md`](bug-fix-designs-2026-08.md) §"WP-6 — AWS clients: Lambda invocation
+semantics; Step Functions idempotent starts".
+- **[RESOLVED] #12 — `UseAwsLambda<T>()`'s `LambdaContextConverter<T>` (the `<T, Void>` fire-and-forget
+  shape) silently invoked `RequestResponse` (synchronous) instead of `Event` (async), and
+  `MapResponseAsync` unconditionally returned `Accepted` regardless of the actual invoke outcome.**
+  `CreateRequestAsync` now sets `InvocationType.Event`; `MapResponseAsync` classifies the response
+  (Event: 2xx `StatusCode` → `Accepted`, else failure; request/response: non-null `FunctionError` →
+  failure, never `Accepted`). See WP-6(a).
+- **[RESOLVED] #13 — `StepFunctionsClient.StartExecutionAsync` treated every
+  `ExecutionAlreadyExistsException` as a successful idempotent retry, with no check that the existing
+  execution's input actually matched this call's — a name collision with a DIFFERENT input was a silent
+  false-positive `Accepted`.** Now calls `DescribeExecution` and compares the existing execution's
+  `Input` to this call's serialized input: a match is `Accepted`; a mismatch is a `Conflict` failure
+  (the caller's payload was not started). See WP-6(b).
+- **[RESOLVED] #14 — `SanitizeExecutionName` could map two distinct original names onto the SAME
+  Step Functions execution name (via character-replacement collisions or identical-after-truncation
+  names), silently defeating (#13)'s idempotency check.** A sanitized-or-truncated name now gets a
+  deterministic 8-hex-character `SHA-256(original name)` suffix, collision-resistant across distinct
+  originals; an already-clean name is unchanged. See WP-6(c).
+
 ---
 
 ## Open — maintainer decisions (the real remaining backlog)

@@ -348,7 +348,18 @@ services.AddScoped<IBenzeneMessageClient>(x =>
 - `TResponse` is `Void` → fire-and-forget (`InvocationType.Event`).
 - Otherwise → request/response (`InvocationType.RequestResponse`), awaiting and mapping the function's response.
 
-It wraps the topic, headers, and serialized message body into its own envelope, `BenzeneMessageClientRequest`, and invokes with that as the payload. An exception during invocation is caught and returned as `BenzeneResult.ServiceUnavailable<TResponse>()`.
+It wraps the topic, headers, and serialized message body into its own envelope, `BenzeneMessageClientRequest`, and invokes with that as the payload. An exception during invocation is caught and returned as `BenzeneResult.ServiceUnavailable<TResponse>()` — including the request/response shape's `AwsLambdaFunctionErrorException`, thrown by the lower-level `AwsLambdaClient` when `InvokeResponse.FunctionError` is set (AWS returns HTTP 200 even when the target function threw), so a function error is never mistaken for a successful response here either.
+
+#### `UseAwsLambda<T>()` / `LambdaContextConverter<T>` (the lower-level pipeline shape)
+
+The context-converter pipeline style (see [The context-converter pipeline](#the-context-converter-pipeline) below) only supports one shape today: `IBenzeneClientContext<T, Void>`, i.e. **fire-and-forget**. `LambdaContextConverter<T>.CreateRequestAsync` builds the `InvokeRequest` with `InvocationType = InvocationType.Event` (async invoke) — this is not optional or inferred, it's the shape's own contract: a client built with `.UseAwsLambda<T>()` never waits for the target function to run.
+
+`MapResponseAsync` classifies the `InvokeResponse` instead of unconditionally reporting `Accepted`:
+
+- For an `Event` invoke (what this converter always sends): a 2xx `InvokeResponse.StatusCode` (confirming Lambda accepted the invocation) maps to `BenzeneResult.Accepted<Void>()`; anything else (e.g. a throttling error surfaced synchronously by the Invoke API) maps to a failure result carrying the status code.
+- For a request/response invoke (not reachable through `.UseAwsLambda<T>()` as shipped, but handled the same way the message-client shape above handles it, should a future decorator override the request's `InvocationType`): a non-null `InvokeResponse.FunctionError` maps to a failure result carrying the error details — never `Accepted` — and a null/empty `FunctionError` maps to `Accepted`.
+
+Unlike `AwsLambdaBenzeneMessageClient`, this converter does not forward `IBenzeneClientRequest.Headers` — see [Header forwarding](#header-forwarding) below.
 
 ### SQS (as a standalone client)
 
