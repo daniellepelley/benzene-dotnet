@@ -24,13 +24,12 @@
 Legend: **[DECISION]** real issue, fix is a behaviour/API/policy call (needs a maintainer's decision
 first). **[PERF]** performance hygiene, not a correctness bug. **[RESOLVED]** verified fixed in source.
 
-> **Tracked findings, 2026-08-25 (review rounds 5–6).** A separate batch of 27 verified findings
-> (evidence-backed: live repros, stress tests, compiler-driven probes) is tracked on the shared task
-> board (tasks #1–#27) and is **not duplicated into this file** while open. Their fix designs — with
-> decisions, rationale, and rejected alternatives — are ruled in
-> **[`bug-fix-designs-2026-08.md`](bug-fix-designs-2026-08.md)**; do not re-decide or re-review those
-> areas without reading that ruling first. As each work package lands, its items are added to the
-> Resolved half below with a pointer to the ruling's section.
+> **Tracked findings, 2026-08-25 (review rounds 5–6) — all fixed.** A batch of 27 evidence-backed
+> findings (live repros, stress tests, compiler-driven probes) from the round-5/round-6 review passes
+> is now fully resolved — all nine work packages below landed and pushed to `main`. Their design
+> decisions, rationale, and rejected alternatives remain ruled in
+> **[`bug-fix-designs-2026-08.md`](archive/bug-fix-designs-2026-08.md)** (now archived); consult it
+> before touching any of this code again so a decision made here doesn't get silently re-litigated.
 
 ---
 
@@ -99,7 +98,7 @@ wildcard+credentials and full Fetch-spec preflight compliance; spec-output cachi
 
 ### Tracked findings round 5–6, WP-4 — gRPC null-response crash (done)
 Decision, rationale, and why server-streaming/duplex are deliberately untouched are ruled in
-[`bug-fix-designs-2026-08.md`](bug-fix-designs-2026-08.md) §"WP-4 — gRPC null-response crash (unary +
+[`bug-fix-designs-2026-08.md`](archive/bug-fix-designs-2026-08.md) §"WP-4 — gRPC null-response crash (unary +
 client-streaming)".
 - **[RESOLVED] #8 — a fire-and-forget unary handler (no response payload) crashed instead of
   succeeding.** `ProtobufJsonGrpcMessageAdapter.ConvertResponse<TResponse>` threw `BenzeneException`
@@ -112,7 +111,7 @@ client-streaming)".
 
 ### Tracked findings round 5–6, WP-1 — mesh host auth (done)
 Decisions, rationale, and rejected alternatives for all seven are ruled in
-[`bug-fix-designs-2026-08.md`](bug-fix-designs-2026-08.md) §"WP-1 — Mesh host: auth satisfiability
+[`bug-fix-designs-2026-08.md`](archive/bug-fix-designs-2026-08.md) §"WP-1 — Mesh host: auth satisfiability
 matrix, OIDC hardening, logout, dispatch wiring".
 - **[RESOLVED] #3 — `AllowedEmailDomains` was satisfiable under `auth.mode: "none"`, which establishes
   no identity to filter at all.** `MeshAuthGate.Validate` now rejects it at startup. See WP-1(a).
@@ -139,7 +138,7 @@ matrix, OIDC hardening, logout, dispatch wiring".
 
 ### Tracked findings round 5–6, WP-7 — cross-cutting hygiene (done)
 Decisions, rationale, and rejected alternatives for all five are ruled in
-[`bug-fix-designs-2026-08.md`](bug-fix-designs-2026-08.md) §"WP-7 — Cross-cutting hygiene: cancellation,
+[`bug-fix-designs-2026-08.md`](archive/bug-fix-designs-2026-08.md) §"WP-7 — Cross-cutting hygiene: cancellation,
 eviction, Saga per-run state".
 - **[RESOLVED] #2 — `IHealthCheck.ExecuteAsync()` had no `CancellationToken`.** Interface now requires
   one; every implementer (20+) forwards it into its own I/O. See WP-7(a).
@@ -159,7 +158,7 @@ eviction, Saga per-run state".
 
 ### Tracked findings round 5–6, WP-5 — Azure: source-generator diagnostics; Service Bus settle ordering (done)
 Decisions, rationale, and the explicitly rejected alternative are ruled in
-[`bug-fix-designs-2026-08.md`](bug-fix-designs-2026-08.md) §"WP-5 — Azure: source-generator
+[`bug-fix-designs-2026-08.md`](archive/bug-fix-designs-2026-08.md) §"WP-5 — Azure: source-generator
 diagnostics; Service Bus settle ordering".
 - **[RESOLVED] #9 — `AzureFunctionTriggerGenerator` let two triggers of different transports collide
   on the same `[Function(name)]` name literal, silently emitting ambiguous/invalid output.** Every
@@ -182,7 +181,7 @@ diagnostics; Service Bus settle ordering".
 
 ### Tracked findings round 5–6, WP-3 — claim fencing for Outbox and Idempotency stores (done)
 Decisions, rationale, and the breaking-change ruling (pre-1.0, no compatibility overloads) are ruled in
-[`bug-fix-designs-2026-08.md`](bug-fix-designs-2026-08.md) §"WP-3 — Claim fencing for Outbox and
+[`bug-fix-designs-2026-08.md`](archive/bug-fix-designs-2026-08.md) §"WP-3 — Claim fencing for Outbox and
 Idempotency stores".
 - **[RESOLVED] #16 — `IIdempotencyStore.CompleteAsync`/`ReleaseAsync` took no claim token, so a
   stale/slow holder's late settle (arriving after its claim legitimately lapsed and was reclaimed by
@@ -207,7 +206,7 @@ Idempotency stores".
 
 ### Tracked findings round 5–6, WP-9 — schema compatibility: union-aware walkers (done)
 Decisions, matching rule, and the breaking-direction table are ruled in
-[`bug-fix-designs-2026-08.md`](bug-fix-designs-2026-08.md) §"WP-9 — Schema compatibility: union-aware
+[`bug-fix-designs-2026-08.md`](archive/bug-fix-designs-2026-08.md) §"WP-9 — Schema compatibility: union-aware
 walkers".
 - **[RESOLVED] #25 — `SchemaCompatibilityComparer`/`JsonSchemaComparer` never inspected `oneOf`/
   `anyOf`/`allOf`, so removing an entire discriminated-union variant (`oneOf:[Dog,Cat]` →
@@ -219,7 +218,7 @@ walkers".
 
 ### Tracked findings round 5–6, WP-2 — Mesh collector robustness, deterministic schema, example posture (done)
 Decisions, rationale, and rejected alternatives for all three are ruled in
-[`bug-fix-designs-2026-08.md`](bug-fix-designs-2026-08.md) §"WP-2 — Mesh collector robustness,
+[`bug-fix-designs-2026-08.md`](archive/bug-fix-designs-2026-08.md) §"WP-2 — Mesh collector robustness,
 deterministic schema, example posture".
 - **[RESOLVED] #22 — `MeshTimeRangeResolver.ParseDuration` threw `OverflowException` on a count too
   large for `TimeSpan` (e.g. `now-100000000d`), surfacing as an unhandled 500 on `mesh:query:*`.**
@@ -242,7 +241,7 @@ deterministic schema, example posture".
 
 ### Tracked findings round 5–6, WP-6 — AWS clients: Lambda invocation semantics; Step Functions idempotent starts (done)
 Decisions, rationale, and the rejected alternative for #13 are ruled in
-[`bug-fix-designs-2026-08.md`](bug-fix-designs-2026-08.md) §"WP-6 — AWS clients: Lambda invocation
+[`bug-fix-designs-2026-08.md`](archive/bug-fix-designs-2026-08.md) §"WP-6 — AWS clients: Lambda invocation
 semantics; Step Functions idempotent starts".
 - **[RESOLVED] #12 — `UseAwsLambda<T>()`'s `LambdaContextConverter<T>` (the `<T, Void>` fire-and-forget
   shape) silently invoked `RequestResponse` (synchronous) instead of `Event` (async), and
@@ -263,7 +262,7 @@ semantics; Step Functions idempotent starts".
   originals; an already-clean name is unchanged. See WP-6(c).
 
 ### Tracked findings round 5–6, WP-8 — RabbitMQ `mandatory` made real (done)
-Ruled in [`bug-fix-designs-2026-08.md`](bug-fix-designs-2026-08.md) §"WP-8 — RabbitMQ `mandatory` made
+Ruled in [`bug-fix-designs-2026-08.md`](archive/bug-fix-designs-2026-08.md) §"WP-8 — RabbitMQ `mandatory` made
 real".
 - **[RESOLVED] #24 — `RabbitMqClientMiddleware`'s `mandatory: true` was documented ("an unroutable
   message is returned by the broker rather than silently dropped") but never implemented: the

@@ -1,3 +1,16 @@
+> ARCHIVED 2026-08-25: all nine work packages landed and pushed to `main` (commits `2c72983` WP-7,
+> `c299293` WP-4, `6819970` WP-5, `ee5af64` WP-3, `8875e93` WP-9, `b45c03c` WP-2, `3d6e867` WP-1,
+> `3f69abd` WP-6, `0e43176` WP-8). Every one of the 27 tracked findings (task board #1–#27) is fixed,
+> red→green regression-tested, and documented in its living home (interface/XML docs,
+> `docs/capability-matrix.md`, the named `docs/*.md` pages). `work/outstanding-bugs.md`'s Resolved
+> section carries the per-finding summary and still points back here for the full decision/rationale/
+> rejected-alternatives record — that record remains load-bearing, which is why this file is kept
+> rather than deleted. Full-suite baselines confirmed green post-merge: `Benzene.Core.Test`
+> 2900 passed / 2 skipped / 0 failed, `Benzene.Mesh.Test` 512/512, `Benzene.Mesh.Host.Test` 136/136.
+> No amendments to the ruling were required during implementation except the WP-1 file-location
+> correction recorded inline in that section (`UseMeshUi` lives in `Benzene.Mesh.Ui`, not
+> `Benzene.Mesh.Artifacts`).
+
 # Tracked-findings fix designs (rounds 5–6) — RULING + implementation plan
 
 **Status:** ✅ **APPROVED for implementation** — design ruling, 2026-08-25. Covers all 27 findings on

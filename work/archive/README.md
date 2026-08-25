@@ -121,3 +121,12 @@ it had one, otherwise 2026-08).
 - `pattern-support-plan-2026-08.md` · `payload-testing-ui-plan-2026-08.md` · `polly-resilience-plan-2026-08.md`
 - `rabbitmq-plan-2026-08.md` · `request-response-improvements-plan-2026-07.md` · `response-events-plan-2026-07.md`
 - `results-taxonomy-plan-2026-08.md` · `streaming-plan-2026-08.md` · `terraform-eventbridge-rules-plan-2026-08.md`
+
+## Dated review and fix-design record (2026-08-25)
+
+- `bug-fix-designs-2026-08.md` — the design ruling (decision, rationale, rejected alternatives) for
+  the 27 evidence-backed findings from the round-5/round-6 adversarial review passes (shared task
+  board #1–#27). All nine work packages landed and pushed; the per-finding summaries now live in
+  [`../outstanding-bugs.md`](../outstanding-bugs.md)'s Resolved section, each pointing back here for
+  the full record — that's why this file is kept rather than deleted, unlike the pure bug-hunt
+  reports above.
