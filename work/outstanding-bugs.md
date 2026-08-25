@@ -117,6 +117,18 @@ eviction, Saga per-run state".
   runs).** Outcome now lives in a run-scoped `SagaStepOutcome` created fresh per run; a built `Saga` is
   documented immutable and concurrency-safe. See WP-7(e).
 
+### Tracked findings round 5–6, WP-9 — schema compatibility: union-aware walkers (done)
+Decisions, matching rule, and the breaking-direction table are ruled in
+[`bug-fix-designs-2026-08.md`](bug-fix-designs-2026-08.md) §"WP-9 — Schema compatibility: union-aware
+walkers".
+- **[RESOLVED] #25 — `SchemaCompatibilityComparer`/`JsonSchemaComparer` never inspected `oneOf`/
+  `anyOf`/`allOf`, so removing an entire discriminated-union variant (`oneOf:[Dog,Cat]` →
+  `oneOf:[Dog]`) was reported as zero changes.** Both walkers (deliberately-identical twins) now walk
+  `oneOf`/`anyOf`/`allOf` pairwise, matching members by discriminator mapping value, then `$ref` target
+  name, then position, and report `UnionVariantAdded`/`UnionVariantRemoved`/`UnionVariantChanged`
+  (the last recursing into the matched pair). An `items` present on only one side is now a `TypeChanged`
+  instead of being silently skipped. See WP-9.
+
 ---
 
 ## Open — maintainer decisions (the real remaining backlog)
