@@ -2,6 +2,7 @@ using Benzene.Abstractions.DI;
 using Benzene.Abstractions.MessageHandlers.Mappers;
 using Benzene.Abstractions.Messages.Mappers;
 using Benzene.Abstractions.Middleware;
+using Microsoft.Extensions.Logging;
 
 namespace Benzene.Idempotency;
 
@@ -39,7 +40,8 @@ public static class Extensions
             return new IdempotencyMiddleware<TContext>(
                 resolver.GetService<IIdempotencyStore>(),
                 keyStrategy,
-                options);
+                options,
+                resolver.TryGetService<ILoggerFactory>()?.CreateLogger("Benzene.Idempotency"));
         });
     }
 

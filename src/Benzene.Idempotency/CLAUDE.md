@@ -41,6 +41,7 @@ exactly-once guarantee on its own.
 - `IIdempotencyStore` — the pluggable persistence contract with **atomic** claim semantics
   (`TryClaimAsync` / `CompleteAsync` / `ReleaseAsync`). Implementations MUST make claim+insert atomic
   (Redis `SET NX`, a unique-key insert) so concurrent redeliveries can't both win the claim.
+  **Fenced** — see "Claim fencing" below.
 - `InMemoryIdempotencyStore` — default in-process store (dictionary + lock + TTL). Single-instance only.
 - `IIdempotencyKeyStrategy<TContext>` — derives the key from a message. Swap it to key on a business
   identifier instead of the default.
@@ -66,6 +67,24 @@ On a duplicate of a completed key, the middleware sets a **synthetic** successfu
 (`BenzeneResult.Ok()`, when the context is `IHasMessageResult`) so the transport acknowledges/completes the duplicate rather
 than looping. Note this is a fresh success signal — the original first-attempt response/payload is
 **not** stored or replayed; a duplicate HTTP-style caller does not get the original body back.
+
+## Claim fencing (`ClaimToken`)
+Every winning `TryClaimAsync` mints a fresh opaque `ClaimResult.ClaimToken`, non-null exactly when
+`Claimed` is `true`. `CompleteAsync`/`ReleaseAsync` **require** that token back
+(`CompleteAsync(key, claimToken, wasSuccessful, ct)` / `ReleaseAsync(key, claimToken, ct)` — no default
+parameter, no overload; pre-1.0, a skippable fence is no fence) and return `Task<bool>`: `false` means
+there was no live claim with that token — it lapsed and was reclaimed by another worker, or was
+already settled — and **nothing was written**. `IdempotencyMiddleware` logs a **warning** (not an
+error) on a `false` settle: the new holder owns the outcome, so this is expected under contention, not
+a failure of the current attempt.
+
+This closes a real hole: without fencing, a stale/slow holder's late `Complete`/`Release` (arriving
+after its claim naturally lapsed and a different worker won a fresh claim on the same key) would
+silently clobber whatever the new holder had already recorded. `InMemoryIdempotencyStore` checks the
+token under the same lock the claim itself uses; `DynamoDbIdempotencyStore` stores the token as a
+`claimToken` attribute and conditions the settle `PutItem`/`DeleteItem` on it matching. A custom store
+MUST implement the same fencing — see `IIdempotencyStore`'s XML docs for the exact contract each method
+must honor.
 
 ## `InProgressBehavior`
 A duplicate that arrives while the first copy is still `InProgress`:
@@ -94,7 +113,9 @@ default header/body-hash strategy (resolving the transport's `IMessageHeadersGet
 ## Conventions
 - Engine is transport-agnostic; persistence is pluggable (mirrors how `Benzene.Saga` keeps state
   storage out of the engine). Do not bake in a specific database.
-- A custom store's `TryClaimAsync` MUST be atomic — the whole guarantee rests on it.
+- A custom store's `TryClaimAsync` MUST be atomic — the whole guarantee rests on it. A custom store's
+  `CompleteAsync`/`ReleaseAsync` MUST be fenced on the claim token (see "Claim fencing" above) — the
+  same discipline `IOutboxStore`'s lease fencing follows.
 - `TryClaimAsync`/`CompleteAsync`/`ReleaseAsync` all take a `CancellationToken`. `InMemoryIdempotencyStore`
   has no downstream I/O to cancel, but still honors it (`ThrowIfCancellationRequested()` before taking
   the lock) rather than silently ignoring an already-cancelled caller. A custom store backed by real
@@ -111,7 +132,12 @@ default header/body-hash strategy (resolving the transport's `IMessageHeadersGet
 ## Tests
 - `test/Benzene.Core.Test/Idempotency/InMemoryIdempotencyStoreTest.cs` — store semantics (claim wins
   once, refused while in-progress, completed outcome recorded, release/expiry allow re-claim, keys
-  independent).
+  independent), plus claim-fencing: matching-token settle succeeds, stale-token settle is refused and
+  writes nothing, and `StaleHolder_LateCompleteAndRelease_AfterLegitimateReclaim_AreRejected_NotClobbered`
+  reproduces the round-5 scenario (a stale holder's claim lapses, a second worker reclaims, the stale
+  holder's late `Complete`/`Release` are both rejected without touching the new holder's state).
+- `test/Benzene.Core.Test/Idempotency/DynamoDb/DynamoDbIdempotencyStoreTest.cs` — same fencing contract
+  against the DynamoDB store's `ConditionExpression`-based settle writes.
 - `test/Benzene.Core.Test/Idempotency/IdempotencyMiddlewareTest.cs` — first-time processes+records;
   duplicate short-circuits; completed-duplicate replays a successful result; throw/failed-result
   release the claim; no-key passes through; in-progress duplicate skip vs. throw.

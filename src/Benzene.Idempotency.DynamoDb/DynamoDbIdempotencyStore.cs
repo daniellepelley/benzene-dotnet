@@ -21,6 +21,15 @@ namespace Benzene.Idempotency.DynamoDb;
 /// The consumer registers <see cref="IAmazonDynamoDB"/> itself (this package resolves it); it does not
 /// create the table.
 /// </para>
+/// <para>
+/// <b>Claim fencing.</b> Every winning <see cref="TryClaimAsync"/> mints a fresh opaque claim token,
+/// stored as the <c>claimToken</c> attribute alongside the record. <see cref="CompleteAsync"/> and
+/// <see cref="ReleaseAsync"/> require the caller's token to be presented back and write with a
+/// <c>ConditionExpression</c> that checks <c>claimToken</c> equality; a <see cref="ConditionalCheckFailedException"/>
+/// (record gone, or reclaimed by another worker so <c>claimToken</c> has moved on) becomes a
+/// <see langword="false"/> return rather than an exception, and nothing is written. This closes the
+/// stale-writer-clobbers-the-new-holder hole a bare key-only settle API would have.
+/// </para>
 /// </remarks>
 public class DynamoDbIdempotencyStore : IIdempotencyStore
 {
@@ -59,6 +68,7 @@ public class DynamoDbIdempotencyStore : IIdempotencyStore
     public async Task<ClaimResult> TryClaimAsync(string key, CancellationToken cancellationToken = default)
     {
         var now = _now();
+        var claimToken = Guid.NewGuid().ToString();
         var request = new PutItemRequest
         {
             TableName = _tableName,
@@ -67,7 +77,8 @@ public class DynamoDbIdempotencyStore : IIdempotencyStore
                 [_partitionKeyAttribute] = new AttributeValue { S = key },
                 ["status"] = new AttributeValue { S = StatusInProgress },
                 ["wasSuccessful"] = new AttributeValue { BOOL = false },
-                ["expiresAt"] = new AttributeValue { N = ToEpochSeconds(now + _timeToLive) }
+                ["expiresAt"] = new AttributeValue { N = ToEpochSeconds(now + _timeToLive) },
+                ["claimToken"] = new AttributeValue { S = claimToken }
             },
             // Win the claim only when there is no live record: either nothing is there, or what's
             // there has already expired (DynamoDB TTL deletion lags, so check it explicitly).
@@ -82,7 +93,7 @@ public class DynamoDbIdempotencyStore : IIdempotencyStore
         try
         {
             await _dynamoDb.PutItemAsync(request, cancellationToken);
-            return ClaimResult.Won();
+            return ClaimResult.Won(claimToken);
         }
         catch (ConditionalCheckFailedException)
         {
@@ -90,15 +101,15 @@ public class DynamoDbIdempotencyStore : IIdempotencyStore
             var existing = await ReadRecordAsync(key, now, cancellationToken);
             // Negligible race: it lapsed between the condition check and the read. Treat as claimable
             // (a possible re-process) rather than falsely reporting a duplicate (which would drop a message).
-            return existing != null ? ClaimResult.AlreadyExists(existing) : ClaimResult.Won();
+            return existing != null ? ClaimResult.AlreadyExists(existing) : ClaimResult.Won(claimToken);
         }
     }
 
     /// <inheritdoc />
-    public async Task CompleteAsync(string key, bool wasSuccessful, CancellationToken cancellationToken = default)
+    public async Task<bool> CompleteAsync(string key, string claimToken, bool wasSuccessful, CancellationToken cancellationToken = default)
     {
         var now = _now();
-        await _dynamoDb.PutItemAsync(new PutItemRequest
+        return await TryWriteIfTokenMatchesAsync(new PutItemRequest
         {
             TableName = _tableName,
             Item = new Dictionary<string, AttributeValue>
@@ -106,19 +117,58 @@ public class DynamoDbIdempotencyStore : IIdempotencyStore
                 [_partitionKeyAttribute] = new AttributeValue { S = key },
                 ["status"] = new AttributeValue { S = StatusCompleted },
                 ["wasSuccessful"] = new AttributeValue { BOOL = wasSuccessful },
-                ["expiresAt"] = new AttributeValue { N = ToEpochSeconds(now + _timeToLive) }
+                ["expiresAt"] = new AttributeValue { N = ToEpochSeconds(now + _timeToLive) },
+                ["claimToken"] = new AttributeValue { S = claimToken }
+            },
+            ConditionExpression = "claimToken = :claimToken",
+            ExpressionAttributeValues = new Dictionary<string, AttributeValue>
+            {
+                [":claimToken"] = new AttributeValue { S = claimToken }
             }
         }, cancellationToken);
     }
 
     /// <inheritdoc />
-    public async Task ReleaseAsync(string key, CancellationToken cancellationToken = default)
+    public async Task<bool> ReleaseAsync(string key, string claimToken, CancellationToken cancellationToken = default)
     {
-        await _dynamoDb.DeleteItemAsync(new DeleteItemRequest
+        try
         {
-            TableName = _tableName,
-            Key = new Dictionary<string, AttributeValue> { [_partitionKeyAttribute] = new AttributeValue { S = key } }
-        }, cancellationToken);
+            await _dynamoDb.DeleteItemAsync(new DeleteItemRequest
+            {
+                TableName = _tableName,
+                Key = new Dictionary<string, AttributeValue> { [_partitionKeyAttribute] = new AttributeValue { S = key } },
+                ConditionExpression = "claimToken = :claimToken",
+                ExpressionAttributeValues = new Dictionary<string, AttributeValue>
+                {
+                    [":claimToken"] = new AttributeValue { S = claimToken }
+                }
+            }, cancellationToken);
+            return true;
+        }
+        catch (ConditionalCheckFailedException)
+        {
+            // No live record, or its claimToken no longer matches (reclaimed by another worker, or
+            // already settled) — refuse rather than deleting whatever the current holder has.
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Issues a settle <c>PutItem</c> whose <see cref="PutItemRequest.ConditionExpression"/> is
+    /// already scoped to the presented claim token, translating a condition failure into
+    /// <see langword="false"/> (fenced out) rather than an exception.
+    /// </summary>
+    private async Task<bool> TryWriteIfTokenMatchesAsync(PutItemRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _dynamoDb.PutItemAsync(request, cancellationToken);
+            return true;
+        }
+        catch (ConditionalCheckFailedException)
+        {
+            return false;
+        }
     }
 
     private async Task<IdempotencyRecord?> ReadRecordAsync(string key, DateTimeOffset now, CancellationToken cancellationToken)
