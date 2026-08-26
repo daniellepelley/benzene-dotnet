@@ -146,8 +146,10 @@ public static class JsonSchemaComparer
 
     /// <summary>
     /// Walks a <c>oneOf</c>/<c>anyOf</c> member array pairwise between baseline and current. Matching
-    /// priority: (1) discriminator mapping value, when the owning schema declares one; (2) <c>$ref</c>
-    /// target name; (3) position. Unmatched baseline members are <see cref="SchemaChangeKind.UnionVariantRemoved"/>,
+    /// priority: (1) <c>$ref</c> target name, when the member has one — a <c>$ref</c> already uniquely
+    /// and stably identifies the target component, regardless of whether a discriminator mapping happens
+    /// to cover it; (2) discriminator mapping value, for inline (non-<c>$ref</c>) members only, where
+    /// there is no <c>$ref</c> name to key on; (3) position. Unmatched baseline members are <see cref="SchemaChangeKind.UnionVariantRemoved"/>,
     /// unmatched current members are <see cref="SchemaChangeKind.UnionVariantAdded"/>, and a matched pair
     /// that differs recurses and is reported as/within <see cref="SchemaChangeKind.UnionVariantChanged"/>.
     /// </summary>
@@ -290,9 +292,9 @@ public static class JsonSchemaComparer
     }
 
     /// <summary>
-    /// Indexes a <c>oneOf</c>/<c>anyOf</c> member array by its matching key: the discriminator mapping
-    /// value that points at this member when <paramref name="owner"/> declares one, else its <c>$ref</c>
-    /// target name, else its position.
+    /// Indexes a <c>oneOf</c>/<c>anyOf</c> member array by its matching key: its <c>$ref</c> target name
+    /// when it has one, else the discriminator mapping value that points at this member when
+    /// <paramref name="owner"/> declares one, else its position.
     /// </summary>
     private static Dictionary<string, JsonObject> IndexVariants(JsonObject owner, JsonArray? members)
     {
@@ -321,7 +323,20 @@ public static class JsonSchemaComparer
     {
         var refId = RefId(member);
 
-        if (mapping != null && refId != null)
+        // A $ref already uniquely and stably identifies the target component, so it takes priority over
+        // discriminator-mapping coverage: whether a mapping entry happens to name this $ref is metadata
+        // about the variant, not part of its identity. Keying on mapping coverage instead let an
+        // additive mapping edit (a new entry covering a previously-unmapped $ref) look like the variant
+        // was replaced — disc:X on one side, ref:X on the other, for the very same schema.
+        if (refId != null)
+        {
+            return $"ref:{refId}";
+        }
+
+        // No $ref to key on - this is an inline member. Fall back to the discriminator mapping when it
+        // identifies this exact member (mapping values are $ref-shaped, so this only ever matches an
+        // inline member a mapping entry names directly).
+        if (mapping != null)
         {
             foreach (var entry in mapping)
             {
@@ -333,7 +348,7 @@ public static class JsonSchemaComparer
             }
         }
 
-        return refId != null ? $"ref:{refId}" : $"idx:{index}";
+        return $"idx:{index}";
     }
 
     /// <summary>The <c>$ref</c> target name of a member, e.g. <c>"Dog"</c> from
