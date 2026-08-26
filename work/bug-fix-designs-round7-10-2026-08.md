@@ -534,6 +534,18 @@ where it diverges from the reference `Benzene.Microsoft.Dependencies`.
 - **#85 (minor):** `AutofacServiceResolverFactory` doesn't implement `IAsyncDisposable` — add it for
   symmetry/`await using`.
 
+**Implementation note (divergence from the plan's suggested commit split).** `AutofacServiceResolverFactory`
+now holds an `ILifetimeScope` (not `IContainer`) with an owns/doesn't-own flag, so it can wrap either a
+freshly-built root container (#83's build-once fix) or an arbitrary already-open scope (#84's lazy
+`IServiceResolverFactory` fallback on `AutofacServiceResolverAdapter`) without building or disposing
+anything it doesn't own; `#85`'s `IAsyncDisposable` sits on that same owns-flag. Landing #85 as a genuinely
+separate commit from #83 would mean re-deriving that same class shape twice for no benefit, so the
+implementation commits #83+#84+#85 together (one commit) after #82 (its own commit), rather than #82, then
+#83+#84, then #85 as three. Verified independently anyway: the regression suite's four #85-specific
+assertions were red-verified in isolation (temporarily excluded from the file, the reverted #82/#83/#84
+tests still failed correctly; then re-included and the full 9-test suite reverified red on the reverted
+`AutofacServiceResolverFactory`/`Adapter`/`Container` trio and green on the fix) before the joint commit.
+
 ### WP-R — Testing infrastructure & the coverage blind spot
 **Tasks #80, #81.**
 - **#81 (worth-fixing, process — the meta-finding):** seven `*.TestHelpers` packages have **zero

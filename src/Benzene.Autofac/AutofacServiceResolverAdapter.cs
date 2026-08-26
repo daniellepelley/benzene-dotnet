@@ -9,7 +9,17 @@ public class AutofacServiceResolverAdapter : IServiceResolver
 {
     private readonly IComponentContext _container;
     private readonly ILifetimeScope? _scope;
-    private readonly IServiceResolverFactory _serviceResolverFactory;
+    private IServiceResolverFactory? _serviceResolverFactory;
+
+    // Lazy fallback for the single-IComponentContext-arg constructor below (used by AddServiceResolver()'s
+    // registration, and by every AddScoped/AddTransient/AddSingleton(Func<IServiceResolver,T>) overload),
+    // which is never handed a factory eagerly. Mirrors MicrosoftServiceResolverAdapter.ResolverFactory's
+    // "??=" pattern: build a factory on demand rather than leave the field permanently unset. _container
+    // resolved through Autofac's own machinery (a registration delegate's IComponentContext, or a scope
+    // passed to one of the constructors below) is always the ambient ILifetimeScope in practice, so this
+    // wraps it directly - no container Build() involved, so it can't collide with #83's build-once fix.
+    private IServiceResolverFactory ResolverFactory
+        => _serviceResolverFactory ??= new AutofacServiceResolverFactory((ILifetimeScope)_container);
 
     /// <summary>
     /// Wraps a scope created via <see cref="AutofacServiceResolverFactory.CreateScope"/>. Unlike
@@ -44,7 +54,7 @@ public class AutofacServiceResolverAdapter : IServiceResolver
 
         if (typeof(T) == typeof(IServiceResolverFactory))
         {
-            return _serviceResolverFactory as T ?? throw new InvalidOperationException();
+            return ResolverFactory as T ?? throw new InvalidOperationException();
         }
 
         try
@@ -71,7 +81,7 @@ public class AutofacServiceResolverAdapter : IServiceResolver
 
         if (typeof(T) == typeof(IServiceResolverFactory))
         {
-            return _serviceResolverFactory as T;
+            return ResolverFactory as T;
         }
 
         try
