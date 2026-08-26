@@ -64,45 +64,70 @@ public class DynamoDbIdempotencyStore : IIdempotencyStore
         _now = now ?? (() => DateTimeOffset.UtcNow);
     }
 
+    /// <summary>
+    /// Bound on how many times <see cref="TryClaimAsync"/> retries the conditional <c>PutItem</c>
+    /// after a <c>ConditionalCheckFailedException</c> whose immediate read-back finds the record
+    /// absent (a race with a concurrent delete/release). Small, because a genuinely contended key
+    /// should resolve to a live record within a couple of tries; see <see cref="IdempotencyClaimContentionException"/>.
+    /// </summary>
+    private const int MaxClaimAttempts = 3;
+
     /// <inheritdoc />
     public async Task<ClaimResult> TryClaimAsync(string key, CancellationToken cancellationToken = default)
     {
-        var now = _now();
-        var claimToken = Guid.NewGuid().ToString();
-        var request = new PutItemRequest
+        for (var attempt = 1; attempt <= MaxClaimAttempts; attempt++)
         {
-            TableName = _tableName,
-            Item = new Dictionary<string, AttributeValue>
+            var now = _now();
+            var claimToken = Guid.NewGuid().ToString();
+            var request = new PutItemRequest
             {
-                [_partitionKeyAttribute] = new AttributeValue { S = key },
-                ["status"] = new AttributeValue { S = StatusInProgress },
-                ["wasSuccessful"] = new AttributeValue { BOOL = false },
-                ["expiresAt"] = new AttributeValue { N = ToEpochSeconds(now + _timeToLive) },
-                ["claimToken"] = new AttributeValue { S = claimToken }
-            },
-            // Win the claim only when there is no live record: either nothing is there, or what's
-            // there has already expired (DynamoDB TTL deletion lags, so check it explicitly).
-            ConditionExpression = "attribute_not_exists(#pk) OR expiresAt < :now",
-            ExpressionAttributeNames = new Dictionary<string, string> { ["#pk"] = _partitionKeyAttribute },
-            ExpressionAttributeValues = new Dictionary<string, AttributeValue>
-            {
-                [":now"] = new AttributeValue { N = ToEpochSeconds(now) }
-            }
-        };
+                TableName = _tableName,
+                Item = new Dictionary<string, AttributeValue>
+                {
+                    [_partitionKeyAttribute] = new AttributeValue { S = key },
+                    ["status"] = new AttributeValue { S = StatusInProgress },
+                    ["wasSuccessful"] = new AttributeValue { BOOL = false },
+                    ["expiresAt"] = new AttributeValue { N = ToEpochSeconds(now + _timeToLive) },
+                    ["claimToken"] = new AttributeValue { S = claimToken }
+                },
+                // Win the claim only when there is no live record: either nothing is there, or what's
+                // there has already expired (DynamoDB TTL deletion lags, so check it explicitly).
+                ConditionExpression = "attribute_not_exists(#pk) OR expiresAt < :now",
+                ExpressionAttributeNames = new Dictionary<string, string> { ["#pk"] = _partitionKeyAttribute },
+                ExpressionAttributeValues = new Dictionary<string, AttributeValue>
+                {
+                    [":now"] = new AttributeValue { N = ToEpochSeconds(now) }
+                }
+            };
 
-        try
-        {
-            await _dynamoDb.PutItemAsync(request, cancellationToken);
-            return ClaimResult.Won(claimToken);
+            try
+            {
+                await _dynamoDb.PutItemAsync(request, cancellationToken);
+                // Every Won corresponds to this successful write — never synthesized.
+                return ClaimResult.Won(claimToken);
+            }
+            catch (ConditionalCheckFailedException)
+            {
+                // A live record existed at write time — read it back so the middleware can act on its
+                // outcome.
+                var existing = await ReadRecordAsync(key, now, cancellationToken);
+                if (existing != null)
+                {
+                    return ClaimResult.AlreadyExists(existing);
+                }
+
+                // Negligible race: the record was live when the condition was evaluated but had
+                // become absent by the time we read it back (e.g. a concurrent ReleaseAsync deleted
+                // it in between). We must NOT synthesize a Won here — nothing has been written yet.
+                // Retry the conditional PutItem against this now-observed-absent state instead; a
+                // further retry could lose the same race again, so this is bounded.
+            }
         }
-        catch (ConditionalCheckFailedException)
-        {
-            // A live record already exists — read it back so the middleware can act on its outcome.
-            var existing = await ReadRecordAsync(key, now, cancellationToken);
-            // Negligible race: it lapsed between the condition check and the read. Treat as claimable
-            // (a possible re-process) rather than falsely reporting a duplicate (which would drop a message).
-            return existing != null ? ClaimResult.AlreadyExists(existing) : ClaimResult.Won(claimToken);
-        }
+
+        // Every attempt raced against a live record that had vanished by the time we read it back,
+        // and every retry still lost. Never fabricate a Won with no durable write behind it — surface
+        // the contention instead.
+        throw new IdempotencyClaimContentionException(key, MaxClaimAttempts);
     }
 
     /// <inheritdoc />
