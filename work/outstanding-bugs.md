@@ -292,6 +292,36 @@ real".
   confirmations enabled, verified via `GetNextPublishSequenceNumberAsync()` (the only public-API-visible
   proxy for that setting in this client version). See WP-8.
 
+### Tracked findings round 7–10, WP-Q — Autofac DI adapter parity (done)
+Decisions, rationale, and rejected alternatives for all four are ruled in
+[`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-Q — Autofac DI adapter
+parity (P8 — the alternate container must match the reference)".
+- **[RESOLVED] #82 — `AutofacBenzeneServiceContainer.IsTypeRegistered` read Autofac's
+  `ComponentRegistryBuilder`, which stays empty until `ContainerBuilder.Build()` runs, but is called
+  during registration (well before `Build()`) by every `TryAdd*` extension - so it always returned
+  `false`, silently turning every `TryAdd*` into an unconditional last-write-wins `Add*` and breaking the
+  idempotency contract `AddMessageHandlers`' finder-lock-in fix (WP-7(a)'s sibling, `AddMessageHandlers`
+  round-5/6) depends on.** Now backed by an explicit `HashSet<Type>` maintained by every `AddXxx`/
+  `AddServiceResolver` call, mirroring `MicrosoftBenzeneServiceContainer`'s live `IServiceCollection`
+  check. See WP-Q.
+- **[RESOLVED] #83 — `CreateServiceResolverFactory()` called `ContainerBuilder.Build()`, which throws on
+  a second call per builder; `Benzene.Grpc.AspNet`'s `GrpcMethodHandlerFactory.Create()` calls it on
+  every gRPC request, so the second request ever handled with Autofac wired in threw.** The `IContainer`
+  is now built once, lazily, on `AutofacBenzeneServiceContainer`'s first `CreateServiceResolverFactory()`
+  call; every call (including the first) returns a cheap, non-owning `AutofacServiceResolverFactory`
+  wrapping that already-built container. See WP-Q.
+- **[RESOLVED] #84 — the single-`IComponentContext`-arg `AutofacServiceResolverAdapter` constructor
+  (used by `AddServiceResolver()`'s registration, and by every `AddScoped/AddTransient/AddSingleton
+  (Func<IServiceResolver,T>)` overload) never set the `IServiceResolverFactory` field, so a
+  constructor-injected `IServiceResolver` asking for its own `IServiceResolverFactory` hit a raw
+  `InvalidOperationException` instead of the enriched `BenzeneResolutionException`.** The adapter now
+  builds one lazily on first use (mirrors `MicrosoftServiceResolverAdapter.ResolverFactory`'s `??=`
+  pattern), wrapping the ambient scope it already has - no container `Build()` involved, so this can't
+  collide with #83's fix. See WP-Q.
+- **[RESOLVED] #85 — `AutofacServiceResolverFactory` didn't implement `IAsyncDisposable`, unlike
+  `MicrosoftServiceResolverFactory`.** Added; disposes the owned container asynchronously when the
+  factory owns one (a non-owning factory's `DisposeAsync` is a no-op, matching its `Dispose`). See WP-Q.
+
 ---
 
 ## Open — maintainer decisions (the real remaining backlog)
