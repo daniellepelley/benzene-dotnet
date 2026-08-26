@@ -236,6 +236,27 @@ publish that sent it when confirms sequence the channel's publishes. The message
 `MessageId` if it doesn't already have one (needed for that correlation), and the send resolves
 `unexpected-error` instead of `accepted` if the broker returns the message as unroutable (a broker-level
 rejection unrelated to routing still surfaces the usual way, as a thrown publish → `service-unavailable`).
+A caller-supplied `MessageId` must not already be in flight on the same channel — publishing a duplicate
+while the earlier one is still awaiting its outcome throws `InvalidOperationException` immediately,
+rather than risking a later `Basic.Return` being misattributed to the wrong publish.
+
+A mandatory publish waits for the broker's confirmation for at most 30 seconds by default — a
+stalled/unresponsive broker (confirms enabled but never firing an ack/nack/return) fails the send with a
+`TimeoutException` (surfacing as `service-unavailable`) instead of hanging the caller forever. Pass
+`publishConfirmTimeout` to override it:
+
+```csharp
+var client = new RabbitMqBenzeneMessageClient(channel,
+    NullLogger<RabbitMqBenzeneMessageClient>.Instance, serviceResolver, exchange: "", mandatory: true,
+    publishConfirmTimeout: TimeSpan.FromSeconds(10));
+
+// or on the pipeline-builder path:
+// .UseRabbitMqClient(channel, mandatory: true, publishConfirmTimeout: TimeSpan.FromSeconds(10))
+```
+
+Cancelling the ambient token, or the timeout above firing, while a mandatory publish is awaiting the
+broker's outcome always cleans up its internal correlation entry before the exception propagates — it
+never leaks past a cancelled or timed-out publish.
 
 For the `OutboundRoutingBuilder` path (so call sites use `IBenzeneMessageSender.SendAsync`), the
 `.UseRabbitMq<T>(exchange, ...)` / `.UseRabbitMqClient(channel)` pipeline extensions are the conversion

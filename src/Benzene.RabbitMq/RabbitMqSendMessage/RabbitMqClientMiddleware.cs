@@ -13,6 +13,7 @@ public class RabbitMqClientMiddleware : IMiddleware<RabbitMqSendMessageContext>,
     private readonly IChannel _channel;
     private readonly bool _mandatory;
     private readonly bool _persistent;
+    private readonly TimeSpan? _publishConfirmTimeout;
     private readonly RabbitMqMandatoryPublishCoordinator? _coordinator;
 
     /// <summary>Initializes a new instance of the <see cref="RabbitMqClientMiddleware"/> class.</summary>
@@ -32,15 +33,24 @@ public class RabbitMqClientMiddleware : IMiddleware<RabbitMqSendMessageContext>,
     /// message on a durable queue survives a broker restart. Set <c>false</c> for transient delivery
     /// (lower overhead, but the message is lost on restart even on a durable queue).
     /// </param>
+    /// <param name="publishConfirmTimeout">
+    /// Only applies when <paramref name="mandatory"/> is <c>true</c>. The most this middleware will wait
+    /// for the broker's confirmation of a single publish before failing it with a
+    /// <see cref="TimeoutException"/>, so a stalled/unresponsive broker cannot hang the caller forever
+    /// (task board #45). Defaults to <see cref="RabbitMqMandatoryPublishCoordinator.DefaultPublishConfirmTimeout"/>
+    /// (30 seconds) when not given.
+    /// </param>
     /// <exception cref="InvalidOperationException">
     /// <paramref name="mandatory"/> is <c>true</c> and <paramref name="channel"/> does not have publisher
     /// confirmations enabled.
     /// </exception>
-    public RabbitMqClientMiddleware(IChannel channel, bool mandatory = false, bool persistent = true)
+    public RabbitMqClientMiddleware(IChannel channel, bool mandatory = false, bool persistent = true,
+        TimeSpan? publishConfirmTimeout = null)
     {
         _channel = channel;
         _mandatory = mandatory;
         _persistent = persistent;
+        _publishConfirmTimeout = publishConfirmTimeout;
 
         // Fail fast here too (not only in Extensions.UseRabbitMqClient) so a caller constructing this
         // middleware directly - bypassing the extension method - gets the same guarantee. Memoized per
@@ -71,7 +81,8 @@ public class RabbitMqClientMiddleware : IMiddleware<RabbitMqSendMessageContext>,
             properties.MessageId ??= Guid.NewGuid().ToString();
 
             context.Published = await _coordinator!
-                .PublishMandatoryAsync(context.Exchange, context.RoutingKey, properties, context.Body, CancellationToken.None)
+                .PublishMandatoryAsync(context.Exchange, context.RoutingKey, properties, context.Body,
+                    CancellationToken.None, _publishConfirmTimeout)
                 .ConfigureAwait(false);
             return;
         }

@@ -124,6 +124,32 @@ message, handlers must be idempotent - see [Idempotency](../../docs/cookbooks/id
   publishing without `mandatory`, which shares the same coordinator once one exists for the channel) can
   in principle interleave inside that narrow gate window. Dedicate the channel to Benzene's outbound
   middleware for `mandatory: true` traffic to avoid it.
+- **Hardening (tracked findings round 7-10, task board #30/#33/#45 - WP-A):** ruled in
+  [`work/bug-fix-designs-round7-10-2026-08.md`](../../work/bug-fix-designs-round7-10-2026-08.md)
+  §"WP-A - RabbitMQ mandatory-publish coordinator hardening".
+  - **Fenced cleanup on cancellation/timeout (#30/#45).** `PublishMandatoryAsync`'s final
+    `tcs.Task.WaitAsync(...)` is awaited on a token linked from the caller's `cancellationToken` AND a
+    `publishConfirmTimeout` (default `RabbitMqMandatoryPublishCoordinator.DefaultPublishConfirmTimeout`,
+    30s) - mirroring `Benzene.Resilience.TimeoutMiddleware`'s "did the timer fire, or did the host token
+    fire" distinction. **Either way**, the pending-publish entry is `Forget`-ed from `_byTag`/
+    `_byMessageId` **before** the exception propagates - previously only the publish-time try/catch
+    called `Forget`, so a caller cancelling (or, before #45, simply waiting forever) while genuinely
+    awaiting the broker's ack/nack/return leaked the entry permanently. A timer-caused wait failure
+    surfaces as `TimeoutException` (distinguishable from a genuine caller cancellation, which still
+    surfaces as `OperationCanceledException`). Threaded end-to-end: `publishConfirmTimeout` is an
+    optional parameter on `RabbitMqMandatoryPublishCoordinator.PublishMandatoryAsync`,
+    `RabbitMqClientMiddleware`'s constructor, `Extensions.UseRabbitMqClient`, and
+    `RabbitMqBenzeneMessageClient`'s constructor - `null` at any layer means "use the coordinator's
+    default".
+  - **Reject a duplicate in-flight `MessageId` (#33).** `_byMessageId[messageId] = pending` used
+    indexer-overwrite, so publishing a second mandatory message with a `MessageId` still pending from an
+    earlier publish silently stole that earlier publish's correlation entry - a later `Basic.Return`
+    naming the shared `MessageId` would then resolve the wrong publish's `Tcs` (and the true owner's
+    `Tcs` would never settle from a real broker event again). Now `TryAdd`; a duplicate throws
+    `InvalidOperationException` at publish time, before the message reaches the wire. Currently
+    unreachable through the shipped `RabbitMqClientMiddleware` surface (it always stamps a fresh GUID
+    when the caller didn't set one), but the coordinator's own public contract - and a caller who
+    supplies their own `MessageId` - invites it.
 
 ## Configurable topic header key
 The topic header key defaults to `RabbitMqConstants.DefaultTopicHeader` (`"topic"`) but is **not
@@ -164,7 +190,11 @@ lacking the configured header still routes by its AMQP routing key.
   mocked `IChannel`: success→ack, failure→nack-requeue, redelivered-failure→nack-no-requeue,
   requeue-disabled, exception→nack, no-result→ack, AutoAck mode, config defaults),
   `RabbitMqBenzeneMessageClientTest` (status mapping + topic-as-routing-key + header forwarding),
-  `RabbitMqRealPipelineTest` (real DI registration completeness).
+  `RabbitMqRealPipelineTest` (real DI registration completeness). `RabbitMqMandatoryPublishTest` also
+  covers the WP-A hardening directly against `RabbitMqMandatoryPublishCoordinator`: cancelling mid-wait
+  and the publish-confirm timeout both forget the pending-publish entry (read back via reflection on
+  the private `_byTag`/`_byMessageId` dictionaries - the round-7 leak-probe technique), and a duplicate
+  in-flight `MessageId` throws `InvalidOperationException` without disturbing the earlier publish.
 - Live (`test/Benzene.Integration.Test/RabbitMq/`, CI-only, needs Docker): `RabbitMqWorkerLiveTest`
   round-trips a real message through a real broker, mirroring `BenzeneKafkaWorkerLiveTest`.
 
