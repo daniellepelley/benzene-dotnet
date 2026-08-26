@@ -49,7 +49,79 @@ public class ApiGatewayHttpRequestAdapterHeaderCasingTest
 
         var request = new ApiGatewayHttpRequestAdapter().Map(context);
 
+        Assert.NotNull(request.Headers);
         Assert.Empty(request.Headers);
+    }
+
+    // #105: the mapped Headers dictionary must itself be case-insensitive - matching the contract
+    // HttpRequest.Headers documents (StringComparer.OrdinalIgnoreCase) - not merely pre-lower-cased
+    // keys sitting in an ordinal dictionary. Before the fix, ToDictionary(...) built a plain-ordinal
+    // dictionary, so a lookup with any casing other than the exact lower-cased form the adapter chose
+    // would fail even though every key had already been lower-cased.
+    [Fact]
+    public void Map_HeaderLookup_IsCaseInsensitiveRegardlessOfLookupCasing()
+    {
+        var context = new ApiGatewayContext(new APIGatewayProxyRequest
+        {
+            Path = "/example",
+            HttpMethod = "GET",
+            Headers = new Dictionary<string, string>
+            {
+                ["Authorization"] = "Bearer abc123"
+            }
+        });
+
+        var request = new ApiGatewayHttpRequestAdapter().Map(context);
+
+        Assert.True(request.Headers.TryGetValue("Authorization", out var mixedCase));
+        Assert.Equal("Bearer abc123", mixedCase);
+        Assert.True(request.Headers.TryGetValue("AUTHORIZATION", out var upperCase));
+        Assert.Equal("Bearer abc123", upperCase);
+        Assert.True(request.Headers.TryGetValue("authorization", out var lowerCase));
+        Assert.Equal("Bearer abc123", lowerCase);
+    }
+
+    // #105: a request with headers differing only by case (a malformed/duplicate wire payload, or a
+    // hand-built test event) must resolve first-wins rather than throwing - matching the
+    // Benzene.Core.Helper.DictionaryUtils convention used elsewhere in the codebase.
+    [Fact]
+    public void Map_CaseCollidingHeaders_FirstWins_DoesNotThrow()
+    {
+        var context = new ApiGatewayContext(new APIGatewayProxyRequest
+        {
+            Path = "/example",
+            HttpMethod = "GET",
+            Headers = new Dictionary<string, string>
+            {
+                ["Content-Type"] = "application/json",
+                ["content-type"] = "text/plain"
+            }
+        });
+
+        var request = new ApiGatewayHttpRequestAdapter().Map(context);
+
+        Assert.True(request.Headers.TryGetValue("CONTENT-TYPE", out var value));
+        Assert.Equal("application/json", value);
+    }
+
+    // #105: a bare health-ping-shaped payload with no HttpMethod/Path set must not surface null where
+    // HttpRequest's contract promises non-null strings.
+    [Fact]
+    public void Map_NullMethodAndPath_DefaultToEmptyString_DoesNotThrow()
+    {
+        var context = new ApiGatewayContext(new APIGatewayProxyRequest
+        {
+            Path = null,
+            HttpMethod = null,
+            Headers = null
+        });
+
+        var request = new ApiGatewayHttpRequestAdapter().Map(context);
+
+        Assert.NotNull(request.Method);
+        Assert.Equal(string.Empty, request.Method);
+        Assert.NotNull(request.Path);
+        Assert.Equal(string.Empty, request.Path);
     }
 }
 

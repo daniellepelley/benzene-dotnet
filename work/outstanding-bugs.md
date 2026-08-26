@@ -909,6 +909,34 @@ parity (P8 — the alternate container must match the reference)".
   `MicrosoftServiceResolverFactory`.** Added; disposes the owned container asynchronously when the
   factory owns one (a non-owning factory's `DisposeAsync` is a no-op, matching its `Dispose`). See WP-Q.
 
+### Tracked findings round 10, WP-Z — API Gateway request adapter headers (done)
+Ruled in [`bug-fix-designs-round10-2026-08.md`](bug-fix-designs-round10-2026-08.md) §"WP-Z — API Gateway
+request adapter headers".
+- **[RESOLVED] #105 — `ApiGatewayHttpRequestAdapter.Map` (v1) built its `Headers` result with a
+  plain-ordinal `Dictionary` (via `.ToDictionary(...)`), not `StringComparer.OrdinalIgnoreCase` -
+  breaking `HttpRequest.Headers`'s documented case-insensitive contract for any lookup key not
+  already in the adapter's own lower-cased form - and left `Method`/`Path` able to come back `null`
+  from a hand-built payload or health-ping-shaped event, since `APIGatewayProxyRequest` is
+  nullable-oblivious on the wire.** Audited every in-repo consumer of `HttpRequest.Headers` first
+  (`src/`, `test/`): every one either calls `HttpRequest.AsLowerCase()` before reading (itself
+  lower-casing all keys and consulting them by lowercase literal) or does a manual
+  `StringComparison.OrdinalIgnoreCase` scan (`MeshRefreshGuardMiddleware`/`MeshDispatchGuardMiddleware`,
+  both already null-checking `Headers` defensively) - so no in-repo consumer reads `Map()`'s raw
+  result with an arbitrary-cased indexer/`TryGetValue`, and this closes a **latent** contract
+  violation for `Headers`'s comparer, not an already-observable one. The `Method`/`Path` half is a
+  **live** NRE risk though: `CorsMiddleware.HandleAsync` calls `httpRequest.Method.ToLowerInvariant()`
+  unconditionally, so a v1 event with no `httpMethod` field (confirmed possible - the wire type
+  carries no `NullableAttribute`/`NullableContextAttribute`, i.e. it's nullable-oblivious, not
+  nullable-annotated-non-null) reaches that call as `null` and throws today. `Map` now accumulates
+  headers into a `new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)` via a first-wins
+  `TryAdd` loop (no existing `DictionaryUtils` helper fit this exact "single dict, case-insensitive,
+  key-transform" shape, so a small loop matching the `Replace`/`FilterAndReplace` pattern was written)
+  instead of `ToDictionary` (which threw `ArgumentException` on a lower-cased key collision), and
+  `Method`/`Path` default to `string.Empty` when the wire value is `null`. Four regression tests in
+  `ApiGatewayHeaderCasingAndQueryStringTest`: mixed/upper/lower-case lookups all succeed against one
+  mapped request, two case-colliding header names resolve first-wins without throwing, and null
+  `Method`/`Path` map to `string.Empty` without throwing. See WP-Z.
+
 ---
 
 ## Open — tracked findings, round 10 (2026-08-26) — ruled, not yet implemented
