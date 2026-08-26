@@ -140,6 +140,35 @@ public class InMemoryIdempotencyStoreTest
         Assert.True(final.ExistingRecord.WasSuccessful);
     }
 
+    /// <summary>
+    /// Regression test for #51: fencing is token match ALONE, matching every sibling implementation
+    /// (<c>DynamoDbIdempotencyStore</c>, both Outbox stores). Previously <c>IsLiveClaim</c> also
+    /// required <c>entry.ExpiresAt > now</c>, so a holder that merely outraced its own TTL - with no
+    /// competing claimant, nobody having reclaimed the key - got a misleading "reclaimed by another
+    /// worker" false return and its outcome was discarded.
+    /// </summary>
+    [Fact]
+    public async Task Complete_WithOriginalToken_AfterOwnTtlExpiry_WithNoCompetingClaimant_Succeeds()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var store = new InMemoryIdempotencyStore(timeToLive: TimeSpan.FromMinutes(1), now: () => now);
+
+        var claim = await store.TryClaimAsync("key-1");
+        Assert.True(claim.Claimed);
+
+        // The claim's own TTL lapses, but nobody else has reclaimed the key - claim.ClaimToken is
+        // still the only, still-InProgress token on record.
+        now = now.AddMinutes(2);
+
+        var settled = await store.CompleteAsync("key-1", claim.ClaimToken!, wasSuccessful: true);
+
+        Assert.True(settled);
+        var reclaim = await store.TryClaimAsync("key-1");
+        Assert.False(reclaim.Claimed);
+        Assert.Equal(IdempotencyStatus.Completed, reclaim.ExistingRecord!.Status);
+        Assert.True(reclaim.ExistingRecord.WasSuccessful);
+    }
+
     [Fact]
     public async Task TryClaim_AfterTtlExpiry_AllowsReclaim()
     {

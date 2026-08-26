@@ -83,13 +83,22 @@ public class DynamoDbIdempotencyStoreTest
     }
 
     [Fact]
-    public async Task TryClaim_WhenExistingRecordHasExpired_IsClaimable()
+    public async Task TryClaim_WhenExistingRecordHasExpired_RetriesThePutAndWins()
     {
         // The conditional write raced (we saw ConditionalCheckFailed) but the record read back is
-        // already past its TTL, so the store treats it as absent and lets the claim win.
+        // already past its TTL, so the store treats the read-back as absent -- which means it must
+        // retry the conditional PutItem (never synthesize a Won) and only report Won once that retry
+        // actually writes.
         var dynamo = MockDynamo();
+        var attempt = 0;
         dynamo.Setup(x => x.PutItemAsync(It.IsAny<PutItemRequest>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new ConditionalCheckFailedException("stale"));
+            .Returns<PutItemRequest, CancellationToken>((_, _) =>
+            {
+                attempt++;
+                return attempt == 1
+                    ? throw new ConditionalCheckFailedException("stale")
+                    : Task.FromResult(new PutItemResponse());
+            });
         dynamo.Setup(x => x.GetItemAsync(It.IsAny<GetItemRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(LiveRecord("key-1", "InProgress", false, Now.AddHours(-1)));
         var store = new DynamoDbIdempotencyStore(dynamo.Object, "idempotency", now: () => Now);
@@ -97,6 +106,106 @@ public class DynamoDbIdempotencyStoreTest
         var claim = await store.TryClaimAsync("key-1");
 
         Assert.True(claim.Claimed);
+        Assert.Equal(2, attempt);
+        dynamo.Verify(x => x.PutItemAsync(It.IsAny<PutItemRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task TryClaim_WhenReadBackAfterConflictFindsRecordGone_RetriesThePut_AndOnlyWinsAfterItSucceeds()
+    {
+        // Regression test for #31 (phantom win): the first PutItem loses the race (a live record
+        // exists), but by the time we read it back it's gone (e.g. a concurrent ReleaseAsync deleted
+        // it). The store must NOT synthesize a Won from that empty read -- it must retry the
+        // conditional PutItem, and only return Won once that retry actually writes.
+        var dynamo = MockDynamo();
+        var putCalls = new List<PutItemRequest>();
+        var putAttempt = 0;
+        dynamo.Setup(x => x.PutItemAsync(It.IsAny<PutItemRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<PutItemRequest, CancellationToken>((r, _) =>
+            {
+                putAttempt++;
+                putCalls.Add(r);
+                return putAttempt == 1
+                    ? throw new ConditionalCheckFailedException("live record exists")
+                    : Task.FromResult(new PutItemResponse());
+            });
+        var getCalls = 0;
+        dynamo.Setup(x => x.GetItemAsync(It.IsAny<GetItemRequest>(), It.IsAny<CancellationToken>()))
+            .Callback(() => getCalls++)
+            .ReturnsAsync(new GetItemResponse { Item = new Dictionary<string, AttributeValue>() }); // absent
+        var store = new DynamoDbIdempotencyStore(dynamo.Object, "idempotency", now: () => Now);
+
+        var claim = await store.TryClaimAsync("key-1");
+
+        Assert.True(claim.Claimed);
+        Assert.NotNull(claim.ClaimToken);
+        Assert.Equal(2, putAttempt);
+        Assert.Equal(1, getCalls);
+        // The winning write is the SECOND PutItem (the retry), carrying the same token returned.
+        Assert.Equal(claim.ClaimToken, putCalls[1].Item["claimToken"].S);
+        dynamo.Verify(x => x.PutItemAsync(It.IsAny<PutItemRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+        dynamo.Verify(x => x.GetItemAsync(It.IsAny<GetItemRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task TryClaim_WhenRetryAlsoLosesToALiveRecord_ReturnsAlreadyExists_NotAPhantomWin()
+    {
+        // The first PutItem loses, the read-back finds it gone (the #31 race), so we retry -- but the
+        // retry ALSO loses, and this time the read-back finds a genuinely live record (someone else
+        // won in between). This must surface as AlreadyExists, never a synthesized Won.
+        var dynamo = MockDynamo();
+        var putAttempt = 0;
+        dynamo.Setup(x => x.PutItemAsync(It.IsAny<PutItemRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<PutItemRequest, CancellationToken>((_, _) =>
+            {
+                putAttempt++;
+                throw new ConditionalCheckFailedException("live record exists");
+            });
+        var getAttempt = 0;
+        dynamo.Setup(x => x.GetItemAsync(It.IsAny<GetItemRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<GetItemRequest, CancellationToken>((_, _) =>
+            {
+                getAttempt++;
+                return Task.FromResult(getAttempt == 1
+                    ? new GetItemResponse { Item = new Dictionary<string, AttributeValue>() } // absent
+                    : LiveRecord("key-1", "InProgress", false, Now.AddHours(1))); // now genuinely live
+            });
+        var store = new DynamoDbIdempotencyStore(dynamo.Object, "idempotency", now: () => Now);
+
+        var claim = await store.TryClaimAsync("key-1");
+
+        Assert.False(claim.Claimed);
+        Assert.Null(claim.ClaimToken);
+        Assert.NotNull(claim.ExistingRecord);
+        Assert.Equal(2, putAttempt);
+        Assert.Equal(2, getAttempt);
+    }
+
+    [Fact]
+    public async Task TryClaim_WhenEveryRetryRacesAgainstAVanishingRecord_ThrowsRatherThanPhantomWin()
+    {
+        // Pathological case: every conditional PutItem loses, and every immediate read-back finds the
+        // record absent -- persistent contention that never resolves to either a successful write or
+        // a stable live record within the retry cap. Must not return Won (nothing was ever written)
+        // and must not return AlreadyExists (there is no record to report).
+        var dynamo = MockDynamo();
+        var putAttempt = 0;
+        dynamo.Setup(x => x.PutItemAsync(It.IsAny<PutItemRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<PutItemRequest, CancellationToken>((_, _) =>
+            {
+                putAttempt++;
+                throw new ConditionalCheckFailedException("live record exists");
+            });
+        dynamo.Setup(x => x.GetItemAsync(It.IsAny<GetItemRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new GetItemResponse { Item = new Dictionary<string, AttributeValue>() }); // always absent
+        var store = new DynamoDbIdempotencyStore(dynamo.Object, "idempotency", now: () => Now);
+
+        var ex = await Assert.ThrowsAsync<IdempotencyClaimContentionException>(() => store.TryClaimAsync("key-1"));
+
+        Assert.Equal("key-1", ex.Key);
+        Assert.Equal(3, putAttempt);
+        dynamo.Verify(x => x.PutItemAsync(It.IsAny<PutItemRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
+        dynamo.Verify(x => x.GetItemAsync(It.IsAny<GetItemRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
     }
 
     [Fact]
