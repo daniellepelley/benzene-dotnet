@@ -81,6 +81,9 @@ What remains, and why it is live:
   as such; the rest are open. Rule 2 applies: it stays until those decisions are made, then it archives.
 - `service-mesh-roadmap-1.0.md` — the one `*-roadmap-1.0.md` that is genuinely a living document,
   owned by the mesh product owner and cited from public documentation.
+- `bug-fix-designs-round10-2026-08.md` — ACTIVE; the fix-design ruling for the round-10 review
+  findings (task board #98–#119, execution task #120). Archives when that round lands, like its
+  round-7–10 predecessor.
 - `benzene-clients-vision.md` — standing vision document for the clients story.
 - `benzene-outbound-model-plan.md` — in-flight plan (the outbound model the descriptor tool needs).
 - `benzene-result-errors-ruling.md` — standing decision record, cited by `docs/migration-alpha-to-1.0.md`.

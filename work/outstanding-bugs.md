@@ -911,9 +911,52 @@ parity (P8 — the alternate container must match the reference)".
 
 ---
 
+## Open — tracked findings, round 10 (2026-08-26) — ruled, not yet implemented
+
+The round-10 review pass (task board #96: five parallel agents over the Lambda hosting bridges,
+deeper CosmosDb/gRPC, health-check logic, Kafka/self-hosted workers, and the abstractions contract
+packages, against `4657c9d`) produced **22 fix-worthy findings, tracked as task board #98–#119**
+and ruled in [`bug-fix-designs-round10-2026-08.md`](bug-fix-designs-round10-2026-08.md)
+(execution task #120). Headlines: the version-blindness root cause behind #69/#70 is the
+`IMessageGetter`/`ResolvedTopicCache` abstraction shape itself, with a third live instance confirmed
+(`UseMeshTrace` exports `TopicVersion = null` for every header-versioned message, #98); three of the
+four self-hosted workers settle successfully-processed messages through calls gated on the shutdown
+token, converting graceful shutdown into silent double-processing (SQS #115 executed, EventHub #116
+executed, ServiceBus #117 suspected); `CachingHealthCheckProcessor` has no single-flight guard
+(50 concurrent cold-cache callers → 50 full dependency-hammering runs, #111); and
+`ValidationStatusAttribute` — documented in the shared abstractions package — is honored by exactly
+one of the three validation adapters (#99). Per-finding evidence, rulings and work packages are in
+the ruling doc; each will get its `[RESOLVED]` line here as it lands.
+
+New `[DECISION]` items surfaced by the same pass (recorded under "Open — maintainer decisions"
+below): worker self-stop leaves the process Ready with health green; EventHub has no poison-message
+escape hatch (Kafka's DLT argument applies verbatim); gRPC client per-call deadlines are not
+settable; missing-topic status asymmetry (`ValidationError` vs `NotFound`) across
+EventGrid/QueueStorage/Timer vs the sentinel transports.
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.
+
+### New from the round-10 pass (2026-08-26)
+- **[DECISION] Worker self-stop leaves the process Ready and health green** — Kafka onFault, Kafka
+  DLT-produce failure, and EventHub `CatchHandlerExceptions=false` all deliberately stop the worker;
+  every transport health check probes broker reachability, none probes "is my worker still running",
+  and `IBenzeneWorker` exposes no state to probe — in Kubernetes the pod stays Ready while the queue
+  backs up. Candidate shapes: a stopped/faulted flag surfaced through a liveness-category health
+  check, or self-stop optionally failing the host fast. (Round-10 kafkaworkers finding 5.)
+- **[DECISION] EventHub has no poison-message escape hatch** — skip-on-failure or stop-the-worker
+  only; the argument that justified Kafka's retry-then-dead-letter producer applies verbatim to
+  EventHub (also a checkpoint-stream with no broker DLQ). Documented-deliberate today; feature
+  candidate. (`BenzeneEventHubConfig.cs:34-74`; round-10 kafkaworkers finding 6.)
+- **[DECISION] gRPC client per-call deadlines not settable by the caller** —
+  `GrpcBenzeneMessageClient` only forwards the inherited inbound `ServerCallContext.Deadline`;
+  `GrpcContextConverter` accepts a deadline no public path supplies. API-surface call.
+  (round-10 cosmosgrpc finding 4.)
+- **[DECISION] Missing-topic status asymmetry across transports** — EventGrid/QueueStorage/Timer
+  report a missing topic as `ValidationError` ("Topic is missing"); sentinel-returning transports
+  report `NotFound`. Same condition, two wire-visible statuses; normalizing is a behavior change.
+  (The stale `MessageRouter` comment claiming uniformity is fixed under task #98.)
 
 ### Settlement / at-least-once semantics
 - **[RESOLVED / doc] Kinesis "partition checkpoint model"** — *previously listed as an unsafe
