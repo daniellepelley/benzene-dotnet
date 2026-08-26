@@ -9,20 +9,26 @@ namespace Benzene.Schema.OpenApi.EventService;
 
 public class EventServiceDocumentDeserializer
 {
-    private readonly EventServiceDocumentBuilder _eventServiceDocumentBuilder = new();
     private readonly OpenApiStringReader _openApiStringReader = new();
 
     public EventServiceDocument Deserialize(string json)
     {
+        // A fresh builder (hence a fresh SchemaBuilder/SchemaRepository) per call keeps this
+        // instance safe to call more than once: SchemaBuilder.AddSchema is first-write-wins, so
+        // reusing one builder/repository across two Deserialize() calls that share a schema name
+        // (e.g. a baseline vs. current spec of the same evolving service) would silently resolve
+        // the second document's schema to the first document's old definition.
+        var eventServiceDocumentBuilder = new EventServiceDocumentBuilder();
+
         // DateParseHandling.None keeps ISO-date-looking strings (e.g. example payload values) as
         // strings, so they round-trip through serialize → deserialize → serialize unchanged.
         using var stringReader = new StringReader(json);
         using var jsonReader = new JsonTextReader(stringReader) { DateParseHandling = DateParseHandling.None };
         var jObject = JObject.Load(jsonReader);
 
-        AddSchema(jObject);
+        AddSchema(jObject, eventServiceDocumentBuilder);
 
-        var doc = _eventServiceDocumentBuilder.Build();
+        var doc = eventServiceDocumentBuilder.Build();
         doc.Info = GetInfo(jObject);
         doc.Tags = GetTags(jObject);
         doc.MessageEndpoint = jObject["messageEndpoint"]?.Value<string>();
@@ -32,7 +38,7 @@ public class EventServiceDocumentDeserializer
         return doc;
     }
 
-    private void AddSchema(JObject jObject)
+    private void AddSchema(JObject jObject, EventServiceDocumentBuilder eventServiceDocumentBuilder)
     {
         var schemaJToken = jObject[OpenApiConstants.Components][OpenApiConstants.Schemas];
 
@@ -40,7 +46,7 @@ public class EventServiceDocumentDeserializer
         {
             return;
         }
-        
+
         foreach (var x in schemaJToken)
         {
             var p = (JProperty)x;
@@ -48,7 +54,7 @@ public class EventServiceDocumentDeserializer
                 _openApiStringReader.ReadFragment<OpenApiSchema>(p.Value.ToString(), OpenApiSpecVersion.OpenApi3_0,
                     out _);
             var key = p.Path.Split('.').Last();
-            _eventServiceDocumentBuilder.AddSchema(key, schema);
+            eventServiceDocumentBuilder.AddSchema(key, schema);
         }
     }
 
