@@ -292,6 +292,74 @@ real".
   confirmations enabled, verified via `GetNextPublishSequenceNumberAsync()` (the only public-API-visible
   proxy for that setting in this client version). See WP-8.
 
+### Tracked findings round 7–10, WP-R — Testing infrastructure & the coverage blind spot (done)
+Ruled in
+[`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-R — Testing
+infrastructure & the coverage blind spot".
+- **[RESOLVED] #81 — seven `*.TestHelpers` packages (`Benzene.Azure.EventHub.TestHelpers`,
+  `Benzene.Azure.ServiceBus.TestHelpers`, `Benzene.Kafka.Core.TestHelpers`,
+  `Benzene.RabbitMq.TestHelpers`, `Benzene.Azure.Function.QueueStorage.TestHelpers`,
+  `Benzene.Azure.Function.EventGrid.TestHelpers`, `Benzene.GoogleCloud.Functions.Http.TestHelpers`)
+  had their `.csproj` in `Benzene.sln`'s build graph but zero coverage from its *test* graph — no test
+  project in the solution referenced any of them, so they were exercised only by
+  `templates/content/*/BenzeneStarter.Tests` (a separate solution) against **published NuGet
+  packages**, never against current `main` source. This is the blind spot that let #80 land
+  unnoticed.** New project `test/Benzene.TestHelpers.SmokeTest` references all seven and exercises one
+  basic scenario from each (envelope/topic/body shape for the message-builder extensions;
+  method/path/header/body for the Google Cloud `HttpContextBuilder`), added to `Benzene.sln`. See
+  WP-R.
+- **[RESOLVED] #80 — `AsQueueStorageBenzeneMessage<T>(source, ISerializer)` serialized the *whole*
+  envelope (`BenzeneMessageRequest { Topic, Headers, Body }`) with the caller-supplied serializer,
+  crashing for a non-JSON serializer (e.g. `Benzene.Xml.XmlSerializer`) because `Headers` is an
+  `IDictionary<string,string>` interface, unserializable by `System.Xml.Serialization.XmlSerializer` -
+  unlike production (`BenzeneMessageQueueStorageHandler.TryExtractRequest`), which always deserializes
+  the envelope with the DI-resolved default serializer regardless of the body's own format.** Now
+  matches the correct sibling `AsEventHubBenzeneMessage`'s pattern exactly: the envelope is always
+  fixed JSON, only `Body` uses the passed serializer. Lived exactly in #81's blind spot. See WP-R.
+
+### Tracked findings round 7–10, WP-S — Hosting / HTTP adapters (done)
+Ruled in
+[`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-S — Hosting / HTTP
+adapters".
+- **[RESOLVED] #88 — `BenzeneHostedServiceAdapter` never observed whether the wrapped worker's own
+  task faulted, so a dead/crashed worker left the process "up" with zero signal (no log, no
+  propagation), unlike `BackgroundService`'s `BackgroundServiceExceptionBehavior` (default: stop the
+  host).** The adapter now observes the worker's task for an unhandled fault the moment it happens (a
+  fire-and-forget continuation started in `StartAsync`, not gated on the host later calling
+  `StopAsync`), logs it at `Critical` via an optional `ILogger<BenzeneHostedServiceAdapter>`, and calls
+  an optional `IHostApplicationLifetime.StopApplication()` - matching `BackgroundService`'s modern
+  default of stopping the whole host on an unhandled worker fault. Both dependencies are optional
+  constructor parameters (default `null`) since not every construction path (e.g.
+  `BenzeneWorkerExtensions.BuildHostedService(this IBenzeneWorkerBuilder)`) has a resolver to supply
+  them; `HostBuilderExtensions.UseBenzene<TStartUp>()` - the one path that does - now wires both. See
+  WP-S.
+- **[RESOLVED] #89 — `ApiGatewayHttpRequestAdapter` (v1) passed AWS's raw, case-sensitive,
+  original-casing header dictionary straight through, unlike `AspNetHttpRequestAdapter`
+  (`.ToLowerInvariant()` on every key) and `ApiGatewayV2Context.CombinedHeaders()`
+  (`StringComparer.OrdinalIgnoreCase`) - every consumer (`BasicAuthMiddleware`,
+  `OAuth2BearerMiddleware`, `CorsMiddleware`, the OIDC middleware) reads headers by lowercase literal
+  key, relying on `HttpRequest.AsLowerCase()` having been called first, so a v1-API-Gateway-triggered
+  request silently missed auth/CORS header lookups unless someone remembered to normalize.**
+  `ApiGatewayHttpRequestAdapter.Map` now lower-cases header keys at the source, matching
+  `AspNetHttpRequestAdapter`'s exact pattern - a raw `Map()` result's `TryGetValue("authorization",
+  ...)` now succeeds without `AsLowerCase()`. See WP-S.
+- **[RESOLVED] #90 — `AspNetRequestEnricher` took the first value for a repeated query-string key
+  (`?status=active&status=inactive`), while `ApiGatewayRequestEnricher`/`ApiGatewayV2RequestEnricher`
+  passed `QueryStringParameters` through as-is, which per AWS's payload shapes keeps only the LAST
+  value for v1's single-value map and comma-joins repeated values into one string for v2 - so a
+  repeated query key bound differently across transports for the identical route/handler.**
+  Standardized on first-value-wins everywhere (matching AspNet, the more common convention): a new
+  `QueryStringFirstWinsMapper` picks the first value per key from v1's
+  `MultiValueQueryStringParameters` (falling back to the single-value map when the multi-value one is
+  absent) and the first comma-separated segment from v2's already-joined value. See WP-S.
+- **[RESOLVED] #91 — `ReflectionHttpEndpointFinder`'s duplicate-route startup check grouped by
+  `new { Method, Path }` with case-sensitive string equality, but `RouteFinder`/`CompiledRoutePath`
+  match case-INSENSITIVELY at runtime, so `[HttpEndpoint("GET","/Users")]` and
+  `[HttpEndpoint("get","/USERS")]` on two different handlers weren't flagged as a duplicate at
+  startup - the second silently became unreachable dead code instead of the documented fail-fast
+  `BenzeneException`.** The `GroupBy` key now case-folds `Method`/`Path` (the stored values are
+  unchanged). See WP-S.
+
 ---
 
 ## Open — maintainer decisions (the real remaining backlog)
