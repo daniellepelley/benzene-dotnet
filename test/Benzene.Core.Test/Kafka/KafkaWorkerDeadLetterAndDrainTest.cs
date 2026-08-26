@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -6,6 +7,7 @@ using Benzene.Core.Middleware;
 using Benzene.Kafka.Core;
 using Benzene.Kafka.Core.KafkaMessage;
 using Benzene.Microsoft.Dependencies;
+using Benzene.SelfHost;
 using Confluent.Kafka;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -239,5 +241,187 @@ public class KafkaWorkerDeadLetterAndDrainTest
     {
         Assert.True(headers.TryGetLastBytes(key, out var bytes), $"Expected header '{key}' on the dead-lettered message.");
         return bytes;
+    }
+
+    /// <summary>
+    /// Covers #118: on a genuine partition-LOSS rebalance event the worker must register its own
+    /// <c>SetPartitionsLostHandler</c> (rather than silently falling back to the revoked handler, which
+    /// would run a pointless drain and then attempt a commit the broker's generation fencing would
+    /// reject), and that handler must never commit and must return effectively instantly (no drain
+    /// wait).
+    /// </summary>
+    /// <remarks>
+    /// <c>ConsumerBuilder{TKey,TValue}.PartitionsRevokedHandler</c>/<c>PartitionsLostHandler</c> are
+    /// NOT public (only the getter's accessibility looked public under a loose reflection check - the
+    /// compiler correctly rejects reading them), so the registered <c>Func</c>/<c>Action</c> delegates
+    /// can't be read back off a real builder without a live broker connection. Instead
+    /// <see cref="BenzeneKafkaWorker{TKey,TValue}.OnPartitionsRevoked"/>/<c>OnPartitionsLost</c> are
+    /// <c>internal</c> methods (visible to this test assembly via <c>InternalsVisibleTo</c>) holding
+    /// the actual callback logic - this test invokes <c>OnPartitionsLost</c> directly against a mocked
+    /// <see cref="IConsumer{TKey,TValue}"/>, the most direct equivalent of "invoke the registered
+    /// handler delegate directly" available without a broker. <see cref="DrainOnRevokeOn_RegistersBothRevokedAndLostHandlersWithoutThrowing"/>
+    /// separately covers that the worker actually wires both handlers onto the real builder.
+    /// </remarks>
+    [Fact]
+    public async Task PartitionsLostHandler_NeverCommits_AndReturnsImmediately()
+    {
+        using var worker = await CreateWorkerForRebalanceCallbackTestsAsync(commitOnlyOnSuccess: true);
+
+        var lostPartitions = new List<TopicPartitionOffset>
+        {
+            new("orders", new Partition(0), Offset.Unset),
+            new("orders", new Partition(1), Offset.Unset),
+        };
+
+        var mockConsumer = new Mock<IConsumer<string, string>>();
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        // CommitOnlyOnSuccess = true => _managesOffsetsManually = true, so the *revoked* handler would
+        // call Commit() for the exact same input - the sharpest possible contrast against the lost
+        // handler, which must never call it regardless of this flag.
+        worker.OnPartitionsLost(mockConsumer.Object, lostPartitions);
+        stopwatch.Stop();
+
+        mockConsumer.Verify(c => c.Commit(), Times.Never);
+        mockConsumer.Verify(c => c.Commit(It.IsAny<IEnumerable<TopicPartitionOffset>>()), Times.Never);
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(1),
+            $"Expected the lost handler to return near-instantly (no drain wait); took {stopwatch.Elapsed}.");
+    }
+
+    /// <summary>
+    /// Regression guard alongside #118: the pre-existing revoked-handler behavior (drain then commit,
+    /// when offsets are managed manually) must be unchanged by extracting it into
+    /// <see cref="BenzeneKafkaWorker{TKey,TValue}.OnPartitionsRevoked"/> and adding the sibling lost
+    /// handler.
+    /// </summary>
+    [Fact]
+    public async Task PartitionsRevokedHandler_StillDrainsAndCommits_WhenManagingOffsetsManually()
+    {
+        using var worker = await CreateWorkerForRebalanceCallbackTestsAsync(commitOnlyOnSuccess: true);
+        var dispatcher = new BoundedConcurrentDispatcher<ConsumeResult<string, string>>(
+            1, (_, _) => Task.CompletedTask, Mock.Of<ILogger>());
+
+        var revoked = new List<TopicPartitionOffset> { new("orders", new Partition(0), Offset.Unset) };
+        var mockConsumer = new Mock<IConsumer<string, string>>();
+
+        worker.OnPartitionsRevoked(mockConsumer.Object, revoked, dispatcher);
+
+        mockConsumer.Verify(c => c.Commit(), Times.Once);
+    }
+
+    /// <summary>
+    /// Covers the wiring half of #118: with <c>DrainOnRevoke</c> on, applying the worker's
+    /// configure-builder callback to a real (never <c>Build()</c>-ed, so no broker connection is
+    /// attempted) <see cref="ConsumerBuilder{TKey,TValue}"/> must call both
+    /// <c>SetPartitionsRevokedHandler</c> AND <c>SetPartitionsLostHandler</c> without throwing -
+    /// <c>ConsumerBuilder</c> throws if the same handler kind is registered twice, so this also proves
+    /// neither is registered more than once.
+    /// </summary>
+    [Fact]
+    public async Task DrainOnRevokeOn_RegistersBothRevokedAndLostHandlersWithoutThrowing()
+    {
+        var mockConsumer = new Mock<IConsumer<string, string>>();
+        mockConsumer.Setup(x => x.Consume(It.IsAny<CancellationToken>())).Throws(new OperationCanceledException());
+
+        Action<ConsumerBuilder<string, string>>? capturedConfigure = null;
+        var mockFactory = new Mock<IKafkaConsumerFactory<string, string>>();
+        mockFactory.Setup(x => x.Create(It.IsAny<ConsumerConfig>(), It.IsAny<Action<ConsumerBuilder<string, string>>?>()))
+            .Callback<ConsumerConfig, Action<ConsumerBuilder<string, string>>?>((_, configure) => capturedConfigure = configure)
+            .Returns(mockConsumer.Object);
+
+        using var worker = new BenzeneKafkaWorker<string, string>(Mock.Of<Benzene.Abstractions.DI.IServiceResolverFactory>(),
+            new KafkaApplication<string, string>(Mock.Of<Benzene.Abstractions.Middleware.IMiddlewarePipeline<KafkaRecordContext<string, string>>>()),
+            Config(drainOnRevoke: true), Mock.Of<ILogger<BenzeneKafkaWorker<string, string>>>(), mockFactory.Object);
+
+        await worker.StartAsync(CancellationToken.None);
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.NotNull(capturedConfigure);
+
+        var builder = new ConsumerBuilder<string, string>(
+            new ConsumerConfig { GroupId = "test-group", BootstrapServers = "localhost:9092" });
+
+        var exception = Record.Exception(() => capturedConfigure!(builder));
+        Assert.Null(exception);
+    }
+
+    /// <summary>
+    /// Builds a worker and runs it through a full (mocked) <c>StartAsync</c>/<c>StopAsync</c> cycle so
+    /// its internal <c>_managesOffsetsManually</c> field is set exactly as production code sets it -
+    /// then hands the worker back so a test can invoke <c>OnPartitionsRevoked</c>/<c>OnPartitionsLost</c>
+    /// directly against its OWN mocked <see cref="IConsumer{TKey,TValue}"/>, independent of the one the
+    /// (immediately-cancelled) consume loop used internally.
+    /// </summary>
+    private static async Task<BenzeneKafkaWorker<string, string>> CreateWorkerForRebalanceCallbackTestsAsync(bool commitOnlyOnSuccess)
+    {
+        var mockConsumer = new Mock<IConsumer<string, string>>();
+        mockConsumer.Setup(x => x.Consume(It.IsAny<CancellationToken>())).Throws(new OperationCanceledException());
+
+        var mockFactory = new Mock<IKafkaConsumerFactory<string, string>>();
+        mockFactory.Setup(x => x.Create(It.IsAny<ConsumerConfig>(), It.IsAny<Action<ConsumerBuilder<string, string>>?>()))
+            .Returns(mockConsumer.Object);
+        mockFactory.Setup(x => x.Create(It.IsAny<ConsumerConfig>())).Returns(mockConsumer.Object);
+
+        var worker = new BenzeneKafkaWorker<string, string>(Mock.Of<Benzene.Abstractions.DI.IServiceResolverFactory>(),
+            new KafkaApplication<string, string>(Mock.Of<Benzene.Abstractions.Middleware.IMiddlewarePipeline<KafkaRecordContext<string, string>>>()),
+            Config(commitOnlyOnSuccess: commitOnlyOnSuccess, drainOnRevoke: true),
+            Mock.Of<ILogger<BenzeneKafkaWorker<string, string>>>(), mockFactory.Object);
+
+        await worker.StartAsync(CancellationToken.None);
+        await worker.StopAsync(CancellationToken.None);
+        return worker;
+    }
+
+    /// <summary>
+    /// Covers #119: <c>StartAsync</c> must not mutate the caller's shared <c>ConsumerConfig</c> instance
+    /// when it needs <c>EnableAutoOffsetStore = false</c> for manual offset management - it must clone
+    /// instead, so a <c>ConsumerConfig</c> the caller reuses elsewhere (a health check, a second worker)
+    /// is unaffected. The worker's own internal behavior must still see the setting disabled, on its
+    /// own clone.
+    /// </summary>
+    [Fact]
+    public async Task StartAsync_ManagingOffsetsManually_DoesNotMutateCallersConsumerConfig()
+    {
+        var callerConfig = new ConsumerConfig { GroupId = "test-group", BootstrapServers = "localhost:9092" };
+        Assert.Null(callerConfig.EnableAutoOffsetStore); // default, before StartAsync
+
+        var config = new BenzeneKafkaConfig
+        {
+            ConsumerConfig = callerConfig,
+            Topics = new[] { "orders" },
+            CommitOnlyOnSuccess = true,
+            CatchHandlerExceptions = false,
+            PreserveOrderPerPartition = true,
+            // Irrelevant to #119 - forced off so the worker takes the single-arg Create(config) path
+            // this test mocks, rather than ShouldDrainOnRevoke's CommitOnlyOnSuccess-derived default.
+            DrainOnRevoke = false,
+        };
+
+        var mockConsumer = new Mock<IConsumer<string, string>>();
+        mockConsumer.Setup(x => x.Consume(It.IsAny<CancellationToken>())).Throws(new OperationCanceledException());
+
+        ConsumerConfig? passedToFactory = null;
+        var mockFactory = new Mock<IKafkaConsumerFactory<string, string>>();
+        mockFactory.Setup(x => x.Create(It.IsAny<ConsumerConfig>()))
+            .Callback<ConsumerConfig>(c => passedToFactory = c)
+            .Returns(mockConsumer.Object);
+
+        using var worker = new BenzeneKafkaWorker<string, string>(Mock.Of<Benzene.Abstractions.DI.IServiceResolverFactory>(),
+            new KafkaApplication<string, string>(Mock.Of<Benzene.Abstractions.Middleware.IMiddlewarePipeline<KafkaRecordContext<string, string>>>()),
+            config, Mock.Of<ILogger<BenzeneKafkaWorker<string, string>>>(), mockFactory.Object);
+
+        await worker.StartAsync(CancellationToken.None);
+        await worker.StopAsync(CancellationToken.None);
+
+        // The caller's own object is untouched.
+        Assert.Null(callerConfig.EnableAutoOffsetStore);
+        Assert.Same(callerConfig, config.ConsumerConfig);
+
+        // The worker still behaves correctly internally - the factory received a *different* object
+        // with auto-store disabled on it.
+        Assert.NotNull(passedToFactory);
+        Assert.NotSame(callerConfig, passedToFactory);
+        Assert.False(passedToFactory!.EnableAutoOffsetStore);
+        Assert.Equal("test-group", passedToFactory.GroupId); // other settings carried over onto the clone
+        Assert.Equal("localhost:9092", passedToFactory.BootstrapServers);
     }
 }

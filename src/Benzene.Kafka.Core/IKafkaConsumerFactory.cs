@@ -18,10 +18,13 @@ namespace Benzene.Kafka.Core;
 public interface IKafkaConsumerFactory<TKey, TValue>
 {
     /// <summary>
-    /// Creates the consumer. The worker calls this once, on its background consume task, passing
-    /// <c>BenzeneKafkaConfig.ConsumerConfig</c> <em>after</em> applying its own adjustments (e.g.
-    /// <c>EnableAutoOffsetStore = false</c> for <c>CommitOnlyOnSuccess</c>) - build from the
-    /// passed config, not a captured copy, so those adjustments are honored.
+    /// Creates the consumer. The worker calls this once, on its background consume task, passing a
+    /// config reflecting its own adjustments (e.g. <c>EnableAutoOffsetStore = false</c> for
+    /// <c>CommitOnlyOnSuccess</c>/dead-lettering) - build from the passed config, not a captured
+    /// copy, so those adjustments are honored. When an adjustment is needed the worker applies it to
+    /// a <em>clone</em> of <c>BenzeneKafkaConfig.ConsumerConfig</c>, never the caller's own instance
+    /// in place (it may be a shared object the caller reuses elsewhere) - otherwise the object passed
+    /// here is the caller's <c>ConsumerConfig</c> unchanged.
     /// </summary>
     /// <param name="consumerConfig">The consumer configuration to build from.</param>
     /// <returns>The created (not yet subscribed) consumer; the worker subscribes, closes, and disposes it.</returns>

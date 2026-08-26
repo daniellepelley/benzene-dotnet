@@ -29,8 +29,14 @@ producer support. This is one of the "self-hosted worker" startup modes document
 - `IKafkaConsumerFactory<TKey,TValue>` / `KafkaConsumerFactory<TKey,TValue>` (2026-07-17,
   additive public API) - the seam through which the worker creates its `IConsumer`, mirroring the
   Azure workers' client-factory seams (`IEventProcessorClientFactory` etc.). `Create(ConsumerConfig)`
-  receives the worker's own `ConsumerConfig` *after* worker adjustments (`CommitOnlyOnSuccess`'s
-  `EnableAutoOffsetStore = false`) - build from the passed config, not a captured copy. The
+  receives a config reflecting the worker's own adjustments (`CommitOnlyOnSuccess`/dead-lettering's
+  `EnableAutoOffsetStore = false`) - build from the passed config, not a captured copy. **The
+  caller's own `BenzeneKafkaConfig.ConsumerConfig` instance is never mutated in place** (2026-08-26,
+  #119) - when an adjustment is needed, `StartAsync` clones it (`new ConsumerConfig(new
+  Dictionary<string,string>(ConsumerConfig)) { EnableAutoOffsetStore = false }`) and passes the clone
+  to `Create`; a `ConsumerConfig` the caller reuses elsewhere (a health check, a second worker
+  instance) is unaffected. Test: `KafkaWorkerDeadLetterAndDrainTest.StartAsync_ManagingOffsetsManually_DoesNotMutateCallersConsumerConfig`.
+  The
   default factory takes an optional `Action<ConsumerBuilder<TKey,TValue>>` for builder
   configuration plain `ConsumerConfig` can't express - deserializers, handlers, and notably
   `SetOAuthBearerTokenRefreshHandler` for secretless Entra ID managed identity against Event Hubs'
@@ -97,15 +103,29 @@ producer support. This is one of the "self-hosted worker" startup modes document
     no record is committed as done while still in flight and none is needlessly reprocessed by the
     partition's next owner. `null` (default) resolves (`ShouldDrainOnRevoke`) to `CommitOnlyOnSuccess`
     - draining is strictly safer under at-least-once and pointless under auto-store. Wired via the
-    consumer's `SetPartitionsRevokedHandler`, which quiesces the revoked partitions' dispatcher lanes
-    with `BoundedConcurrentDispatcher.DrainLanesAsync` (bounded by `DrainTimeout`) then `Commit()`s.
-    Only honored when the consumer is built through the default `KafkaConsumerFactory` or a custom
-    factory that applies the worker's builder-configuration callback (the new
-    `IKafkaConsumerFactory.Create(config, configureBuilder)` overload - a default interface method, so
-    pre-existing custom factories keep compiling but must implement it to get the drain handler). The
-    worker still calls the original single-arg `Create` when draining is off, so nothing changes on
-    that path. Prefer `PartitionAssignmentStrategy.CooperativeSticky` (a `ConsumerConfig` passthrough)
-    to reduce stop-the-world rebalances. Tests: `KafkaWorkerDeadLetterAndDrainTest` (config
+    consumer's `SetPartitionsRevokedHandler` (`BenzeneKafkaWorker.OnPartitionsRevoked`), which quiesces
+    the revoked partitions' dispatcher lanes with `BoundedConcurrentDispatcher.DrainLanesAsync`
+    (bounded by `DrainTimeout`) then `Commit()`s. **`SetPartitionsLostHandler`
+    (`OnPartitionsRevoked`'s sibling, `OnPartitionsLost`) is also registered** (2026-08-26, #118) - a
+    genuine partition **loss** (session timeout, a long GC pause, ...) is deliberately handled
+    differently from a **revoke**: no drain wait and no `Commit()` at all, ever, logged at
+    `Information` as a distinct "Partitions LOST (not revoked)" event. Per Confluent.Kafka's own docs,
+    without a lost handler the revoked handler runs instead for a loss too - paying its drain wait and
+    then a commit the broker's own generation fencing will reject (the partition is likely already
+    reassigned to another consumer by the time the callback fires) - so the fix is registering the
+    sibling handler, not changing the revoked one. Only honored when the consumer is built through the
+    default `KafkaConsumerFactory` or a custom factory that applies the worker's builder-configuration
+    callback (the `IKafkaConsumerFactory.Create(config, configureBuilder)` overload - a default
+    interface method, so pre-existing custom factories keep compiling but must implement it to get
+    both handlers). The worker still calls the original single-arg `Create` when draining is off, so
+    nothing changes on that path. Prefer `PartitionAssignmentStrategy.CooperativeSticky` (a
+    `ConsumerConfig` passthrough) to reduce stop-the-world rebalances. Tests: `KafkaWorkerDeadLetterAndDrainTest`
+    (`PartitionsLostHandler_NeverCommits_AndReturnsImmediately`,
+    `PartitionsRevokedHandler_StillDrainsAndCommits_WhenManagingOffsetsManually`,
+    `DrainOnRevokeOn_RegistersBothRevokedAndLostHandlersWithoutThrowing` - `OnPartitionsRevoked`/
+    `OnPartitionsLost` are `internal` + `InternalsVisibleTo("Benzene.Test")` specifically so these can
+    invoke the callback logic directly, since `ConsumerBuilder`'s registered handler delegates live on
+    non-public properties with no live-broker-free way to read them back); config
     resolution + the consumer is built with/without a rebalance handler per the flag); the lane-drain
     mechanics themselves in `BoundedConcurrentDispatcherTest.DrainLanesAsync_*`.
 - **`KafkaDeadLetterOptions<TKey,TValue>`** (2026-07-20) - opt-in retry-then-dead-letter, passed to

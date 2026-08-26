@@ -82,6 +82,14 @@ public class BenzeneKafkaWorker<TKey, TValue> : IBenzeneWorker, IDisposable
         // advance the commit watermark past an earlier one that hasn't actually succeeded / been
         // dead-lettered yet (silent loss on the next commit).
         _managesOffsetsManually = _benzeneKafkaConfig.CommitOnlyOnSuccess || deadLetterEnabled;
+
+        // Never mutate the caller's ConsumerConfig instance in place - it may be a shared object the
+        // caller reuses elsewhere (e.g. handed to a health check, or a second worker instance), and a
+        // surprise EnableAutoOffsetStore flip on someone else's config is exactly the kind of
+        // action-at-a-distance bug that's hard to track down. When manual offset management needs
+        // EnableAutoOffsetStore = false, apply it to a clone built from the same key/value pairs and
+        // hand that clone to the consumer factory instead; the caller's object is left untouched.
+        var effectiveConsumerConfig = _benzeneKafkaConfig.ConsumerConfig;
         if (_managesOffsetsManually)
         {
             if (!_benzeneKafkaConfig.PreserveOrderPerPartition)
@@ -96,7 +104,10 @@ public class BenzeneKafkaWorker<TKey, TValue> : IBenzeneWorker, IDisposable
                     "in flight.");
             }
 
-            _benzeneKafkaConfig.ConsumerConfig.EnableAutoOffsetStore = false;
+            effectiveConsumerConfig = new ConsumerConfig(new Dictionary<string, string>(_benzeneKafkaConfig.ConsumerConfig))
+            {
+                EnableAutoOffsetStore = false,
+            };
         }
 
         if (_benzeneKafkaConfig.ShouldDrainOnRevoke && _consumerFactory is not KafkaConsumerFactory<TKey, TValue>)
@@ -151,8 +162,8 @@ public class BenzeneKafkaWorker<TKey, TValue> : IBenzeneWorker, IDisposable
                 // Create is used - preserving behavior (and custom factories) exactly.
                 var configureBuilder = ConfigureRebalanceDrain(dispatcher);
                 _consumer = configureBuilder == null
-                    ? _consumerFactory.Create(_benzeneKafkaConfig.ConsumerConfig)
-                    : _consumerFactory.Create(_benzeneKafkaConfig.ConsumerConfig, configureBuilder);
+                    ? _consumerFactory.Create(effectiveConsumerConfig)
+                    : _consumerFactory.Create(effectiveConsumerConfig, configureBuilder);
                 _consumer.Subscribe(_benzeneKafkaConfig.Topics);
 
                 while (!runToken.IsCancellationRequested)
@@ -354,10 +365,27 @@ public class BenzeneKafkaWorker<TKey, TValue> : IBenzeneWorker, IDisposable
 
     /// <summary>
     /// Builds the <see cref="ConsumerBuilder{TKey,TValue}"/> configuration that registers the
-    /// partitions-revoked handler when <c>DrainOnRevoke</c> is on: on revoke it quiesces the revoked
-    /// partitions' dispatcher lanes (bounded by <see cref="BenzeneKafkaConfig.DrainTimeout"/>) and
-    /// commits their stored offsets before releasing them. Returns <c>null</c> when draining is off, so
-    /// the consumer is built exactly as before.
+    /// partitions-revoked AND partitions-lost handlers when <c>DrainOnRevoke</c> is on. The two are
+    /// deliberately different:
+    /// <list type="bullet">
+    /// <item><description>
+    /// <b>Revoked</b> (a cooperative, planned handoff - e.g. a rebalance from scaling the group) drains
+    /// the revoked partitions' dispatcher lanes (bounded by <see cref="BenzeneKafkaConfig.DrainTimeout"/>)
+    /// and commits their stored offsets before releasing them, so no record is committed as done while
+    /// still being handled, and none is silently reprocessed by the partition's next owner.
+    /// </description></item>
+    /// <item><description>
+    /// <b>Lost</b> (an involuntary loss - session timeout, a long GC pause, ...) does neither. Per
+    /// Confluent.Kafka's own guidance, a lost partition is likely already owned by another consumer in
+    /// the group by the time this fires, so committing here would race that consumer's own offsets past
+    /// the broker's generation fencing and fail, and waiting out a drain only delays this consumer
+    /// rejoining the group for no benefit. Without an explicit lost handler, Confluent.Kafka falls back
+    /// to calling the revoked handler above for a loss too - paying its drain wait and then a commit the
+    /// broker will reject - which is exactly the bug this handler exists to avoid.
+    /// </description></item>
+    /// </list>
+    /// Returns <c>null</c> when draining is off, so the consumer is built exactly as before (and neither
+    /// handler is registered).
     /// </summary>
     private Action<ConsumerBuilder<TKey, TValue>>? ConfigureRebalanceDrain(
         BoundedConcurrentDispatcher<ConsumeResult<TKey, TValue>> dispatcher)
@@ -367,39 +395,88 @@ public class BenzeneKafkaWorker<TKey, TValue> : IBenzeneWorker, IDisposable
             return null;
         }
 
-        return builder => builder.SetPartitionsRevokedHandler((consumer, revoked) =>
+        return builder =>
         {
-            try
-            {
-                var partitions = revoked.Select(tpo => tpo.Partition.Value).ToArray();
-                // The revoked handler runs on this consume thread, so no new records are being enqueued
-                // while we wait - the in-flight lanes only drain down. Blocking here is expected during
-                // a rebalance.
-                dispatcher.DrainLanesAsync(partitions, _benzeneKafkaConfig.DrainTimeout).GetAwaiter().GetResult();
+            builder.SetPartitionsRevokedHandler((consumer, revoked) => OnPartitionsRevoked(consumer, revoked, dispatcher));
+            builder.SetPartitionsLostHandler((consumer, lost) => OnPartitionsLost(consumer, lost));
+        };
+    }
 
-                // Only commit when offsets are managed manually (CommitOnlyOnSuccess / dead-letter):
-                // there, stored = last genuinely-processed offset per partition, so committing is safe.
-                // Under plain auto-store, the stored offset is the consumer's *position* (including
-                // records still in flight on OTHER, non-revoked partitions), and a blanket Commit() would
-                // mark those in-flight records as done - a silent loss if the worker later crashes. In
-                // that mode we only drain (wait for the revoked partitions' handlers to finish) and let
-                // the broker's own rebalance commit handle offsets.
-                if (_managesOffsetsManually)
-                {
-                    consumer.Commit();
-                }
-            }
-            catch (KafkaException ex)
+    /// <summary>
+    /// The <c>SetPartitionsRevokedHandler</c> callback: a cooperative, planned handoff (e.g. a
+    /// rebalance from scaling the group). Drains the revoked partitions' dispatcher lanes (bounded by
+    /// <see cref="BenzeneKafkaConfig.DrainTimeout"/>) and commits their stored offsets before
+    /// releasing them, so no record is committed as done while still being handled, and none is
+    /// silently reprocessed by the partition's next owner.
+    /// </summary>
+    /// <remarks>
+    /// Internal (rather than a private lambda body) so a test can invoke it directly against a mocked
+    /// <see cref="IConsumer{TKey,TValue}"/> - <c>ConsumerBuilder{TKey,TValue}</c> stores registered
+    /// handlers on non-public properties, so this is the only way to exercise the callback's actual
+    /// logic without a live broker connection. See <c>InternalsVisibleTo</c> in the project file.
+    /// </remarks>
+    internal void OnPartitionsRevoked(IConsumer<TKey, TValue> consumer, List<TopicPartitionOffset> revoked,
+        BoundedConcurrentDispatcher<ConsumeResult<TKey, TValue>> dispatcher)
+    {
+        try
+        {
+            var partitions = revoked.Select(tpo => tpo.Partition.Value).ToArray();
+            // The revoked handler runs on this consume thread, so no new records are being enqueued
+            // while we wait - the in-flight lanes only drain down. Blocking here is expected during a
+            // rebalance.
+            dispatcher.DrainLanesAsync(partitions, _benzeneKafkaConfig.DrainTimeout).GetAwaiter().GetResult();
+
+            // Only commit when offsets are managed manually (CommitOnlyOnSuccess / dead-letter): there,
+            // stored = last genuinely-processed offset per partition, so committing is safe. Under plain
+            // auto-store, the stored offset is the consumer's *position* (including records still in
+            // flight on OTHER, non-revoked partitions), and a blanket Commit() would mark those
+            // in-flight records as done - a silent loss if the worker later crashes. In that mode we
+            // only drain (wait for the revoked partitions' handlers to finish) and let the broker's own
+            // rebalance commit handle offsets.
+            if (_managesOffsetsManually)
             {
-                // Nothing stored yet (e.g. no successful record on a revoked partition) surfaces as a
-                // "no offset stored" commit error - benign; the partition simply advances no further.
-                _logger.LogDebug(ex, "Commit during partition revoke found no stored offsets to commit.");
+                consumer.Commit();
             }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Error draining/committing revoked partitions during rebalance.");
-            }
-        });
+
+            _logger.LogInformation(
+                "Partitions revoked: drained {PartitionCount} partition(s) ({Partitions}); {CommitAction}.",
+                partitions.Length, string.Join(",", partitions),
+                _managesOffsetsManually ? "committed stored offsets" : "no commit needed (auto-store)");
+        }
+        catch (KafkaException ex)
+        {
+            // Nothing stored yet (e.g. no successful record on a revoked partition) surfaces as a "no
+            // offset stored" commit error - benign; the partition simply advances no further.
+            _logger.LogDebug(ex, "Commit during partition revoke found no stored offsets to commit.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error draining/committing revoked partitions during rebalance.");
+        }
+    }
+
+    /// <summary>
+    /// The <c>SetPartitionsLostHandler</c> callback: an involuntary loss (session timeout, a long GC
+    /// pause, ...), deliberately handled differently from <see cref="OnPartitionsRevoked"/> - see
+    /// #118. Per Confluent.Kafka's own docs: "If [the partitions lost handler] is not specified, the
+    /// partitions revoked handler (if specified) will be called instead if partitions are lost ... The
+    /// application should not commit offsets in this case, since the partitions will likely be owned
+    /// by other consumers in the group (offset commits to Kafka will likely fail)." So this handler
+    /// never commits, and does not drain either - by the time it fires the partitions are likely
+    /// already reassigned, so waiting only delays this consumer rejoining the group for no benefit; the
+    /// fastest way back to healthy is to return immediately. Without this handler, Confluent.Kafka
+    /// falls back to the revoked handler for a loss too - paying its drain wait and then a commit the
+    /// broker's generation fencing will reject - which is exactly the bug this handler exists to avoid.
+    /// </summary>
+    /// <remarks>Internal for the same direct-invocation testing reason as <see cref="OnPartitionsRevoked"/>.</remarks>
+    internal void OnPartitionsLost(IConsumer<TKey, TValue> consumer, List<TopicPartitionOffset> lost)
+    {
+        var partitions = lost.Select(tpo => tpo.Partition.Value).ToArray();
+        _logger.LogInformation(
+            "Partitions LOST (not revoked): {PartitionCount} partition(s) ({Partitions}) are likely " +
+            "already owned by another consumer in the group - skipping drain and commit, rejoining " +
+            "immediately.",
+            partitions.Length, string.Join(",", partitions));
     }
 
     /// <summary>
