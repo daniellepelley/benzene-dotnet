@@ -44,13 +44,20 @@ public class RabbitMqBenzeneMessageClient : IBenzeneMessageClient
     /// confirmations enabled; the constructor throws immediately if it doesn't.
     /// </param>
     /// <param name="topicHeaderKey">The message-property header the topic is written to (defaults to <see cref="RabbitMqConstants.DefaultTopicHeader"/>).</param>
+    /// <param name="publishConfirmTimeout">
+    /// Only applies when <paramref name="mandatory"/> is <c>true</c>. The most a single publish will wait
+    /// for the broker's confirmation before failing with a <see cref="TimeoutException"/> instead of
+    /// hanging forever on a stalled broker (task board #45). Defaults to
+    /// <see cref="RabbitMqMandatoryPublishCoordinator.DefaultPublishConfirmTimeout"/> (30 seconds) when
+    /// not given.
+    /// </param>
     /// <exception cref="InvalidOperationException">
     /// <paramref name="mandatory"/> is <c>true</c> and <paramref name="channel"/> does not have publisher
     /// confirmations enabled.
     /// </exception>
     public RabbitMqBenzeneMessageClient(IChannel channel, ILogger<RabbitMqBenzeneMessageClient> logger,
         IServiceResolver serviceResolver, string exchange = "", bool mandatory = false,
-        string topicHeaderKey = RabbitMqConstants.DefaultTopicHeader)
+        string topicHeaderKey = RabbitMqConstants.DefaultTopicHeader, TimeSpan? publishConfirmTimeout = null)
     {
         _serviceResolver = serviceResolver;
         _logger = logger;
@@ -60,7 +67,7 @@ public class RabbitMqBenzeneMessageClient : IBenzeneMessageClient
         var benzeneServiceContainer = new NullBenzeneServiceContainer();
         var middlewarePipelineBuilder = new MiddlewarePipelineBuilder<RabbitMqSendMessageContext>(benzeneServiceContainer);
         _middlewarePipeline = middlewarePipelineBuilder
-            .UseRabbitMqClient(channel, mandatory)
+            .UseRabbitMqClient(channel, mandatory, publishConfirmTimeout: publishConfirmTimeout)
             .Build();
     }
 

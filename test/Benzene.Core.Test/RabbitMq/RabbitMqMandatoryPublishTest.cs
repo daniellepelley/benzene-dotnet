@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Benzene.Clients;
@@ -211,6 +212,133 @@ public class RabbitMqMandatoryPublishTest
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.PublishMandatoryAsync(
             "exchange", "routing-key", properties, ReadOnlyMemory<byte>.Empty, CancellationToken.None));
+    }
+
+    // -------------------------------------------------------------------------------------------
+    // Tracked findings round 7-10, WP-A (task board #30, #33, #45) - RabbitMqMandatoryPublishCoordinator
+    // hardening. Ruled in work/bug-fix-designs-round7-10-2026-08.md, "WP-A - RabbitMQ mandatory-publish
+    // coordinator hardening".
+    // -------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Reads the coordinator's private <c>_byTag</c>/<c>_byMessageId</c> dictionaries via reflection (the
+    /// round-7 leak-probe technique) so a test can assert a pending-publish entry did not leak past
+    /// <c>Forget</c>, without exposing internal state on the type's public surface just for testing.
+    /// </summary>
+    private static (int ByTagCount, int ByMessageIdCount) GetPendingCounts(RabbitMqMandatoryPublishCoordinator coordinator)
+    {
+        FieldInfo byTagField = typeof(RabbitMqMandatoryPublishCoordinator)
+            .GetField("_byTag", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        FieldInfo byMessageIdField = typeof(RabbitMqMandatoryPublishCoordinator)
+            .GetField("_byMessageId", BindingFlags.NonPublic | BindingFlags.Instance)!;
+
+        dynamic byTag = byTagField.GetValue(coordinator)!;
+        dynamic byMessageId = byMessageIdField.GetValue(coordinator)!;
+        return ((int)byTag.Count, (int)byMessageId.Count);
+    }
+
+    [Fact]
+    public async Task PublishMandatoryAsync_CancelledWhileAwaitingBrokerOutcome_ForgetsThePendingPublish()
+    {
+        // Task board #30: a broker that never fires Basic.Ack/Basic.Nack/Basic.Return, combined with the
+        // caller's own token firing while the final await is outstanding - before this fix, that leaked
+        // the pending-publish entry in _byTag/_byMessageId forever, because Forget(tag, messageId) was
+        // only ever called from the earlier try/catch around the publish itself, not around the final
+        // await.
+        var mockChannel = ConfirmsEnabledChannel(nextSequenceNumber: 1);
+        mockChannel
+            .Setup(x => x.BasicPublishAsync(It.IsAny<string>(), It.IsAny<string>(), true,
+                It.IsAny<BasicProperties>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()))
+            .Returns(ValueTask.CompletedTask); // never raises an ack/nack/return
+
+        var coordinator = RabbitMqMandatoryPublishCoordinator.GetOrCreate(mockChannel.Object);
+        var properties = new BasicProperties { MessageId = "msg-leak-probe" };
+        using var cts = new CancellationTokenSource();
+
+        Task<bool> publishTask = coordinator.PublishMandatoryAsync("exchange", "routing-key", properties,
+            ReadOnlyMemory<byte>.Empty, cts.Token);
+
+        // By this point the publish has already run to completion synchronously (the mocked channel
+        // completes every call inline) and is now suspended purely on the broker's outcome - exactly the
+        // "mid-wait" state the leak needs.
+        (int byTagBefore, int byMessageIdBefore) = GetPendingCounts(coordinator);
+        Assert.Equal(1, byTagBefore);
+        Assert.Equal(1, byMessageIdBefore);
+
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => publishTask);
+
+        (int byTagAfter, int byMessageIdAfter) = GetPendingCounts(coordinator);
+        Assert.Equal(0, byTagAfter);
+        Assert.Equal(0, byMessageIdAfter);
+    }
+
+    [Fact]
+    public async Task PublishMandatoryAsync_BrokerNeverConfirms_TimesOutAndForgetsThePendingPublish()
+    {
+        // Task board #45: nothing used to bound how long a caller waits for the broker's confirm - a
+        // stalled/unresponsive broker (confirms enabled but never firing) hung the caller forever.
+        var mockChannel = ConfirmsEnabledChannel(nextSequenceNumber: 1);
+        mockChannel
+            .Setup(x => x.BasicPublishAsync(It.IsAny<string>(), It.IsAny<string>(), true,
+                It.IsAny<BasicProperties>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()))
+            .Returns(ValueTask.CompletedTask); // never raises an ack/nack/return
+
+        var coordinator = RabbitMqMandatoryPublishCoordinator.GetOrCreate(mockChannel.Object);
+        var properties = new BasicProperties { MessageId = "msg-timeout-probe" };
+
+        var ex = await Assert.ThrowsAsync<TimeoutException>(() => coordinator.PublishMandatoryAsync(
+            "exchange", "routing-key", properties, ReadOnlyMemory<byte>.Empty, CancellationToken.None,
+            TimeSpan.FromMilliseconds(50)));
+
+        Assert.Contains("msg-timeout-probe", ex.Message);
+
+        (int byTagAfter, int byMessageIdAfter) = GetPendingCounts(coordinator);
+        Assert.Equal(0, byTagAfter);
+        Assert.Equal(0, byMessageIdAfter);
+    }
+
+    [Fact]
+    public async Task PublishMandatoryAsync_DefaultTimeout_Is30Seconds()
+    {
+        Assert.Equal(TimeSpan.FromSeconds(30), RabbitMqMandatoryPublishCoordinator.DefaultPublishConfirmTimeout);
+    }
+
+    [Fact]
+    public async Task PublishMandatoryAsync_DuplicateMessageIdAlreadyInFlight_ThrowsClearly()
+    {
+        // Task board #33: _byMessageId[messageId] = pending used indexer-overwrite, so a second publish
+        // sharing an already-in-flight MessageId silently stole the first publish's correlation entry -
+        // a later Basic.Return naming that MessageId would then be misattributed to the wrong publish
+        // (and the first publish's Tcs would never settle from a real broker return). It must instead be
+        // rejected up front, clearly, at publish time.
+        var mockChannel = ConfirmsEnabledChannel(nextSequenceNumber: 1);
+        mockChannel
+            .Setup(x => x.BasicPublishAsync(It.IsAny<string>(), It.IsAny<string>(), true,
+                It.IsAny<BasicProperties>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()))
+            .Returns(ValueTask.CompletedTask); // never settles - keeps the first publish "in flight"
+
+        var coordinator = RabbitMqMandatoryPublishCoordinator.GetOrCreate(mockChannel.Object);
+
+        Task<bool> firstPublish = coordinator.PublishMandatoryAsync("exchange", "routing-key",
+            new BasicProperties { MessageId = "dup-id" }, ReadOnlyMemory<byte>.Empty, CancellationToken.None,
+            TimeSpan.FromMilliseconds(200));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.PublishMandatoryAsync(
+            "exchange", "routing-key", new BasicProperties { MessageId = "dup-id" }, ReadOnlyMemory<byte>.Empty,
+            CancellationToken.None));
+
+        Assert.Contains("dup-id", ex.Message);
+        Assert.Contains("already in flight", ex.Message, StringComparison.OrdinalIgnoreCase);
+
+        // The first (genuinely earlier) publish is untouched by the rejected duplicate - it is still the
+        // one and only entry tracked for "dup-id", and settles independently (here, by its own timeout).
+        (int byTagAfterDuplicateRejected, int byMessageIdAfterDuplicateRejected) = GetPendingCounts(coordinator);
+        Assert.Equal(1, byTagAfterDuplicateRejected);
+        Assert.Equal(1, byMessageIdAfterDuplicateRejected);
+
+        await Assert.ThrowsAsync<TimeoutException>(() => firstPublish);
     }
 
     // -------------------------------------------------------------------------------------------

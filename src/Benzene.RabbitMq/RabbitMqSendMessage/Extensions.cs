@@ -22,13 +22,21 @@ public static class Extensions
     /// publish) if it doesn't.
     /// </param>
     /// <param name="persistent">Whether the message is published persistently (delivery mode 2). Defaults to <c>true</c>.</param>
+    /// <param name="publishConfirmTimeout">
+    /// Only applies when <paramref name="mandatory"/> is <c>true</c>. The most a single publish will wait
+    /// for the broker's confirmation before failing with a <see cref="TimeoutException"/> instead of
+    /// hanging forever on a stalled broker (task board #45). Defaults to
+    /// <see cref="RabbitMqMandatoryPublishCoordinator.DefaultPublishConfirmTimeout"/> (30 seconds) when
+    /// not given.
+    /// </param>
     /// <returns>The same builder, for chaining.</returns>
     /// <exception cref="InvalidOperationException">
     /// <paramref name="mandatory"/> is <c>true</c> and <paramref name="channel"/> does not have publisher
     /// confirmations enabled.
     /// </exception>
     public static IMiddlewarePipelineBuilder<RabbitMqSendMessageContext> UseRabbitMqClient(
-        this IMiddlewarePipelineBuilder<RabbitMqSendMessageContext> app, IChannel channel, bool mandatory = false, bool persistent = true)
+        this IMiddlewarePipelineBuilder<RabbitMqSendMessageContext> app, IChannel channel, bool mandatory = false,
+        bool persistent = true, TimeSpan? publishConfirmTimeout = null)
     {
         if (mandatory)
         {
@@ -39,7 +47,7 @@ public static class Extensions
             RabbitMqMandatoryPublishCoordinator.GetOrCreate(channel);
         }
 
-        return app.Use(_ => new RabbitMqClientMiddleware(channel, mandatory, persistent));
+        return app.Use(_ => new RabbitMqClientMiddleware(channel, mandatory, persistent, publishConfirmTimeout));
     }
 
     /// <summary>

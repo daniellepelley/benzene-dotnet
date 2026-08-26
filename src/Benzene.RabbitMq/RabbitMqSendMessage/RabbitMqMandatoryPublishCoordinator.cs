@@ -53,6 +53,13 @@ namespace Benzene.RabbitMq.RabbitMqSendMessage;
 /// </remarks>
 internal sealed class RabbitMqMandatoryPublishCoordinator
 {
+    /// <summary>
+    /// The publish-confirm timeout applied when <see cref="PublishMandatoryAsync"/> is not given an
+    /// explicit one (task board #45): without a bound, a stalled/unresponsive broker (confirms enabled
+    /// but never firing <c>Basic.Ack</c>/<c>Basic.Nack</c>/<c>Basic.Return</c>) hangs the caller forever.
+    /// </summary>
+    public static readonly TimeSpan DefaultPublishConfirmTimeout = TimeSpan.FromSeconds(30);
+
     private static readonly ConditionalWeakTable<IChannel, RabbitMqMandatoryPublishCoordinator> Coordinators = new();
 
     private readonly IChannel _channel;
@@ -107,31 +114,81 @@ internal sealed class RabbitMqMandatoryPublishCoordinator
     /// <see cref="BasicProperties.MessageId"/> - with <c>mandatory: true</c>, and resolves once the
     /// outcome is known.
     /// </summary>
+    /// <param name="exchange">The exchange to publish to.</param>
+    /// <param name="routingKey">The AMQP routing key.</param>
+    /// <param name="properties">
+    /// The message properties, carrying the <see cref="BasicProperties.MessageId"/> this publish is
+    /// correlated by. Must be unique among this coordinator's currently in-flight mandatory publishes -
+    /// see the <see cref="InvalidOperationException"/> below.
+    /// </param>
+    /// <param name="body">The message body.</param>
+    /// <param name="cancellationToken">
+    /// Cancelled by the caller (e.g. host shutdown). Cancelling while the broker's confirmation is still
+    /// pending forgets the pending-publish entry before the <see cref="OperationCanceledException"/>
+    /// propagates (task board #30) - it does not leak in <c>_byTag</c>/<c>_byMessageId</c>.
+    /// </param>
+    /// <param name="publishConfirmTimeout">
+    /// The most this call will wait for the broker's <c>Basic.Ack</c>/<c>Basic.Nack</c>/<c>Basic.Return</c>
+    /// once the publish has been written to the channel, before giving up with a
+    /// <see cref="TimeoutException"/> (task board #45) - a stalled/unresponsive broker (confirms enabled
+    /// but never firing) would otherwise hang the caller forever. Defaults to
+    /// <see cref="DefaultPublishConfirmTimeout"/> when not given. Like a cancellation, a timeout also
+    /// forgets the pending-publish entry before the exception propagates.
+    /// </param>
     /// <returns><c>true</c> once the broker acks the publish; <c>false</c> if it instead returns the message as unroutable.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// A mandatory publish with the same <see cref="BasicProperties.MessageId"/> is already in flight on
+    /// this coordinator (task board #33) - accepting it would let a later <c>Basic.Return</c> be
+    /// misattributed to whichever of the two publishes happened to still be registered under that id.
+    /// </exception>
+    /// <exception cref="TimeoutException">
+    /// The broker did not confirm or return the publish within <paramref name="publishConfirmTimeout"/>.
+    /// </exception>
     public async Task<bool> PublishMandatoryAsync(string exchange, string routingKey, BasicProperties properties,
-        ReadOnlyMemory<byte> body, CancellationToken cancellationToken)
+        ReadOnlyMemory<byte> body, CancellationToken cancellationToken, TimeSpan? publishConfirmTimeout = null)
     {
         string messageId = properties.MessageId!;
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         await _publishGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        ulong tag = 0;
+        PendingPublish? pending = null;
         try
         {
             // Atomic with the publish immediately below (nothing else can run BasicPublishAsync on this
             // channel while we hold the gate), so this is guaranteed to be the tag RabbitMQ.Client is
             // about to assign to it.
-            tag = await _channel.GetNextPublishSequenceNumberAsync(cancellationToken).ConfigureAwait(false);
-            var pending = new PendingPublish(tag, messageId, tcs);
+            ulong tag = await _channel.GetNextPublishSequenceNumberAsync(cancellationToken).ConfigureAwait(false);
+            pending = new PendingPublish(tag, messageId, tcs);
             _byTag[tag] = pending;
-            _byMessageId[messageId] = pending;
+
+            // #33: TryAdd, not indexer-overwrite - a second publish sharing an already-in-flight
+            // MessageId would otherwise silently steal the first publish's correlation entry, so a later
+            // Basic.Return naming that MessageId gets misattributed to the wrong publish (and the first
+            // publish's Tcs would never settle). Reject it here, before the message is even written to
+            // the wire. Forget below is value-checked (see its remarks), so rejecting this duplicate
+            // never disturbs the OTHER, still-legitimately-in-flight publish already registered under
+            // this MessageId - only the _byTag entry this call itself just added is undone.
+            if (!_byMessageId.TryAdd(messageId, pending))
+            {
+                throw new InvalidOperationException(
+                    $"A mandatory RabbitMQ publish with MessageId '{messageId}' is already in flight on " +
+                    "this channel. Each mandatory publish must use a MessageId that is not already " +
+                    "pending on the same coordinator/channel, otherwise a later Basic.Return could not be " +
+                    "reliably correlated back to the publish that caused it. Await (or cancel) the " +
+                    "earlier publish before starting a new one with the same MessageId, or let " +
+                    "RabbitMqClientMiddleware stamp a fresh one for you.");
+            }
 
             await _channel.BasicPublishAsync(exchange, routingKey, true, properties, body, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch
         {
-            Forget(tag, messageId);
+            if (pending is not null)
+            {
+                Forget(pending);
+            }
+
             throw;
         }
         finally
@@ -142,17 +199,55 @@ internal sealed class RabbitMqMandatoryPublishCoordinator
         // Released above already - only the "assign tag, write the frame" step needs to be serialized;
         // multiple mandatory publishes can have their outcomes pending concurrently, each correctly
         // settled by its own tag/MessageId.
-        return await tcs.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        //
+        // #30/#45: wait bounded by BOTH the caller's token and a publish-confirm timeout, via one linked
+        // source - mirrors Benzene.Resilience.TimeoutMiddleware's "timer vs. host token" distinction.
+        // Either way the pending-publish entry must be forgotten before the exception propagates, or it
+        // leaks in _byTag/_byMessageId forever (nothing else will ever remove it once the caller has
+        // stopped awaiting it).
+        TimeSpan timeout = publishConfirmTimeout ?? DefaultPublishConfirmTimeout;
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(timeout);
+        try
+        {
+            return await tcs.Task.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException ex) when (ex.CancellationToken == timeoutCts.Token && !cancellationToken.IsCancellationRequested)
+        {
+            // The timer fired, not the caller: a publish-confirm timeout, not a genuine cancellation.
+            Forget(pending);
+            throw new TimeoutException(
+                $"Timed out after {timeout} waiting for the RabbitMQ broker to confirm or return the " +
+                $"mandatory publish with MessageId '{messageId}'.", ex);
+        }
+        catch (OperationCanceledException)
+        {
+            // The caller's own token fired - a genuine cancellation, not a timeout.
+            Forget(pending);
+            throw;
+        }
     }
 
-    private void Forget(ulong tag, string messageId)
+    /// <summary>
+    /// Removes <paramref name="pending"/> from <c>_byTag</c>/<c>_byMessageId</c> - but only the exact
+    /// entries that still point at <em>this</em> instance. Value-checked (via the
+    /// <see cref="ConcurrentDictionary{TKey,TValue}.TryRemove(KeyValuePair{TKey,TValue})"/> overload), not
+    /// key-checked: a plain key-only <c>TryRemove(key, out _)</c> would delete whatever is currently
+    /// registered under that key - including a DIFFERENT, still-legitimately-in-flight publish that
+    /// happens to share this one's (rejected-as-a-duplicate) MessageId. Since <see cref="PendingPublish"/>
+    /// is a record whose <see cref="TaskCompletionSource{TResult}"/> field is compared by reference, two
+    /// distinct publishes are never equal even if they somehow shared a <c>Tag</c>/<c>MessageId</c>, so
+    /// this can only ever remove the entry <paramref name="pending"/> itself put there.
+    /// </summary>
+    private void Forget(PendingPublish? pending)
     {
-        if (tag != 0)
+        if (pending is null)
         {
-            _byTag.TryRemove(tag, out _);
+            return;
         }
 
-        _byMessageId.TryRemove(messageId, out _);
+        _byTag.TryRemove(new KeyValuePair<ulong, PendingPublish>(pending.Tag, pending));
+        _byMessageId.TryRemove(new KeyValuePair<string, PendingPublish>(pending.MessageId, pending));
     }
 
     private Task OnBasicReturnAsync(object sender, BasicReturnEventArgs @event)
