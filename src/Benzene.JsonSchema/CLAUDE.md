@@ -16,9 +16,13 @@ OpenAPI feature (that is `Benzene.Schema.OpenApi`).
   schema via `IJsonSchemaProvider<TContext>`; a `null` schema means "no validation" and passes
   through to `next()`. Reads the body via `IMessageBodyGetter<TContext>`; a `null`/malformed body,
   or one that fails `schema.Evaluate(...)` (`OutputFormat.List`), short-circuits with
-  `BenzeneResult.Set(defaultStatuses.ValidationError, errors)` via
-  `IMessageHandlerResultSetter<TContext>` - the structured `BenzeneError`s travel as the result's
-  **errors** (same failure contract as FluentValidation/DataAnnotations). The topic's handler
+  `BenzeneResult.Set(status, errors)` via `IMessageHandlerResultSetter<TContext>` - the structured
+  `BenzeneError`s travel as the result's **errors** (same failure contract as
+  FluentValidation/DataAnnotations). `status` is resolved once, via an optional
+  `IValidationStatusMapper` (`Benzene.Abstractions.Validation`) - when one is registered (e.g.
+  `Benzene.FluentValidation`'s `DefaultValidationStatusMapper`) it honours `[ValidationStatus]` on
+  the topic's resolved handler type; absent a registered mapper, falls back to
+  `defaultStatuses.ValidationError`, same as before this mapper existed. The topic's handler
   definition is attached to the result so the response payload mapper writes a body (it skips
   definition-less results); the wire body itself (`ProblemDetails`, via `ProblemTypes.From`) carries
   both the joined message text (`detail`) and the structured `Field`/`Code` per error (`errors`) -
@@ -58,6 +62,9 @@ OpenAPI feature (that is `Benzene.Schema.OpenApi`).
 
 ## Dependencies on other Benzene packages
 - **Benzene.Abstractions.Pipelines** - pipeline seams.
+- **Benzene.Abstractions.Validation** - `IValidationStatusMapper`, the shared status-mapping
+  contract; no `IValidationStatusMapper` implementation ships in this package (only
+  `Benzene.FluentValidation` provides `DefaultValidationStatusMapper`).
 - **Benzene.Core.MessageHandlers** - `IMessageBodyGetter<>`, `IMessageTopicGetter<>`,
   `IMessageHandlerDefinitionLookUp`, `IMessageHandlerResultSetter<>`, `IDefaultStatuses`,
   `MessageHandlerResult`.
@@ -66,10 +73,11 @@ OpenAPI feature (that is `Benzene.Schema.OpenApi`).
 - **JsonSchema.Net.Generation** (NuGet, 7.3.10) - CLR-type → schema generation.
 
 ## Important conventions
-- The failure result matches the other validation libraries: `ValidationError` status with one
-  structured `BenzeneError` per failed keyword as the result's errors (`Field`/`Code` populated per
-  the table above), serialized in the response as an RFC 9457 problem document (`ProblemDetails`).
-  (Until 2026-07 this was a bare
+- The failure result matches the other validation libraries: a validation-status result (default
+  `ValidationError`, or whatever a registered `IValidationStatusMapper` resolves via
+  `[ValidationStatus]` on the handler - see above) with one structured `BenzeneError` per failed
+  keyword as the result's errors (`Field`/`Code` populated per the table above), serialized in the
+  response as an RFC 9457 problem document (`ProblemDetails`). (Until 2026-07 this was a bare
   `false` payload with no detail - flagged as a behavior change, along with `JsonSchemaMiddleware`'s
   constructor gaining the topic getter + definition lookup. As of 2026-08 the messages stopped
   carrying an inline `"<pointer>: "` prefix - the pointer moved to `Field` - see

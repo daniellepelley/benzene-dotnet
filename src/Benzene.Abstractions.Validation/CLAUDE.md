@@ -17,8 +17,9 @@ the rule-to-schema wiring live in the implementation/adapter packages that consu
   `IValidationSchema` rules that apply to that request type.
 - `IValidationStatusMapper` - `GetStatus(handlerType, requestType, result)` maps a validation
   outcome to a Benzene result status string.
-- `ValidationStatusAttribute` - class/method attribute overriding the result status a failed
-  validation produces (e.g. `BadRequest` vs `ValidationError`).
+- `ValidationStatusAttribute` - class-only attribute, applied to a message handler type, overriding
+  the result status a failed validation produces for that handler (e.g. `BadRequest` vs
+  `ValidationError`).
 - `ValidationConstants` - the canonical rule-name strings (`MinLength`, `MaxLength`, `IsGuid`,
   `IsNumeric`, `NotEmpty`, `NotNull`, `IsOneOf`, `Regex`, `Email`, `Phone`, `GreaterThan`, ... ).
 
@@ -35,7 +36,12 @@ the rule-to-schema wiring live in the implementation/adapter packages that consu
 - Rule names come from `ValidationConstants` (case-sensitive).
 - A failed validation is surfaced as a Benzene result status via `IValidationStatusMapper` /
   `ValidationStatusAttribute`, so validation failures flow through the same result pipeline as
-  handler outcomes.
+  handler outcomes. All three validation adapters (`Benzene.FluentValidation`,
+  `Benzene.DataAnnotations`, `Benzene.JsonSchema`) resolve an optional `IValidationStatusMapper` and
+  honour it identically - only `Benzene.FluentValidation` ships a default implementation
+  (`DefaultValidationStatusMapper`); register it (or your own `IValidationStatusMapper`) once and
+  every adapter honours `[ValidationStatus]` the same way. Absent a registered mapper, each adapter
+  keeps its own pre-existing default validation-error status unchanged.
 
 ## Tests
 Exercised via the validation middleware/implementation tests in `test/` (this package is
