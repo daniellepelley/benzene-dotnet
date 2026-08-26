@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading.Tasks;
@@ -30,7 +31,7 @@ public class W3CTraceContextTest
         return (activities, listener);
     }
 
-    private static async Task<List<Activity>> RunPipeline(IDictionary<string, string> headers)
+    private static async Task<List<Activity>> RunPipeline(IDictionary<string, string> headers, Func<Task>? downstream = null)
     {
         var (activities, listener) = ListenToBenzeneActivities();
         using var _ = listener;
@@ -43,7 +44,7 @@ public class W3CTraceContextTest
 
         var builder = new MiddlewarePipelineBuilder<BenzeneMessageContext>(container);
         builder.UseW3CTraceContext();
-        builder.Use((_, next) => next());
+        builder.Use((_, next) => downstream != null ? downstream() : next());
 
         var pipeline = builder.Build();
         using var factory = new MicrosoftServiceResolverFactory(services);
@@ -89,5 +90,22 @@ public class W3CTraceContextTest
 
         var activity = Assert.Single(activities, a => a.OperationName == "W3CTraceContext.Root");
         Assert.NotEqual(default, activity.TraceId);
+    }
+
+    // #64: a throwing downstream middleware must mark the "W3CTraceContext.Root" span Error - the
+    // highest-visibility span, the one OTel backends key error-rate metrics off - not leave it Unset
+    // (indistinguishable from success in a trace viewer).
+    [Fact]
+    public async Task DownstreamThrows_MarksTheRootSpanError()
+    {
+        List<Activity> activities = null!;
+        var thrown = await Record.ExceptionAsync(async () =>
+            activities = await RunPipeline(new Dictionary<string, string>(), downstream: () =>
+                throw new InvalidOperationException("handler blew up")));
+
+        Assert.IsType<InvalidOperationException>(thrown);
+        var activity = Assert.Single(activities, a => a.OperationName == "W3CTraceContext.Root");
+        Assert.Equal(ActivityStatusCode.Error, activity.Status);
+        Assert.Contains(activity.Events, e => e.Name == "exception");
     }
 }
