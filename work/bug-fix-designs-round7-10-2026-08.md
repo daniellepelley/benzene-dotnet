@@ -322,6 +322,40 @@ processor.
   on the STJ default so it doesn't throw, and document the cross-engine divergence** in
   `NewtonsoftJson/CLAUDE.md`.
 
+**Implementation notes (as-built, minor divergences/clarifications from the decisions above):**
+- **#56:** the depth counter lives in `BoundedBinaryDecoder` as ruled, keyed off `ReadUnionIndex` (the
+  "pick a branch, then possibly recurse into a nested record" pattern every reflected schema's
+  self-reference goes through) — but it *also* guards `ReadArrayStart`/`ReadMapStart`, a superset of the
+  literal ruling text. Reason: a reflected schema always wraps a nested type in a `["null", X]` union
+  (covered by `ReadUnionIndex` alone), but an **explicit** (hand-authored `.avsc`) schema can nest a
+  *non-nullable* record inside an array/map with no union in the path at all — `ReadUnionIndex` alone
+  would miss that vector for the explicit-schema/schema-registry use case the package's docs call out as
+  a primary scenario. The counter is a single running count for the whole deserialize call, never
+  decremented (the `Decoder` interface has no "a nested record finished" hook to decrement on), so it is
+  a conservative *upper bound* correlated with recursion depth, not an exact live depth — a very wide
+  (many sibling nullable/collection fields) but shallow message can also trip it. `AvroOptions.MaxDepth`
+  is one shared knob for both serialize and deserialize (the ruling didn't specify whether they should
+  share); the serialize side (`AvroDatumConverter`), being Benzene's own recursion, tracks an *exact*
+  current depth via a normal recursive parameter instead, with no such width caveat.
+- **#57:** implemented without the "capture schema metadata (field count/fingerprint) somewhere
+  accessible at deserialize time" the ruling flagged as a possible requirement — no wire-format change
+  was needed. Both failure modes are detected from properties of the read itself: a field-order mismatch
+  desyncs the byte stream, which the existing low-level read surfaces as *some* exception (previously
+  opaque, now caught and rewrapped as `AvroSchemaMismatchException`, excluding this package's own
+  `AvroPayloadTooLargeException`/`AvroPayloadTooDeepException`, which already carry a specific, correct
+  meaning of their own); a field-count mismatch (typically a removed field) reads fewer bytes than the
+  payload contains, which shows up as unconsumed trailing bytes on the underlying `MemoryStream` after a
+  successful read. This detects every case the round-8/9 repro and regression tests exercise without
+  touching the wire format, at the cost of not being a mathematical guarantee for every conceivable
+  mismatch shape (e.g. a coincidental byte-length match).
+- **#59:** the ruling asked to verify `AllowNamedFloatingPointLiterals`'s actual behavior rather than
+  assume it. Verified empirically (a throwaway console probe): with it set, `System.Text.Json` serializes
+  `double.NaN`/`PositiveInfinity`/`NegativeInfinity` as the **quoted JSON strings**
+  `"NaN"`/`"Infinity"`/`"-Infinity"` — not bare/unquoted tokens — which is standard-JSON-compliant output,
+  and reads them back correctly. This happens to be the *same* representation Newtonsoft has always used
+  for these values, so the fix doesn't just stop the crash — it makes the two engines agree on the wire
+  for this case, better than the ruling's framing of "at least doesn't crash" implied.
+
 ### WP-M — Validation: JsonSchema parity
 **Task #60 (worth-fixing).** `Benzene.JsonSchema`'s default provider silently ignores
 `System.ComponentModel.DataAnnotations` attributes (`[Required]`/`[Range]`/`[MinLength]`), so a DTO that

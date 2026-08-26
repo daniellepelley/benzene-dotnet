@@ -292,6 +292,41 @@ real".
   confirmations enabled, verified via `GetNextPublishSequenceNumberAsync()` (the only public-API-visible
   proxy for that setting in this client version). See WP-8.
 
+### Tracked findings round 7–10, WP-L — Avro DoS + evolution, XML BOM, Newtonsoft divergence (done)
+Decision, rationale, and the exact mechanism (why the depth guard has to live in `BoundedBinaryDecoder`,
+not `AvroDatumConverter`) are ruled in
+[`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-L — Serialization:
+Avro DoS + evolution, XML BOM, Newtonsoft divergence".
+- **[RESOLVED] #56 — Avro serialize/deserialize recursed unboundedly on a self-referencing/deeply-nested
+  schema, an *uncatchable* CLR stack overflow crashing the whole process from a <100 KB body (confirmed
+  by two independent agents at ~15,000-16,000 nesting levels).** `BoundedBinaryDecoder` now also counts
+  nested-read entry points (`ReadUnionIndex`, plus `ReadArrayStart`/`ReadMapStart` for an explicit
+  schema's non-nullable nested collections - a superset of the ruling's literal "union-index" mechanism,
+  to also cover the explicit-schema path) across a whole deserialize call and throws a catchable
+  `AvroPayloadTooDeepException` once `AvroOptions.MaxDepth` (default 500) is exceeded, well below the
+  real crash threshold. The serialize side (`AvroDatumConverter.ToDatum`/`ToUnionDatum`/`ToRecord`/
+  `ToArray`) got the equivalent guard, threading an exact (not approximated) depth count through its own
+  recursion. See WP-L.
+- **[RESOLVED] #57 — Avro has zero schema-evolution support**, despite `Benzene.Avro/CLAUDE.md` having
+  marketed the package on Avro-the-format's schema-evolution reputation; a removed middle field silently
+  read the *next* field's bytes into the wrong property (no exception), a reordered field threw an
+  opaque `IndexOutOfRangeException`. Landed as two commits per the ruling's doc-first instruction: (1)
+  `CLAUDE.md` now states plainly that there is no schema-evolution support and why; (2)
+  `AvroSerializer`'s deserialize path now detects both failure modes for the reflection/registered-schema
+  path and throws a clear `AvroSchemaMismatchException` - a field-order mismatch that desyncs the byte
+  stream is caught and rewrapped, and unconsumed trailing bytes after a successful read (a field-count
+  mismatch) are checked explicitly. This is detection, not resolution - see WP-L and the corrected
+  `CLAUDE.md` for what is and is not guaranteed. See WP-L.
+- **[RESOLVED] #58 — `XmlSerializer.Deserialize(Type, string)` rejected a valid UTF-8-BOM-prefixed body**
+  that ASP.NET Core's own `StreamReader`-based body-reading path accepts. A leading U+FEFF is now
+  stripped before constructing the `XmlReader`, fixing every transport at once. See WP-L.
+- **[RESOLVED] #59 — Newtonsoft and the default `System.Text.Json`-based serializer diverged on
+  `NaN`/`Infinity` doubles** (Newtonsoft silently encoded them as strings; STJ threw `ArgumentException`
+  unhandled). The default STJ serializer now sets `JsonNumberHandling.AllowNamedFloatingPointLiterals`;
+  verified empirically (not assumed from the flag's name), this makes STJ emit the same quoted-string
+  wire form (`"NaN"` etc.) Newtonsoft has always used, so the two engines now agree on the wire rather
+  than one crashing. Documented in `Benzene.NewtonsoftJson/CLAUDE.md`. See WP-L.
+
 ---
 
 ## Open — maintainer decisions (the real remaining backlog)
