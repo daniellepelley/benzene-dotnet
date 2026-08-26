@@ -14,8 +14,18 @@ public class ServiceBusMessageHeadersGetter : IMessageHeadersGetter<ServiceBusCo
     /// <returns>The message headers.</returns>
     public IDictionary<string, string> GetHeaders(ServiceBusContext context)
     {
-        return context.Message.ApplicationProperties
-            .Where(x => x.Value is string)
-            .ToDictionary(x => x.Key, x => (string)x.Value);
+        // OrdinalIgnoreCase, matching every other built-in getter's headers dictionary (#165) -
+        // ToDictionary with no comparer built a plain-ordinal (case-sensitive) dictionary here.
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var property in context.Message.ApplicationProperties)
+        {
+            if (property.Value is string value)
+            {
+                headers[property.Key] = value;
+            }
+        }
+
+        return headers;
     }
 }

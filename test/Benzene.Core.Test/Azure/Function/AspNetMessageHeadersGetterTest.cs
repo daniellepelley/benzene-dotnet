@@ -37,4 +37,20 @@ public class AspNetMessageHeadersGetterTest
         // diagnostics module's inbound trace tag - which reads the same default key - finds it here.
         Assert.Equal("Corr-XYZ", result["x-correlation-id"]);
     }
+
+    [Fact]
+    public void GetHeaders_ResultDictionary_IsCaseInsensitiveRegardlessOfLookupCasing()
+    {
+        // #165/#164: ToDictionary with no comparer built a plain-ordinal dictionary of
+        // already-lower-cased keys, so a lookup with any casing other than the exact lower-cased
+        // form chosen here would fail even though every key had already been lower-cased.
+        var getter = new AspNetMessageHeadersGetter();
+
+        var result = getter.GetHeaders(ContextWithHeaders(("X-Tenant-Id", "tenant-1")));
+
+        Assert.True(result.TryGetValue("x-tenant-id", out var lowerCase));
+        Assert.Equal("tenant-1", lowerCase);
+        Assert.True(result.TryGetValue("X-TENANT-ID", out var upperCase));
+        Assert.Equal("tenant-1", upperCase);
+    }
 }

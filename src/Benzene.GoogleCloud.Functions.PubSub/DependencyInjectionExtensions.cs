@@ -41,11 +41,13 @@ public static class DependencyInjectionExtensions
     {
         services.TryAddScoped<JsonSerializer>();
 
-        services.AddScoped<IMessageTopicGetter<PubSubContext>>(_ => new PubSubMessageTopicGetter(topicAttributeKey));
-        services.AddHeaderMessageVersionGetter<PubSubContext>();
-        services.AddScoped<IMessageHeadersGetter<PubSubContext>, PubSubMessageHeadersGetter>();
-        services.AddScoped<IMessageBodyGetter<PubSubContext>, PubSubMessageBodyGetter>();
-        services.AddScoped<IMessageHandlerResultSetter<PubSubContext>, PubSubMessageHandlerResultSetter>();
+        // TryAdd: a user registration made earlier (ConfigureServices runs before Configure, where
+        // UsePubSub calls this) wins over these per-context defaults, matching Benzene.Aws.Lambda.Sns.
+        services.TryAddScoped<IMessageTopicGetter<PubSubContext>>(_ => new PubSubMessageTopicGetter(topicAttributeKey));
+        services.TryAddHeaderMessageVersionGetter<PubSubContext>();
+        services.TryAddScoped<IMessageHeadersGetter<PubSubContext>, PubSubMessageHeadersGetter>();
+        services.TryAddScoped<IMessageBodyGetter<PubSubContext>, PubSubMessageBodyGetter>();
+        services.TryAddScoped<IMessageHandlerResultSetter<PubSubContext>, PubSubMessageHandlerResultSetter>();
 
         services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.PubSub));
         return services;

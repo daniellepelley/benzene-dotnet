@@ -26,13 +26,15 @@ public static class DependencyInjectionExtensions
         services.TryAddScoped<JsonSerializer>();
         services.TryAddScoped<PresetTopicHolder>();
 
-        services.AddScoped<IMessageTopicGetter<EventBridgeContext>>(resolver =>
+        // TryAdd: a user registration made earlier (ConfigureServices runs before Configure, where
+        // UseEventBridge calls this) wins over these per-context defaults, matching Benzene.Aws.Lambda.Sns.
+        services.TryAddScoped<IMessageTopicGetter<EventBridgeContext>>(resolver =>
             new PresetTopicMessageTopicGetter<EventBridgeContext>(new EventBridgeMessageTopicGetter(), resolver.GetService<PresetTopicHolder>()));
-        services.AddHeaderMessageVersionGetter<EventBridgeContext>();
-        services.AddScoped<IMessageHeadersGetter<EventBridgeContext>, EventBridgeMessageHeadersGetter>();
-        services.AddScoped<IMessageBodyGetter<EventBridgeContext>, EventBridgeMessageBodyGetter>();
-        services.AddScoped<IMessageBodySetter<EventBridgeContext>, EventBridgeMessageBodySetter>();
-        services.AddScoped<IMessageHandlerResultSetter<EventBridgeContext>, EventBridgeMessageHandlerResultSetter>();
+        services.TryAddHeaderMessageVersionGetter<EventBridgeContext>();
+        services.TryAddScoped<IMessageHeadersGetter<EventBridgeContext>, EventBridgeMessageHeadersGetter>();
+        services.TryAddScoped<IMessageBodyGetter<EventBridgeContext>, EventBridgeMessageBodyGetter>();
+        services.TryAddScoped<IMessageBodySetter<EventBridgeContext>, EventBridgeMessageBodySetter>();
+        services.TryAddScoped<IMessageHandlerResultSetter<EventBridgeContext>, EventBridgeMessageHandlerResultSetter>();
         services.AddMediaFormatNegotiation<EventBridgeContext>();
         services
             .TryAddScoped<IRequestMapper<EventBridgeContext>,

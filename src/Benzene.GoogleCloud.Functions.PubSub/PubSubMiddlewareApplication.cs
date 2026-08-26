@@ -70,17 +70,22 @@ public class PubSubMiddlewareApplication : IMiddlewareApplication<MessagePublish
 
             if (_options.RaiseOnFailureStatus && context.MessageResult?.IsSuccessful == false)
             {
-                throw new PubSubMessageProcessingException(context.Message.MessageId);
+                throw new PubSubMessageProcessingException(context.Message?.MessageId);
             }
         }
         catch (Exception ex) when (_options.CatchExceptions)
         {
             using (var loggingScope = serviceResolverFactory.CreateScope())
             {
+                // context.Message?. (not context.Message.) deliberately - this catch exists to
+                // contain whatever exception the pipeline/escalation above raised, including one
+                // caused by a CloudEvent with no Pub/Sub message at all. Dereferencing Message
+                // unconditionally here would NRE a second time and replace the real exception being
+                // logged with an unrelated one.
                 loggingScope.GetService<ILogger<PubSubMiddlewareApplication>>()
                     .LogError(ex, BenzeneFailure.IsInfrastructure(ex)
                     ? BenzeneFailure.InfrastructureLogPrefix + " Processing Pub/Sub message {messageId} failed — this service is mis-wired; the message is not at fault"
-                    : "Processing Pub/Sub message {messageId} failed", context.Message.MessageId);
+                    : "Processing Pub/Sub message {messageId} failed", context.Message?.MessageId);
             }
         }
     }

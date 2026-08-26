@@ -69,6 +69,21 @@ public class PubSubMessageBuilder
         return this;
     }
 
+    /// <summary>
+    /// Builds a <see cref="MessagePublishedData"/> with no Pub/Sub message at all - the malformed/
+    /// synthetic delivery shape (a CloudEvent whose <c>message</c> field is absent) that the getters
+    /// and <see cref="PubSubMiddlewareApplication"/> must degrade gracefully for rather than NRE-ing.
+    /// </summary>
+    /// <returns>A <see cref="MessagePublishedData"/> with a null <see cref="MessagePublishedData.Message"/>.</returns>
+    public MessagePublishedData BuildWithNoMessage()
+    {
+        return new MessagePublishedData
+        {
+            Message = null,
+            Subscription = _subscription
+        };
+    }
+
     /// <summary>Builds the <see cref="MessagePublishedData"/>.</summary>
     /// <returns>A <see cref="MessagePublishedData"/> with the configured message and subscription.</returns>
     public MessagePublishedData Build()

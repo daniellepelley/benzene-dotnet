@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System;
+using System.Text.Json;
 using Benzene.Aws.Lambda.EventBridge;
 using Xunit;
 
@@ -51,6 +52,58 @@ public class EventBridgeGettersTest
         var body = new EventBridgeMessageBodyGetter().GetBody(context);
 
         Assert.Null(body);
+    }
+
+    [Fact]
+    public void Body_ExplicitJsonNullDetail_ReturnsNull()
+    {
+        // Regression test for #163: previously an explicit JSON null fell through to GetRawText(),
+        // handing a handler the literal 4-character string "null" as its body instead of no body.
+        var context = CreateContext("null");
+
+        var body = new EventBridgeMessageBodyGetter().GetBody(context);
+
+        Assert.Null(body);
+    }
+
+    [Fact]
+    public void Body_StringTypedDetailWrappingAJsonObject_IsUnwrapped()
+    {
+        // Regression test for #163: a string-typed detail whose content is itself a JSON object
+        // (e.g. a producer double-encoded the payload) must be unwrapped, not handed through as an
+        // escaped JSON string literal a handler could never deserialize.
+        var context = CreateContext("\"{\\\"name\\\":\\\"some-name\\\"}\"");
+
+        var body = new EventBridgeMessageBodyGetter().GetBody(context);
+
+        Assert.Equal("{\"name\":\"some-name\"}", body);
+    }
+
+    [Fact]
+    public void Body_StringTypedDetailWithNonJsonContent_ThrowsWithAClearMessage()
+    {
+        var context = CreateContext("\"just a plain string\"");
+
+        var exception = Assert.Throws<InvalidOperationException>(() => new EventBridgeMessageBodyGetter().GetBody(context));
+        Assert.Contains("not itself valid JSON", exception.Message);
+    }
+
+    [Fact]
+    public void Body_StringTypedDetailWrappingAJsonArray_ThrowsNamingTheActualValueKind()
+    {
+        var context = CreateContext("\"[1,2,3]\"");
+
+        var exception = Assert.Throws<InvalidOperationException>(() => new EventBridgeMessageBodyGetter().GetBody(context));
+        Assert.Contains("Array", exception.Message);
+    }
+
+    [Fact]
+    public void Body_StringTypedDetailWrappingANumber_ThrowsNamingTheActualValueKind()
+    {
+        var context = CreateContext("\"42\"");
+
+        var exception = Assert.Throws<InvalidOperationException>(() => new EventBridgeMessageBodyGetter().GetBody(context));
+        Assert.Contains("Number", exception.Message);
     }
 
     [Fact]

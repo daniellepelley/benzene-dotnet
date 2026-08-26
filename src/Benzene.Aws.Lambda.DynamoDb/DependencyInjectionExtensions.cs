@@ -29,11 +29,13 @@ public static class DependencyInjectionExtensions
     {
         services.TryAddScoped<JsonSerializer>();
 
-        services.AddScoped<IMessageTopicGetter<DynamoDbRecordContext>, DynamoDbMessageTopicGetter>();
-        services.AddHeaderMessageVersionGetter<DynamoDbRecordContext>();
-        services.AddScoped<IMessageHeadersGetter<DynamoDbRecordContext>, DynamoDbMessageHeadersGetter>();
-        services.AddScoped<IMessageBodyGetter<DynamoDbRecordContext>, DynamoDbMessageBodyGetter>();
-        services.AddScoped<IMessageHandlerResultSetter<DynamoDbRecordContext>, DynamoDbMessageHandlerResultSetter>();
+        // TryAdd: a user registration made earlier (ConfigureServices runs before Configure, where
+        // UseDynamoDb calls this) wins over these per-context defaults, matching Benzene.Aws.Lambda.Sns.
+        services.TryAddScoped<IMessageTopicGetter<DynamoDbRecordContext>, DynamoDbMessageTopicGetter>();
+        services.TryAddHeaderMessageVersionGetter<DynamoDbRecordContext>();
+        services.TryAddScoped<IMessageHeadersGetter<DynamoDbRecordContext>, DynamoDbMessageHeadersGetter>();
+        services.TryAddScoped<IMessageBodyGetter<DynamoDbRecordContext>, DynamoDbMessageBodyGetter>();
+        services.TryAddScoped<IMessageHandlerResultSetter<DynamoDbRecordContext>, DynamoDbMessageHandlerResultSetter>();
         services.AddMediaFormatNegotiation<DynamoDbRecordContext>();
         services
             .TryAddScoped<IRequestMapper<DynamoDbRecordContext>,

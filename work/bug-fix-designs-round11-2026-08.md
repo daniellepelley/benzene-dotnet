@@ -215,6 +215,25 @@ documents the SNS→SQS raw-message-delivery requirement.
 (exactly once, lossless, no compression assumption), SNS raw-message-delivery structurally absent for
 Lambda, EventBridge `detail-type`/`source` extraction, DynamoDB batch isolation of a bad record.
 
+**§5 status: fixed (#158–#165).** All eight findings landed; see `work/outstanding-bugs.md`'s
+"Tracked findings round 11, §5" section for the per-item `[RESOLVED]` writeups.
+
+**[DECISION] #162 residual gap, scoped down.** The fix (`?.Kinesis?.SequenceNumber` in
+`KinesisStreamCheckpointer.FirstUncheckpointedSequenceNumber`) stops the NRE from escaping
+`CatchExceptions`'s protection, but when the record at the resume boundary itself has no `Kinesis`
+payload, there is no sequence number left to name as the resume point — the fix degrades to
+`BatchItemFailures` empty (reported success) rather than a real partial-resume entry. This trades
+"crash, AWS retries the whole batch from the last real checkpoint" for "no crash, but the malformed
+record and everything after it in that invocation is not retried." The alternative that would
+preserve a genuine partial-resume signal — restructuring `MiddlewareApplication<TEvent,TContext,TResult>`
+so `resultMapper` runs inside the same try/catch as the pipeline, or giving `KinesisStreamApplication`
+its own non-shared result-extraction path — is a larger, cross-cutting change to a base class shared
+by every stream-shaped transport (also used by DynamoDB Streams), and out of scope for a mechanical
+hardening fix. Deferred; not reopened as a task since a malformed record with no `Kinesis` payload at
+exactly the unchecked resume index is itself an edge case of an edge case (a synthetic/malformed
+delivery), and the fix's actual goal — don't let this NRE mask a real exception or crash the
+invocation — is fully met.
+
 ---
 
 ## §6 Spec/descriptor/CloudService/Probe pipeline — #166–#171

@@ -1334,6 +1334,100 @@ already-completed work runs under `CancellationToken.None`, never the run/stop t
   cancelled token → still completes; failure + cancelled token → still abandons; handler throws +
   abandon also throws → original exception still propagates, both logged).
 
+### Tracked findings round 11, §5 — less-common AWS/GCP transports (#158–#165, done)
+Ruling, rationale, and scope decisions are in
+[`bug-fix-designs-round11-2026-08.md`](bug-fix-designs-round11-2026-08.md) §5 "Less-common AWS/GCP
+transports".
+- **[RESOLVED] #158 — S3 object keys were never URL-decoded** (`S3MessageBodyGetter.cs`,
+  `S3MessageHeadersGetter.cs`): S3 URL-encodes an object key on the event notification record (space
+  → `+`, reserved/non-ASCII bytes percent-encoded), so any key containing one of those reached the
+  handler still encoded, and calling `GetObjectAsync` with it returned `NoSuchKey`. Fixed with a
+  shared `S3ObjectKeyCodec.Decode` helper using `WebUtility.UrlDecode` (not `Uri.UnescapeDataString`,
+  which doesn't decode `+` to a space). The body's `key` field and the `key` header now carry the
+  decoded key; a new `keyRaw` header preserves the original wire encoding for callers who need it
+  (e.g. building a pre-signed URL). Regression tests in `S3MessageMapperTests`.
+- **[RESOLVED] #159 — Pub/Sub: a CloudEvent with no `Message` NREs in all three getters, and the NRE
+  escaped `CatchExceptions = true`** because the catch block itself dereferenced
+  `context.Message.MessageId` while logging, replacing the real exception with an unrelated NRE
+  (`PubSubMiddlewareApplication.cs`). Fixed: `context.Message?.MessageId` in both the log call and the
+  escalated `PubSubMessageProcessingException` construction (its `messageId` parameter is now
+  nullable), and null-conditional chains through `Message`/`Attributes` in
+  `PubSubMessageBodyGetter`/`PubSubMessageTopicGetter`/`PubSubMessageHeadersGetter` so each degrades
+  to null/empty instead of throwing, matching the SNS/SQS siblings' hardening. Regression tests in
+  `PubSubGettersTest` (each getter, no-message case) and `PubSubFailureHandlingTest` (the log-call
+  case, using `FakeLogger` to assert the *real* exception instance reaches the logger, and the
+  escalation case, asserting a null `MessageId` rather than a thrown NRE).
+- **[RESOLVED] #160 — S3, DynamoDB, EventBridge, and Google Pub/Sub's `DependencyInjectionExtensions`
+  used plain `AddScoped`/`AddHeaderMessageVersionGetter` instead of `TryAdd*` for their per-context
+  topic/body/header/version getters**, silently shadowing a user's earlier registration
+  (`ConfigureServices` runs before `Configure`, MS DI is last-wins) — the same defect class the
+  `customization-robustness-review-2026-08.md` pass fixed on nine other packages but missed these
+  four. Fixed mechanically in all four packages' `DependencyInjectionExtensions.cs`, matching
+  `Benzene.Aws.Lambda.Sns`'s already-correct pattern. Regression test
+  `AwsGoogleTransportGetterOverrideTest`: registers a custom `IMessageHeadersGetter<TContext>` before
+  calling each of `AddS3`/`AddDynamoDb`/`AddEventBridge`/`AddGooglePubSub`, confirms the custom one
+  wins.
+- **[RESOLVED] #161 — Pub/Sub's outbound converter had no attribute-limit guard**
+  (`OutboundPubSubContextConverter.cs`), unlike SNS's `GuardAttributeLimit`. Fixed: a `GuardAttribute`/
+  `GuardAttributeCount` pair enforcing Pub/Sub's documented limits (100 attributes max per publish,
+  256-byte keys, 1024-byte values, no `goog`-prefixed keys), throwing `InvalidOperationException` with
+  a clear message — same choice (throw, not drop-with-log) SNS made. Regression tests in
+  `OutboundPubSubContextConverterTest`.
+- **[RESOLVED] #162 — Kinesis's resume-point computation could NRE outside `CatchExceptions`'s
+  protection** (`KinesisStreamCheckpointer.FirstUncheckpointedSequenceNumber`, `.Kinesis.SequenceNumber`):
+  the getter runs from `KinesisStreamApplication`'s `resultMapper`, which the base
+  `MiddlewareApplication` invokes *after* `CatchAndCheckpointPipeline`'s own try/catch has already
+  returned, so a malformed record with no `Kinesis` payload at the resume index threw an NRE that
+  cascaded unhandled instead of being caught. Fixed with `?.Kinesis?.SequenceNumber`, degrading to a
+  `null` resume point (empty `BatchItemFailures`) instead of crashing the invocation. **[DECISION]
+  scoped down**: a malformed record at exactly the resume boundary can't be named as a specific
+  sequence number to redrive, so this trades "crash, AWS retries the whole batch" for "report success,
+  the malformed record is not retried" — the alternative (restructuring `MiddlewareApplication` so
+  `resultMapper` runs inside the same try/catch as the pipeline) would let a real fix name *something*
+  but is a larger, cross-cutting change to a shared base class touched by every stream transport;
+  deferred. Regression test
+  `KinesisStreamApplicationTest.HandleAsync_ResumePointRecordHasNoKinesisData_DoesNotThrow`.
+- **[RESOLVED] #163 — EventBridge's body getter mishandled explicit JSON `null` detail and
+  double-encoded string detail** (`EventBridgeMessageBodyGetter.cs`): an explicit JSON `null` detail
+  fell through to `GetRawText()`, handing a handler the literal 4-character string `"null"` instead of
+  no body; a string-typed detail (a malformed/synthetic delivery - real EventBridge always delivers an
+  object) was handed through as an escaped JSON string literal a handler could never deserialize.
+  Fixed: `JsonValueKind.Null` now returns `null`; a string-typed detail is unwrapped by parsing its
+  content and using it if it's a JSON object, or throwing `InvalidOperationException` naming the
+  actual `ValueKind` (or "not itself valid JSON") when it isn't. Regression tests in
+  `EventBridgeGettersTest`.
+- **[RESOLVED] #164 — GoogleCloud Functions HTTP inherits `Benzene.AspNet.Core`'s
+  `AspNetHttpRequestAdapter`, which had the same header-casing/null-`Method`/`Path` defect class
+  already fixed for API Gateway in #105** (`ApiGatewayHttpRequestAdapter.cs` was the reference fix).
+  This adapter also serves Cloud Run and `Benzene.Azure.Function.AspNet`'s ASP.NET Core integration,
+  so the fix lands once for all three. Fixed the same shape as #105: headers built with
+  `StringComparer.OrdinalIgnoreCase` + first-wins `TryAdd` instead of a plain-ordinal
+  `IEnumerable.ToDictionary`, and `?? string.Empty` on `Method`/`Path.Value` (ASP.NET Core's
+  `PathString` implicit `string` conversion can be `null` for a default/unset `PathString`).
+  Regression tests in `AspNetHttpRequestAdapterTest`. While auditing the same defect class, found and
+  fixed the identical bug in a *different* file, `Benzene.Azure.Function.AspNet`'s own
+  `AspNetMessageHeadersGetter` (its `ToDictionary` had no comparer either) — see #165 below.
+- **[RESOLVED] #165 — SNS and Pub/Sub headers getters used an inconsistent comparer depending on
+  whether attributes were present** (`SnsMessageHeadersGetter.cs`, `PubSubMessageHeadersGetter.cs`:
+  case-insensitive on the empty-fallback path, plain-ordinal `ToDictionary` on the populated path).
+  While verifying the cookbook's claim that "every built-in getter's headers dictionary is
+  case-insensitive by construction" (`docs/cookbooks/multi-tenancy.md:94-97`), found the identical
+  inconsistent-branch bug in both `Benzene.Aws.Lambda.Sqs.SqsMessageHeadersGetter` and
+  `Benzene.Aws.Sqs.Consumer.SqsConsumerMessageHeadersGetter`, and a plainer always-case-sensitive
+  `ToDictionary` (no comparer at all, not merely inconsistent) in
+  `Benzene.Azure.Function.ServiceBus.ServiceBusMessageHeadersGetter`,
+  `Benzene.Azure.ServiceBus.ServiceBusConsumerMessageHeadersGetter`,
+  `Benzene.Azure.Function.EventHub.Function.EventHubMessageHeadersGetter`,
+  `Benzene.Azure.EventHub.EventHubConsumerMessageHeadersGetter`, and (the #164-class defect)
+  `Benzene.Azure.Function.AspNet.AspNetMessageHeadersGetter`. Fixed all eight getters onto
+  `StringComparer.OrdinalIgnoreCase` consistently (checked every other built-in getter too — S3,
+  DynamoDB, EventBridge, RabbitMq, Grpc, all three Kafka getters, QueueStorage, EventGrid, both API
+  Gateway getters via `DictionaryUtils.Replace`, and `Benzene.AspNet.Core`'s own headers getter — all
+  already correct). The cookbook's claim is now true for every built-in getter; left the doc line as
+  written and added one clarifying sentence about why `GetHeader` is still the recommended lookup even
+  so (a custom `IMessageHeadersGetter<TContext>` has no obligation to follow suit). Regression tests
+  added to each transport's existing getter test file.
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.
