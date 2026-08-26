@@ -15,7 +15,7 @@ packaging. Design: `work/archive/azure-functions-trigger-codegen-design-2026-08.
 ## Key types
 - `AzureFunctionTriggerGenerator` (`[Generator]`, `IIncrementalGenerator`) - registers one
   `ForAttributeWithMetadataName` **per transport**, and one `RegisterSourceOutput` **per transport**
-  (restored in WP-C, #38 - see `work/bug-fix-designs-round7-10-2026-08.md`; a prior round had merged
+  (restored in WP-C, #38 - see `work/archive/bug-fix-designs-round7-10-2026-08.md`; a prior round had merged
   every transport into one shared output, which both re-emitted every trigger class on any single
   trigger edit and was a build-crash vector). The `BENZ0001` name-collision check stays a single
   *global* view (`Combine`d into every transport's output) so a name shared *across* transports is

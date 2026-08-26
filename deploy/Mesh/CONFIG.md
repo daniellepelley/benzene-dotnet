@@ -111,7 +111,7 @@ bounds a dispatch request's body at 128 KiB (`MeshDispatchGuardOptions.DefaultMa
 check measures the request's ACTUAL byte count (not the caller-supplied `Content-Length` header, which
 a chunked `Transfer-Encoding` request omits entirely), so a chunked oversized body can't bypass it.
 `Program.cs` also sets Kestrel's own `MaxRequestBodySize` to the same value, host-wide, as
-defence-in-depth against the buffering itself running unbounded (see `bug-fix-designs-round7-10-2026-08.md`'s
+defence-in-depth against the buffering itself running unbounded (see `work/archive/bug-fix-designs-round7-10-2026-08.md`'s
 "WP-D", #35).
 
 ## `auth` — who may reach the dashboard
@@ -178,7 +178,7 @@ turned on — the role check only ever runs against the dispatch path (`InvokeAs
 `MeshAuthGate.DispatchPath`), which is not a reachable endpoint at all while `dispatch.enabled` stays
 false. `MeshAuthGate.Validate` rejects `dispatchRole` set with `dispatch.enabled` false, the same
 fail-fast treatment as the table above (P6 — no inert options; see
-`bug-fix-designs-round7-10-2026-08.md`'s "WP-D", #37).
+`work/archive/bug-fix-designs-round7-10-2026-08.md`'s "WP-D", #37).
 
 **The residual gap, stated plainly:** with `auth.ingestion.mode: "open"` (the default) and
 `auth.mode` set to anything else, the **read** surface (the dashboard, the catalog) is protected and

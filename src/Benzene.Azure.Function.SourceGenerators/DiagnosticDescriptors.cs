@@ -6,7 +6,7 @@ namespace Benzene.Azure.Function.SourceGenerators
     /// Every diagnostic <see cref="AzureFunctionTriggerGenerator"/> (or a transport reader under
     /// <c>Transports/</c>) can report, in one place. Future generator complaints should add a
     /// descriptor here rather than inventing a new reporting mechanism - see
-    /// <c>work/bug-fix-designs-2026-08.md</c>, WP-5a, and <c>work/bug-fix-designs-round7-10-2026-08.md</c>,
+    /// <c>work/bug-fix-designs-2026-08.md</c>, WP-5a, and <c>work/archive/bug-fix-designs-round7-10-2026-08.md</c>,
     /// WP-C.
     /// </summary>
     internal static class DiagnosticDescriptors

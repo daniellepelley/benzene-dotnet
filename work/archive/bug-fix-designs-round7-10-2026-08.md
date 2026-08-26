@@ -1,3 +1,20 @@
+> ARCHIVED 2026-08-26: actioned. All 16 work packages (WP-A through WP-U, tasks #30-95) landed and
+> pushed to `main` via 16 merge commits, in landing order: `8330e6e` (WP-A), `c53936d` (WP-B),
+> `cafeefd` (WP-C), `d9eff9d` (WP-D+E), `5648b2f` (WP-F), `d954f73` (WP-G+I), `7b362d9` (WP-H),
+> `88d139a` (WP-J), `5124735` (WP-K), `004f646` (WP-L), `4f70b62` (WP-N+O+M), `50202f6` (WP-P),
+> `125ddc3` (WP-Q), `985b3f4` (WP-R+S), `0c6a3ee` (WP-T), `88293e9` (WP-U) — followed by `f719504`
+> ("Fix baseline regressions found verifying the round 7-10 merge"), which fixed 10 test failures that
+> only surfaced once the full `Benzene.Core.Test`/`Benzene.Mesh.Test` suites ran together post-merge
+> (cross-work-package interactions, plus one pre-existing bug where the #61 fix commit had updated only
+> its doc comment and never the actual `TimeoutMiddleware` catch-filter condition — confirmed genuinely
+> fixed by `f719504`, independently re-verified against source). Full baseline re-verified independently
+> by the docs-archivist pass: `dotnet build Benzene.sln -c Release` 0 errors; `Benzene.Core.Test` 3017
+> passed / 2 skipped (pre-existing, unrelated) / 0 failed; `Benzene.Mesh.Test` 535/535 (no flake on
+> re-run); `Benzene.Mesh.Host.Test` 141/141; `Benzene.Examples.sln` build 0 errors. Per-finding
+> resolution detail lives in [`../outstanding-bugs.md`](../outstanding-bugs.md)'s Resolved section
+> (search "Tracked findings round 7–10"), each entry pointing back here for the full ruling. See
+> `work/archive/README.md` for the index entry.
+
 # Tracked-findings fix designs (review rounds 7–10) — RULING + implementation plan
 
 **Status:** ✅ **APPROVED for implementation** — design ruling, 2026-08-26. Covers the findings on the

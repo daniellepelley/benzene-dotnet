@@ -17,7 +17,7 @@ namespace Benzene.Azure.Function.SourceGenerators
     /// they want (and their bindings — route, queue, hub, …); the generator writes the ceremony.
     /// See <c>work/archive/azure-functions-trigger-codegen-design-2026-08.md</c> and, for the
     /// diagnostics path, <c>work/bug-fix-designs-2026-08.md</c> (WP-5a) and
-    /// <c>work/bug-fix-designs-round7-10-2026-08.md</c> (WP-C).
+    /// <c>work/archive/bug-fix-designs-round7-10-2026-08.md</c> (WP-C).
     /// </summary>
     [Generator]
     public class AzureFunctionTriggerGenerator : IIncrementalGenerator

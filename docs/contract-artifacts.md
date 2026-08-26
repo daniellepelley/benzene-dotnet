@@ -147,7 +147,7 @@ renumbered union doesn't manufacture spurious adds/removes) uses this priority, 
    variant that was already `$ref`'d and unchanged otherwise — look like the variant was replaced
    (matched by mapping on one side, by `$ref` on the other), manufacturing a spurious
    `UnionVariantRemoved`/`UnionVariantAdded` pair (fixed as part of WP-J/#53; see
-   `work/bug-fix-designs-round7-10-2026-08.md`).
+   `work/archive/bug-fix-designs-round7-10-2026-08.md`).
 2. Else the discriminator mapping value, when the owning schema declares a `discriminator` — this only
    applies to an inline (non-`$ref`) member, since there is no `$ref` name to prefer over it.
 3. Else its position in the array.

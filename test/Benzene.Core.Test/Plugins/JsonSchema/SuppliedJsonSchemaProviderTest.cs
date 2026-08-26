@@ -118,7 +118,7 @@ public class SuppliedJsonSchemaProviderTest
     [Fact]
     public async Task TwoHandlerVersions_CatalogLookup_UsesTheDeclaredVersionsRequestType()
     {
-        // WP-P (work/bug-fix-designs-round7-10-2026-08.md), task #69: without version-augmentation,
+        // WP-P (work/archive/bug-fix-designs-round7-10-2026-08.md), task #69: without version-augmentation,
         // resolving the request type for the catalog lookup is version-blind too - it would resolve
         // VersionBlindnessV2Request's catalog entry (the max-ordinal fallback) for a v1 request and
         // reject the valid v1 int payload against v2's string-typed schema.

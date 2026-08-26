@@ -75,7 +75,7 @@ public class MessageRouter<TContext> : IMiddleware<TContext>, ITerminalMiddlewar
     {
         // Version-augmentation (combining the topic with the message's own version signal before
         // FindHandler) is the shared GetVersionedTopic helper - see its doc comment and WP-P
-        // (work/bug-fix-designs-round7-10-2026-08.md) for why this must never be re-derived per
+        // (work/archive/bug-fix-designs-round7-10-2026-08.md) for why this must never be re-derived per
         // consumer.
         var topic = _messageGetter.GetVersionedTopic(context, _messageVersionGetter);
 

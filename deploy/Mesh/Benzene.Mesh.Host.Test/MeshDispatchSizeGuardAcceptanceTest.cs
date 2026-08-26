@@ -12,7 +12,7 @@ using Xunit;
 namespace Benzene.Mesh.Host.Test;
 
 /// <summary>
-/// Regression test for #34/#35 (work/bug-fix-designs-round7-10-2026-08.md "WP-D"): boots the REAL
+/// Regression test for #34/#35 (work/archive/bug-fix-designs-round7-10-2026-08.md "WP-D"): boots the REAL
 /// <see cref="Startup"/> on a real Kestrel-hosted pipeline - the same class <c>Program.cs</c> uses -
 /// with <c>dispatch.enabled: true</c>, and proves the dispatch guard's 128 KiB payload cap actually
 /// bounds a CHUNKED <c>Transfer-Encoding</c> request (no <c>Content-Length</c> header at all), not just

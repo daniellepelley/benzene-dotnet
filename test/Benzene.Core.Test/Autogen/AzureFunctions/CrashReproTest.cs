@@ -12,7 +12,7 @@ namespace Benzene.Test.Autogen.AzureFunctions;
 // longer belongs to the CURRENT Compilation crashes Roslyn's suppression-checking with
 // ArgumentException, taking the whole build down on an ordinary, unrelated edit. These tests
 // reproduce the exact mechanisms the review found live (see
-// work/bug-fix-designs-round7-10-2026-08.md, WP-C): two independently-constructed CSharpCompilations
+// work/archive/bug-fix-designs-round7-10-2026-08.md, WP-C): two independently-constructed CSharpCompilations
 // run through the same driver, and a genuine single-tree incremental edit via
 // SyntaxTree.WithChangedText + Compilation.ReplaceSyntaxTree. Each must run generation to completion
 // with no exception AND still produce the expected diagnostics - not merely "not throw".

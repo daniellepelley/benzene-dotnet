@@ -125,7 +125,7 @@ message, handlers must be idempotent - see [Idempotency](../../docs/cookbooks/id
   in principle interleave inside that narrow gate window. Dedicate the channel to Benzene's outbound
   middleware for `mandatory: true` traffic to avoid it.
 - **Hardening (tracked findings round 7-10, task board #30/#33/#45 - WP-A):** ruled in
-  [`work/bug-fix-designs-round7-10-2026-08.md`](../../work/bug-fix-designs-round7-10-2026-08.md)
+  [`work/archive/bug-fix-designs-round7-10-2026-08.md`](../../work/archive/bug-fix-designs-round7-10-2026-08.md)
   §"WP-A - RabbitMQ mandatory-publish coordinator hardening".
   - **Fenced cleanup on cancellation/timeout (#30/#45).** `PublishMandatoryAsync`'s final
     `tcs.Task.WaitAsync(...)` is awaited on a token linked from the caller's `cancellationToken` AND a

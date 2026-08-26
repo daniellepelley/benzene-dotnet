@@ -12,7 +12,7 @@ namespace Benzene.Abstractions.MessageHandlers.Mappers;
 /// max-by-ordinal default rather than the version the request declares (docs/specification/versioning.md
 /// §2.3). This is the one implementation of that combination; every consumer - present and future -
 /// should call it rather than re-deriving the same three lines (WP-P,
-/// work/bug-fix-designs-round7-10-2026-08.md, tasks #69/#70).
+/// work/archive/bug-fix-designs-round7-10-2026-08.md, tasks #69/#70).
 /// </summary>
 public static class MessageTopicGetterExtensions
 {

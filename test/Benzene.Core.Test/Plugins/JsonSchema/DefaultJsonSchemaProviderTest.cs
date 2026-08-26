@@ -81,7 +81,7 @@ public class DefaultJsonSchemaProviderTest
     [Fact]
     public async Task TwoHandlerVersions_ValidatesAgainstTheDeclaredVersionsSchema_NotTheMaxOrdinalFallback()
     {
-        // WP-P (work/bug-fix-designs-round7-10-2026-08.md), task #69: without version-augmentation,
+        // WP-P (work/archive/bug-fix-designs-round7-10-2026-08.md), task #69: without version-augmentation,
         // the provider resolves the topic unversioned, which VersionSelector then falls back to
         // resolving as the highest-ordinal registered version ("v2") regardless of what the request
         // actually declares - so a genuinely valid v1 payload ({"id": 42}, an int) gets rejected

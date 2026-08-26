@@ -216,7 +216,7 @@ public class RabbitMqMandatoryPublishTest
 
     // -------------------------------------------------------------------------------------------
     // Tracked findings round 7-10, WP-A (task board #30, #33, #45) - RabbitMqMandatoryPublishCoordinator
-    // hardening. Ruled in work/bug-fix-designs-round7-10-2026-08.md, "WP-A - RabbitMQ mandatory-publish
+    // hardening. Ruled in work/archive/bug-fix-designs-round7-10-2026-08.md, "WP-A - RabbitMQ mandatory-publish
     // coordinator hardening".
     // -------------------------------------------------------------------------------------------
 

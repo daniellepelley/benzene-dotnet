@@ -14,7 +14,7 @@ namespace Benzene.Test.Core.Core.DI;
 
 /// <summary>
 /// Regression coverage for the round 7-10 Autofac DI adapter parity fixes (task board #82-#85, ruling
-/// <c>work/bug-fix-designs-round7-10-2026-08.md</c> WP-Q). Every test here runs against the real
+/// <c>work/archive/bug-fix-designs-round7-10-2026-08.md</c> WP-Q). Every test here runs against the real
 /// Autofac 6.5.0 package - no mocking of the container - since these are subtle container-lifecycle
 /// bugs that a mock would paper over.
 /// </summary>

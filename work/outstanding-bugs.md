@@ -31,15 +31,16 @@ first). **[PERF]** performance hygiene, not a correctness bug. **[RESOLVED]** ve
 > **[`bug-fix-designs-2026-08.md`](archive/bug-fix-designs-2026-08.md)** (now archived); consult it
 > before touching any of this code again so a decision made here doesn't get silently re-litigated.
 
-> **Tracked findings, 2026-08-26 (review rounds 7–10) — fix designs ruled, not yet implemented.** The
-> later review rounds (which re-reviewed the round-5/6 fix code and swept previously-unscrutinized
-> areas: core/DI, validation, resilience, observability, CLI/codegen, serialization, the Autofac
-> adapter, the mesh backend adapters, the schema registry, the testing infra, hosting, abstractions)
-> logged a further batch of evidence-backed findings on the shared task board (tasks #30 onward). Their
-> fix designs — decisions, rationale, rejected alternatives, work packages, sequencing — are ruled in
-> **[`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md)** (a living doc while
-> the review sequence is open). Do not re-decide or re-review those areas without reading that ruling
-> first. As each work package lands, its items move to the Resolved half below with a pointer to it.
+> **Tracked findings, 2026-08-26 (review rounds 7–10) — all fixed.** A batch of evidence-backed findings
+> (tasks #30–#95) from the later review rounds (which re-reviewed the round-5/6 fix code and swept
+> previously-unscrutinized areas: core/DI, validation, resilience, observability, CLI/codegen,
+> serialization, the Autofac adapter, the mesh backend adapters, the schema registry, the testing infra,
+> hosting, abstractions) is now fully resolved — all 16 work packages landed and pushed to `main` (16
+> merge commits plus one follow-up commit fixing baseline regressions surfaced only by the full
+> post-merge test run). Their design decisions, rationale, and rejected alternatives remain ruled in
+> **[`bug-fix-designs-round7-10-2026-08.md`](archive/bug-fix-designs-round7-10-2026-08.md)** (now
+> archived, stamped with the landing commits); consult it before touching any of this code again so a
+> decision made here doesn't get silently re-litigated.
 
 ---
 
@@ -108,7 +109,7 @@ wildcard+credentials and full Fetch-spec preflight compliance; spec-output cachi
 
 ### Tracked findings round 7–10, WP-B — DynamoDB idempotency phantom win + fencing consistency (done)
 Decisions, rationale, and the rejected "won-but-unverified" alternative are ruled in
-[`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-B — DynamoDB
+[`bug-fix-designs-round7-10-2026-08.md`](archive/bug-fix-designs-round7-10-2026-08.md) §"WP-B — DynamoDB
 idempotency phantom win + fencing consistency".
 - **[RESOLVED] #31 — `DynamoDbIdempotencyStore.TryClaimAsync`'s conflict path returned
   `ClaimResult.Won(claimToken)` on an empty read-back without ever writing anything — a `Won` with no
@@ -324,7 +325,7 @@ real".
   incremental build on an ordinary, unrelated edit - reproduced both via two independently-constructed
   `CSharpCompilation`s sharing one `GeneratorDriver`, and via a genuine single-tree incremental edit
   (`SyntaxTree.WithChangedText` + `Compilation.ReplaceSyntaxTree`).** Two fixes, both needed (verified
-  live - see the implementation note in `work/bug-fix-designs-round7-10-2026-08.md`, WP-C, for why a
+  live - see the implementation note in `work/archive/bug-fix-designs-round7-10-2026-08.md`, WP-C, for why a
   try/catch around `ReportDiagnostic` was tried first and does NOT work: the throw happens inside
   Roslyn's own `GeneratorDriver.RunGeneratorsCore`, after every generator's callback has already
   returned): (1) **the actual crash fix** - `AttributeReading.AttributeLocation` now returns an
@@ -336,7 +337,7 @@ real".
   reference, not content) so an edit to one transport can't force re-emission of another's classes - the
   incrementality regression the same review flagged - while the `BENZ0001` collision check stays a
   single global view (`Combine`d into every transport's output) so a name shared *across* transports is
-  still caught. See `work/bug-fix-designs-round7-10-2026-08.md`, WP-C.
+  still caught. See `work/archive/bug-fix-designs-round7-10-2026-08.md`, WP-C.
 - **[RESOLVED] #32 — the `BENZ0001` name-collision `GroupBy` ran *after* filtering out triggers that
   carry their own `PendingDiagnostic` (e.g. `BENZ0002` for a CosmosDb trigger missing `DocumentType`),
   so a collision where one side was broken reported only that side's own diagnostic and silently
@@ -364,7 +365,7 @@ real".
   fixed, not the precedence itself. See WP-C.
 
 ### Tracked findings round 7–10, WP-U — Examples build regression (done)
-Ruled in [`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-U — Examples
+Ruled in [`bug-fix-designs-round7-10-2026-08.md`](archive/bug-fix-designs-round7-10-2026-08.md) §"WP-U — Examples
 build regression (URGENT, land first)".
 - **[RESOLVED] #68 — `Benzene.Examples.sln` failed to build (CS0535, ~18 files): WP-7a's `IHealthCheck`
   interface change to `ExecuteAsync(CancellationToken)` was swept across `src/` but not `examples/`.**
@@ -373,7 +374,7 @@ build regression (URGENT, land first)".
 
 ### Tracked findings round 7–10, WP-N — Resilience & correlation (done)
 Decisions, rationale, and rejected alternatives are ruled in
-[`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-N — Resilience &
+[`bug-fix-designs-round7-10-2026-08.md`](archive/bug-fix-designs-round7-10-2026-08.md) §"WP-N — Resilience &
 correlation".
 - **[RESOLVED] #61 — nested `UseTimeout`: an OUTER deadline firing while inside an INNER wrap escaped
   as a raw `OperationCanceledException`/`TaskCanceledException`, not the `TimeoutException`
@@ -418,7 +419,7 @@ correlation".
 
 ### Tracked findings round 7–10, WP-O — Observability & privacy-doc accuracy (done)
 Decisions and rationale are ruled in
-[`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-O — Observability &
+[`bug-fix-designs-round7-10-2026-08.md`](archive/bug-fix-designs-round7-10-2026-08.md) §"WP-O — Observability &
 privacy-doc accuracy".
 - **[RESOLVED] #54 — `UseW3CTraceContext`'s manually-started `"W3CTraceContext.Root"` span
   (`ActivityKind.Server`) was wrapped in a bare `using (activity) { await next(); }` with no try/catch,
@@ -440,7 +441,7 @@ privacy-doc accuracy".
   unsuccessful-result line can carry handler-authored error text.
 
 ### Tracked findings round 7–10, WP-M — Validation: JsonSchema parity (done)
-Ruled in [`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-M —
+Ruled in [`bug-fix-designs-round7-10-2026-08.md`](archive/bug-fix-designs-round7-10-2026-08.md) §"WP-M —
 Validation: JsonSchema parity".
 - **[RESOLVED / doc] #60 — `Benzene.JsonSchema`'s `DefaultJsonSchemaProvider` silently ignores
   `System.ComponentModel.DataAnnotations` attributes** (`[Required]`/`[Range]`/`[MinLength]`, ...) - the
@@ -454,7 +455,7 @@ Validation: JsonSchema parity".
   into schema keywords during generation remains open as future work, not tracked as a bug.)
 
 ### Tracked findings round 7–10, WP-D — Mesh host & UI robustness (done)
-Ruled in [`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-D — Mesh
+Ruled in [`bug-fix-designs-round7-10-2026-08.md`](archive/bug-fix-designs-round7-10-2026-08.md) §"WP-D — Mesh
 host & UI robustness".
 - **[RESOLVED] #34 — `MeshTimeRangeResolver.ParseBound`'s `now ± span` threw `ArgumentOutOfRangeException`
   (`DateTimeOffset` range) for a relative count that is perfectly valid as a `TimeSpan` but pushes the
@@ -497,7 +498,7 @@ host & UI robustness".
   inert/unsatisfiable auth-config combination. See WP-D.
 
 ### Tracked findings round 7–10, WP-E — Mesh example parity + resolved-note correction (done)
-Ruled in [`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-E — Mesh
+Ruled in [`bug-fix-designs-round7-10-2026-08.md`](archive/bug-fix-designs-round7-10-2026-08.md) §"WP-E — Mesh
 example parity + resolved-note correction".
 - **[RESOLVED] #41 — `examples/AzureFunctionsMesh`'s `POST /mesh/refresh` had no guard at all
   (unauthenticated ARM discovery + a Blob write on an anonymous POST), CONTRADICTING this file's own
@@ -511,8 +512,8 @@ example parity + resolved-note correction".
   had. **#21's resolved-note is corrected above** (see its `[CORRECTED 2026-08-26, WP-E/#41]` line):
   its "K8sMesh/GoogleCloudMesh/AzureFunctionsMesh already match the guarded posture" claim was false at
   the time it was written for all three named examples - none of the three had `UseMeshRefreshGuard`
-  wired until this fix. See WP-E, and `bug-fix-designs-round7-10-2026-08.md`'s WP-E section for why the
-  scope grew from "verify two examples" to "fix three".
+  wired until this fix. See WP-E, and `archive/bug-fix-designs-round7-10-2026-08.md`'s WP-E section for
+  why the scope grew from "verify two examples" to "fix three".
 - **[RESOLVED] #73 — `examples/AwsMesh/Mesh/MeshAggregateHandler` is triggered BOTH by an EventBridge
   schedule AND an on-demand `POST /mesh/refresh` HTTP endpoint on the same class, calling
   `_aggregator.RunOnceAsync(registry)`/`_store.PublishAsync("registry.json", ...)` directly with no
@@ -525,7 +526,7 @@ example parity + resolved-note correction".
   conditional-write/lease is named as the fuller fix if true single-flight is ever needed). See WP-E.
 
 ### Tracked findings round 7–10, WP-P — Core version-blindness (done)
-Ruled in [`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-P — Core
+Ruled in [`bug-fix-designs-round7-10-2026-08.md`](archive/bug-fix-designs-round7-10-2026-08.md) §"WP-P — Core
 version-blindness (shared root cause)".
 - **[RESOLVED] #69 — `DefaultJsonSchemaProvider`/`SuppliedJsonSchemaProvider`'s `Get()` resolved the
   topic via a bare version-less `GetTopic(context)`, never consulting `IMessageVersionGetter<TContext>`
@@ -561,7 +562,7 @@ version-blindness (shared root cause)".
 Decision, rationale, and the three-check implementation divergence (`GrpcHealthCheck`/`RabbitMqHealthCheck`
 guard at the call site; `DynamoDbHealthCheck` gets `TcpHealthCheck`'s own explicit catch/rethrow; every
 other affected check is fixed by the shared class alone) are ruled in
-[`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-K — Health-check
+[`bug-fix-designs-round7-10-2026-08.md`](archive/bug-fix-designs-round7-10-2026-08.md) §"WP-K — Health-check
 cancellation classification (P8 completion of WP-7)".
 - **[RESOLVED] #50 — WP-7a's own requirement that every `IHealthCheck` forward its `CancellationToken`
   made a cancellation-swallowing bug newly reachable in ~10 backend checks** (`Sns`/`Sqs`/`EventBridge`/
@@ -577,7 +578,7 @@ cancellation classification (P8 completion of WP-7)".
 
 ### Tracked findings round 7–10, WP-F — Mesh fleet/usage backend fetch-isolation & bounds (done)
 Decisions, rationale, and rejected alternatives are ruled in
-[`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-F — Mesh fleet/usage
+[`bug-fix-designs-round7-10-2026-08.md`](archive/bug-fix-designs-round7-10-2026-08.md) §"WP-F — Mesh fleet/usage
 backend fetch-isolation & bounds".
 - **[RESOLVED] #74 — `CompositeMeshFleetReadModel.TraceAsync`/`CorrelationAsync` forwarded to the trace
   source with no try/catch, unlike the sibling `RecentFlowsAsync`/`TopicsFromUsageAsync` in the same
@@ -615,7 +616,7 @@ backend fetch-isolation & bounds".
 ### Tracked findings round 7–10, WP-L — Avro DoS + evolution, XML BOM, Newtonsoft divergence (done)
 Decision, rationale, and the exact mechanism (why the depth guard has to live in `BoundedBinaryDecoder`,
 not `AvroDatumConverter`) are ruled in
-[`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-L — Serialization:
+[`bug-fix-designs-round7-10-2026-08.md`](archive/bug-fix-designs-round7-10-2026-08.md) §"WP-L — Serialization:
 Avro DoS + evolution, XML BOM, Newtonsoft divergence".
 - **[RESOLVED] #56 — Avro serialize/deserialize recursed unboundedly on a self-referencing/deeply-nested
   schema, an *uncatchable* CLR stack overflow crashing the whole process from a <100 KB body (confirmed
@@ -648,7 +649,7 @@ Avro DoS + evolution, XML BOM, Newtonsoft divergence".
   than one crashing. Documented in `Benzene.NewtonsoftJson/CLAUDE.md`. See WP-L.
 
 ### Tracked findings round 7–10, WP-A — RabbitMQ mandatory-publish coordinator hardening (done)
-Ruled in [`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-A — RabbitMQ
+Ruled in [`bug-fix-designs-round7-10-2026-08.md`](archive/bug-fix-designs-round7-10-2026-08.md) §"WP-A — RabbitMQ
 mandatory-publish coordinator hardening" (WP-8's own new code — the riskiest code that round shipped, and
 the first dedicated review of it found three issues).
 - **[RESOLVED] #30 — the final `await tcs.Task.WaitAsync(cancellationToken)` in
@@ -678,7 +679,7 @@ the first dedicated review of it found three issues).
 
 ### Tracked findings round 7–10, WP-G — AWS client / health-check consistency (done)
 Decisions and rationale ruled in
-[`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-G — AWS client /
+[`bug-fix-designs-round7-10-2026-08.md`](archive/bug-fix-designs-round7-10-2026-08.md) §"WP-G — AWS client /
 health-check consistency (P8)".
 - **[RESOLVED] #43 — `AwsLambdaBenzeneMessageClient`'s fire-and-forget (`InvocationType.Event`) path
   unconditionally returned `Accepted` regardless of the invoke's actual `InvokeResponse.StatusCode` —
@@ -700,7 +701,7 @@ health-check consistency (P8)".
   same caveat WP-7(b) already carried.) See WP-G.
 
 ### Tracked findings round 7–10, WP-I — gRPC null-response diagnostic symmetry (done)
-Ruled in [`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-I — gRPC
+Ruled in [`bug-fix-designs-round7-10-2026-08.md`](archive/bug-fix-designs-round7-10-2026-08.md) §"WP-I — gRPC
 null-response diagnostic symmetry".
 - **[RESOLVED] #48 — `ProtobufJsonGrpcMessageAdapter.ConvertResponse`'s null-payload branch called
   `Activator.CreateInstance<TResponse>()` directly with no check, unlike the non-null branch (which
@@ -713,7 +714,7 @@ null-response diagnostic symmetry".
 
 ### Tracked findings round 7–10, WP-H — CI-gating tools & codegen correctness (done)
 Decisions, rationale, and the CLI `--fail-on` flag convention are ruled in
-[`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-H — CI-gating tools &
+[`bug-fix-designs-round7-10-2026-08.md`](archive/bug-fix-designs-round7-10-2026-08.md) §"WP-H — CI-gating tools &
 codegen correctness (P10, P11)".
 - **[RESOLVED] #46 — `EventServiceDocumentDeserializer` reused one `EventServiceDocumentBuilder`
   (hence one `SchemaBuilder`/`SchemaRepository`) across calls, and `SchemaBuilder.AddSchema` is
@@ -749,7 +750,7 @@ codegen correctness (P10, P11)".
 
 ### Tracked findings round 7–10, WP-J — Schema comparer discriminator matching + coverage (done)
 Decision, rationale, and rejected alternatives are ruled in
-[`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-J — Schema comparer
+[`bug-fix-designs-round7-10-2026-08.md`](archive/bug-fix-designs-round7-10-2026-08.md) §"WP-J — Schema comparer
 discriminator matching + coverage".
 - **[RESOLVED] #53 — a discriminator mapping's *coverage* of a `$ref`'d `oneOf`/`anyOf` variant
   changing between baseline and current (e.g. a mapping entry newly added for a variant that was
@@ -773,7 +774,7 @@ discriminator matching + coverage".
 
 ### Tracked findings round 7–10, WP-R — Testing infrastructure & the coverage blind spot (done)
 Ruled in
-[`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-R — Testing
+[`bug-fix-designs-round7-10-2026-08.md`](archive/bug-fix-designs-round7-10-2026-08.md) §"WP-R — Testing
 infrastructure & the coverage blind spot".
 - **[RESOLVED] #81 — seven `*.TestHelpers` packages (`Benzene.Azure.EventHub.TestHelpers`,
   `Benzene.Azure.ServiceBus.TestHelpers`, `Benzene.Kafka.Core.TestHelpers`,
@@ -798,7 +799,7 @@ infrastructure & the coverage blind spot".
 
 ### Tracked findings round 7–10, WP-S — Hosting / HTTP adapters (done)
 Ruled in
-[`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-S — Hosting / HTTP
+[`bug-fix-designs-round7-10-2026-08.md`](archive/bug-fix-designs-round7-10-2026-08.md) §"WP-S — Hosting / HTTP
 adapters".
 - **[RESOLVED] #88 — `BenzeneHostedServiceAdapter` never observed whether the wrapped worker's own
   task faulted, so a dead/crashed worker left the process "up" with zero signal (no log, no
@@ -840,7 +841,7 @@ adapters".
   unchanged). See WP-S.
 
 ### Tracked findings round 7–10, WP-T — MapReduce / SchemaRegistry / ResponseEvents (done)
-Ruled in [`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-T —
+Ruled in [`bug-fix-designs-round7-10-2026-08.md`](archive/bug-fix-designs-round7-10-2026-08.md) §"WP-T —
 MapReduce / SchemaRegistry / ResponseEvents".
 - **[RESOLVED] #92 — `ScatterGatherAsync` discarded all per-shard exception detail: `Outcome.Failed`
   carried only the shard, so a thrown `ScatterGatherPartialFailureException` had `InnerException ==
@@ -880,7 +881,7 @@ MapReduce / SchemaRegistry / ResponseEvents".
 
 ### Tracked findings round 7–10, WP-Q — Autofac DI adapter parity (done)
 Decisions, rationale, and rejected alternatives for all four are ruled in
-[`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-Q — Autofac DI adapter
+[`bug-fix-designs-round7-10-2026-08.md`](archive/bug-fix-designs-round7-10-2026-08.md) §"WP-Q — Autofac DI adapter
 parity (P8 — the alternate container must match the reference)".
 - **[RESOLVED] #82 — `AutofacBenzeneServiceContainer.IsTypeRegistered` read Autofac's
   `ComponentRegistryBuilder`, which stays empty until `ContainerBuilder.Build()` runs, but is called

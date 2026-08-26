@@ -7,7 +7,7 @@ using Benzene.Results;
 
 namespace Benzene.Test.Examples;
 
-// Shared fixtures for WP-P (work/bug-fix-designs-round7-10-2026-08.md) regression tests: a topic
+// Shared fixtures for WP-P (work/archive/bug-fix-designs-round7-10-2026-08.md) regression tests: a topic
 // with two registered handler versions whose request types are genuinely different shapes, so a
 // version-blind lookup (falling back to VersionSelector's unversioned max-by-ordinal default) is
 // observably wrong rather than accidentally correct. "v2" sorts higher than "v1" by ordinal

@@ -123,7 +123,7 @@ public class ActivityMiddlewareDecorator<TContext> : IMiddleware<TContext>
 
         var getter = _serviceResolver.TryGetService<IMessageGetter<TContext>>();
         // Version-augmented (see GetVersionedTopic's doc comment / WP-P,
-        // work/bug-fix-designs-round7-10-2026-08.md): without this, a topic with 2+ registered handler
+        // work/archive/bug-fix-designs-round7-10-2026-08.md): without this, a topic with 2+ registered handler
         // versions would tag the wrong (never-run) handler and a blank version on every trace/log line,
         // undermining mesh trace-backed flow reconstruction (task #70).
         var versionGetter = _serviceResolver.TryGetService<IMessageVersionGetter<TContext>>();

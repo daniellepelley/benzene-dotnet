@@ -130,3 +130,15 @@ it had one, otherwise 2026-08).
   [`../outstanding-bugs.md`](../outstanding-bugs.md)'s Resolved section, each pointing back here for
   the full record — that's why this file is kept rather than deleted, unlike the pure bug-hunt
   reports above.
+
+## Dated review and fix-design record (2026-08-26)
+
+- `bug-fix-designs-round7-10-2026-08.md` — the design ruling (decision, rationale, rejected
+  alternatives) for the evidence-backed findings from the round-7–10 adversarial review passes (shared
+  task board #30–#95), successor to the round-5/6 ruling above. All 16 work packages (WP-A through
+  WP-U) landed and pushed to `main` via 16 merge commits, followed by one cleanup commit (`f719504`)
+  fixing baseline regressions the full post-merge test run surfaced. Archived 2026-08-26 after an
+  independent re-verification of the build/test baseline (`Benzene.Core.Test` 3017/2/0,
+  `Benzene.Mesh.Test` 535/535, `Benzene.Mesh.Host.Test` 141/141, `Benzene.Examples.sln` 0 errors); the
+  per-finding summaries live in [`../outstanding-bugs.md`](../outstanding-bugs.md)'s Resolved section
+  (search "Tracked findings round 7–10"), each pointing back here for the full record.

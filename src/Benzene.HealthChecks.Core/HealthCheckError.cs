@@ -92,7 +92,7 @@ public static class HealthCheckError
     /// (<c>GrpcHealthCheck</c>, <c>RabbitMqHealthCheck</c>) cannot rely on this - a cancellation this
     /// method cannot tell apart from the caller-driven one - and instead guard at the call site so their
     /// own timeout still classifies as an ordinary transient failure. See the WP-K ruling
-    /// (<c>work/bug-fix-designs-round7-10-2026-08.md</c>) for the full reasoning.
+    /// (<c>work/archive/bug-fix-designs-round7-10-2026-08.md</c>) for the full reasoning.
     /// </exception>
     public static IHealthCheckResult Classify(string type, Exception exception, HealthCheckDependency[] dependencies,
         string? errorCode = null, int? statusCode = null, IDictionary<string, object>? data = null,
