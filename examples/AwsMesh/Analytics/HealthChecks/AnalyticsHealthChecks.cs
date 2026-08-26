@@ -9,7 +9,7 @@ public class AnalyticsStoreHealthCheck : IHealthCheck
 
     public string Type => "TimeseriesStore";
 
-    public Task<IHealthCheckResult> ExecuteAsync()
+    public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var data = new Dictionary<string, object> { ["latencyMs"] = 9 };
         return Task.FromResult(HealthCheckResult.CreateInstance(true, Type, data, Dependencies));

@@ -16,7 +16,7 @@ public class ShippingCarrierApiHealthCheck : IHealthCheck
 
     public string Type => "CarrierApi";
 
-    public Task<IHealthCheckResult> ExecuteAsync()
+    public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var data = new Dictionary<string, object>();
 
@@ -37,7 +37,7 @@ public class ShippingQueueHealthCheck : IHealthCheck
 
     public string Type => "SqsQueue";
 
-    public Task<IHealthCheckResult> ExecuteAsync()
+    public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var data = new Dictionary<string, object>();
 

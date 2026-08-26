@@ -16,7 +16,7 @@ public class PaymentsDatabaseHealthCheck : IHealthCheck
 
     public string Type => "PostgresDatabase";
 
-    public Task<IHealthCheckResult> ExecuteAsync()
+    public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var data = new Dictionary<string, object> { ["latencyMs"] = 6 };
 
@@ -38,7 +38,7 @@ public class FraudEngineHealthCheck : IHealthCheck
 
     public string Type => "FraudEngine";
 
-    public Task<IHealthCheckResult> ExecuteAsync()
+    public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var data = new Dictionary<string, object> { ["p99Ms"] = 850, ["note"] = "elevated latency" };
 

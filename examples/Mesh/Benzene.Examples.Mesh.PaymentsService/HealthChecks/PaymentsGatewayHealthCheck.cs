@@ -18,7 +18,7 @@ public class PaymentsGatewayHealthCheck : IHealthCheck
 
     public string Type => "PaymentsGateway";
 
-    public Task<IHealthCheckResult> ExecuteAsync()
+    public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var isHealthy = Environment.GetEnvironmentVariable("DEMO_PAYMENTS_HEALTHY") == "true";
 

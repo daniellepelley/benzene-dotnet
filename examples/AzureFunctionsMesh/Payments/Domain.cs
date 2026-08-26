@@ -83,7 +83,7 @@ public class ServiceHealthCheck : IHealthCheck
 
     public string Type => "self";
 
-    public Task<IHealthCheckResult> ExecuteAsync()
+    public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var data = new Dictionary<string, object> { ["service"] = _service };
         return Task.FromResult(HealthCheckResult.CreateInstance(true, Type, data, Array.Empty<HealthCheckDependency>()));

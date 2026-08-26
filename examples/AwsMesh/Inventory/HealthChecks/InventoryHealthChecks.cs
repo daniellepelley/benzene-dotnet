@@ -9,7 +9,7 @@ public class InventoryDatabaseHealthCheck : IHealthCheck
 
     public string Type => "PostgresDatabase";
 
-    public Task<IHealthCheckResult> ExecuteAsync()
+    public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var data = new Dictionary<string, object> { ["latencyMs"] = 5 };
         return Task.FromResult(HealthCheckResult.CreateInstance(true, Type, data, Dependencies));

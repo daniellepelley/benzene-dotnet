@@ -9,7 +9,7 @@ public class ShippingDatabaseHealthCheck : IHealthCheck
 
     public string Type => "DynamoDbTable";
 
-    public Task<IHealthCheckResult> ExecuteAsync()
+    public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var data = new Dictionary<string, object> { ["latencyMs"] = 3 };
         return Task.FromResult(HealthCheckResult.CreateInstance(true, Type, data, Dependencies));
@@ -23,7 +23,7 @@ public class CarrierApiHealthCheck : IHealthCheck
 
     public string Type => "CarrierApi";
 
-    public Task<IHealthCheckResult> ExecuteAsync()
+    public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var data = new Dictionary<string, object> { ["carriers"] = "DPD,RoyalMail" };
         return Task.FromResult(HealthCheckResult.CreateInstance(true, Type, data, Dependencies));

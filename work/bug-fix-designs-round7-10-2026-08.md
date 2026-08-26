@@ -105,6 +105,16 @@ for `src/`). Land this first, alone, so the examples solution is green before an
 it. **This is the P8 lesson in its rawest form** — WP-7a's "every implementer (20+)" sweep counted
 only `src/`.
 
+**Amendment (implementation, same commit).** "Forwarding the token into their own I/O" doesn't apply
+literally: all 18 example implementers (`AwsMesh`, `AzureFunctionsMesh`, `GoogleCloudMesh`, `K8sMesh`,
+`Mesh` examples' health checks) are synthetic demo checks — they build a canned `Dictionary` and return
+`Task.FromResult(...)` synchronously, with no underlying I/O call to thread a token into (unlike the
+real `src/` checks WP-7a fixed, e.g. `SqsHealthCheck`, which forward into an SDK call). The fix is
+therefore just the signature change (accept `CancellationToken cancellationToken`, unused) — matching
+the existing `src/` precedent for the same situation: `Benzene.HealthChecks.SimpleHealthCheck` and
+`FailedHealthCheck` also accept the token with nothing to forward it into. No behavioural change beyond
+satisfying the interface.
+
 ### WP-A — RabbitMQ mandatory-publish coordinator hardening
 **Tasks #30, #33, #45.** All in `RabbitMqMandatoryPublishCoordinator` / `RabbitMqClientMiddleware`
 (the new WP-8 class — the riskiest new code the round-5/6 round shipped, and the review found three

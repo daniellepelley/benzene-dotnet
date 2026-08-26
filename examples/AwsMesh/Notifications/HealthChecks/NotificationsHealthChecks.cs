@@ -9,7 +9,7 @@ public class EmailProviderHealthCheck : IHealthCheck
 
     public string Type => "HttpDependency";
 
-    public Task<IHealthCheckResult> ExecuteAsync()
+    public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var data = new Dictionary<string, object> { ["latencyMs"] = 18 };
         return Task.FromResult(HealthCheckResult.CreateInstance(true, Type, data, Dependencies));
