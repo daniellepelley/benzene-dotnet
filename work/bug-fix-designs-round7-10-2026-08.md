@@ -167,6 +167,50 @@ Tests: the round-7 leak probe (now permanent), a timeout test, a duplicate-id te
 - **#42 (ServiceBus queue-vs-topic):** silently prefers `QueueName` when both queue and topic are set;
   emit a diagnostic rather than discard the topic. Minor.
 
+**Implementation note (added at WP-C's implementation, not a re-litigation - see this file's own
+anti-flip-flop rule):** both options this section names were tried, in that order, and only the second
+turned out to actually fix the crash - recorded here so a future agent doesn't "simplify" back to the
+first on the reasonable-looking assumption that it should have worked.
+
+Per-transport `RegisterSourceOutput` was restored first, as preferred: collision detection stays a
+single global view (`Combine`d into every transport's own output, via a content-aware
+`IEqualityComparer` - see below) so the cross-transport `BENZ0001` check keeps working, while each
+transport's own emission runs through its own `RegisterSourceOutput`. This *does* fix the incrementality
+regression (confirmed with `IncrementalityTest`, using `GeneratorDriverOptions(trackIncrementalGeneratorSteps:
+true)` + `WithTrackingName` to assert the untouched transport's step reports `Cached`/`Unchanged` after
+an edit to a different transport) - **but it does not fix the crash on its own**, and initially shipping
+it alone (with a try/catch around `SourceProductionContext.ReportDiagnostic` as a believed-sufficient
+guard) was *proven wrong* by `CrashReproTest` actually reproducing the crash against that code: the
+`ArgumentException` is thrown by Roslyn's own `GeneratorDriver.RunGeneratorsCore` →
+`FilterDiagnostics` → `SuppressMessageAttributeState.IsDiagnosticSuppressed` →
+`Compilation.GetSemanticModel(diagnostic.Location.SourceTree)`, which runs *after* every generator's
+`Execute`/`RegisterSourceOutput` callback has already returned and collected its diagnostics into the
+driver's own bag - there is no hook on the generator's side of that call that can intercept it, with or
+without per-transport registration.
+
+**The actual fix (verified: `CrashReproTest` reproduces the crash without it, passes with it) is
+upstream, at the point a `Location` is first captured:** `AttributeReading.AttributeLocation` now
+returns an *external* `Location` (`Location.Create(string filePath, TextSpan, LinePositionSpan)` - file
+path + span, deliberately built with no `SourceTree`) instead of the tree-bound
+`SyntaxNode.GetLocation()` result. An external `Location` has no tree reference to go stale in the first
+place, so `IsDiagnosticSuppressed`'s compilation-membership check can never reject it, regardless of how
+long the incremental engine ends up caching the `TriggerInfo` carrying it - `SourceTree` being null there
+is exactly `Location.None`'s own trick, just retaining real file+line+column so `error BENZ0001: …` build
+output still points at the right place. This closes the hazard at its root: it no longer matters whether
+a given `TriggerInfo` is cached across compilations, single-tree incremental edits, or several rounds of
+either, because there is no longer any tree-bound reference that a later compilation could fail to
+contain.
+
+Per-transport `RegisterSourceOutput` was kept (it independently fixes the incrementality regression) and
+its own comparer gap was closed while implementing it: `ImmutableArray<T>.Collect()`'s result compares
+by *reference* under `EqualityComparer<T>.Default`, not content, so `transport.Collect()` needed an
+explicit `IEqualityComparer<ImmutableArray<TriggerInfo>>` (`TriggerInfoSequenceComparer`) - without it,
+every transport's `RegisterSourceOutput` reported "changed" on every single run regardless of relevance,
+silently defeating the whole restructure (caught live by an early version of `IncrementalityTest`
+failing even after the crash was fixed). The `SafeReportDiagnostic` try/catch tried first is *not* part
+of the shipped code - it is dead weight now that Locations can never be tree-bound-stale, and keeping it
+would misleadingly imply a defence that demonstrably does not intercept the actual failure mode.
+
 ### WP-D — Mesh host & UI robustness
 **Tasks #34, #35, #36, #37, #72.**
 - **#34 (P5, second overflow path):** `MeshTimeRangeResolver.ParseBound`'s `now ± span` throws

@@ -291,6 +291,53 @@ real".
   `true`. Wiring requires (and fails fast on, at setup - not first publish) a channel with publisher
   confirmations enabled, verified via `GetNextPublishSequenceNumberAsync()` (the only public-API-visible
   proxy for that setting in this client version). See WP-8.
+- **[RESOLVED] #38 — `AzureFunctionTriggerGenerator.Execute` built the `BENZ0001` diagnostic from a
+  `TriggerInfo.Location`, which `TriggerInfo`'s equality deliberately excludes (for incremental cache
+  hits) - so the incremental engine was free to keep serving an old cached `TriggerInfo`, stale
+  `Location` and all, whenever a freshly-recomputed instance compared equal to it. If that old
+  `Location`'s `SyntaxTree` was no longer part of the current `Compilation`, `Diagnostic.Create`/
+  `ReportDiagnostic` threw `ArgumentException` during suppression-checking and crashed the whole
+  incremental build on an ordinary, unrelated edit - reproduced both via two independently-constructed
+  `CSharpCompilation`s sharing one `GeneratorDriver`, and via a genuine single-tree incremental edit
+  (`SyntaxTree.WithChangedText` + `Compilation.ReplaceSyntaxTree`).** Two fixes, both needed (verified
+  live - see the implementation note in `work/bug-fix-designs-round7-10-2026-08.md`, WP-C, for why a
+  try/catch around `ReportDiagnostic` was tried first and does NOT work: the throw happens inside
+  Roslyn's own `GeneratorDriver.RunGeneratorsCore`, after every generator's callback has already
+  returned): (1) **the actual crash fix** - `AttributeReading.AttributeLocation` now returns an
+  *external* `Location` (file path + span, no `SourceTree`) instead of the tree-bound
+  `SyntaxNode.GetLocation()` result, so there is no tree reference left to go stale across an
+  incremental boundary in the first place; and (2) **restored per-transport `RegisterSourceOutput`**
+  (undoing WP-5's merge of all 9 transports into one shared output, with a content-aware
+  `IEqualityComparer` on each transport's `Collect()` - `ImmutableArray<T>`'s own equality compares by
+  reference, not content) so an edit to one transport can't force re-emission of another's classes - the
+  incrementality regression the same review flagged - while the `BENZ0001` collision check stays a
+  single global view (`Combine`d into every transport's output) so a name shared *across* transports is
+  still caught. See `work/bug-fix-designs-round7-10-2026-08.md`, WP-C.
+- **[RESOLVED] #32 — the `BENZ0001` name-collision `GroupBy` ran *after* filtering out triggers that
+  carry their own `PendingDiagnostic` (e.g. `BENZ0002` for a CosmosDb trigger missing `DocumentType`),
+  so a collision where one side was broken reported only that side's own diagnostic and silently
+  shipped the other trigger under the shared name with no `BENZ0001` at all.** The collision check now
+  runs over the *full* declared set, including an entry that carries its own diagnostic
+  (`TriggerInfo.ForDiagnostic` always records the attempted `FunctionNameLiteral`, even though nothing
+  will be emitted for it, precisely so this check can still see it) - both diagnostics now fire
+  together when applicable. See WP-C.
+- **[RESOLVED] #39 — only CosmosDb's `Read()` validated a required field (`BENZ0002` for missing
+  `DocumentType`); the other five transports with a required binding value silently emitted an
+  empty/invalid binding argument (e.g. `ServiceBusTrigger("", "")`) instead of failing the build.**
+  Extended the same pattern to `DiagnosticDescriptors`: `BENZ0003` (ServiceBus - neither `QueueName` nor
+  `TopicName` set), `BENZ0004` (EventHub - missing `EventHubName`), `BENZ0005` (Kafka - missing
+  `Topic`), `BENZ0006` (Queue Storage - missing `QueueName`), `BENZ0007` (Blob Storage - missing
+  `Path`). See WP-C.
+- **[RESOLVED] #40 — `AttributeReading.NamedString` couldn't distinguish an *absent* `Name` (which
+  correctly defaults) from an *explicitly-set* `""`/whitespace-only `Name`, across all 9 transports -
+  the latter silently produced `[Function("")]`.** Added `AttributeReading.ValidateName`, called by
+  every transport before its own required-field checks, which reports the new `BENZ0008` diagnostic for
+  the explicit-empty case and leaves the absent case defaulting as before. See WP-C.
+- **[RESOLVED] #42 — `ServiceBus.Read`'s `queue.Length > 0 ? ... : ...` silently preferred `QueueName`
+  when *both* `QueueName` and `TopicName`/`SubscriptionName` were set on one attribute, discarding the
+  topic with no diagnostic at all.** Added `BENZ0009` (warning, non-blocking) reported alongside the
+  still-generated trigger, which keeps the same queue-wins precedence - only the silent discard is
+  fixed, not the precedence itself. See WP-C.
 
 ---
 
