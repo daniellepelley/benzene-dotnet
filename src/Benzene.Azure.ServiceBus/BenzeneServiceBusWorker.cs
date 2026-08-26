@@ -190,7 +190,26 @@ public class BenzeneServiceBusWorker : IBenzeneWorker
                     .LogError(ex, "Processing Service Bus message {messageId} failed", settler.Message.MessageId);
             }
 
-            await settler.AbandonMessageAsync();
+            // The abandon call is wrapped in its own try/catch so a failure abandoning (e.g. the
+            // lock already expired) can never replace the original handler exception below - without
+            // this, an exception thrown out of AbandonMessageAsync would propagate from the bare
+            // `throw;` in its place, masking the real cause of the failure.
+            try
+            {
+                await settler.AbandonMessageAsync();
+            }
+            catch (Exception abandonEx)
+            {
+                using (var loggingScope = _serviceResolverFactory.CreateScope())
+                {
+                    loggingScope.GetService<ILogger<BenzeneServiceBusWorker>>()
+                        .LogError(abandonEx,
+                            "Abandoning Service Bus message {messageId} after a processing failure also failed; " +
+                            "the message will remain locked until the lock expires and then be redelivered",
+                            settler.Message.MessageId);
+                }
+            }
+
             throw;
         }
     }
@@ -233,16 +252,28 @@ public class BenzeneServiceBusWorker : IBenzeneWorker
         }
     }
 
+    // Settlement (Complete/Abandon/DeadLetter/Defer) below is deliberately CancellationToken.None on
+    // every call, never _args.CancellationToken. Per the WP's settlement-on-shutdown principle: by the
+    // time SettleAsync/AbandonMessageAsync runs, the handler has already finished and the outcome is
+    // decided - settling it is part of graceful drain, not more handler work. Per the SDK's own docs,
+    // _args.CancellationToken "will be cancelled when StopProcessingAsync is called" - and
+    // StopProcessingAsync awaits this very in-flight handler rather than cancelling it and moving on,
+    // so a settle call gated on that token can be cancelled for a message whose handler already
+    // succeeded, silently leaving it unsettled for redelivery/double-processing after the lock expires.
+    // CancellationToken.None is used (rather than MessageLockCancellationToken, which fires on lock
+    // loss/expiry, not shutdown) so the call is bounded only by the SDK's own operation timeout, not by
+    // any cancellation source unrelated to the settle operation itself; a lock genuinely lost by then
+    // still fails the call with the SDK's own error, which is logged rather than masked.
     private sealed class ProcessMessageSettler : IServiceBusMessageSettler
     {
         private readonly ProcessMessageEventArgs _args;
         public ProcessMessageSettler(ProcessMessageEventArgs args) => _args = args;
         public ServiceBusReceivedMessage Message => _args.Message;
         public CancellationToken CancellationToken => _args.CancellationToken;
-        public Task CompleteMessageAsync() => _args.CompleteMessageAsync(_args.Message, _args.CancellationToken);
-        public Task AbandonMessageAsync() => _args.AbandonMessageAsync(_args.Message, cancellationToken: _args.CancellationToken);
-        public Task DeadLetterMessageAsync(string? reason, string? description) => _args.DeadLetterMessageAsync(_args.Message, reason, description, _args.CancellationToken);
-        public Task DeferMessageAsync() => _args.DeferMessageAsync(_args.Message, cancellationToken: _args.CancellationToken);
+        public Task CompleteMessageAsync() => _args.CompleteMessageAsync(_args.Message, CancellationToken.None);
+        public Task AbandonMessageAsync() => _args.AbandonMessageAsync(_args.Message, cancellationToken: CancellationToken.None);
+        public Task DeadLetterMessageAsync(string? reason, string? description) => _args.DeadLetterMessageAsync(_args.Message, reason, description, CancellationToken.None);
+        public Task DeferMessageAsync() => _args.DeferMessageAsync(_args.Message, cancellationToken: CancellationToken.None);
     }
 
     private sealed class ProcessSessionMessageSettler : IServiceBusMessageSettler
@@ -251,10 +282,10 @@ public class BenzeneServiceBusWorker : IBenzeneWorker
         public ProcessSessionMessageSettler(ProcessSessionMessageEventArgs args) => _args = args;
         public ServiceBusReceivedMessage Message => _args.Message;
         public CancellationToken CancellationToken => _args.CancellationToken;
-        public Task CompleteMessageAsync() => _args.CompleteMessageAsync(_args.Message, _args.CancellationToken);
-        public Task AbandonMessageAsync() => _args.AbandonMessageAsync(_args.Message, cancellationToken: _args.CancellationToken);
-        public Task DeadLetterMessageAsync(string? reason, string? description) => _args.DeadLetterMessageAsync(_args.Message, reason, description, _args.CancellationToken);
-        public Task DeferMessageAsync() => _args.DeferMessageAsync(_args.Message, cancellationToken: _args.CancellationToken);
+        public Task CompleteMessageAsync() => _args.CompleteMessageAsync(_args.Message, CancellationToken.None);
+        public Task AbandonMessageAsync() => _args.AbandonMessageAsync(_args.Message, cancellationToken: CancellationToken.None);
+        public Task DeadLetterMessageAsync(string? reason, string? description) => _args.DeadLetterMessageAsync(_args.Message, reason, description, CancellationToken.None);
+        public Task DeferMessageAsync() => _args.DeferMessageAsync(_args.Message, cancellationToken: CancellationToken.None);
     }
 
     private Task OnProcessErrorAsync(ProcessErrorEventArgs args)

@@ -1022,13 +1022,14 @@ and ruled in [`bug-fix-designs-round10-2026-08.md`](bug-fix-designs-round10-2026
 (`UseMeshTrace` exports `TopicVersion = null` for every header-versioned message, #98); three of the
 four self-hosted workers settle successfully-processed messages through calls gated on the shutdown
 token, converting graceful shutdown into silent double-processing (SQS #115 executed, EventHub #116
-executed, ServiceBus #117 suspected); `CachingHealthCheckProcessor` has no single-flight guard
+executed, ServiceBus #117 originally suspected — confirmed and fixed, see WP-AD below);
+`CachingHealthCheckProcessor` has no single-flight guard
 (50 concurrent cold-cache callers → 50 full dependency-hammering runs, #111 — now RESOLVED, see
 WP-AC above); and `ValidationStatusAttribute` — documented in the shared abstractions package — is
-honored by exactly one of the three validation adapters (#99). Per-finding evidence, rulings and work
-packages are in the ruling doc; each will get its `[RESOLVED]` line here as it lands. **WP-AC
-(#111–#114, health-check processor + adapters) has landed** - see the resolved section above; the
-remaining round-10 work packages below are still open.
+honored by exactly one of the three validation adapters (#99 — now RESOLVED, see WP-W above).
+Per-finding evidence, rulings and work packages are in the ruling doc; each will get its
+`[RESOLVED]` line here as it lands. **WP-AA, WP-AB, WP-AC, WP-W, WP-Z and WP-AE have landed** - see
+the resolved sections above; the remaining round-10 work packages below are still open.
 
 - **[RESOLVED] #108 — `BenzeneCosmosChangeFeedWorker`'s auto-checkpoint call sat inside the pipeline's
   own try/catch, so a checkpoint failure after a successful batch was misattributed to the handler
@@ -1127,6 +1128,74 @@ rebalance + config hygiene".
   `BenzeneKafkaWorkerTest.StartAsync_CommitOnlyOnSuccessWithValidCombination_*` test previously
   asserted the mutate-in-place behavior as correct - flipped (and renamed) to assert non-mutation,
   the actual red→green signal for this fix.
+
+### Tracked findings round 10, WP-AD — self-hosted worker settlement-on-shutdown (done)
+Decisions, rationale, and the #117 verification evidence are ruled/recorded in
+[`bug-fix-designs-round10-2026-08.md`](bug-fix-designs-round10-2026-08.md) §"WP-AD — self-hosted
+worker settlement-on-shutdown (#115, #116, #117)". One unifying theme across three transports: each
+settled *successfully processed* work through a call gated on the shutdown/processor token itself, so
+graceful shutdown could convert already-completed work into silent redelivery/double-processing
+(Kafka already did this correctly via synchronous `StoreOffset` + a commit in the run task's
+`finally`, and was not in scope). All three are now fixed on the same principle: settlement of
+already-completed work runs under `CancellationToken.None`, never the run/stop token.
+- **[RESOLVED] #115 — SQS: a successfully-processed message was silently never deleted when
+  shutdown fired mid-batch** (`SqsConsumer.cs`: the delete call passed the poll loop's own
+  `cancellationToken`; a catch for `OperationCanceledException` swallowed the resulting failure with
+  no log line). Confirmed by an executed probe. Fixed: once a batch's pipeline run has completed, the
+  delete of successfully-processed messages runs under `CancellationToken.None` (bounded by the AWS
+  SDK client's own HTTP timeout, not by an artificial one); if the delete call itself still fails (as
+  opposed to a partial per-entry failure, already logged), it's now caught and logged naming the
+  message ids that will be redelivered. Regression test:
+  `SqsConsumerCancellationTest.StartAsync_ShutdownFiresAfterHandlerSucceeds_MessageIsStillDeleted`
+  (red pre-fix: asserted the token used for the delete call is not the cancelled run token).
+- **[RESOLVED] #116 — EventHub: `UpdateCheckpointAsync` sat outside the handler's try/catch and used
+  the (shutdown-cancellable) `args.CancellationToken`** (`BenzeneEventHubWorker.cs`). Confirmed by an
+  executed probe: a successful handler with `args.CancellationToken` already cancelled (the SDK's
+  documented state once `StopProcessingAsync` is called, which `StopAsync` calls while in-flight
+  handlers are still awaited) threw an `OperationCanceledException` that propagated UNHANDLED out of
+  `OnProcessEventAsync` — which per the SDK's own docs faults the partition-processing task and can
+  crash the process on some hosts; separately, any transient checkpoint-store failure escaped the
+  same way, bypassing the worker's own `CatchHandlerExceptions` policy entirely. Fixed: the checkpoint
+  call now runs in its own try/catch, under `CancellationToken.None`. A cancellation path (defensive —
+  the checkpoint store itself throwing `OperationCanceledException` for its own reasons) is logged at
+  Information ("skipped due to shutdown ... redelivered on restart") rather than treated as a failure;
+  any other checkpoint failure is logged at Error and routed through the same
+  `CatchHandlerExceptions` stop-or-continue policy every other failure in the file already uses (the
+  stop logic was extracted into a shared `StopProcessorOnce()` helper so both paths use it
+  identically). Regression tests in `EventHubWorkerCheckpointCancellationTest` (all three paths: token
+  already cancelled → still checkpoints; checkpoint store throws OCE → Information log, no stop;
+  checkpoint store throws an ordinary exception → Error log, routed through
+  `CatchHandlerExceptions`).
+- **[RESOLVED] #117 — ServiceBus: settlement used `args.CancellationToken` — same shutdown race,
+  plus an abandon failure in the catch path could replace the original handler exception**
+  (`BenzeneServiceBusWorker.cs`: the settler passed `_args.CancellationToken` into
+  `CompleteMessageAsync`/`AbandonMessageAsync`; the failure-path catch called `AbandonMessageAsync()`
+  with a bare `throw;` after it, so an abandon failure propagated in place of the original exception).
+  This was **SUSPECTED, not confirmed** going into the work package — the prior review had only
+  documentary SDK evidence (`ProcessMessageEventArgs.CancellationToken`'s docs use the identical
+  wording as the EventHub case: "will be cancelled when `StopProcessingAsync` is called") and could
+  not execute a repro because the settler seam is `internal`. **Verified this round, no
+  `InternalsVisibleTo`/refactor needed**: `ProcessMessageEventArgs` has a public constructor
+  `(ServiceBusReceivedMessage, ServiceBusReceiver, CancellationToken)` and `ServiceBusReceiver` has a
+  protected parameterless constructor with virtual settle methods, both mockable directly; combined
+  with the same reflection-invoke-the-private-handler pattern already used for
+  `BenzeneEventHubWorker.OnProcessEventAsync` in this codebase, this let the race be reproduced with
+  the SDK's own real types rather than a mock of Benzene's own seam. **The race is real**: with the
+  pre-fix code, a real `OperationCanceledException` was observed propagating unhandled out of
+  `BenzeneServiceBusWorker.HandleMessageAsync` for a message whose handler had already succeeded (and
+  separately, for one whose handler had already failed and was being abandoned) — confirmed by
+  reverting the fix and re-running the new regression tests, which failed with exactly that exception
+  before being restored to green. Fixed: every settle call (`Complete`/`Abandon`/`DeadLetter`/`Defer`,
+  both the regular and session settlers) now uses `CancellationToken.None`, not
+  `MessageLockCancellationToken` — chosen over the lock-scoped token because it fires on lock
+  loss/renewal-duration-elapsed, not shutdown, and using it would risk turning a genuine lock-loss
+  into a client-side `OperationCanceledException` instead of the SDK's own (more diagnosable) failure
+  for that case; `CancellationToken.None` bounds the call only by the SDK's own operation timeout, per
+  the WP's principle. Also fixed: the abandon-on-failure call in the catch path is now wrapped in its
+  own try/catch, so an abandon failure is logged but never replaces the original handler exception in
+  the rethrow. Regression tests in `BenzeneServiceBusWorkerSettlementCancellationTest` (success +
+  cancelled token → still completes; failure + cancelled token → still abandons; handler throws +
+  abandon also throws → original exception still propagates, both logged).
 
 ## Open — maintainer decisions (the real remaining backlog)
 

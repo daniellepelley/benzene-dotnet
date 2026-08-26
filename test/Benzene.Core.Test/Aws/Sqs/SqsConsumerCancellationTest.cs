@@ -173,4 +173,55 @@ public class SqsConsumerCancellationTest
         mockClient.Verify(x => x.DeleteMessageBatchAsync(It.IsAny<DeleteMessageBatchRequest>(), It.IsAny<CancellationToken>()), Times.Never);
         mockClient.Verify(x => x.ReceiveMessageAsync(It.IsAny<ReceiveMessageRequest>(), It.IsAny<CancellationToken>()), Times.Once);
     }
+
+    [Fact]
+    public async Task StartAsync_ShutdownFiresAfterHandlerSucceeds_MessageIsStillDeleted()
+    {
+        // Regression for #115: settlement of already-completed work is part of graceful drain. If the
+        // run/shutdown token fires between the handler completing successfully and the delete call,
+        // the delete must still go through - it must NOT be gated on the (now-cancelled) run token, or
+        // the successfully-processed message is silently left on the queue for redelivery/double
+        // processing after the visibility timeout.
+        using var cts = new CancellationTokenSource();
+
+        var message = new Message { MessageId = "done", ReceiptHandle = "r1", Body = "test" };
+
+        var mockClient = new Mock<IAmazonSQS>();
+        mockClient
+            .Setup(x => x.ReceiveMessageAsync(It.IsAny<ReceiveMessageRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ReceiveMessageResponse { Messages = new List<Message> { message } });
+
+        CancellationToken? deleteToken = null;
+        mockClient
+            .Setup(x => x.DeleteMessageBatchAsync(It.IsAny<DeleteMessageBatchRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<DeleteMessageBatchRequest, CancellationToken>((_, ct) => deleteToken = ct)
+            .ReturnsAsync(new DeleteMessageBatchResponse());
+
+        var mockPipeline = new Mock<IMiddlewarePipeline<SqsConsumerMessageContext>>();
+        mockPipeline
+            .Setup(x => x.HandleAsync(It.IsAny<SqsConsumerMessageContext>(), It.IsAny<IServiceResolver>()))
+            .Returns((SqsConsumerMessageContext context, IServiceResolver resolver) =>
+            {
+                context.MessageResult = Benzene.Results.BenzeneResult.Ok();
+                // Simulate the host's shutdown token firing right after the handler finished
+                // successfully but before the batch has been deleted.
+                cts.Cancel();
+                return Task.CompletedTask;
+            });
+
+        var sqsConsumerApplication = new SqsConsumerApplication(mockPipeline.Object, new SqsConsumerOptions { AckMode = SqsConsumerAckMode.PerMessage });
+
+        var mockClientFactory = new Mock<ISqsClientFactory>();
+        mockClientFactory.Setup(x => x.Create()).Returns(mockClient.Object);
+
+        var consumer = new SqsConsumer(CreateFactory(), sqsConsumerApplication,
+            new SqsConsumerConfig { QueueUrl = "https://example/queue", MaxNumberOfMessages = 10 },
+            mockClientFactory.Object);
+
+        await consumer.StartAsync(cts.Token);
+
+        mockClient.Verify(x => x.DeleteMessageBatchAsync(It.IsAny<DeleteMessageBatchRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+        Assert.NotNull(deleteToken);
+        Assert.False(deleteToken!.Value.IsCancellationRequested);
+    }
 }
