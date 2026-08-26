@@ -134,4 +134,68 @@ public class TempoServiceGraphTopologyBuilderTest
         Assert.Null(edge.RequestsPerMinute);
         Assert.Equal(0, edge.ErrorRate);
     }
+
+    private sealed class ThrowingForMetricHttpMessageHandler : HttpMessageHandler
+    {
+        private readonly string _throwingMetricSubstring;
+        private readonly Dictionary<string, string> _responsesByMetricSubstring = new();
+
+        public ThrowingForMetricHttpMessageHandler(string throwingMetricSubstring) => _throwingMetricSubstring = throwingMetricSubstring;
+
+        public ThrowingForMetricHttpMessageHandler Map(string metricSubstring, string body)
+        {
+            _responsesByMetricSubstring[metricSubstring] = body;
+            return this;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var query = HttpUtility.ParseQueryString(request.RequestUri!.Query)["query"] ?? string.Empty;
+            if (query.Contains(_throwingMetricSubstring))
+            {
+                // A genuine connection-level failure (timeout, DNS, refused) - PrometheusQueryClient
+                // only swallows a reachable-but-unsuccessful *response*, so this must propagate up to
+                // the builder exactly like a real Prometheus hiccup would.
+                throw new HttpRequestException("simulated Prometheus connection failure");
+            }
+
+            var match = _responsesByMetricSubstring.FirstOrDefault(x => query.Contains(x.Key));
+            var body = match.Value ?? """{ "status": "success", "data": { "resultType": "vector", "result": [] } }""";
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) });
+        }
+    }
+
+    [Fact]
+    public async Task BuildAsync_OnePromQlCallThrows_DegradesThatEdgeDimension_RatherThanFailingTheWholeBuild()
+    {
+        // #75: a transient Prometheus failure on ONE of the 5 sequential PromQL calls (here, the p99
+        // latency query) must not take down mesh:topology - the other 4 dimensions still populate the
+        // edge, and BuildAsync completes rather than throwing.
+        var handler = new ThrowingForMetricHttpMessageHandler("0.99")
+            .Map("traces_service_graph_request_total", VectorResult(("orders-api", "payments-api", 10)))
+            .Map("traces_service_graph_request_failed_total", VectorResult(("orders-api", "payments-api", 1)))
+            .Map("0.50", VectorResult(("orders-api", "payments-api", 20)))
+            .Map("0.95", VectorResult(("orders-api", "payments-api", 80)));
+
+        var topology = await CreateBuilder(handler).BuildAsync();
+
+        var edge = Assert.Single(topology.Edges);
+        Assert.Equal("orders-api", edge.Client);
+        Assert.Equal("payments-api", edge.Server);
+        Assert.Equal(10, edge.RequestsPerMinute);
+        Assert.Equal(0.1, edge.ErrorRate);
+        Assert.Equal(20, edge.P50LatencyMs!.Value, 3);
+        Assert.Equal(80, edge.P95LatencyMs!.Value, 3);
+        Assert.Null(edge.P99LatencyMs); // the failing dimension degrades to absent, not fatal
+    }
+
+    [Fact]
+    public async Task BuildAsync_EveryPromQlCallThrows_ReturnsAnEmptyTopology_RatherThanThrowing()
+    {
+        var handler = new ThrowingForMetricHttpMessageHandler(""); // matches every query (empty substring)
+
+        var topology = await CreateBuilder(handler).BuildAsync();
+
+        Assert.Empty(topology.Edges);
+    }
 }
