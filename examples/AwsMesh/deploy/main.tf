@@ -667,6 +667,37 @@ resource "aws_lambda_function" "mesh" {
   timeout          = 60
   layers           = local.collector_layers
 
+  # #73 (WP-E): MeshAggregateHandler (Mesh/MeshAggregateHandler.cs) runs the SAME aggregation pass -
+  # discover, write registry.json, interrogate, write the catalog - from TWO triggers on this one
+  # function: the EventBridge schedule below, and the on-demand POST /mesh/refresh (behind
+  # UseMeshRefreshGuard on the API Gateway route). Unlike the other four mesh examples (AzureMesh,
+  # AzureFunctionsMesh, K8sMesh, GoogleCloudMesh), which each run as one long-lived process where an
+  # in-process semaphore (MeshAggregationPass's single-writer gate) can serialize concurrent callers,
+  # a Lambda's EventBridge invocation and its API-Gateway-triggered invocation execute in SEPARATE
+  # execution environments - no in-process lock, semaphore, or static field is shared between them, so
+  # nothing in the .NET code can prevent two passes from running concurrently and racing on the same
+  # S3 keys (registry.json, manifest.json, services/*.json - all unconditional PutObject, no
+  # conditional-write/ETag guard).
+  #
+  # WHAT THIS DOES: caps the mesh Lambda to exactly one concurrent execution across BOTH triggers - a
+  # cheap platform-level serializer requiring no new infrastructure. A second invocation that would
+  # exceed the reservation while one is in flight is throttled (EventBridge retries per its own retry
+  # policy; the refresh route's caller sees a Lambda throttling error, which the browser reports as a
+  # failed refresh, not a corrupted catalog).
+  #
+  # WHAT THIS DOES NOT DO: it is not a queue and not a distributed lock with fairness/ordering
+  # guarantees - it is a hard concurrency ceiling, the same "not a distributed lock" caveat
+  # MeshRefreshGuardMiddleware's own remarks give its throttle (see that class's XML docs). A burst of
+  # near-simultaneous triggers can still throttle a legitimate request rather than queueing it, and a
+  # long-running pass (this function's `timeout` above) holds the single slot for its full duration,
+  # so the scheduled pass and an operator's on-demand refresh compete for the same one slot rather than
+  # running independently. If true single-flight semantics (queueing instead of throttling, ordering
+  # guarantees) are ever needed, the fuller fix is an S3 conditional-write/lease (e.g. a
+  # `registry.lock` object written with `If-None-Match: *` before a pass starts, removed after) - NOT
+  # adopting `MeshAggregationPass`'s in-process semaphore here, which would compile and appear to help
+  # but cannot cross the Lambda execution-environment boundary this finding is actually about.
+  reserved_concurrent_executions = 1
+
   environment {
     variables = merge({
       MESH_ARTIFACT_BUCKET = aws_s3_bucket.artifacts.id
