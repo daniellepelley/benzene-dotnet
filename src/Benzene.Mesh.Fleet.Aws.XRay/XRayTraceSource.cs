@@ -3,6 +3,7 @@ using Amazon.XRay;
 using Amazon.XRay.Model;
 using Benzene.Mesh.Collector;
 using Benzene.Mesh.Wire;
+using Microsoft.Extensions.Logging;
 // Both namespaces declare a TraceSummary; the alias resolves the bare name to the mesh one (what this
 // adapter produces) while X-Ray's own summary type stays reachable by its full name.
 using TraceSummary = Benzene.Mesh.Collector.TraceSummary;
@@ -28,8 +29,28 @@ public class XRayTraceSource : IMeshTraceSource
     // X-Ray's BatchGetTraces accepts at most 5 trace ids per call.
     private const int BatchGetTracesMax = 5;
 
+    /// <summary>Conservative upper bound on the time range passed to a single <c>GetTraceSummaries</c>
+    /// call. AWS does not publish a fixed per-call time-range cap the way it does for
+    /// <c>BatchGetTraces</c>' 5-id batch limit, but a window much wider than this is commonly reported to
+    /// degrade (throttling/timeouts) on high-volume accounts. This is a structural safety bound, not a
+    /// verified API limit — VERIFY against live AWS docs/account before relying on the exact threshold;
+    /// chunking a window that didn't strictly need it costs one extra API call, not a correctness bug, so
+    /// this errs generous rather than skip chunking. <see cref="XRayTraceSourceOptions.CorrelationLookback"/>
+    /// defaults to 24h, well past this bound, so correlation search always chunks under defaults.</summary>
+    private static readonly TimeSpan MaxTraceSummariesWindow = TimeSpan.FromHours(6);
+
+    /// <summary>Hard pagination cap for <see cref="GetRecentFlowsAsync"/>, as a multiple of the requested
+    /// <c>limit</c>: paging continues until the window is exhausted (no more <c>NextToken</c>) OR this many
+    /// summaries have been collected, whichever comes first. Replaces a prior early-stop heuristic that
+    /// assumed <c>GetTraceSummaries</c> pages come back newest-first (unconfirmed) — this bound is honest
+    /// regardless of actual page order: paging over a much larger, less-biased sample before picking the
+    /// newest N client-side. A generous multiple, not the exact limit, because it only trims pathological
+    /// volume, never normal traffic.</summary>
+    private const int RecentFlowsHardCapMultiplier = 20;
+
     private readonly IAmazonXRay _xray;
     private readonly XRayTraceSourceOptions _options;
+    private readonly ILogger? _logger;
 
     /// <summary>Creates the source over an X-Ray client (region/credentials come from the client).</summary>
     public XRayTraceSource(IAmazonXRay xray) : this(xray, new XRayTraceSourceOptions())
@@ -37,10 +58,11 @@ public class XRayTraceSource : IMeshTraceSource
     }
 
     /// <summary>Creates the source over an X-Ray client with explicit tuning (correlation lookback).</summary>
-    public XRayTraceSource(IAmazonXRay xray, XRayTraceSourceOptions options)
+    public XRayTraceSource(IAmazonXRay xray, XRayTraceSourceOptions options, ILogger? logger = null)
     {
         _xray = xray;
         _options = options;
+        _logger = logger;
     }
 
     /// <summary>Fetches the trace's segments from X-Ray and maps its topic-bearing spans into a
@@ -74,26 +96,10 @@ public class XRayTraceSource : IMeshTraceSource
         // annotations are filterable (see work/otel-fleet-adapter-scope.md §6b).
         var filter = $"annotation.benzene_correlation_id = \"{Escape(correlationId)}\"";
 
-        var traceIds = new List<string>();
-        string? nextToken = null;
-        do
-        {
-            var summaries = await _xray.GetTraceSummariesAsync(new GetTraceSummariesRequest
-            {
-                StartTime = start,
-                EndTime = end,
-                FilterExpression = filter,
-                NextToken = nextToken
-            }, cancellationToken);
-
-            if (summaries.TraceSummaries != null)
-            {
-                traceIds.AddRange(summaries.TraceSummaries.Select(s => s.Id).Where(id => !string.IsNullOrEmpty(id)));
-            }
-
-            nextToken = string.IsNullOrEmpty(summaries.NextToken) ? null : summaries.NextToken;
-        }
-        while (nextToken != null);
+        // The window is chunked (MaxTraceSummariesWindow) and each chunk paged to exhaustion - a
+        // correlation search must not miss matches, so there's no hard cap here (unlike recent-flows).
+        var summaries = await FetchTraceSummariesAsync(start, end, filter, hardCap: null, "GetCorrelationAsync", cancellationToken);
+        var traceIds = summaries.Select(s => s.Id).Where(id => !string.IsNullOrEmpty(id)).ToList();
 
         if (traceIds.Count == 0)
         {
@@ -151,27 +157,14 @@ public class XRayTraceSource : IMeshTraceSource
 
         var (start, end) = ResolveWindow(range, _options.RecentFlowsLookback);
 
-        var summaries = new List<Amazon.XRay.Model.TraceSummary>();
-        string? nextToken = null;
-        do
-        {
-            var response = await _xray.GetTraceSummariesAsync(new GetTraceSummariesRequest
-            {
-                StartTime = start,
-                EndTime = end,
-                NextToken = nextToken
-            }, cancellationToken);
-
-            if (response.TraceSummaries != null)
-            {
-                summaries.AddRange(response.TraceSummaries);
-            }
-
-            nextToken = string.IsNullOrEmpty(response.NextToken) ? null : response.NextToken;
-        }
-        // Stop once we have comfortably more than the cap to sort a newest-first top-N from; the window,
-        // not exhaustive paging, bounds a "recent flows" list.
-        while (nextToken != null && summaries.Count < limit * 4);
+        // Page to window exhaustion (chunked - MaxTraceSummariesWindow) or a generous hard cap, whichever
+        // comes first - NOT a small early-stop multiple of limit. GetTraceSummaries' page ordering isn't
+        // documented/confirmed, so an early stop biased toward whatever order the pages happen to arrive in
+        // could silently surface stale traces as "recent" under high volume; this samples over a much wider,
+        // order-agnostic set before the client-side newest-first Take(limit) below. A hit on the cap is
+        // logged (not silent) since it means the sample may not cover the full requested window.
+        var summaries = await FetchTraceSummariesAsync(
+            start, end, filter: null, hardCap: limit * RecentFlowsHardCapMultiplier, "GetRecentFlowsAsync", cancellationToken);
 
         // Select the newest N by the trace-id epoch (second-granularity, but enough to pick the right ~20),
         // then enrich those rows below. Ordering within a second is refined by the enriched millisecond
@@ -340,6 +333,80 @@ public class XRayTraceSource : IMeshTraceSource
 
         var end = DateTime.UtcNow;
         return (end - fallback, end);
+    }
+
+    /// <summary>Runs <c>GetTraceSummaries</c> over <c>[start,end]</c>, chunking the window into
+    /// <see cref="MaxTraceSummariesWindow"/>-sized sub-queries (each paged via <c>NextToken</c> before
+    /// moving to the next chunk) so no single call is asked to scan a window wider than the conservative
+    /// bound - mirroring the chunking <see cref="BatchGetTracesMax"/> already applies to id batches, just
+    /// on the time axis instead of the id axis. When <paramref name="hardCap"/> is set, paging stops early
+    /// once that many summaries have been collected (a truncation is logged, never silent) rather than
+    /// exhausting every chunk; null means "always exhaust the full window" (correlation search must not
+    /// miss a match).</summary>
+    private async Task<List<Amazon.XRay.Model.TraceSummary>> FetchTraceSummariesAsync(
+        DateTime start, DateTime end, string? filter, int? hardCap, string operation, CancellationToken cancellationToken)
+    {
+        var all = new List<Amazon.XRay.Model.TraceSummary>();
+        var chunks = ChunkWindow(start, end, MaxTraceSummariesWindow).ToList();
+
+        for (var chunkIndex = 0; chunkIndex < chunks.Count; chunkIndex++)
+        {
+            var (chunkStart, chunkEnd) = chunks[chunkIndex];
+            string? nextToken = null;
+            do
+            {
+                var response = await _xray.GetTraceSummariesAsync(new GetTraceSummariesRequest
+                {
+                    StartTime = chunkStart,
+                    EndTime = chunkEnd,
+                    FilterExpression = filter,
+                    NextToken = nextToken
+                }, cancellationToken);
+
+                if (response.TraceSummaries != null)
+                {
+                    all.AddRange(response.TraceSummaries);
+                }
+
+                nextToken = string.IsNullOrEmpty(response.NextToken) ? null : response.NextToken;
+
+                if (hardCap.HasValue && all.Count >= hardCap.Value)
+                {
+                    var moreRemaining = nextToken != null || chunkIndex < chunks.Count - 1;
+                    if (moreRemaining)
+                    {
+                        _logger?.LogWarning(
+                            "XRayTraceSource.{Operation} stopped at its hard pagination cap ({Cap} rows) with more GetTraceSummaries pages available; the result may not cover the full requested window.",
+                            operation, hardCap.Value);
+                    }
+
+                    return all;
+                }
+            }
+            while (nextToken != null);
+        }
+
+        return all;
+    }
+
+    /// <summary>Splits <c>[start,end]</c> into sequential sub-windows of at most <paramref name="maxSpan"/>,
+    /// covering the whole range with no gaps or overlaps. Yields the whole range unchanged (as one chunk)
+    /// when it already fits, or when <paramref name="end"/> doesn't come after <paramref name="start"/>.</summary>
+    private static IEnumerable<(DateTime Start, DateTime End)> ChunkWindow(DateTime start, DateTime end, TimeSpan maxSpan)
+    {
+        if (end <= start)
+        {
+            yield return (start, end);
+            yield break;
+        }
+
+        var chunkStart = start;
+        while (chunkStart < end)
+        {
+            var chunkEnd = chunkStart + maxSpan < end ? chunkStart + maxSpan : end;
+            yield return (chunkStart, chunkEnd);
+            chunkStart = chunkEnd;
+        }
     }
 
     private static DateTimeOffset EarliestStart(TraceView trace)

@@ -1,6 +1,7 @@
 using Amazon.XRay;
 using Benzene.Abstractions.DI;
 using Benzene.Mesh.Collector;
+using Microsoft.Extensions.Logging;
 
 namespace Benzene.Mesh.Fleet.Aws.XRay;
 
@@ -36,7 +37,10 @@ public static class Extensions
     {
         services.AddSingleton(options ?? new XRayTraceSourceOptions());
         services.TryAddSingleton<IAmazonXRay>(_ => new AmazonXRayClient());
-        services.AddSingleton<IMeshTraceSource, XRayTraceSource>();
+        services.AddSingleton<IMeshTraceSource>(resolver => new XRayTraceSource(
+            resolver.GetService<IAmazonXRay>(),
+            resolver.GetService<XRayTraceSourceOptions>(),
+            resolver.TryGetService<ILogger<XRayTraceSource>>()));
         services.AddSingleton<IMeshFleetReadModel, CompositeMeshFleetReadModel>();
         return services;
     }
