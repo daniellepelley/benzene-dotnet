@@ -35,9 +35,6 @@ public class MessageRouterDiagnosticsTest
         var messageGetter = new Mock<IMessageGetter<TestContext>>();
         messageGetter.Setup(x => x.GetTopic(It.IsAny<TestContext>())).Returns(topicFromGetter);
 
-        var versionGetter = new Mock<IMessageVersionGetter<TestContext>>();
-        versionGetter.Setup(x => x.GetVersion(It.IsAny<TestContext>())).Returns((string?)null);
-
         var lookUp = new Mock<IMessageHandlerDefinitionLookUp>();
         lookUp.Setup(x => x.FindHandler(It.IsAny<ITopic>())).Returns(definition);
 
@@ -56,7 +53,6 @@ public class MessageRouterDiagnosticsTest
         var router = new MessageRouter<TestContext>(
             Mock.Of<IMessageHandlerFactory>(),
             messageGetter.Object,
-            versionGetter.Object,
             lookUp.Object,
             Mock.Of<IRequestMapper<TestContext>>(),
             resultSetter.Object,

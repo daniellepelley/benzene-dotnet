@@ -12,12 +12,23 @@ using Xunit;
 namespace Benzene.Test.Core.Core.MessageHandling;
 
 /// <summary>
-/// Coverage for the version-wiring change in <see cref="MessageRouter{TContext}"/>: it combines the
-/// topic id from <see cref="IMessageTopicGetter{TContext}"/> (via <see cref="IMessageGetter{TContext}"/>)
-/// with the version from the new <see cref="IMessageVersionGetter{TContext}"/> into one
-/// <see cref="ITopic"/> before handler lookup (docs/specification/versioning.md §2.3), unless the
-/// topic getter already supplied a non-empty version (e.g. an explicit preset).
+/// Coverage for <see cref="MessageRouter{TContext}"/>'s topic-resolution contract: it routes on
+/// exactly the <see cref="ITopic"/> its <see cref="IMessageGetter{TContext}"/> returns from
+/// <see cref="IMessageGetter{TContext}.GetTopic"/>, with no augmentation of its own.
 /// </summary>
+/// <remarks>
+/// Before task #98 (work/bug-fix-designs-round10-2026-08.md WP-V) the router combined the topic id
+/// from <see cref="IMessageTopicGetter{TContext}"/> with a separately-injected
+/// <see cref="IMessageVersionGetter{TContext}"/> itself, via the shared <c>GetVersionedTopic</c>
+/// helper, and threw the joined result away instead of caching it - so every other reader of the
+/// topic saw a version-blind answer. That join now happens once, inside
+/// <see cref="IMessageGetter{TContext}.GetTopic"/> itself (see
+/// <see cref="Benzene.Test.Core.Core.MessageHandling.MessageGetterVersionJoinTest"/> for coverage of
+/// the join/cache behaviour), so the router no longer takes an
+/// <see cref="IMessageVersionGetter{TContext}"/> dependency at all - it just has to forward whatever
+/// topic the getter hands it, unchanged, to <see cref="IMessageHandlerDefinitionLookUp.FindHandler"/>.
+/// That pass-through contract is what these tests cover.
+/// </remarks>
 public class MessageRouterVersionWiringTest
 {
     // Public (not private) because Moq needs to build a dynamic proxy for the closed generic
@@ -28,13 +39,10 @@ public class MessageRouterVersionWiringTest
     }
 
     private static (MessageRouter<TestContext> Router, Mock<IMessageHandlerDefinitionLookUp> LookUp) CreateRouter(
-        ITopic topicFromGetter, string? version)
+        ITopic? topicFromGetter)
     {
         var messageGetter = new Mock<IMessageGetter<TestContext>>();
         messageGetter.Setup(x => x.GetTopic(It.IsAny<TestContext>())).Returns(topicFromGetter);
-
-        var versionGetter = new Mock<IMessageVersionGetter<TestContext>>();
-        versionGetter.Setup(x => x.GetVersion(It.IsAny<TestContext>())).Returns(version);
 
         var lookUp = new Mock<IMessageHandlerDefinitionLookUp>();
         lookUp.Setup(x => x.FindHandler(It.IsAny<ITopic>())).Returns((IMessageHandlerDefinition?)null);
@@ -46,7 +54,6 @@ public class MessageRouterVersionWiringTest
         var router = new MessageRouter<TestContext>(
             Mock.Of<IMessageHandlerFactory>(),
             messageGetter.Object,
-            versionGetter.Object,
             lookUp.Object,
             Mock.Of<IRequestMapper<TestContext>>(),
             Mock.Of<IMessageHandlerResultSetter<TestContext>>(),
@@ -57,61 +64,24 @@ public class MessageRouterVersionWiringTest
     }
 
     [Fact]
-    public async Task HandleAsync_TopicHasNoVersion_UsesMessageVersionGetterResult()
+    public async Task HandleAsync_GetterReturnsAVersionedTopic_LooksUpExactlyThatTopic()
     {
-        var (router, lookUp) = CreateRouter(new Topic("order:create"), "V1");
+        // The getter already did any version-joining (task #98) - the router must not re-derive or
+        // discard the version.
+        var (router, lookUp) = CreateRouter(new Topic("order:create", "v1"));
 
         await router.HandleAsync(new TestContext(), () => Task.CompletedTask);
 
-        lookUp.Verify(x => x.FindHandler(It.Is<ITopic>(t => t.Id == "order:create" && t.Version == "V1")), Times.Once);
+        lookUp.Verify(x => x.FindHandler(It.Is<ITopic>(t => t.Id == "order:create" && t.Version == "v1")), Times.Once);
     }
 
     [Fact]
-    public async Task HandleAsync_TopicAlreadyHasAVersion_PresetVersionWinsOverMessageVersionGetter()
+    public async Task HandleAsync_GetterReturnsAnUnversionedTopic_LooksUpItUnversioned()
     {
-        var (router, lookUp) = CreateRouter(new Topic("order:create", "preset-version"), "V1");
-
-        await router.HandleAsync(new TestContext(), () => Task.CompletedTask);
-
-        lookUp.Verify(x => x.FindHandler(It.Is<ITopic>(t => t.Id == "order:create" && t.Version == "preset-version")), Times.Once);
-    }
-
-    [Fact]
-    public async Task HandleAsync_NoVersionSignalled_TopicVersionStaysEmpty()
-    {
-        var (router, lookUp) = CreateRouter(new Topic("order:create"), version: null);
+        var (router, lookUp) = CreateRouter(new Topic("order:create"));
 
         await router.HandleAsync(new TestContext(), () => Task.CompletedTask);
 
         lookUp.Verify(x => x.FindHandler(It.Is<ITopic>(t => t.Id == "order:create" && t.Version == "")), Times.Once);
-    }
-
-    [Fact]
-    public async Task HandleAsync_TopicIdMissing_NeverConsultsVersionGetter()
-    {
-        // A getter that can't resolve a topic at all returns null (not a Topic("<missing>")
-        // placeholder, which - like an unmatched HTTP route - is a non-empty, non-null Id and
-        // would still be looked up).
-        var messageGetter = new Mock<IMessageGetter<TestContext>>();
-        messageGetter.Setup(x => x.GetTopic(It.IsAny<TestContext>())).Returns((ITopic?)null);
-
-        var versionGetter = new Mock<IMessageVersionGetter<TestContext>>();
-
-        var defaultStatuses = new Mock<IDefaultStatuses>();
-        defaultStatuses.SetupGet(x => x.ValidationError).Returns("validation-error");
-
-        var router = new MessageRouter<TestContext>(
-            Mock.Of<IMessageHandlerFactory>(),
-            messageGetter.Object,
-            versionGetter.Object,
-            Mock.Of<IMessageHandlerDefinitionLookUp>(),
-            Mock.Of<IRequestMapper<TestContext>>(),
-            Mock.Of<IMessageHandlerResultSetter<TestContext>>(),
-            defaultStatuses.Object,
-            NullLogger<MessageRouter<TestContext>>.Instance);
-
-        await router.HandleAsync(new TestContext(), () => Task.CompletedTask);
-
-        versionGetter.Verify(x => x.GetVersion(It.IsAny<TestContext>()), Times.Never);
     }
 }

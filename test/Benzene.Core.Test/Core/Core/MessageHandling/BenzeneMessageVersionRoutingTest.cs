@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Benzene.Abstractions.DI;
 using Benzene.Abstractions.MessageHandlers;
 using Benzene.Abstractions.MessageHandlers.Mappers;
 using Benzene.Abstractions.MessageHandlers.Request;
@@ -19,8 +20,11 @@ namespace Benzene.Test.Core.Core.MessageHandling;
 /// priority-ordered <see cref="IMessageVersionGetter{TContext}"/> (default order
 /// <c>benzene-version</c> &gt; <c>version</c> &gt; <c>x-version</c>) - not by baking the raw
 /// <c>"version"</c> header into the topic in <c>BenzeneMessageGetter.GetTopic</c>. A topic-getter
-/// version is treated by <see cref="MessageRouter{TContext}"/> as a deliberate preset override that
-/// skips the version getter, so hardcoding one there silently defeats the configured header order.
+/// version is treated as a deliberate preset override that skips the version getter, so hardcoding
+/// one there silently defeats the configured header order. The join itself now happens inside
+/// <c>BenzeneMessageGetter.GetTopic</c> (task #98, work/bug-fix-designs-round10-2026-08.md WP-V) -
+/// <see cref="MessageRouter{TContext}"/> just consumes the already-joined topic - so the version
+/// getter is wired into the getter here, not into the router.
 /// </summary>
 public class BenzeneMessageVersionRoutingTest
 {
@@ -29,8 +33,11 @@ public class BenzeneMessageVersionRoutingTest
         var request = new BenzeneMessageRequest { Topic = "order:create", Headers = headers, Body = "{}" };
         var context = new BenzeneMessageContext(request);
 
-        var getter = new BenzeneMessageGetter();
-        var versionGetter = new HeaderMessageVersionGetter<BenzeneMessageContext>(getter);
+        var rawGetter = new BenzeneMessageGetter();
+        var versionGetter = new HeaderMessageVersionGetter<BenzeneMessageContext>(rawGetter);
+        var serviceResolver = new Mock<IServiceResolver>();
+        serviceResolver.Setup(x => x.TryGetService<IMessageVersionGetter<BenzeneMessageContext>>()).Returns(versionGetter);
+        var getter = new BenzeneMessageGetter(serviceResolver.Object);
 
         var lookUp = new Mock<IMessageHandlerDefinitionLookUp>();
         ITopic? routed = null;
@@ -45,7 +52,6 @@ public class BenzeneMessageVersionRoutingTest
         var router = new MessageRouter<BenzeneMessageContext>(
             Mock.Of<IMessageHandlerFactory>(),
             getter,
-            versionGetter,
             lookUp.Object,
             Mock.Of<IRequestMapper<BenzeneMessageContext>>(),
             Mock.Of<IMessageHandlerResultSetter<BenzeneMessageContext>>(),

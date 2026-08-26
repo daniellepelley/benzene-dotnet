@@ -134,9 +134,6 @@ public class RobustnessFixesTest
         messageGetter.Setup(x => x.GetTopic(It.IsAny<RouterTestContext>()))
             .Returns(new Topic(null));
 
-        var versionGetter = new Mock<IMessageVersionGetter<RouterTestContext>>();
-        versionGetter.Setup(x => x.GetVersion(It.IsAny<RouterTestContext>())).Returns((string?)null);
-
         var lookUp = new Mock<IMessageHandlerDefinitionLookUp>();
         lookUp.Setup(x => x.FindHandler(It.IsAny<ITopic>()))
             .Returns((IMessageHandlerDefinition?)null);
@@ -154,7 +151,6 @@ public class RobustnessFixesTest
         var router = new MessageRouter<RouterTestContext>(
             Mock.Of<IMessageHandlerFactory>(),
             messageGetter.Object,
-            versionGetter.Object,
             lookUp.Object,
             Mock.Of<IRequestMapper<RouterTestContext>>(),
             resultSetter.Object,
