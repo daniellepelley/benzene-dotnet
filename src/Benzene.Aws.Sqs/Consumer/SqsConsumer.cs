@@ -102,25 +102,44 @@ public class SqsConsumer : IBenzeneWorker
 
                     if (messagesToDelete.Count > 0)
                     {
-                        var deleteResult = await client.DeleteMessageBatchAsync(new DeleteMessageBatchRequest
+                        // These messages have already been successfully processed by the pipeline, so
+                        // deleting them is part of graceful drain, not more work subject to the poll
+                        // loop's own cancellation. Use CancellationToken.None here (bounded naturally by
+                        // the AWS SDK HTTP client's own timeout) so a shutdown signal firing between the
+                        // handler completing and this call can never turn already-completed work into a
+                        // silent redelivery/double-processing.
+                        try
                         {
-                            QueueUrl = _sqsConsumerConfig.QueueUrl,
-                            Entries = messagesToDelete
-                                .Select(x => new DeleteMessageBatchRequestEntry(x.MessageId, x.ReceiptHandle))
-                                .ToList()
-                        }, cancellationToken);
+                            var deleteResult = await client.DeleteMessageBatchAsync(new DeleteMessageBatchRequest
+                            {
+                                QueueUrl = _sqsConsumerConfig.QueueUrl,
+                                Entries = messagesToDelete
+                                    .Select(x => new DeleteMessageBatchRequestEntry(x.MessageId, x.ReceiptHandle))
+                                    .ToList()
+                            }, CancellationToken.None);
 
-                        // A batch delete can partially fail: the call succeeds while individual entries
-                        // land in Failed. Those messages were NOT removed and will reappear after the
-                        // visibility timeout, so surface it rather than let the redelivery look
-                        // unexplained.
-                        if (deleteResult.Failed is { Count: > 0 })
+                            // A batch delete can partially fail: the call succeeds while individual entries
+                            // land in Failed. Those messages were NOT removed and will reappear after the
+                            // visibility timeout, so surface it rather than let the redelivery look
+                            // unexplained.
+                            if (deleteResult.Failed is { Count: > 0 })
+                            {
+                                using var loggingScope = _serviceResolverFactory.CreateScope();
+                                loggingScope.GetService<ILogger<SqsConsumer>>()
+                                    .LogError("Failed to delete {failedCount} handled SQS message(s) from queue {queueUrl}; they will be redelivered: {messageIds}",
+                                        deleteResult.Failed.Count, _sqsConsumerConfig.QueueUrl,
+                                        string.Join(", ", deleteResult.Failed.Select(x => x.Id)));
+                            }
+                        }
+                        catch (Exception ex)
                         {
+                            // The delete call itself failed (not a partial per-entry failure) - every
+                            // message in this batch will be redelivered after the visibility timeout.
                             using var loggingScope = _serviceResolverFactory.CreateScope();
                             loggingScope.GetService<ILogger<SqsConsumer>>()
-                                .LogError("Failed to delete {failedCount} handled SQS message(s) from queue {queueUrl}; they will be redelivered: {messageIds}",
-                                    deleteResult.Failed.Count, _sqsConsumerConfig.QueueUrl,
-                                    string.Join(", ", deleteResult.Failed.Select(x => x.Id)));
+                                .LogError(ex, "Failed to delete {messageCount} handled SQS message(s) from queue {queueUrl}; they will be redelivered: {messageIds}",
+                                    messagesToDelete.Count, _sqsConsumerConfig.QueueUrl,
+                                    string.Join(", ", messagesToDelete.Select(x => x.MessageId)));
                         }
                     }
                 }

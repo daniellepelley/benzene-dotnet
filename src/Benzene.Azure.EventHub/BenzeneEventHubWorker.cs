@@ -118,27 +118,75 @@ public class BenzeneEventHubWorker : IBenzeneWorker
 
             if (!_config.CatchHandlerExceptions)
             {
-                // The processor's docs forbid calling StopProcessingAsync from inside a handler
-                // (it deadlocks waiting for this very handler to return), so initiate the stop on
-                // a background task; StopProcessingAsync is safe to call concurrently with a
-                // subsequent StopAsync. The failed event is not checkpointed, so a restart resumes
-                // from the last checkpoint and redelivers it.
-                if (Interlocked.Exchange(ref _stopInitiated, 1) == 0)
-                {
-                    _ = Task.Run(() => _processor!.StopProcessingAsync());
-                }
+                // The failed event is not checkpointed, so a restart resumes from the last
+                // checkpoint and redelivers it.
+                StopProcessorOnce();
             }
 
             return;
         }
 
+        // The event has already been processed successfully at this point: checkpointing it is part
+        // of graceful drain, not more handler work in flight, so it runs in its own try/catch rather
+        // than sharing the handler's - and, per the WP's settlement-on-shutdown principle, under
+        // CancellationToken.None rather than args.CancellationToken. Per the SDK's own docs,
+        // args.CancellationToken is cancelled by StopProcessingAsync (which StopAsync calls) while
+        // this in-flight handler is still being awaited - so a checkpoint gated on it can be
+        // cancelled for an event that already succeeded, and an OperationCanceledException escaping
+        // OnProcessEventAsync unhandled faults the partition-processing task and, per the SDK's
+        // docs, can crash the process on some hosts. Any transient checkpoint-store failure must
+        // also never escape unhandled, bypassing CatchHandlerExceptions entirely.
+        //
         // ProcessEventAsync is invoked one event at a time per partition, so this count has no
         // same-partition race - the dictionary only needs to be concurrent across partitions.
         var seen = _uncheckpointedCounts.AddOrUpdate(args.Partition.PartitionId, 1, (_, count) => count + 1);
         if (seen >= _config.CheckpointInterval)
         {
-            await args.UpdateCheckpointAsync(args.CancellationToken);
-            _uncheckpointedCounts[args.Partition.PartitionId] = 0;
+            try
+            {
+                await args.UpdateCheckpointAsync(CancellationToken.None);
+                _uncheckpointedCounts[args.Partition.PartitionId] = 0;
+            }
+            catch (OperationCanceledException)
+            {
+                // Shutdown is in progress. The correct at-least-once outcome: the event was handled
+                // but not checkpointed, so it will be redelivered (and re-checkpointed) on restart -
+                // not a failure, so log at Information rather than Error, and do not stop the worker
+                // (it's already stopping).
+                using var loggingScope = _serviceResolverFactory.CreateScope();
+                loggingScope.GetService<ILogger<BenzeneEventHubWorker>>()
+                    .LogInformation(
+                        "Checkpoint for handled event with sequence number {sequenceNumber} on partition {partitionId} skipped due to shutdown; the event will be redelivered on restart",
+                        args.Data.SequenceNumber, args.Partition.PartitionId);
+            }
+            catch (Exception ex)
+            {
+                using (var loggingScope = _serviceResolverFactory.CreateScope())
+                {
+                    loggingScope.GetService<ILogger<BenzeneEventHubWorker>>()
+                        .LogError(ex, "Checkpointing event with sequence number {sequenceNumber} on partition {partitionId} failed",
+                            args.Data.SequenceNumber, args.Partition.PartitionId);
+                }
+
+                // Same stop-or-continue policy as every other failure in this file: the event was
+                // handled but is not checkpointed, so a restart (if we stop) resumes from the last
+                // checkpoint and redelivers it.
+                if (!_config.CatchHandlerExceptions)
+                {
+                    StopProcessorOnce();
+                }
+            }
+        }
+    }
+
+    private void StopProcessorOnce()
+    {
+        // The processor's docs forbid calling StopProcessingAsync from inside a handler (it
+        // deadlocks waiting for this very handler to return), so initiate the stop on a background
+        // task; StopProcessingAsync is safe to call concurrently with a subsequent StopAsync.
+        if (Interlocked.Exchange(ref _stopInitiated, 1) == 0)
+        {
+            _ = Task.Run(() => _processor!.StopProcessingAsync());
         }
     }
 
