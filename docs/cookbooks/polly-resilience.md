@@ -149,6 +149,39 @@ transport has no deadline this is effectively `CancellationToken.None` — a Pol
 can't cooperatively cancel the Benzene pipeline underneath it beyond however `next()` itself responds
 to an `OperationCanceledException` propagating back up.
 
+**Widening `ShouldHandle` can silently drop cancellation-safety.** Polly's own *default*
+`ShouldHandle` (used when a strategy's options leave it unset) already excludes
+`OperationCanceledException` — a caller-cancelled request does not, by itself, trip a circuit breaker
+or exhaust a retry budget. But the `Handle<BenzeneFailureResultException>()` pattern shown above (and
+the plain `Handle<Exception>()` used in the retry examples in this cookbook and its tests) is an
+**explicit** `ShouldHandle`, which replaces that safe default rather than adding to it. Copy-pasting
+`Handle<Exception>()` from a *retry* config onto a **circuit breaker**'s `ShouldHandle` reintroduces
+exactly the bug the default quietly protected you from: a caller-cancelled request now counts as a
+breaker failure and can trip the breaker for every other in-flight caller sharing it. Use
+`Benzene.Resilience.Polly`'s `.ExcludingCancellation<TResult>()` extension (on `PredicateBuilder`/
+`PredicateBuilder<TResult>`) instead of `Handle<Exception>()` whenever you widen a strategy's
+`ShouldHandle` beyond a specific exception type — it excludes `OperationCanceledException` (and
+subclasses, e.g. `TaskCanceledException`), mirroring `RetryMiddleware`'s own documented default
+(`ex is not OperationCanceledException`):
+
+```csharp
+using Benzene.Resilience.Polly;
+using Polly;
+using Polly.CircuitBreaker;
+
+var pipeline = new ResiliencePipelineBuilder()
+    .AddCircuitBreaker(new CircuitBreakerStrategyOptions
+    {
+        // Safe: excludes OperationCanceledException, like Polly's own unset default.
+        ShouldHandle = new PredicateBuilder().ExcludingCancellation(),
+        FailureRatio = 0.5,
+        SamplingDuration = TimeSpan.FromSeconds(30),
+        MinimumThroughput = 10,
+        BreakDuration = TimeSpan.FromSeconds(15),
+    })
+    .Build();
+```
+
 ## Testing
 
 `ResiliencePipeline` is a real object you can construct directly in a test — no need to spin up your
