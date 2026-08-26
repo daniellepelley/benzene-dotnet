@@ -63,16 +63,18 @@ public class BenzeneKafkaWorkerTest
     }
 
     [Fact]
-    public async Task StartAsync_CommitOnlyOnSuccessWithValidCombination_SetsEnableAutoOffsetStoreFalse()
+    public async Task StartAsync_CommitOnlyOnSuccessWithValidCombination_DoesNotMutateCallersConsumerConfig()
     {
+        // #119: EnableAutoOffsetStore = false is applied to a CLONE of ConsumerConfig, not to the
+        // caller's own instance in place - the caller's ConsumerConfig (a possibly-shared object) must
+        // come back out of StartAsync exactly as they set it. (Was previously asserted the other way -
+        // this test used to encode the mutate-in-place bug as the expected behavior.)
         var config = CreateConfig(commitOnlyOnSuccess: true, catchHandlerExceptions: false, preserveOrderPerPartition: true);
         using var worker = CreateWorker(config);
 
-        // EnableAutoOffsetStore is set synchronously before the background consume loop is started,
-        // so it's already observable the instant StartAsync returns - no need to wait for the loop.
         await worker.StartAsync(CancellationToken.None);
 
-        Assert.False(config.ConsumerConfig.EnableAutoOffsetStore);
+        Assert.Null(config.ConsumerConfig.EnableAutoOffsetStore);
 
         await worker.StopAsync(CancellationToken.None);
     }

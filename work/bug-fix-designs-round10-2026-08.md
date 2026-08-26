@@ -294,7 +294,7 @@ never replaces the original handler exception in the rethrow. If (1) shows the S
 args token only strictly after in-flight handlers complete, downgrade this to a doc note and
 record that here — do not fix what can't happen.
 
-### WP-AE — Kafka rebalance + config hygiene (#118, #119)
+### WP-AE — Kafka rebalance + config hygiene (#118, #119) (done)
 
 **#118 — no `SetPartitionsLostHandler`: on partition loss the revoke-drain handler runs — up to
 `DrainTimeout` (30s) blocking rejoin, then a commit the Confluent docs explicitly say not to make**

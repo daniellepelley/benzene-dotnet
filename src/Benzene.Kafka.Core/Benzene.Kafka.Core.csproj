@@ -20,4 +20,13 @@
     <ProjectReference Include="..\Benzene.HealthChecks.Core\Benzene.HealthChecks.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- So KafkaWorkerDeadLetterAndDrainTest can invoke BenzeneKafkaWorker's OnPartitionsRevoked/
+         OnPartitionsLost rebalance-callback methods directly (mocked IConsumer, real
+         TopicPartitionOffset lists) instead of only indirectly through ConsumerBuilder - whose
+         registered Func/Action handler delegates are stored on non-public properties, so there is no
+         way to read them back and invoke them without a live broker connection. -->
+    <InternalsVisibleTo Include="Benzene.Test" />
+  </ItemGroup>
+
 </Project>

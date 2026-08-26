@@ -1009,6 +1009,51 @@ client cancellation + health bridge diagnosability".
   no-`includeTypes`/no-registered-checks default both still construct cleanly; two checks sharing a
   `Type` both appear distinctly (suffixed) in `CheckHealthAsync`'s result data. See WP-AB.
 
+### Tracked findings round 10, WP-AE — Kafka rebalance + config hygiene (done)
+Ruled in [`bug-fix-designs-round10-2026-08.md`](bug-fix-designs-round10-2026-08.md) §"WP-AE — Kafka
+rebalance + config hygiene".
+- **[RESOLVED] #118 — `BenzeneKafkaWorker`'s `ConfigureRebalanceDrain` registered no
+  `SetPartitionsLostHandler`, so Confluent.Kafka fell back to the *revoked* handler for a genuine
+  partition-LOSS event (session timeout, a long GC pause), paying its up-to-`DrainTimeout` (30s)
+  drain wait and then attempting a `Commit()` the broker's own generation fencing would reject (the
+  partition is likely already reassigned to another consumer by the time the callback fires) - a
+  rejection the code mislabeled as a benign "no offsets to commit" at Debug.** A `SetPartitionsLostHandler`
+  is now registered alongside the revoked handler; it never commits and does not drain at all (per
+  Confluent's own guidance that draining buys nothing once the partition is likely already
+  reassigned - "as fast as possible back to rejoining"), and logs a clearly distinct "Partitions LOST
+  (not revoked)" event at `Information`, never conflated with or buried under the revoked-handler's
+  logging. The revoked-handler logic itself is unchanged (still drains + commits under manual offset
+  management), just extracted into `BenzeneKafkaWorker.OnPartitionsRevoked` alongside the new
+  `OnPartitionsLost` - both `internal` + `InternalsVisibleTo("Benzene.Test")` so tests can invoke the
+  callback logic directly (`ConsumerBuilder<TKey,TValue>`'s registered `PartitionsRevokedHandler`/
+  `PartitionsLostHandler` live on non-public properties, so there is no way to read the delegates back
+  off a real builder without a live broker connection - confirmed by hitting `CS0122` when the first
+  test draft tried exactly that). Tests: `KafkaWorkerDeadLetterAndDrainTest.PartitionsLostHandler_NeverCommits_AndReturnsImmediately`
+  (asserts zero `Commit()` calls and sub-second return - the "does it drain" question resolved by
+  never wiring the lost handler to a dispatcher at all, not merely bounding a wait);
+  `PartitionsRevokedHandler_StillDrainsAndCommits_WhenManagingOffsetsManually` (regression guard - the
+  extraction didn't change the revoked path's behavior); `DrainOnRevokeOn_RegistersBothRevokedAndLostHandlersWithoutThrowing`
+  (the wiring half - applying the worker's configure-builder callback to a real, never-`Build()`-ed
+  `ConsumerBuilder` registers both handlers without `ConsumerBuilder`'s own double-registration guard
+  tripping). **Residual gap:** none of this is exercised against a live broker/real rebalance (the
+  ruling itself anticipated this - "inherently rebalance-integration-shaped ... may be hard to
+  unit-test directly against a real broker"); the direct-invocation tests cover the callback bodies'
+  logic exactly, not librdkafka's actual decision of when it calls lost vs. revoked.
+- **[RESOLVED] #119 — `StartAsync` mutated the CALLER's shared `ConsumerConfig` instance directly**
+  (`_benzeneKafkaConfig.ConsumerConfig.EnableAutoOffsetStore = false` for `CommitOnlyOnSuccess`/dead-lettering)
+  **- surprising/dangerous if the same `ConsumerConfig` is reused elsewhere (a health check, a second
+  worker instance).** `StartAsync` now clones (`new ConsumerConfig(new Dictionary<string,string>(ConsumerConfig))
+  { EnableAutoOffsetStore = false }` - `ConsumerConfig`'s `ClientConfig`-typed copy constructor was
+  tried first and rejected: it shares the underlying dictionary rather than copying it, confirmed by a
+  throwaway repro where mutating the "clone" mutated the original too) when manual offset management
+  needs the adjustment, and hands the clone to `IKafkaConsumerFactory.Create` - the caller's own
+  object is never touched. Test: `KafkaWorkerDeadLetterAndDrainTest.StartAsync_ManagingOffsetsManually_DoesNotMutateCallersConsumerConfig`
+  (asserts the original object's `EnableAutoOffsetStore` is unchanged and the object the factory
+  receives is a *different* instance with it correctly disabled); the pre-existing
+  `BenzeneKafkaWorkerTest.StartAsync_CommitOnlyOnSuccessWithValidCombination_*` test previously
+  asserted the mutate-in-place behavior as correct - flipped (and renamed) to assert non-mutation,
+  the actual red→green signal for this fix.
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.
