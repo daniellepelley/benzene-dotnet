@@ -17,7 +17,13 @@ namespace Benzene.Azure.Function.SourceGenerators
                 // Named-property defaults declared on the attribute class don't surface in AttributeData
                 // unless explicitly set, so the generator applies the same defaults (Name = "benzene",
                 // catch-all route) - keeping a bare [assembly: BenzeneHttpTrigger] working zero-config.
-                var name = AttributeReading.NamedString(attribute, "Name", "benzene");
+                var emptyName = AttributeReading.ValidateName(attribute, "benzene", out var name);
+                if (emptyName is { } emptyNameDiagnostic)
+                {
+                    builder.Add(TriggerInfo.ForDiagnostic(AttributeReading.Literal(name), AttributeReading.AttributeLocation(attribute), emptyNameDiagnostic));
+                    continue;
+                }
+
                 var route = AttributeReading.NamedString(attribute, "Route", "{*restOfPath}");
                 var methods = AttributeReading.NamedStringArrayCsv(attribute, "Methods", "get", "post", "put", "delete", "options");
                 var authLevel = AttributeReading.NamedEnumMember(
