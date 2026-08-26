@@ -1,4 +1,4 @@
-using Autofac;
+﻿using Autofac;
 using Benzene.Abstractions.DI;
 
 namespace Benzene.Autofac;
@@ -14,6 +14,10 @@ public class AutofacBenzeneServiceContainer : IBenzeneServiceContainer
     // here instead, updated by every AddXxx/AddServiceResolver call as registrations happen - mirroring
     // MicrosoftBenzeneServiceContainer, which checks its live, always-current IServiceCollection.
     private readonly HashSet<Type> _registeredTypes = [];
+
+    // Built lazily, once, on first CreateServiceResolverFactory() call - see that method.
+    private IContainer? _container;
+    private readonly object _buildLock = new();
 
     public AutofacBenzeneServiceContainer(ContainerBuilder containerBuilder)
     {
@@ -214,7 +218,27 @@ public class AutofacBenzeneServiceContainer : IBenzeneServiceContainer
 
     public IServiceResolverFactory CreateServiceResolverFactory()
     {
-        return new AutofacServiceResolverFactory(_containerBuilder);
+        // ContainerBuilder.Build() can only run once per instance - a second call throws. Build the
+        // IContainer once, lazily, here; every call (including the first) then returns a cheap,
+        // non-owning AutofacServiceResolverFactory wrapping that already-built container, matching
+        // Microsoft's model where CreateServiceResolverFactory() is safe to call repeatedly (e.g. once
+        // per gRPC request via GrpcMethodHandlerFactory.Create()).
+        return new AutofacServiceResolverFactory(EnsureContainerBuilt());
+    }
+
+    private IContainer EnsureContainerBuilt()
+    {
+        if (_container is not null)
+        {
+            return _container;
+        }
+
+        lock (_buildLock)
+        {
+            _container ??= AutofacServiceResolverFactory.BuildOwnedContainer(_containerBuilder);
+        }
+
+        return _container;
     }
 
     public IBenzeneServiceContainer AddSingleton<TImplementation>(TImplementation implementation)
