@@ -277,6 +277,87 @@ public class JsonSchemaComparerTest
     }
 
     [Fact]
+    public void BothWalkers_ProduceIdenticalChangeSets_DiscriminatorMappingCoverageAdded_ProducesNoSpuriousChange()
+    {
+        // The exact round-8 probe (#53): baseline oneOf:[Dog,Cat] maps only Cat; current same
+        // oneOf:[Dog,Cat] adds a mapping entry for Dog too - nothing else about Dog changes. Before the
+        // fix, coverage-keyed matching produced "ref:Dog" on the baseline side (unmapped) and "disc:dog"
+        // on the current side (now mapped) for the very same $ref'd variant, so the pairwise matcher
+        // reported a spurious UnionVariantRemoved+UnionVariantAdded pair for Dog - Breaking in either
+        // direction per SchemaCompatibilityRules, so a harmless additive mapping edit failed the gate.
+        // $ref-name-first matching fixes this: Dog keys on its $ref regardless of mapping coverage on
+        // either side, stays matched, and nothing about Dog itself changed - so zero changes.
+        var openApiReport = new SchemaCompatibilityComparer().Compare(
+            DocWithComponents(PetComponentsOpenApi(),
+                Req(Topic, OpenApi(NoFields), PartiallyDiscriminatedOneOfOpenApi(["Dog", "Cat"], ["Cat"]))),
+            DocWithComponents(PetComponentsOpenApi(),
+                Req(Topic, OpenApi(NoFields), PartiallyDiscriminatedOneOfOpenApi(["Dog", "Cat"], ["Cat", "Dog"]))));
+        var viaOpenApi = openApiReport.Changes.Where(c => c.Direction == SchemaDirection.Response).Select(Tuple).ToArray();
+
+        var viaJson = JsonSchemaComparer
+            .Compare(
+                PartiallyDiscriminatedOneOfJson(["Dog", "Cat"], ["Cat"]),
+                PartiallyDiscriminatedOneOfJson(["Dog", "Cat"], ["Cat", "Dog"]),
+                SchemaDirection.Response, Topic, $"{Topic}.response")
+            .Select(Tuple).ToArray();
+
+        Assert.Equal(viaOpenApi, viaJson);
+        Assert.Empty(viaJson);
+    }
+
+    [Fact]
+    public void BothWalkers_ProduceIdenticalChangeSets_OneOfAndAllOfBothPresent_EachLosesAMember()
+    {
+        // #49: a schema carrying both oneOf and allOf on the same node, each losing a member in the
+        // same edit. Verified correct by direct execution in the review round but had no regression
+        // test - this pins it.
+        var openApiReport = new SchemaCompatibilityComparer().Compare(
+            DocWithComponents(PetComponentsOpenApi(),
+                Req(Topic, OpenApi(NoFields), OneOfAndAllOfOpenApi(["Dog", "Cat"], ["Dog", "Cat"]))),
+            DocWithComponents(PetComponentsOpenApi(),
+                Req(Topic, OpenApi(NoFields), OneOfAndAllOfOpenApi(["Dog"], ["Dog"]))));
+        var viaOpenApi = openApiReport.Changes.Where(c => c.Direction == SchemaDirection.Response).Select(Tuple).ToArray();
+
+        var viaJson = JsonSchemaComparer
+            .Compare(OneOfAndAllOfJson(["Dog", "Cat"], ["Dog", "Cat"]), OneOfAndAllOfJson(["Dog"], ["Dog"]),
+                SchemaDirection.Response, Topic, $"{Topic}.response")
+            .Select(Tuple).ToArray();
+
+        Assert.Equal(viaOpenApi, viaJson);
+        Assert.Equal(2, viaJson.Length);
+        Assert.Contains(viaJson, c => c.Item1 == SchemaChangeKind.UnionVariantRemoved && c.Item3.Contains(".oneOf["));
+        Assert.Contains(viaJson, c => c.Item1 == SchemaChangeKind.UnionVariantRemoved && c.Item3.Contains(".allOf["));
+    }
+
+    [Fact]
+    public void BothWalkers_ProduceIdenticalChangeSets_NestedOneOfWithinOneOf_InnerVariantRemoved()
+    {
+        // #49: an outer oneOf variant that is itself a oneOf (nested union) losing an inner variant.
+        // Verified correct by direct execution in the review round but had no regression test - this
+        // pins it: the outer match (the "Wrapper" $ref is unchanged) still recurses into Wrapper's own
+        // body and finds the inner removal, producing both an outer UnionVariantChanged and an inner
+        // UnionVariantRemoved.
+        var openApiReport = new SchemaCompatibilityComparer().Compare(
+            DocWithComponents(PetComponentsWithWrapperOpenApi("Dog", "Cat"),
+                Req(Topic, OpenApi(NoFields), OneOfOpenApi("Wrapper"))),
+            DocWithComponents(PetComponentsWithWrapperOpenApi("Dog"),
+                Req(Topic, OpenApi(NoFields), OneOfOpenApi("Wrapper"))));
+        var viaOpenApi = openApiReport.Changes.Where(c => c.Direction == SchemaDirection.Response).Select(Tuple).ToArray();
+
+        var viaJson = JsonSchemaComparer
+            .Compare(OneOfWithWrapperJson("Dog", "Cat"), OneOfWithWrapperJson("Dog"), SchemaDirection.Response,
+                Topic, $"{Topic}.response")
+            .Select(Tuple).ToArray();
+
+        Assert.Equal(viaOpenApi, viaJson);
+        Assert.Equal(2, viaJson.Length);
+        Assert.Equal(SchemaChangeKind.UnionVariantChanged, viaJson[0].Item1);
+        Assert.Contains("Wrapper", viaJson[0].Item3);
+        Assert.Equal(SchemaChangeKind.UnionVariantRemoved, viaJson[1].Item1);
+        Assert.Contains("Cat", viaJson[1].Item3);
+    }
+
+    [Fact]
     public void BothWalkers_ProduceIdenticalChangeSets_UnionVariantChanged_MatchedPairDiffers()
     {
         var currentComponents = PetComponentsOpenApi();
@@ -580,4 +661,66 @@ public class JsonSchemaComparerTest
             ["discriminator"] = new JsonObject { ["propertyName"] = "petType", ["mapping"] = mapping }
         };
     }
+
+    // ---- discriminator-coverage / oneOf+allOf / nested-union helpers (#53, #49) ----
+
+    /// <summary>Like <see cref="DiscriminatedOneOfOpenApi"/> but the mapping covers only
+    /// <paramref name="mappedNames"/> - a subset of <paramref name="names"/> - so a test can add mapping
+    /// coverage for a previously-unmapped <c>$ref</c>d variant without changing anything else about it.</summary>
+    private static OpenApiSchema PartiallyDiscriminatedOneOfOpenApi(string[] names, string[] mappedNames) => new()
+    {
+        OneOf = names.Select(RefSchema).ToList(),
+        Discriminator = new OpenApiDiscriminator
+        {
+            PropertyName = "petType",
+            Mapping = mappedNames.ToDictionary(n => n.ToLowerInvariant(), n => $"#/components/schemas/{n}")
+        }
+    };
+
+    private static JsonObject PartiallyDiscriminatedOneOfJson(string[] names, string[] mappedNames)
+    {
+        var mapping = new JsonObject();
+        foreach (var name in mappedNames)
+        {
+            mapping[name.ToLowerInvariant()] = $"#/components/schemas/{name}";
+        }
+
+        return new JsonObject
+        {
+            ["oneOf"] = new JsonArray(names.Select(n => (JsonNode)PetJson(n)).ToArray()),
+            ["discriminator"] = new JsonObject { ["propertyName"] = "petType", ["mapping"] = mapping }
+        };
+    }
+
+    private static OpenApiSchema OneOfAndAllOfOpenApi(string[] oneOfNames, string[] allOfNames) => new()
+    {
+        OneOf = oneOfNames.Select(RefSchema).ToList(),
+        AllOf = allOfNames.Select(RefSchema).ToList()
+    };
+
+    private static JsonObject OneOfAndAllOfJson(string[] oneOfNames, string[] allOfNames) => new()
+    {
+        ["oneOf"] = new JsonArray(oneOfNames.Select(n => (JsonNode)PetJson(n)).ToArray()),
+        ["allOf"] = new JsonArray(allOfNames.Select(n => (JsonNode)PetJson(n)).ToArray())
+    };
+
+    /// <summary>Components including a "Wrapper" schema whose own body is a <c>oneOf</c> over
+    /// <paramref name="innerNames"/> - a oneOf variant that is itself a oneOf, for the nested-union
+    /// corpus case.</summary>
+    private static OpenApiComponents PetComponentsWithWrapperOpenApi(params string[] innerNames)
+    {
+        var components = PetComponentsOpenApi();
+        components.Schemas["Wrapper"] = new OpenApiSchema { Type = "object", OneOf = innerNames.Select(RefSchema).ToList() };
+        return components;
+    }
+
+    private static JsonObject WrapperJson(params string[] innerNames) => new()
+    {
+        ["type"] = "object",
+        ["$ref"] = "#/components/schemas/Wrapper",
+        ["oneOf"] = new JsonArray(innerNames.Select(n => (JsonNode)PetJson(n)).ToArray())
+    };
+
+    private static JsonObject OneOfWithWrapperJson(params string[] wrapperInnerNames) =>
+        new() { ["oneOf"] = new JsonArray(WrapperJson(wrapperInnerNames)) };
 }

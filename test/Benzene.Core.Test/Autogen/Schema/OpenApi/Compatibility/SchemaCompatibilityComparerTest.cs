@@ -228,6 +228,40 @@ public class SchemaCompatibilityComparerTest
     }
 
     [Fact]
+    public void OneOfDiscriminator_MappingCoverageAdded_ProducesNoSpuriousChange()
+    {
+        // The exact round-8 probe (#53): baseline oneOf:[Dog,Cat] maps only Cat; current same
+        // oneOf:[Dog,Cat] adds a mapping entry for Dog too - nothing else about Dog changes. Before the
+        // fix, coverage-keyed matching produced "ref:Dog" on the baseline side (unmapped) and "disc:dog"
+        // on the current side (now mapped) for the very same $ref'd variant, so the pairwise matcher
+        // reported a spurious UnionVariantRemoved+UnionVariantAdded pair for Dog - Breaking in either
+        // direction per SchemaCompatibilityRules, so a harmless additive mapping edit failed the gate.
+        var baselineMapping = new OpenApiDiscriminator
+        {
+            PropertyName = "petType",
+            Mapping = new Dictionary<string, string> { ["cat"] = "#/components/schemas/Cat" }
+        };
+        var currentMapping = new OpenApiDiscriminator
+        {
+            PropertyName = "petType",
+            Mapping = new Dictionary<string, string>
+            {
+                ["cat"] = "#/components/schemas/Cat",
+                ["dog"] = "#/components/schemas/Dog"
+            }
+        };
+
+        var baseline = DocOf(PetComponents(), Req(Topic, Obj(("id", true)),
+            new OpenApiSchema { OneOf = OneOfRef("Dog", "Cat").OneOf, Discriminator = baselineMapping }));
+        var current = DocOf(PetComponents(), Req(Topic, Obj(("id", true)),
+            new OpenApiSchema { OneOf = OneOfRef("Dog", "Cat").OneOf, Discriminator = currentMapping }));
+
+        var report = new SchemaCompatibilityComparer().Compare(baseline, current);
+
+        Assert.Empty(report.Changes);
+    }
+
+    [Fact]
     public void OneOfVariantMatchedPairDiffers_IsUnionVariantChanged_WithNestedChange()
     {
         var baselineComponents = PetComponents();
