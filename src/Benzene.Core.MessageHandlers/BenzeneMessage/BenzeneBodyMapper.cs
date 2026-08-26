@@ -30,7 +30,7 @@ public class BenzeneMessageGetter : IMessageGetter<BenzeneMessageContext>, IMess
     /// </summary>
     /// <param name="serviceResolver">
     /// Used to LAZILY resolve <see cref="IMessageVersionGetter{TContext}"/> inside <see cref="GetTopic"/>
-    /// (task #98, work/bug-fix-designs-round10-2026-08.md WP-V), rather than taking it as an ordinary
+    /// (task #98, work/archive/bug-fix-designs-round10-2026-08.md WP-V), rather than taking it as an ordinary
     /// constructor dependency. This is deliberate, not a style choice: this class is registered as the
     /// DI implementation of <em>both</em> <c>IMessageGetter&lt;BenzeneMessageContext&gt;</c> and
     /// <c>IMessageHeadersGetter&lt;BenzeneMessageContext&gt;</c>, and the default
@@ -70,7 +70,7 @@ public class BenzeneMessageGetter : IMessageGetter<BenzeneMessageContext>, IMess
 
     /// <summary>
     /// Gets the request's topic, joined with the message's own version signal (task #98,
-    /// work/bug-fix-designs-round10-2026-08.md WP-V), or the <see cref="Constants.Missing"/> sentinel
+    /// work/archive/bug-fix-designs-round10-2026-08.md WP-V), or the <see cref="Constants.Missing"/> sentinel
     /// topic if the request has no topic set.
     /// </summary>
     /// <param name="context">The context to extract the topic from.</param>

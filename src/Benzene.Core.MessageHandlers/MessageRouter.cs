@@ -42,7 +42,7 @@ public class MessageRouter<TContext> : IMiddleware<TContext>, ITerminalMiddlewar
     /// <c>GetVersionedTopic</c> helper and a separately-injected <c>IMessageVersionGetter&lt;TContext&gt;</c>;
     /// it now happens once, in the getter itself, so every other reader of the same topic (mesh trace,
     /// health checks, cloud-service dispatch, ...) sees the same version-resolved answer this router
-    /// routes on (task #98, work/bug-fix-designs-round10-2026-08.md WP-V).
+    /// routes on (task #98, work/archive/bug-fix-designs-round10-2026-08.md WP-V).
     /// </param>
     /// <param name="messageHandlerDefinitionLookUpUp">Resolves the handler definition registered for a topic.</param>
     /// <param name="requestMapper">Maps the context into the handler's request type.</param>
@@ -79,7 +79,7 @@ public class MessageRouter<TContext> : IMiddleware<TContext>, ITerminalMiddlewar
     {
         // Version-augmentation (combining the topic with the message's own version signal before
         // FindHandler) now happens inside IMessageGetter<TContext>.GetTopic itself (task #98,
-        // work/bug-fix-designs-round10-2026-08.md WP-V) - this used to be the one place that called the
+        // work/archive/bug-fix-designs-round10-2026-08.md WP-V) - this used to be the one place that called the
         // shared GetVersionedTopic helper (WP-P, work/archive/bug-fix-designs-round7-10-2026-08.md) and
         // threw the joined result away instead of caching it, leaving every other reader of the topic
         // (mesh trace, health checks, cloud-service dispatch, ...) to see a version-blind topic. Simply
@@ -105,7 +105,7 @@ public class MessageRouter<TContext> : IMiddleware<TContext>, ITerminalMiddlewar
             // Most built-in topic getters convert an unresolvable topic into the "<missing>" sentinel
             // (Topic's constructor does it), so the null-topic branch above never fires for them and
             // THIS branch is where a wrong-attribute producer actually lands. That is NOT universal,
-            // though (task #98, work/bug-fix-designs-round10-2026-08.md WP-V, correcting an earlier
+            // though (task #98, work/archive/bug-fix-designs-round10-2026-08.md WP-V, correcting an earlier
             // version of this comment): EventGridMessageTopicGetter, QueueStorageMessageTopicGetter and
             // TimerMessageMappers return a null ITopic instead, which the null-topic branch above DOES
             // catch (reported as ValidationError there, rather than NotFound here) - a recorded, not

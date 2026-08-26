@@ -22,7 +22,7 @@ namespace Benzene.Test.Core.Core.MessageHandling;
 /// <c>"version"</c> header into the topic in <c>BenzeneMessageGetter.GetTopic</c>. A topic-getter
 /// version is treated as a deliberate preset override that skips the version getter, so hardcoding
 /// one there silently defeats the configured header order. The join itself now happens inside
-/// <c>BenzeneMessageGetter.GetTopic</c> (task #98, work/bug-fix-designs-round10-2026-08.md WP-V) -
+/// <c>BenzeneMessageGetter.GetTopic</c> (task #98, work/archive/bug-fix-designs-round10-2026-08.md WP-V) -
 /// <see cref="MessageRouter{TContext}"/> just consumes the already-joined topic - so the version
 /// getter is wired into the getter here, not into the router.
 /// </summary>

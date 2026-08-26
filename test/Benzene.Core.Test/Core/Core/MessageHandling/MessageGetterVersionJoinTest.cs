@@ -10,7 +10,7 @@ namespace Benzene.Test.Core.Core.MessageHandling;
 
 /// <summary>
 /// Coverage for the version-join half of <see cref="MessageGetter{TContext}.GetTopic"/> (task #98,
-/// work/bug-fix-designs-round10-2026-08.md WP-V): the facade now combines the topic getter's answer
+/// work/archive/bug-fix-designs-round10-2026-08.md WP-V): the facade now combines the topic getter's answer
 /// with the optionally-injected <see cref="IMessageVersionGetter{TContext}"/> itself, and caches the
 /// JOINED result, so every consumer of <c>IMessageGetter&lt;TContext&gt;.GetTopic</c> - not just
 /// <see cref="MessageRouter{TContext}"/> - sees a version-resolved topic. Before this fix, only the

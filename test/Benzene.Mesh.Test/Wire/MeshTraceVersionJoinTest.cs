@@ -18,7 +18,7 @@ using Void = Benzene.Abstractions.Results.Void;
 namespace Benzene.Test.Mesh.Wire;
 
 /// <summary>
-/// Resurrects the round-10 reviewer's live probe for task #98 (work/bug-fix-designs-round10-2026-08.md
+/// Resurrects the round-10 reviewer's live probe for task #98 (work/archive/bug-fix-designs-round10-2026-08.md
 /// WP-V): a message carrying the <c>benzene-version</c> header through a pipeline with
 /// <see cref="Extensions.UseMeshTrace{TContext}"/> must export a <see cref="MeshTraceEvent.TopicVersion"/>
 /// matching the header - before the fix it was always <c>null</c>, because <c>UseMeshTrace</c> reads

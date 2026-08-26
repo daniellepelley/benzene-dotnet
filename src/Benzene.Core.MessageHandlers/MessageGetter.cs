@@ -10,11 +10,11 @@ namespace Benzene.Core.MessageHandlers;
 /// and <see cref="IMessageHeadersGetter{TContext}"/> for <typeparamref name="TContext"/> into a
 /// single facade, so callers that need all three don't have to depend on each mapper individually.
 /// <see cref="GetTopic"/> also joins in the optionally-registered <see cref="IMessageVersionGetter{TContext}"/>
-/// (task #98, work/bug-fix-designs-round10-2026-08.md WP-V), so whenever this facade's topic is
+/// (task #98, work/archive/bug-fix-designs-round10-2026-08.md WP-V), so whenever this facade's topic is
 /// resolvable at all, it is the same version-resolved <see cref="ITopic"/> <see cref="MessageRouter{TContext}"/>
 /// routes on - <see cref="GetTopic"/> can still return <c>null</c>, exactly matching
 /// <see cref="IMessageTopicGetter{TContext}.GetTopic"/>'s own contract (task #101,
-/// work/bug-fix-designs-round10-2026-08.md WP-X - this facade used to narrow the interfaces it
+/// work/archive/bug-fix-designs-round10-2026-08.md WP-X - this facade used to narrow the interfaces it
 /// forwards to non-nullable without actually guaranteeing that).
 /// </summary>
 /// <typeparam name="TContext">The transport-specific context type messages are extracted from.</typeparam>
@@ -40,7 +40,7 @@ public class MessageGetter<TContext> : IMessageGetter<TContext>
     /// <param name="messageVersionGetter">
     /// Joins the message's own version signal into the topic <see cref="GetTopic"/> returns, via the
     /// shared <see cref="MessageTopicGetterExtensions.GetVersionedTopic{TContext}"/> helper (task #98,
-    /// work/bug-fix-designs-round10-2026-08.md WP-V) - the same join <see cref="MessageRouter{TContext}"/>
+    /// work/archive/bug-fix-designs-round10-2026-08.md WP-V) - the same join <see cref="MessageRouter{TContext}"/>
     /// used to perform locally and throw away, leaving every other consumer of this facade (mesh trace,
     /// health checks, cloud-service dispatch, ...) reading a version-blind topic. Optional: when
     /// <c>null</c> (no version getter registered for <typeparamref name="TContext"/>, or a direct
@@ -79,7 +79,7 @@ public class MessageGetter<TContext> : IMessageGetter<TContext>
 
     /// <summary>
     /// Gets the topic of the message, via the registered <see cref="IMessageTopicGetter{TContext}"/>,
-    /// joined with the message's own version signal (task #98, work/bug-fix-designs-round10-2026-08.md
+    /// joined with the message's own version signal (task #98, work/archive/bug-fix-designs-round10-2026-08.md
     /// WP-V) when the topic getter didn't already supply one.
     /// </summary>
     /// <param name="context">The transport-specific context to extract the topic from.</param>

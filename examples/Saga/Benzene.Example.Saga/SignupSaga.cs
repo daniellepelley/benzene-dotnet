@@ -18,7 +18,7 @@ public static class SignupSaga
         // so the forward payload is always present here in practice - ArgumentNullException.ThrowIfNull
         // makes that an honest, checked assumption rather than an unchecked one, now that the
         // Compensate delegate's payload parameter is nullable (IBenzeneResult<T>.Payload can be null in
-        // general, task #100/#101, work/bug-fix-designs-round10-2026-08.md WP-X).
+        // general, task #100/#101, work/archive/bug-fix-designs-round10-2026-08.md WP-X).
         return new SagaBuilder()
             .Stage(stage => stage
                 .Step<TenantCreated>(step => step

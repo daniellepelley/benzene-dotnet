@@ -42,6 +42,15 @@ first). **[PERF]** performance hygiene, not a correctness bug. **[RESOLVED]** ve
 > archived, stamped with the landing commits); consult it before touching any of this code again so a
 > decision made here doesn't get silently re-litigated.
 
+> **Tracked findings, 2026-08-26 (round 10) — all fixed.** The round-10 review pass (task board #96)
+> produced 22 evidence-backed findings (tasks #98–#119), successor to the round-7–10 pass above. All
+> ten work packages (WP-V, WP-W, WP-X, WP-Y, WP-Z, WP-AA, WP-AB, WP-AC, WP-AD, WP-AE) landed and were
+> pushed to `main` via 10 merge commits. Their design decisions, rationale, and the WP-V/
+> `BenzeneMessageGetter` divergence (and the DI-deadlock finding that forced it) remain ruled in
+> **[`bug-fix-designs-round10-2026-08.md`](archive/bug-fix-designs-round10-2026-08.md)** (now
+> archived, stamped with the landing commits); consult it before touching any of this code again so a
+> decision made here doesn't get silently re-litigated.
+
 ---
 
 ## Resolved since the prior triage (verified in current source)
@@ -936,7 +945,7 @@ parity (P8 — the alternate container must match the reference)".
   rewritten for the router's new pass-through contract. See WP-V.
 
 ### Tracked findings round 10, WP-Z — API Gateway request adapter headers (done)
-Ruled in [`bug-fix-designs-round10-2026-08.md`](bug-fix-designs-round10-2026-08.md) §"WP-Z — API Gateway
+Ruled in [`bug-fix-designs-round10-2026-08.md`](archive/bug-fix-designs-round10-2026-08.md) §"WP-Z — API Gateway
 request adapter headers".
 - **[RESOLVED] #105 — `ApiGatewayHttpRequestAdapter.Map` (v1) built its `Headers` result with a
   plain-ordinal `Dictionary` (via `.ToDictionary(...)`), not `StringComparer.OrdinalIgnoreCase` -
@@ -965,7 +974,7 @@ request adapter headers".
 
 ### Tracked findings round 10, WP-AC — health-check processor + adapters (done)
 Ruling, rationale, and the red/green test conventions are in
-[`bug-fix-designs-round10-2026-08.md`](bug-fix-designs-round10-2026-08.md) §"WP-AC — health-check
+[`bug-fix-designs-round10-2026-08.md`](archive/bug-fix-designs-round10-2026-08.md) §"WP-AC — health-check
 processor + adapters (#111, #112, #113, #114)".
 - **[RESOLVED] #111 — `CachingHealthCheckProcessor` had no single-flight guard: 50 concurrent
   cold-cache callers produced 50 full inner runs, recurring at every TTL expiry.** Added a per-key
@@ -1009,7 +1018,7 @@ processor + adapters (#111, #112, #113, #114)".
   confirmed clean, no change needed.
 
 ### Tracked findings round 10, WP-W — Validation status-mapping contract (done)
-Ruled in [`bug-fix-designs-round10-2026-08.md`](bug-fix-designs-round10-2026-08.md) §"WP-W —
+Ruled in [`bug-fix-designs-round10-2026-08.md`](archive/bug-fix-designs-round10-2026-08.md) §"WP-W —
 validation status-mapping contract".
 - **[RESOLVED] #99 — `ValidationStatusAttribute`/`IValidationStatusMapper` silently ignored by two
   of the three validation adapters.** The mechanism lives in the shared `Benzene.Abstractions.Validation`
@@ -1036,7 +1045,7 @@ validation status-mapping contract".
   solution build after the change confirms nothing depended on the dropped target.
 
 ### Tracked findings round 10, WP-Y — Host/entry-point seams (done)
-Ruled in [`bug-fix-designs-round10-2026-08.md`](bug-fix-designs-round10-2026-08.md) §"WP-Y — host/entry-point
+Ruled in [`bug-fix-designs-round10-2026-08.md`](archive/bug-fix-designs-round10-2026-08.md) §"WP-Y — host/entry-point
 seams".
 - **[RESOLVED] #104 — ASP.NET hosts never forwarded `HttpContext.RequestAborted` into the
   `SendAsync(event, cancellationToken)` overload**, unlike the Azure Functions and Google PubSub
@@ -1077,25 +1086,26 @@ seams".
 
 ---
 
-## Open — tracked findings, round 10 (2026-08-26) — ruled, not yet implemented
+### Tracked findings round 10 (2026-08-26) — all fixed
 
 The round-10 review pass (task board #96: five parallel agents over the Lambda hosting bridges,
 deeper CosmosDb/gRPC, health-check logic, Kafka/self-hosted workers, and the abstractions contract
-packages, against `4657c9d`) produced **22 fix-worthy findings, tracked as task board #98–#119**
-and ruled in [`bug-fix-designs-round10-2026-08.md`](bug-fix-designs-round10-2026-08.md)
-(execution task #120). Headlines: the version-blindness root cause behind #69/#70 is the
-`IMessageGetter`/`ResolvedTopicCache` abstraction shape itself, with a third live instance confirmed
-(`UseMeshTrace` exports `TopicVersion = null` for every header-versioned message, #98); three of the
-four self-hosted workers settle successfully-processed messages through calls gated on the shutdown
-token, converting graceful shutdown into silent double-processing (SQS #115 executed, EventHub #116
-executed, ServiceBus #117 originally suspected — confirmed and fixed, see WP-AD below);
-`CachingHealthCheckProcessor` has no single-flight guard
-(50 concurrent cold-cache callers → 50 full dependency-hammering runs, #111 — now RESOLVED, see
-WP-AC above); and `ValidationStatusAttribute` — documented in the shared abstractions package — is
-honored by exactly one of the three validation adapters (#99 — now RESOLVED, see WP-W above).
-Per-finding evidence, rulings and work packages are in the ruling doc; each will get its
-`[RESOLVED]` line here as it lands. **WP-AA, WP-AB, WP-AC, WP-W, WP-X, WP-Z and WP-AE have landed** -
-see the resolved sections above; the remaining round-10 work packages below are still open.
+packages, against `4657c9d`) produced **22 fix-worthy findings, tracked as task board #98–#119**,
+all now resolved, ruled in
+[`bug-fix-designs-round10-2026-08.md`](archive/bug-fix-designs-round10-2026-08.md) (now archived,
+stamped with the landing commits; execution task #120 complete). Headlines: the version-blindness
+root cause behind #69/#70 was the `IMessageGetter`/`ResolvedTopicCache` abstraction shape itself,
+with a third live instance confirmed (`UseMeshTrace` exports `TopicVersion = null` for every
+header-versioned message, #98 — WP-V; the fix also had to reach `BenzeneMessageGetter`, not just the
+generic `MessageGetter<TContext>` facade the ruling named — see the archived doc's stamp for why);
+three of the four self-hosted workers settled successfully-processed messages through calls gated on
+the shutdown token, converting graceful shutdown into silent double-processing (SQS #115, EventHub
+#116, ServiceBus #117 originally suspected — confirmed and fixed, see WP-AD above);
+`CachingHealthCheckProcessor` had no single-flight guard (50 concurrent cold-cache callers → 50 full
+dependency-hammering runs, #111 — WP-AC above); and `ValidationStatusAttribute` — documented in the
+shared abstractions package — was honored by exactly one of the three validation adapters (#99 —
+WP-W above). All ten work packages (WP-V, WP-W, WP-X, WP-Y, WP-Z, WP-AA, WP-AB, WP-AC, WP-AD, WP-AE)
+landed and were pushed to `main`; every finding below carries its own `[RESOLVED]` line.
 
 - **[RESOLVED] #108 — `BenzeneCosmosChangeFeedWorker`'s auto-checkpoint call sat inside the pipeline's
   own try/catch, so a checkpoint failure after a successful batch was misattributed to the handler
@@ -1115,7 +1125,7 @@ settable; missing-topic status asymmetry (`ValidationError` vs `NotFound`) acros
 EventGrid/QueueStorage/Timer vs the sentinel transports.
 
 ### Tracked findings round 10, WP-X — contract-annotation alignment (done)
-Ruled in [`bug-fix-designs-round10-2026-08.md`](bug-fix-designs-round10-2026-08.md) §"WP-X —
+Ruled in [`bug-fix-designs-round10-2026-08.md`](archive/bug-fix-designs-round10-2026-08.md) §"WP-X —
 contract-annotation alignment (#100, #101, #103)". Annotation-only, no behavioral change: aligning
 three nullable-reference-type contracts with what their implementations/callers already did in
 practice, landed after WP-V (which touches the same `MessageGetter.cs`).
@@ -1176,7 +1186,7 @@ practice, landed after WP-V (which touches the same `MessageGetter.cs`).
   unreachable case, per the ruling. No behavioral change; no new warnings.
 
 ### Tracked findings round 10, WP-AB — gRPC client cancellation + health bridge diagnosability (done)
-Ruled in [`bug-fix-designs-round10-2026-08.md`](bug-fix-designs-round10-2026-08.md) §"WP-AB — gRPC
+Ruled in [`bug-fix-designs-round10-2026-08.md`](archive/bug-fix-designs-round10-2026-08.md) §"WP-AB — gRPC
 client cancellation + health bridge diagnosability".
 - **[RESOLVED] #109 — `GrpcBenzeneMessageClient.SendMessageAsync` logged routine ambient
   cancellation at `LogLevel.Error` and mapped it to `ServiceUnavailable` via its catch-all** (a bare
@@ -1212,7 +1222,7 @@ client cancellation + health bridge diagnosability".
   `Type` both appear distinctly (suffixed) in `CheckHealthAsync`'s result data. See WP-AB.
 
 ### Tracked findings round 10, WP-AE — Kafka rebalance + config hygiene (done)
-Ruled in [`bug-fix-designs-round10-2026-08.md`](bug-fix-designs-round10-2026-08.md) §"WP-AE — Kafka
+Ruled in [`bug-fix-designs-round10-2026-08.md`](archive/bug-fix-designs-round10-2026-08.md) §"WP-AE — Kafka
 rebalance + config hygiene".
 - **[RESOLVED] #118 — `BenzeneKafkaWorker`'s `ConfigureRebalanceDrain` registered no
   `SetPartitionsLostHandler`, so Confluent.Kafka fell back to the *revoked* handler for a genuine
@@ -1258,7 +1268,7 @@ rebalance + config hygiene".
 
 ### Tracked findings round 10, WP-AD — self-hosted worker settlement-on-shutdown (done)
 Decisions, rationale, and the #117 verification evidence are ruled/recorded in
-[`bug-fix-designs-round10-2026-08.md`](bug-fix-designs-round10-2026-08.md) §"WP-AD — self-hosted
+[`bug-fix-designs-round10-2026-08.md`](archive/bug-fix-designs-round10-2026-08.md) §"WP-AD — self-hosted
 worker settlement-on-shutdown (#115, #116, #117)". One unifying theme across three transports: each
 settled *successfully processed* work through a call gated on the shutdown/processor token itself, so
 graceful shutdown could convert already-completed work into silent redelivery/double-processing

@@ -17,7 +17,7 @@ namespace Benzene.Test.Core.Core.MessageHandling;
 /// <see cref="IMessageGetter{TContext}.GetTopic"/>, with no augmentation of its own.
 /// </summary>
 /// <remarks>
-/// Before task #98 (work/bug-fix-designs-round10-2026-08.md WP-V) the router combined the topic id
+/// Before task #98 (work/archive/bug-fix-designs-round10-2026-08.md WP-V) the router combined the topic id
 /// from <see cref="IMessageTopicGetter{TContext}"/> with a separately-injected
 /// <see cref="IMessageVersionGetter{TContext}"/> itself, via the shared <c>GetVersionedTopic</c>
 /// helper, and threw the joined result away instead of caching it - so every other reader of the

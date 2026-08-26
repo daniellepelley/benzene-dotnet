@@ -142,3 +142,20 @@ it had one, otherwise 2026-08).
   `Benzene.Mesh.Test` 535/535, `Benzene.Mesh.Host.Test` 141/141, `Benzene.Examples.sln` 0 errors); the
   per-finding summaries live in [`../outstanding-bugs.md`](../outstanding-bugs.md)'s Resolved section
   (search "Tracked findings round 7–10"), each pointing back here for the full record.
+
+## Dated review and fix-design record (2026-08-26, round 10)
+
+- `bug-fix-designs-round10-2026-08.md` — the design ruling (decision, rationale, rejected
+  alternatives) for the evidence-backed findings from the round-10 adversarial review pass (task
+  board #98–#119), successor to the round-7–10 ruling above. All ten work packages (WP-V, WP-W, WP-X,
+  WP-Y, WP-Z, WP-AA, WP-AB, WP-AC, WP-AD, WP-AE) landed and pushed to `main` via 10 merge commits.
+  Notable divergence: WP-V (#98) had to reach `BenzeneMessageGetter` as well as the
+  `MessageGetter<TContext>` facade the ruling named, and resolve the version getter lazily via
+  `IServiceResolver` rather than by constructor injection, to avoid a real DI resolution deadlock
+  (`HeaderMessageVersionGetter` → `IMessageHeadersGetter<BenzeneMessageContext>` → back into
+  `BenzeneMessageGetter`'s own construction) — recorded in the file's stamp. Archived 2026-08-26 after
+  independent re-verification of the build/test baseline (`dotnet build Benzene.sln -c Release` 0
+  errors; `Benzene.Core.Test` 3056/2/0; `Benzene.Mesh.Test` 536/536; `Benzene.Mesh.Host.Test` 141/141;
+  `Benzene.Examples.sln` 0 errors); the per-finding summaries live in
+  [`../outstanding-bugs.md`](../outstanding-bugs.md)'s Resolved section (search "Tracked findings
+  round 10"), each pointing back here for the full record.

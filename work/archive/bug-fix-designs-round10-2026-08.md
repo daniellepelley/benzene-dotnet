@@ -1,3 +1,29 @@
+> ARCHIVED 2026-08-26: actioned. All ten work packages (WP-V, WP-W, WP-X, WP-Y, WP-Z, WP-AA, WP-AB,
+> WP-AC, WP-AD, WP-AE — task board #98-#119) landed and pushed to `main` via 10 merge commits, in
+> landing order: `f7479f6..77b5b20` (WP-V, #98), `42429ad..adb68c8` (WP-Y, #104/#106/#107),
+> `585ef34..3ca83a5` (WP-AD, #115/#116/#117), `45a2f95..ca2c712` (WP-W, #99/#102),
+> `ceaf64c..499ed91` (WP-AC, #111-#114), `9e5a0b9..bcc2fce` (WP-AE, #118/#119),
+> `ae506c9..9304368` (WP-AB, #109/#110), `a066026..f6aa484` (WP-Z, #105), `f3380d7..d8e4e1b`
+> (WP-AA, #108), `912a99b..62daae1` (WP-X, #100/#101/#103). Full baseline re-verified centrally after
+> the last merge: `dotnet build Benzene.sln -c Release` 0 errors; `Benzene.Core.Test` 3056 passed / 2
+> skipped (pre-existing, unrelated) / 0 failed; `Benzene.Mesh.Test` 536/536 (535 baseline + 1 new WP-V
+> regression test); `Benzene.Mesh.Host.Test` 141/141; `Benzene.Examples.sln` build 0 errors.
+>
+> **Notable divergence from this ruling (WP-V, #98):** the fix had to extend beyond
+> `MessageGetter<TContext>` (the facade §1 WP-V names below) to also cover `BenzeneMessageGetter`,
+> which implements `IMessageGetter<BenzeneMessageContext>` directly and bypasses the generic facade
+> entirely for the most commonly-used transport (`BenzeneMessage`) — a closed-type DI registration
+> always wins over the open-generic `MessageGetter<TContext>` facade, so that transport would have
+> stayed version-blind even after the facade-only fix. Implementing it required resolving the version
+> getter *lazily* via `IServiceResolver` inside `GetTopic`, not via constructor injection: eager
+> constructor injection produced a real DI resolution deadlock (confirmed via an isolated repro) —
+> `HeaderMessageVersionGetter` itself depends on `IMessageHeadersGetter<BenzeneMessageContext>`, which
+> `BenzeneMessageGetter` also implements, so constructing `BenzeneMessageGetter` eagerly would re-enter
+> its own construction one level down via that dependency. Per-finding resolution detail lives in
+> [`../outstanding-bugs.md`](../outstanding-bugs.md)'s Resolved section (search "Tracked findings round
+> 10"), each entry pointing back here for the full ruling. See `work/archive/README.md` for the index
+> entry.
+
 # Fix designs — round 10 review findings (2026-08)
 
 **Status: ACTIVE — ruled, not yet implemented.** This is the fix-design ruling for the round-10
