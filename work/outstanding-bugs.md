@@ -315,6 +315,18 @@ health-check consistency (P8)".
   that client has no `CancellationToken` overload — unchanged from before and out of this fix's scope,
   same caveat WP-7(b) already carried.) See WP-G.
 
+### Tracked findings round 7–10, WP-I — gRPC null-response diagnostic symmetry (done)
+Ruled in [`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-I — gRPC
+null-response diagnostic symmetry".
+- **[RESOLVED] #48 — `ProtobufJsonGrpcMessageAdapter.ConvertResponse`'s null-payload branch called
+  `Activator.CreateInstance<TResponse>()` directly with no check, unlike the non-null branch (which
+  calls `GetDescriptor` and throws a clear `BenzeneException` naming the offending type when
+  `TResponse` isn't a real protobuf message) — a non-protobuf `TResponse` gave an opaque
+  `MissingMethodException` instead.** The null branch now calls `GetDescriptor` first (throwing the
+  same `BenzeneException` on failure) before constructing via `Activator.CreateInstance`. Unreachable via
+  generated code today (protoc-emitted types always have a public parameterless constructor) — fixed for
+  error-message symmetry/quality. See WP-I.
+
 ---
 
 ## Open — maintainer decisions (the real remaining backlog)
