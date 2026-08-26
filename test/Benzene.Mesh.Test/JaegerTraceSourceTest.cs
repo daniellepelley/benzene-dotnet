@@ -190,4 +190,52 @@ public class JaegerTraceSourceTest
         Assert.Equal(1, handler.ServiceListCalls);          // discovery was used
         Assert.Equal("t-a", Assert.Single(flows).TraceId);
     }
+
+    // #79: every per-service search request blocks until ALL of them have arrived, then all unblock
+    // together. This is only satisfiable if the fan-out issues the requests concurrently (BoundedFanOut /
+    // Task.WhenAll) - a sequential `foreach await` would issue the second request only after the first
+    // completes, which never happens here, so a regression to sequential deadlocks this test instead of
+    // passing it. The outer Task.WhenAny/Delay is a deadlock guard, not a timing assertion - a passing run
+    // is fast regardless of machine load; only a genuine sequential regression makes it hang.
+    private sealed class GatedConcurrencyHandler : HttpMessageHandler
+    {
+        private readonly int _expectedConcurrentRequests;
+        private int _arrived;
+        private readonly TaskCompletionSource _allArrived = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public GatedConcurrencyHandler(int expectedConcurrentRequests) => _expectedConcurrentRequests = expectedConcurrentRequests;
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri!.PathAndQuery;
+            if (path.StartsWith("/api/services"))
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{ "data": [] }""") };
+            }
+
+            if (Interlocked.Increment(ref _arrived) == _expectedConcurrentRequests)
+            {
+                _allArrived.TrySetResult();
+            }
+
+            await _allArrived.Task; // only resolves once every expected request has arrived
+
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Data()) };
+        }
+    }
+
+    [Fact]
+    public async Task GetRecentFlowsAsync_QueriesServicesConcurrently_NotSequentially()
+    {
+        var services = new[] { "svc-a", "svc-b", "svc-c" };
+        var handler = new GatedConcurrencyHandler(services.Length);
+        var options = new JaegerTraceSourceOptions(JaegerUrl) { Services = services }; // SearchConcurrency default (8) >= 3
+        var source = new JaegerTraceSource(new HttpClient(handler), options);
+
+        var task = source.GetRecentFlowsAsync(20);
+        var completed = await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(5)));
+
+        Assert.Same(task, completed); // did not deadlock - all 3 requests were in flight together
+        Assert.Empty(await task);
+    }
 }

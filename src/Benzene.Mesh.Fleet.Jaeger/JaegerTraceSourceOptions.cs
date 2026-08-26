@@ -32,4 +32,12 @@ public class JaegerTraceSourceOptions
     /// <summary>Jaeger search <c>limit</c> per service call — the max traces one service's search returns
     /// before the results are merged and re-capped. Default 20.</summary>
     public int SearchLimitPerService { get; init; } = 20;
+
+    /// <summary>How many per-service Jaeger searches (<see cref="JaegerTraceSource"/>'s fan-out over
+    /// <see cref="Services"/>, or the discovered set) run concurrently. Default 8 — high enough that a
+    /// typical mesh (a handful to a few dozen services) still finishes in roughly one request's worth of
+    /// latency, low enough not to open one HTTP request per service simultaneously against a shared Jaeger
+    /// query deployment. Set to 0 or a negative value for unbounded (every service queried at once) or a
+    /// higher value for a larger mesh with headroom to spare.</summary>
+    public int SearchConcurrency { get; init; } = 8;
 }

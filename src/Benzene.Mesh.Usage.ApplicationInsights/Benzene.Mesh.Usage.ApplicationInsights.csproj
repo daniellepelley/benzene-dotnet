@@ -20,4 +20,11 @@
     <ProjectReference Include="..\Benzene.Mesh.Contracts\Benzene.Mesh.Contracts.csproj" />
   </ItemGroup>
 
+  <!-- Lets the test project unit-test LogsQueryUsageQuery's KQL-escaping helper directly, without having
+       to mock Azure.Monitor.Query's Response<LogsQueryResult> (an SDK-internal type not designed to be
+       constructed from outside the SDK) just to observe the generated query string. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Benzene.Mesh.Test" />
+  </ItemGroup>
+
 </Project>

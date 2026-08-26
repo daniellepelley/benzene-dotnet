@@ -508,6 +508,43 @@ cancellation classification (P8 completion of WP-7)".
   processor (real `SqsHealthCheck`/`ServiceBusHealthCheck`/`RabbitMqHealthCheck`/`DynamoDbHealthCheck`
   driven through `HealthCheckProcessor` with a timeout shorter than a hung SDK call). See WP-K.
 
+### Tracked findings round 7–10, WP-F — Mesh fleet/usage backend fetch-isolation & bounds (done)
+Decisions, rationale, and rejected alternatives are ruled in
+[`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-F — Mesh fleet/usage
+backend fetch-isolation & bounds".
+- **[RESOLVED] #74 — `CompositeMeshFleetReadModel.TraceAsync`/`CorrelationAsync` forwarded to the trace
+  source with no try/catch, unlike the sibling `RecentFlowsAsync`/`TopicsFromUsageAsync` in the same
+  class, which degrade-to-empty/null.** Both now catch and degrade to `null` (a single trace/correlation
+  lookup reads as "not found" rather than throwing out of the composite), matching the class's own
+  documented fetch-isolation rule. See WP-F.
+- **[RESOLVED] #75 — `TempoServiceGraphTopologyBuilder.BuildAsync`'s 5 sequential PromQL calls had no
+  fetch isolation; one Prometheus hiccup took down the whole `mesh:topology` handler.** Each query is
+  now wrapped individually (`RunQueryAsync`): a failing call degrades just that edge-dimension to
+  absent, the rest of the topology still builds. See WP-F.
+- **[RESOLVED, verify live limit before shipping] #76 — `XRayTraceSource` never chunked a
+  `GetTraceSummaries` window against a per-call time-range bound; the default `CorrelationLookback`
+  (24h) went out as one call.** Windows are now chunked into contiguous ≤6h sub-queries
+  (`FetchTraceSummariesAsync`/`ChunkWindow`), mirroring the id-axis chunking `BatchGetTraces` already
+  had. The 6h bound is a conservative structural default (the review couldn't reach live AWS docs/an
+  account to confirm `GetTraceSummaries`' exact per-call time-range limit) — verify against live
+  docs/account before relying on the exact threshold; the chunking itself is correct regardless (an
+  unnecessary chunk costs one extra API call, not a bug). See WP-F.
+- **[RESOLVED, verify live page ordering before shipping] #77 — `GetRecentFlowsAsync`'s early-stop
+  pagination heuristic (`summaries.Count >= limit * 4`) assumed `GetTraceSummaries` pages come back
+  newest-first (unconfirmed); if it doesn't, the client-side top-N could bias toward stale traces under
+  high volume.** Replaced with paging to window exhaustion or a generous hard cap (`limit * 20`),
+  whichever comes first — order-agnostic by construction — with a logged warning (`ILogger?`, optional)
+  when the cap is hit before the window was exhausted, rather than a silent truncation. The review
+  couldn't reach a live X-Ray account to confirm actual page ordering; the fix is safe regardless of
+  what that ordering turns out to be. See WP-F.
+- **[RESOLVED] #78 — `LogsQueryUsageQuery` interpolated `options.MetricName`/dimension names directly
+  into KQL with no escaping (config-time values only, so lower urgency, but fixed for defence-in-depth
+  per the ruling).** New `EscapeKqlStringLiteral` escapes backslashes/quotes and rejects a configured
+  value containing a line break (`ArgumentException`) before it's interpolated. See WP-F.
+- **[RESOLVED] #79 — `JaegerTraceSource.SearchAcrossServicesAsync` fanned out one sequential HTTP GET
+  per discovered service when `Services` was unset.** Parallelized via `Benzene.Core.Middleware`'s
+  `BoundedFanOut`, capped by new `JaegerTraceSourceOptions.SearchConcurrency` (default 8). See WP-F.
+
 ---
 
 ## Open — maintainer decisions (the real remaining backlog)

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Benzene.Core.Middleware;
 using Benzene.Mesh.Collector;
 using Benzene.Mesh.Wire;
 
@@ -91,7 +92,10 @@ public class JaegerTraceSource : IMeshTraceSource
     }
 
     /// <summary>Fan a search out across every service (Jaeger requires one per query), merge the returned
-    /// full traces, and dedupe by trace id (a cross-service trace is returned by each of its services).</summary>
+    /// full traces, and dedupe by trace id (a cross-service trace is returned by each of its services).
+    /// Runs the per-service GETs concurrently, capped at <see cref="JaegerTraceSourceOptions.SearchConcurrency"/>
+    /// (<see cref="BoundedFanOut"/>) - sequentially awaiting one GET per service would otherwise pay every
+    /// service's round-trip in series for one fleet load.</summary>
     private async Task<List<JaegerMappedTrace>> SearchAcrossServicesAsync(
         (DateTimeOffset Start, DateTimeOffset End) window, string? tags, CancellationToken cancellationToken)
     {
@@ -104,8 +108,7 @@ public class JaegerTraceSource : IMeshTraceSource
         var startMicros = window.Start.ToUnixTimeMilliseconds() * 1000;
         var endMicros = window.End.ToUnixTimeMilliseconds() * 1000;
 
-        var byTraceId = new Dictionary<string, JaegerMappedTrace>();
-        foreach (var service in services)
+        var perService = await BoundedFanOut.WhenAllAsync(services, async service =>
         {
             var url = $"{_options.JaegerUrl}/api/traces?service={Uri.EscapeDataString(service)}"
                       + $"&start={startMicros}&end={endMicros}&limit={_options.SearchLimitPerService}";
@@ -115,15 +118,13 @@ public class JaegerTraceSource : IMeshTraceSource
             }
 
             var body = await GetStringOrNullAsync(url, cancellationToken);
-            if (body is null)
-            {
-                continue;
-            }
+            return body is null ? new List<JaegerMappedTrace>() : JaegerTraceMapper.MapTraces(body);
+        }, _options.SearchConcurrency);
 
-            foreach (var trace in JaegerTraceMapper.MapTraces(body))
-            {
-                byTraceId.TryAdd(trace.TraceId, trace);
-            }
+        var byTraceId = new Dictionary<string, JaegerMappedTrace>();
+        foreach (var trace in perService.SelectMany(traces => traces))
+        {
+            byTraceId.TryAdd(trace.TraceId, trace);
         }
 
         return byTraceId.Values.ToList();

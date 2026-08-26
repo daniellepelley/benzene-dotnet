@@ -93,16 +93,31 @@ public class TempoServiceGraphTopologyBuilder
     private async Task<Dictionary<(string Client, string Server), double>> QueryPerMinuteAsync(string metric, string window)
     {
         var promQl = $"sum by (client, server) (rate({metric}[{window}])) * 60";
-        var samples = await _client.QueryAsync(_options.PrometheusUrl, promQl);
-        return ToEdgeMap(samples);
+        return await RunQueryAsync(promQl);
     }
 
     private async Task<Dictionary<(string Client, string Server), double>> QueryLatencyMsAsync(double quantile, string window)
     {
         var promQl = $"histogram_quantile({quantile.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}, " +
             $"sum by (le, client, server) (rate({ServerSecondsBucketMetric}[{window}]))) * 1000";
-        var samples = await _client.QueryAsync(_options.PrometheusUrl, promQl);
-        return ToEdgeMap(samples);
+        return await RunQueryAsync(promQl);
+    }
+
+    /// <summary>Runs one PromQL query in isolation: a transient Prometheus failure (timeout, 5xx,
+    /// connection reset) degrades just this edge-dimension to "absent" rather than taking down the
+    /// whole <c>mesh:topology</c> build - mirroring the fetch-isolation rule the composite fleet
+    /// read-model applies to its own per-source fetches.</summary>
+    private async Task<Dictionary<(string Client, string Server), double>> RunQueryAsync(string promQl)
+    {
+        try
+        {
+            var samples = await _client.QueryAsync(_options.PrometheusUrl, promQl);
+            return ToEdgeMap(samples);
+        }
+        catch
+        {
+            return new Dictionary<(string Client, string Server), double>();
+        }
     }
 
     private static Dictionary<(string Client, string Server), double> ToEdgeMap(IReadOnlyList<PrometheusSample> samples)

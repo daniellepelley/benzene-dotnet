@@ -43,11 +43,33 @@ public class CompositeMeshFleetReadModel : IMeshFleetReadModel
         _usageSources = usageSources;
     }
 
-    public Task<TraceView?> TraceAsync(string traceId, CancellationToken cancellationToken = default)
-        => _traceSource.GetTraceAsync(traceId, cancellationToken);
+    public async Task<TraceView?> TraceAsync(string traceId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await _traceSource.GetTraceAsync(traceId, cancellationToken);
+        }
+        catch
+        {
+            // Fetch isolation: a failing trace source degrades a single trace lookup to "not found"
+            // rather than throwing out of the composite, matching RecentFlowsAsync/TopicsFromUsageAsync.
+            return null;
+        }
+    }
 
-    public Task<CorrelationView?> CorrelationAsync(string correlationId, MeshTimeRange? range = null, CancellationToken cancellationToken = default)
-        => _traceSource.GetCorrelationAsync(correlationId, range, cancellationToken);
+    public async Task<CorrelationView?> CorrelationAsync(string correlationId, MeshTimeRange? range = null, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await _traceSource.GetCorrelationAsync(correlationId, range, cancellationToken);
+        }
+        catch
+        {
+            // Fetch isolation: a failing trace source degrades a correlation lookup to "not found"
+            // rather than throwing out of the composite, matching RecentFlowsAsync/TopicsFromUsageAsync.
+            return null;
+        }
+    }
 
     // No descriptor feed on this plane, so neither a single service nor a single topic can be answered
     // (the fleet view derives what it can from usage + traces; the per-entity pages compose later).

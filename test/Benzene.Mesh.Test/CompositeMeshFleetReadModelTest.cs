@@ -18,13 +18,15 @@ public class CompositeMeshFleetReadModelTest
         public TraceView? Trace { get; init; }
         public CorrelationView? Correlation { get; init; }
         public bool ThrowOnRecent { get; init; }
+        public bool ThrowOnTrace { get; init; }
+        public bool ThrowOnCorrelation { get; init; }
 
         public MeshTimeRange? LastRecentRange { get; private set; }
 
         public Task<TraceView?> GetTraceAsync(string traceId, CancellationToken cancellationToken = default)
-            => Task.FromResult(Trace);
+            => ThrowOnTrace ? throw new InvalidOperationException("trace backend down") : Task.FromResult(Trace);
         public Task<CorrelationView?> GetCorrelationAsync(string correlationId, MeshTimeRange? range = null, CancellationToken cancellationToken = default)
-            => Task.FromResult(Correlation);
+            => ThrowOnCorrelation ? throw new InvalidOperationException("trace backend down") : Task.FromResult(Correlation);
         public Task<IReadOnlyList<TraceSummary>> GetRecentFlowsAsync(int limit = 20, MeshTimeRange? range = null, CancellationToken cancellationToken = default)
         {
             LastRecentRange = range;
@@ -161,5 +163,28 @@ public class CompositeMeshFleetReadModelTest
         Assert.Equal("c1", (await model.CorrelationAsync("c1"))!.CorrelationId);
         Assert.Null(await model.ServiceAsync("orders-api")); // no descriptor feed on this plane
         Assert.Null(await model.TopicAsync("orders:create", null));
+    }
+
+    [Fact]
+    public async Task TraceAsync_FailingTraceSource_DegradesToNull_RatherThanThrowing()
+    {
+        // #74: TraceAsync/CorrelationAsync must get the same fetch-isolation RecentFlowsAsync/
+        // TopicsFromUsageAsync already have - a throwing trace source degrades this single lookup to
+        // "not found", it doesn't propagate out of the composite.
+        var model = new CompositeMeshFleetReadModel(new FakeTraceSource { ThrowOnTrace = true }, Array.Empty<IMeshUsageSource>());
+
+        var view = await model.TraceAsync("t1");
+
+        Assert.Null(view);
+    }
+
+    [Fact]
+    public async Task CorrelationAsync_FailingTraceSource_DegradesToNull_RatherThanThrowing()
+    {
+        var model = new CompositeMeshFleetReadModel(new FakeTraceSource { ThrowOnCorrelation = true }, Array.Empty<IMeshUsageSource>());
+
+        var view = await model.CorrelationAsync("c1");
+
+        Assert.Null(view);
     }
 }

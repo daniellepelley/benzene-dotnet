@@ -1,8 +1,13 @@
 using Amazon.XRay;
 using Amazon.XRay.Model;
 using Benzene.Mesh.Fleet.Aws.XRay;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
+// MeshTimeRange (not aliased) - both this namespace and Amazon.XRay.Model declare a TraceSummary, so a
+// blanket `using Benzene.Mesh.Collector;` would make every bare TraceSummary in this file ambiguous;
+// referencing MeshTimeRange by its full name avoids that without an extra alias.
+using MeshTimeRange = Benzene.Mesh.Collector.MeshTimeRange;
 
 namespace Benzene.Mesh.Test;
 
@@ -307,7 +312,11 @@ public class XRayTraceSourceTest
 
         var source = new XRayTraceSource(mock.Object);
 
-        var view = await source.GetCorrelationAsync(correlationId);
+        // An explicit narrow range keeps this test's mock (which counts/keys off calls, not the request's
+        // StartTime/EndTime) inside a single #76 window-chunk; the default 24h CorrelationLookback would
+        // now chunk into 4 sub-queries and quadruple the summaries this always-the-same-response mock hands
+        // back. The chunking behavior itself is covered separately (GetCorrelationAsync_ChunksAWideWindow...).
+        var view = await source.GetCorrelationAsync(correlationId, new MeshTimeRange { From = "now-1h", To = "now" });
 
         Assert.NotNull(view);
         Assert.Equal(correlationId, view!.CorrelationId);
@@ -356,7 +365,10 @@ public class XRayTraceSourceTest
 
         var source = new XRayTraceSource(mock.Object);
 
-        var view = await source.GetCorrelationAsync(correlationId);
+        // Narrow range: keeps this test inside a single #76 window-chunk so "2 calls" means exactly the
+        // NextToken page-follow this test targets, not chunk-count multiplication (see the comment on
+        // GetCorrelationAsync_FindsMatchingTraces_GroupedByTrace).
+        var view = await source.GetCorrelationAsync(correlationId, new MeshTimeRange { From = "now-1h", To = "now" });
 
         Assert.NotNull(view);
         Assert.Equal(2, view!.Traces.Count); // both pages' traces collected
@@ -580,5 +592,144 @@ public class XRayTraceSourceTest
         var flows = await source.GetRecentFlowsAsync(3);
 
         Assert.Equal(3, flows.Count);
+    }
+
+    // A minimal ILogger that records formatted messages, for asserting on the truncation-warning log
+    // without pulling in a mocking framework's extension-method plumbing for ILogger.
+    private sealed class RecordingLogger : ILogger
+    {
+        public List<string> Messages { get; } = new();
+
+        public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
+
+        private sealed class NullScope : IDisposable
+        {
+            public static readonly NullScope Instance = new();
+            public void Dispose() { }
+        }
+    }
+
+    [Fact]
+    public async Task GetCorrelationAsync_ChunksAWideWindow_IntoSubQueriesNoWiderThanTheConservativeBound()
+    {
+        // #76: the default CorrelationLookback (24h) must not be handed to GetTraceSummaries as one call -
+        // it's chunked into contiguous sub-windows no wider than the conservative bound (6h), the same way
+        // BatchGetTraces is already chunked on the id axis.
+        var seenWindows = new List<(DateTime Start, DateTime End)>();
+        var mock = new Mock<IAmazonXRay>();
+        mock.Setup(x => x.GetTraceSummariesAsync(It.IsAny<GetTraceSummariesRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((GetTraceSummariesRequest req, CancellationToken _) =>
+            {
+                seenWindows.Add((req.StartTime, req.EndTime));
+                return new GetTraceSummariesResponse { TraceSummaries = new List<Amazon.XRay.Model.TraceSummary>() };
+            });
+        var source = new XRayTraceSource(mock.Object); // default CorrelationLookback = 24h
+
+        await source.GetCorrelationAsync("ticket-1");
+
+        Assert.True(seenWindows.Count >= 4, $"expected >= 4 chunks for a 24h window over a 6h bound, got {seenWindows.Count}");
+        Assert.All(seenWindows, w => Assert.True(w.End - w.Start <= TimeSpan.FromHours(6) + TimeSpan.FromSeconds(1)));
+        // Contiguous coverage: no gap or overlap between consecutive chunks.
+        for (var i = 1; i < seenWindows.Count; i++)
+        {
+            Assert.Equal(seenWindows[i - 1].End, seenWindows[i].Start);
+        }
+    }
+
+    [Fact]
+    public async Task GetRecentFlowsAsync_DefaultWindow_IssuesOneQuery_SinceItAlreadyFitsTheConservativeBound()
+    {
+        // The chunking fix must not change behavior for a window that already fits (the default 1h
+        // recent-flows lookback) - one call, same as before.
+        var mock = new Mock<IAmazonXRay>();
+        var calls = 0;
+        mock.Setup(x => x.GetTraceSummariesAsync(It.IsAny<GetTraceSummariesRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((GetTraceSummariesRequest _, CancellationToken _) =>
+            {
+                calls++;
+                return new GetTraceSummariesResponse { TraceSummaries = new List<Amazon.XRay.Model.TraceSummary>() };
+            });
+        var source = new XRayTraceSource(mock.Object, new XRayTraceSourceOptions { RecentFlowsServiceEnrichmentMax = 0 });
+
+        await source.GetRecentFlowsAsync(5);
+
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public async Task GetRecentFlowsAsync_PagesBeyondTheOldEarlyStopHeuristic_WhenTheHardCapIsNotHit()
+    {
+        // #77: the old heuristic stopped once summaries.Count >= limit*4 (here 5*4 = 20). This backend
+        // returns 25 summaries across 5 pages of 5 - fully below the new hard cap (limit*20 = 100) - so
+        // every page must be consumed, not just the first 4.
+        var mock = new Mock<IAmazonXRay>();
+        var pageCalls = 0;
+        mock.Setup(x => x.GetTraceSummariesAsync(It.IsAny<GetTraceSummariesRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((GetTraceSummariesRequest req, CancellationToken _) =>
+            {
+                pageCalls++;
+                var page = pageCalls - 1;
+                var summaries = Enumerable.Range(0, 5)
+                    .Select(i => new Amazon.XRay.Model.TraceSummary { Id = $"1-{page:D2}{i:D6}-{(page * 5 + i):D24}" })
+                    .ToList();
+                return new GetTraceSummariesResponse { TraceSummaries = summaries, NextToken = page < 4 ? "more" : null };
+            });
+        var source = new XRayTraceSource(mock.Object, new XRayTraceSourceOptions { RecentFlowsServiceEnrichmentMax = 0 });
+
+        var flows = await source.GetRecentFlowsAsync(5);
+
+        Assert.Equal(5, pageCalls); // all 5 pages fetched - the old heuristic would have stopped after page 4
+        Assert.Equal(5, flows.Count);
+    }
+
+    [Fact]
+    public async Task GetRecentFlowsAsync_HardCapTerminatesPaging_WhenABackendNeverStopsOfferingMorePages()
+    {
+        // Proves the hard cap actually bounds pagination (structurally, not by timing): NextToken is
+        // always "more", so without a hard cap this would page forever. limit=1 -> hard cap = 20 rows =
+        // 4 pages of 5; the WhenAny/Delay race is a deadlock guard, not a performance assertion.
+        var mock = new Mock<IAmazonXRay>();
+        var pageCalls = 0;
+        mock.Setup(x => x.GetTraceSummariesAsync(It.IsAny<GetTraceSummariesRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((GetTraceSummariesRequest req, CancellationToken _) =>
+            {
+                pageCalls++;
+                var summaries = Enumerable.Range(0, 5)
+                    .Select(i => new Amazon.XRay.Model.TraceSummary { Id = $"1-{pageCalls:D2}{i:D6}-{(pageCalls * 5 + i):D24}" })
+                    .ToList();
+                return new GetTraceSummariesResponse { TraceSummaries = summaries, NextToken = "more" };
+            });
+        var source = new XRayTraceSource(mock.Object, new XRayTraceSourceOptions { RecentFlowsServiceEnrichmentMax = 0 });
+
+        var task = source.GetRecentFlowsAsync(1);
+        var completed = await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(10)));
+
+        Assert.Same(task, completed); // terminated - it did not page forever
+        Assert.True(pageCalls <= 4, $"expected paging to stop at/before the hard cap (4 pages), got {pageCalls}");
+        Assert.Single(await task);
+    }
+
+    [Fact]
+    public async Task GetRecentFlowsAsync_LogsATruncationWarning_WhenTheHardCapStopsPagingWithMoreAvailable()
+    {
+        var mock = new Mock<IAmazonXRay>();
+        mock.Setup(x => x.GetTraceSummariesAsync(It.IsAny<GetTraceSummariesRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((GetTraceSummariesRequest req, CancellationToken _) => new GetTraceSummariesResponse
+            {
+                TraceSummaries = new List<Amazon.XRay.Model.TraceSummary> { new() { Id = "1-5b000000-000000000000000000000000" } },
+                NextToken = "more" // always more available - guarantees the cap is hit with pages remaining
+            });
+        var logger = new RecordingLogger();
+        var source = new XRayTraceSource(mock.Object,
+            new XRayTraceSourceOptions { RecentFlowsServiceEnrichmentMax = 0 }, logger);
+
+        var task = source.GetRecentFlowsAsync(1);
+        await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(10)));
+
+        Assert.Contains(logger.Messages, m => m.Contains("cap", StringComparison.OrdinalIgnoreCase));
     }
 }
