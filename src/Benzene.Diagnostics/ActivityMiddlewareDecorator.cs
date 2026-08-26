@@ -114,7 +114,12 @@ public class ActivityMiddlewareDecorator<TContext> : IMiddleware<TContext>
         }
 
         var getter = _serviceResolver.TryGetService<IMessageGetter<TContext>>();
-        var topic = getter?.GetTopic(context);
+        // Version-augmented (see GetVersionedTopic's doc comment / WP-P,
+        // work/bug-fix-designs-round7-10-2026-08.md): without this, a topic with 2+ registered handler
+        // versions would tag the wrong (never-run) handler and a blank version on every trace/log line,
+        // undermining mesh trace-backed flow reconstruction (task #70).
+        var versionGetter = _serviceResolver.TryGetService<IMessageVersionGetter<TContext>>();
+        var topic = getter?.GetVersionedTopic(context, versionGetter);
         // The "<missing>" sentinel (Constants.Missing — same value as TransportNames.Unresolved) is a
         // getter saying "no topic here", not a topic: stamping it would mint a phantom benzene.topic
         // span that a trace-backed mesh reader counts as a real flow on a topic literally named
