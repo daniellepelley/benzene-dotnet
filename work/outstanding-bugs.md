@@ -973,6 +973,42 @@ escape hatch (Kafka's DLT argument applies verbatim); gRPC client per-call deadl
 settable; missing-topic status asymmetry (`ValidationError` vs `NotFound`) across
 EventGrid/QueueStorage/Timer vs the sentinel transports.
 
+### Tracked findings round 10, WP-AB — gRPC client cancellation + health bridge diagnosability (done)
+Ruled in [`bug-fix-designs-round10-2026-08.md`](bug-fix-designs-round10-2026-08.md) §"WP-AB — gRPC
+client cancellation + health bridge diagnosability".
+- **[RESOLVED] #109 — `GrpcBenzeneMessageClient.SendMessageAsync` logged routine ambient
+  cancellation at `LogLevel.Error` and mapped it to `ServiceUnavailable` via its catch-all** (a bare
+  `TaskCanceledException` from `ICancellationTokenAccessor`'s ambient token firing mid-send hit the
+  same catch block as a genuine unexpected exception). Now caught separately, mirroring the server
+  side's own `OperationCanceledException` handling in `GrpcMethodHandler.RunPipelineAsync` (no log):
+  `SendMessageAsync` catches `OperationCanceledException` before the general catch-all and returns a
+  `ServiceUnavailable` failure with no `LogError` call - the same classification a mid-flight
+  `RpcException(Cancelled)` already resolves to via `DefaultGrpcStatusReverseMapper`, so both
+  cancellation surfaces agree and neither generates Error-level noise. The `Cancelled ->
+  ServiceUnavailable` reverse mapping itself is deliberately left unchanged (a wire-visible
+  vocabulary question, deferred to the spec level - see the comment added at
+  `DefaultGrpcStatusReverseMapper.cs:33`). Doc-only: `src/Benzene.Grpc.Client/CLAUDE.md` now states
+  that resilience/retry for an unreachable channel is the app-owned `GrpcChannel`'s own
+  `ServiceConfig` retry policy - Benzene adds none. Regression tests in
+  `GrpcBenzeneMessageClientTest` assert no `Error`/`Critical` log entry and the
+  `ServiceUnavailable` classification for the ambient-cancellation path. See WP-AB.
+- **[RESOLVED] #110 — `BenzeneHealthCheckBridge`: a typo'd `LivenessCheckTypes`/`ReadinessCheckTypes`
+  entry matching no registered check yielded an unconditional `Healthy("No Benzene health checks are
+  registered.")` at every probe, and `data[result.Type] = result.Status` silently collapsed two
+  checks sharing the same `Type`.** The `includeTypes` constructor now validates every configured
+  type against the registered checks' actual `Type` values and throws `InvalidOperationException`
+  immediately (at construction / wiring time, not deferred into `CheckHealthAsync`'s probe-time
+  "zero checks matched" branch) naming the unmatched type(s) - the same "never silently
+  under-enforced" fail-fast principle `Benzene.Mesh.Host.MeshAuthGate.Validate` applies to its own
+  config satisfiability. The result `data` dictionary is now built through a private
+  `DuplicateTypeSuffixer` that reuses `Benzene.HealthChecks.HealthCheckNamer`'s suffixing convention
+  (first occurrence unchanged, collisions suffixed `-2`, `-3`, ...) as an independent copy rather
+  than a new project reference, per this package's documented deliberate non-dependency on the full
+  `Benzene.HealthChecks` pipeline package. Tests in `BenzeneHealthCheckBridgeTest` cover: an
+  unmatched `includeTypes` entry throws at construction; a fully-satisfiable `includeTypes` and the
+  no-`includeTypes`/no-registered-checks default both still construct cleanly; two checks sharing a
+  `Type` both appear distinctly (suffixed) in `CheckHealthAsync`'s result data. See WP-AB.
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.

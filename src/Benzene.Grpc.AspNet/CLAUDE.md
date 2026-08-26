@@ -24,6 +24,12 @@ grpc.reflection.v1alpha. This is the package a gRPC server application actually 
   `Benzene.HealthChecks.Core.IHealthCheck`s (unhealthy if any failed, degraded if any warned, healthy
   otherwise); registered as the `"benzene"` check when `EnableHealthChecks` is set. It can be scoped to
   a subset of checks by `Type` (an optional `includeTypes` ctor arg) to back a named grpc.health.v1 service.
+  **`includeTypes` is validated at construction** (round-10 #110): a configured type matching no
+  registered check's `Type` throws `InvalidOperationException` immediately rather than silently
+  reporting an unconditional `Healthy` at every probe (a typo'd `LivenessCheckTypes`/
+  `ReadinessCheckTypes` entry used to do exactly that). `CheckHealthAsync`'s result `data` dictionary
+  keys by `Type`, suffixed on collision (`-2`, `-3`, ...) so two checks that happen to share a `Type`
+  both appear instead of one silently clobbering the other.
 - **Liveness/readiness split**: set `BenzeneGrpcOptions.LivenessCheckTypes`/`ReadinessCheckTypes` (lists
   of check `Type`s) to publish named grpc.health.v1 services `"liveness"`/`"readiness"` that report only
   those checks, alongside the overall `""` service - the gRPC analogue of HTTP `UseLivenessCheck`/

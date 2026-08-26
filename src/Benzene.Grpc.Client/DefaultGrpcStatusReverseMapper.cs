@@ -30,6 +30,10 @@ public class DefaultGrpcStatusReverseMapper : IGrpcStatusReverseMapper
             { StatusCode.Unavailable, BenzeneResultStatus.ServiceUnavailable },
             { StatusCode.ResourceExhausted, BenzeneResultStatus.TooManyRequests },
             { StatusCode.DeadlineExceeded, BenzeneResultStatus.Timeout },
+            // Cancelled -> ServiceUnavailable is deliberately left as-is here (round-10 #109):
+            // whether a cancelled call should instead resolve to a distinct cancellation-flavoured
+            // status is a wire-visible vocabulary question, deferred to the spec level rather than
+            // decided unilaterally by this reverse mapper.
             { StatusCode.Cancelled, BenzeneResultStatus.ServiceUnavailable },
         };
     }

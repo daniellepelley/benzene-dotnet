@@ -93,6 +93,16 @@ public class GrpcBenzeneMessageClient : IBenzeneMessageClient
             var payload = _adapter.ConvertRequest<TResponse>(context.Response);
             return BenzeneResult.Set(status, payload!, true);
         }
+        catch (OperationCanceledException ex)
+        {
+            // Ambient cancellation (the inbound call's deadline/cancel firing mid-send, propagated
+            // via ICancellationTokenAccessor above) is a routine outcome, not a send failure worth
+            // Error-level noise - mirror the server side's own OperationCanceledException handling
+            // (GrpcMethodHandler.RunPipelineAsync, no log) rather than falling into the catch-all
+            // below. Classified the same way an actual mid-flight RpcException(Cancelled) already
+            // resolves via DefaultGrpcStatusReverseMapper, so both cancellation surfaces agree.
+            return BenzeneResult.ServiceUnavailable<TResponse>(ex.Message);
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Sending message {topic} failed", request.Topic);
