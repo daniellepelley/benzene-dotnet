@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Benzene.Abstractions\Benzene.Abstractions.csproj" />
+    <ProjectReference Include="..\Benzene.Core.Middleware\Benzene.Core.Middleware.csproj" />
     <ProjectReference Include="..\Benzene.Mesh.Collector\Benzene.Mesh.Collector.csproj" />
   </ItemGroup>
 
