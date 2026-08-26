@@ -6,14 +6,22 @@ distributed caching shared across instances.
 
 ## Key types/interfaces
 - `RedisCacheService` - **abstract** `ICacheService`, `IAsyncDisposable`. You subclass it and
-  implement `GetConfigurationOptionsAsync()` (returns a StackExchange.Redis `ConfigurationOptions`).
-  Holds a lazily-established, cached `IConnectionMultiplexer`; `CanConnectAsync()` issues a `PING`.
-  `DisposeAsync()` disposes that cached multiplexer (a no-op if a connect was never started or never
-  completed) - register your subclass so its container disposes it on shutdown. Factory methods
-  build the concrete entry/action types below.
+  implement `GetConfigurationOptionsAsync()` (returns a StackExchange.Redis `ConfigurationOptions`);
+  its constructor also optionally takes an `ISerializer` (DI-resolved automatically for you when your
+  subclass is constructed through DI), shared by every cache entry this service creates, via its
+  public `Serializer` property. Holds a lazily-established, cached `IConnectionMultiplexer`;
+  `CanConnectAsync(cancellationToken)` issues a `PING`. `DisposeAsync()` disposes that cached
+  multiplexer (a no-op if a connect was never started or never completed) - register your subclass so
+  its container disposes it on shutdown; after it runs, any further `RedisSetup`/`StartConnection`/
+  connect-driven call throws `ObjectDisposedException` rather than silently opening (and leaking) a
+  new multiplexer. Factory methods build the concrete entry/action types below.
 - `RedisCacheEntry<T>` (internal) - `CacheEntry<T>` over a single key. `Get`/`Set`/`Invalidate` map
   to `StringGetAsync` / `StringSetAsync` (with TTL) / `KeyDeleteAsync`.
 - `RedisMultiKeyActions<T>` (internal) - write/invalidate the same value across several keys.
+  `SetEntryValueAsync` issues each key's `StringSetAsync` concurrently, with each key's outcome
+  (success / `false` / a thrown exception) captured independently so one key's failure never stops the
+  others from being attempted; `InvalidateEntryAsync` issues one atomic multi-key `KeyDeleteAsync(RedisKey[])`
+  rather than a per-key loop.
 - `RedisWildcardActions` (internal) - invalidate by pattern via a `KEYS <pattern>` scan then batched
   `KeyDeleteAsync`.
 - `IRedisConnectionFactory` / `RedisConnectionFactory` - the `ConnectionMultiplexer.ConnectAsync`
@@ -37,9 +45,19 @@ distributed caching shared across instances.
 - Configuration is supplied as `ConfigurationOptions` from your `GetConfigurationOptionsAsync()`
   override, **not** as a bare connection string on this package's API.
 - `DefaultCacheLifespan` defaults to 5 minutes (override in your subclass); `SetEntryValueAsync`
-  applies it as the TTL when no explicit expiry is passed.
+  applies it as the TTL when no explicit expiry is passed (unless a per-call `expireIn` was given -
+  see `Benzene.Cache.Core`'s `LazyLoadAsync`/`WriteThroughAsync`).
 - Redis errors on get/set/invalidate are caught and logged (returning a miss / `false`) rather than
-  thrown, so a Redis outage degrades gracefully.
+  thrown, so a Redis outage degrades gracefully. A caller-driven `OperationCanceledException` is the
+  one exception excluded from this - it always propagates, never logged as an ordinary Redis failure.
+- Every Redis call is wrapped in `Task.WaitAsync(cancellationToken)` - StackExchange.Redis's
+  `IDatabase` methods have no native per-call cancellation, so this is the standard way to bound a
+  caller's own wait on a task that doesn't support it directly; the underlying Redis operation itself
+  keeps running in the background rather than being aborted. `RedisSetup` (the shared connect-and-
+  get-database step every operation goes through) applies the same pattern to the memoized connect
+  task, but deliberately does **not** cancel the shared task itself (it's awaited by every concurrent
+  caller - cancelling it for one caller would break another's unrelated in-flight wait), only each
+  caller's own wait on it.
 
 ## Dependencies on other Benzene packages
 - **Benzene.Cache.Core** - the cache abstractions and base-class layering

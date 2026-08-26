@@ -1,4 +1,4 @@
-﻿using Benzene.Abstractions.Results;
+using Benzene.Abstractions.Results;
 
 namespace Benzene.Cache.Core;
 
@@ -6,7 +6,7 @@ namespace Benzene.Cache.Core;
 
 public interface ICacheInvalidateActions
 {
-    Task<bool> InvalidateAsync();
+    Task<bool> InvalidateAsync(CancellationToken cancellationToken = default);
 
-    Task<TResult> WriteThroughInvalidateAsync<TResult>(Func<Task<TResult>> modifyDatabaseFunc) where TResult : IBenzeneResult;
+    Task<TResult> WriteThroughInvalidateAsync<TResult>(Func<Task<TResult>> modifyDatabaseFunc, CancellationToken cancellationToken = default) where TResult : IBenzeneResult;
 }

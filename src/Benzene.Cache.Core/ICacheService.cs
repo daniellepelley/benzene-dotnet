@@ -1,6 +1,8 @@
-﻿namespace Benzene.Cache.Core;
+namespace Benzene.Cache.Core;
+
+#nullable enable
 
 public interface ICacheService
 {
-    Task<bool> CanConnectAsync();
+    Task<bool> CanConnectAsync(CancellationToken cancellationToken = default);
 }

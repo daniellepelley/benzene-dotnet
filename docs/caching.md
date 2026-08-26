@@ -6,7 +6,7 @@ Benzene's caching support is a provider-agnostic abstraction (`Benzene.Cache.Cor
 
 Caching in Benzene is **not** a middleware you add to a pipeline with a `.UseCache(...)` call — there is no such extension in the codebase. Instead, `Benzene.Cache.Core` gives you a small set of abstractions for building a cache-backed service:
 
-- `ICacheService` — a marker interface with a single `CanConnectAsync()` method, used to health-check whatever cache backend you're using.
+- `ICacheService` — a marker interface with a single `CanConnectAsync(CancellationToken = default)` method, used to health-check whatever cache backend you're using.
 - `ICacheEntry<T>` — represents a single cached value. Supports reading (`GetValueAsync`), writing/invalidating (inherited from `ICacheWriteActions<T>`), and a "lazy load" pattern (`LazyLoadAsync`) that reads from cache first and falls back to a database/service call on a miss.
 - `ICacheWriteActions<T>` — write and "write-through" operations (`SetValueAsync`, `WriteThroughAsync`).
 - `ICacheInvalidateActions` — invalidate and "write-through invalidate" operations (`InvalidateAsync`, `WriteThroughInvalidateAsync`). `ICacheWriteActions<T>` extends this.
@@ -130,23 +130,59 @@ public class GetOrderMessageHandler : IMessageHandler<GetOrderRequest, Order>
 | --- | --- |
 | `GetConfigurationOptionsAsync()` (abstract) | Supplies the `StackExchange.Redis` `ConfigurationOptions` used to connect. Called once, lazily, the first time the connection is needed (or immediately if `StartConnection()` is called in your constructor). |
 | `DefaultCacheLifespan` (virtual, default `TimeSpan.FromMinutes(5)`) | TTL applied to `SetValueAsync` calls that don't pass an explicit `expireIn`. Override to change the default. |
-| `StartConnection()` (protected) | Touches the lazily-created connection `Task` so the connection begins immediately rather than on first use. Optional — call it from your subclass's constructor if you want to fail fast / warm the connection. |
+| `Serializer` (`ISerializer`, public) | Shared by every cache entry this service creates. The constructor-injected `ISerializer` if your subclass's constructor forwards one (resolved automatically by DI, since `Benzene.Core.MessageHandlers` already registers one), otherwise a shared `System.Text.Json`-backed default - never a fresh instance per cache entry. |
+| `StartConnection()` (protected) | Touches the lazily-created connection `Task` so the connection begins immediately rather than on first use. Optional — call it from your subclass's constructor if you want to fail fast / warm the connection. Throws `ObjectDisposedException` if called after `DisposeAsync()`. |
 | `CreateCacheEntry<T>(string key)` (protected) | Returns an `ICacheEntry<T>` (backed by `RedisCacheEntry<T>`) for a single Redis string key. |
 | `CreateMultiKeyActions<T>(IEnumerable<string> keys)` (protected) | Returns an `ICacheWriteActions<T>` that sets/invalidates the *same* value across multiple keys at once. |
 | `CreatePrefixActions(string prefix)` (protected) | Returns an `ICacheInvalidateActions` that invalidates every key matching `prefix + "*"`. |
 | `CreateWildcardActions(string pattern)` (protected) | Returns an `ICacheInvalidateActions` that invalidates every key matching an arbitrary pattern. |
 
+Every cache operation (`CanConnectAsync`, and everything on the entries/actions the `Create...` methods
+return) takes an optional trailing `CancellationToken`. A hung connect is bounded by *your* token, not
+just StackExchange.Redis's own internal timeouts: `RedisSetup` (the internal connect-and-get-database
+step every operation goes through) applies your token via `Task.WaitAsync`, so a client
+disconnect/shutdown unblocks the caller even while the underlying connect attempt keeps retrying in the
+background for whoever else is (or later becomes) waiting on it.
+
 ### `ICacheEntry<T>` / write-through actions
+
+Every member below also takes an optional trailing `CancellationToken cancellationToken = default`
+(omitted from the signatures here for brevity) - it flows into the concrete provider's own I/O (for
+`Benzene.Cache.Redis`, into every Redis call via `Task.WaitAsync`, since StackExchange.Redis has no
+native per-call cancellation) but **not** into your `databaseReadFunc`/`modifyDatabaseFunc` delegates,
+which stay `Func<Task<TResult>>` - observe the ambient token yourself inside those the same way you
+would calling your database/service directly.
 
 | Member | Purpose |
 | --- | --- |
 | `GetValueAsync()` | Reads and deserializes the cached value, or `default` on a miss or error (errors are logged, not thrown). |
-| `SetValueAsync(T value, TimeSpan? expireIn = null)` | Serializes (via `Benzene.Core.MessageHandlers.Serialization.JsonSerializer`) and stores the value, using `expireIn` or the service's `DefaultCacheLifespan`. |
+| `SetValueAsync(T value, TimeSpan? expireIn = null)` | Serializes (via the constructor-injected `ISerializer`, or a shared `System.Text.Json`-backed default) and stores the value, using `expireIn` or the service's `DefaultCacheLifespan`. Storing `default` (e.g. `null` for a reference type) is a legitimate negative-cache write - see below. |
 | `InvalidateAsync()` | Deletes the key(s). |
-| `LazyLoadAsync(Func<Task<IBenzeneResult<T>>> databaseReadFunc)` | Cache-aside read: hit returns from cache; miss calls `databaseReadFunc` and caches a successful result. |
-| `WriteThroughAsync(Func<Task<TResult>> modifyDatabaseFunc)` | Runs the write, then updates the cache based on the result's `BenzeneResultStatus` (`ok`/`created`/`updated`/`accepted` → `Set`; `deleted` → `Invalidate`; anything else → no cache change). |
-| `WriteThroughAsync(..., Func<TResult, T> getCacheValue)` / `WriteThroughAsync(..., getCacheValue, getCacheAction)` | Overloads for when the write's result type isn't `IBenzeneResult<T>` directly, or when you need custom cache-action logic instead of the default status mapping. |
-| `WriteThroughInvalidateAsync(Func<Task<TResult>> modifyDatabaseFunc)` | Runs the write, and invalidates the cache only if the result `IsSuccessful` — no `Set` path, since there's nothing to cache (e.g. a delete-only operation). |
+| `LazyLoadAsync(Func<Task<IBenzeneResult<T>>> databaseReadFunc, TimeSpan? expireIn = null)` | Cache-aside read: hit returns from cache; miss calls `databaseReadFunc` and, on a successful result with a non-null `Payload`, caches it (with `expireIn` if given). |
+| `WriteThroughAsync(Func<Task<TResult>> modifyDatabaseFunc, TimeSpan? expireIn = null)` | Runs the write, then updates the cache based on the result's `BenzeneResultStatus` (`ok`/`created`/`updated`/`accepted` → `Set`; `deleted` → `Invalidate`; anything else → no cache change). A cache-side failure during the `Set`/`Invalidate` step - an exception, or the provider honestly reporting it didn't happen - is logged and swallowed, never thrown from here or folded into the returned result: the database write already committed and is what the return value represents. |
+| `WriteThroughAsync(..., Func<TResult, T> getCacheValue, TimeSpan? expireIn = null)` / `WriteThroughAsync(..., getCacheValue, getCacheAction, TimeSpan? expireIn = null)` | Overloads for when the write's result type isn't `IBenzeneResult<T>` directly, or when you need custom cache-action logic instead of the default status mapping. Same cache-side-failure handling as above. |
+| `WriteThroughInvalidateAsync(Func<Task<TResult>> modifyDatabaseFunc)` | Runs the write, and invalidates the cache only if the result `IsSuccessful` — no `Set` path, since there's nothing to cache (e.g. a delete-only operation). Same cache-side-failure handling as `WriteThroughAsync`. |
+
+### Negative caching
+
+A cache hit is decided by whether a value is **present**, never by whether it's `null`. This means a
+reference-type `T` you explicitly cache as `null` — `await entry.SetValueAsync(null)` — is a real,
+repeatable hit on every subsequent `LazyLoadAsync` call, not a permanent miss that re-runs
+`databaseReadFunc` every time (the classic cache-penetration scenario: a flood of lookups for keys that
+are legitimately, consistently absent). `LazyLoadAsync` itself stays conservative and does **not** do
+this automatically — a successful database read whose `Payload` is `null` is still not written back to
+the cache on your behalf, so an ordinary "not found" doesn't silently start being cached. Decide for
+yourself when a null result is safe/worth negative-caching, and call `SetValueAsync(default, ...)`
+once you've made that call:
+
+```csharp
+var result = await _orders.GetOrderAsync(orderId); // IBenzeneResult<Order?>
+if (result.IsSuccessful && result.Payload is null)
+{
+    // A genuine, expected "no such order" - safe to negative-cache for a short TTL.
+    await entry.SetValueAsync(null, TimeSpan.FromSeconds(30));
+}
+```
 
 ### Health check
 
@@ -168,7 +204,11 @@ public ICacheWriteActions<Order> GetOrderMultiKeyActions(Guid orderId, string ex
     CreateMultiKeyActions<Order>(new[] { $"order:{orderId}", $"order:ref:{externalRef}" });
 ```
 
-`SetValueAsync`/`InvalidateAsync` on the result apply to every key in the set; the operation reports success if *any* key was updated/deleted.
+`SetValueAsync`/`InvalidateAsync` on the result apply to every key in the set; the operation reports
+success if *any* key was updated/deleted. `SetValueAsync` issues each key's write concurrently and
+independently - a failure on one key (an exception, or Redis reporting it didn't happen) never stops
+the others from being attempted, and is logged without affecting the rest. `InvalidateAsync` issues a
+single atomic multi-key `DEL` command for every key at once, rather than one command per key.
 
 ### Prefix and wildcard invalidation
 
@@ -194,9 +234,9 @@ await entry.WriteThroughAsync(
 Because `Benzene.Cache.Core`'s `CacheEntry<T>`/`CacheWriteActions<T>`/`CacheInvalidateActions` do all the serialization, logging, and write-through/lazy-load orchestration, adding support for a backend other than Redis means implementing just the raw storage primitives:
 
 ```csharp
-protected abstract Task<string?> GetEntryValueAsync();
-protected abstract Task<bool> SetEntryValueAsync(string value, TimeSpan? expireIn);
-protected abstract Task<bool> InvalidateEntryAsync();
+protected abstract Task<string?> GetEntryValueAsync(CancellationToken cancellationToken);
+protected abstract Task<bool> SetEntryValueAsync(string value, TimeSpan? expireIn, CancellationToken cancellationToken);
+protected abstract Task<bool> InvalidateEntryAsync(CancellationToken cancellationToken);
 ```
 
 along with `Logger`, `ProcessTimerFactory`, and `KeyDescription` (used for log messages). `Benzene.Cache.Redis`'s `RedisCacheEntry<T>` is a complete, minimal example of this.
@@ -215,6 +255,12 @@ Read errors are caught and logged (at `Error` level for `CacheEntry<T>.GetValueA
 
 **`InvalidateAsync()` on a prefix/wildcard entry returns `false` even though I expect keys to exist.**
 `RedisWildcardActions` returns `true` only if at least one key was actually deleted, and swallows connection errors (logged as a warning) by returning `false` rather than throwing. Check for "Error deleting keys from cache" in your logs.
+
+**A write-through call returns the successful database result, but the cache doesn't seem to have updated.**
+`WriteThroughAsync`/`WriteThroughInvalidateAsync` never let a cache-side failure turn an already-committed database write into a failure result — the database write is the source of truth. If the cache-side `Set`/`Invalidate` step itself failed (threw, or the provider honestly reported `false`), it's logged as a `Warning` ("Cache set/invalidate failed/threw for key ... after the database write already succeeded") rather than surfaced any other way. Check your logs for that message.
+
+**`RedisSetup`/`CanConnectAsync`/a cache operation throws `ObjectDisposedException`.**
+The owning `RedisCacheService` has already had `DisposeAsync()` called on it — resolve/inject a live instance instead of one whose scope has ended (e.g. a captured singleton dependency outliving a scoped `RedisCacheService`, or a manually-disposed instance reused afterwards).
 
 ## See Also
 

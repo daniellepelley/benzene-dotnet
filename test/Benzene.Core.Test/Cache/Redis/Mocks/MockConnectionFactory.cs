@@ -9,6 +9,7 @@ internal class MockConnectionFactory : IRedisConnectionFactory
 {
     public Mock<IDatabase> DataBaseMock { get; }
     public Mock<IConnectionMultiplexer> ConnectionMultiplexerMock { get; }
+    public int ConnectCallCount { get; private set; }
 
     public MockConnectionFactory()
     {
@@ -19,6 +20,7 @@ internal class MockConnectionFactory : IRedisConnectionFactory
 
     public Task<IConnectionMultiplexer> ConnectAsync(ConfigurationOptions options)
     {
+        ConnectCallCount++;
         return Task.FromResult(ConnectionMultiplexerMock.Object);
     }
 }

@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using Benzene.Abstractions.Results;
 using Benzene.Abstractions.Serialization;
 using Benzene.Results;
@@ -11,18 +11,28 @@ public abstract class CacheWriteActions<T> : CacheInvalidateActions, ICacheWrite
 {
     protected ISerializer Serializer { get; }
 
-    protected CacheWriteActions()
+    protected CacheWriteActions() : this(null)
     {
-        Serializer = new Benzene.Core.MessageHandlers.Serialization.JsonSerializer();
     }
 
-    protected abstract Task<bool> SetEntryValueAsync(string value, TimeSpan? expireIn);
+    /// <param name="serializer">
+    /// The <see cref="ISerializer"/> to use for this entry's values. Pass the DI-registered
+    /// <see cref="ISerializer"/> (e.g. resolved by the owning <c>RedisCacheService</c> subclass, itself
+    /// constructor-injected) to honor a non-default serialization format; <c>null</c> falls back to a
+    /// shared <c>System.Text.Json</c>-backed default (#145).
+    /// </param>
+    protected CacheWriteActions(ISerializer? serializer)
+    {
+        Serializer = serializer ?? CacheSerializerDefaults.Serializer;
+    }
 
-    public async Task<bool> SetValueAsync(T value, TimeSpan? expireIn = null)
+    protected abstract Task<bool> SetEntryValueAsync(string value, TimeSpan? expireIn, CancellationToken cancellationToken);
+
+    public async Task<bool> SetValueAsync(T value, TimeSpan? expireIn = null, CancellationToken cancellationToken = default)
     {
         Logger.LogDebug("Setting cache for key {key}", KeyDescription);
         var cacheValue = Serializer.Serialize(value);
-        return await SetEntryValueAsync(cacheValue, expireIn);
+        return await SetEntryValueAsync(cacheValue, expireIn, cancellationToken);
     }
 
     private static CacheUpdateAction DefaultCacheActionMapping<TResult>(TResult result) where TResult : IBenzeneResult
@@ -38,17 +48,17 @@ public abstract class CacheWriteActions<T> : CacheInvalidateActions, ICacheWrite
         };
     }
 
-    public Task<TResult> WriteThroughAsync<TResult>(Func<Task<TResult>> modifyDatabaseFunc) where TResult : IBenzeneResult<T>
+    public Task<TResult> WriteThroughAsync<TResult>(Func<Task<TResult>> modifyDatabaseFunc, TimeSpan? expireIn = null, CancellationToken cancellationToken = default) where TResult : IBenzeneResult<T>
     {
-        return WriteThroughAsync(modifyDatabaseFunc, result => result.Payload, DefaultCacheActionMapping);
+        return WriteThroughAsync(modifyDatabaseFunc, result => result.Payload, DefaultCacheActionMapping, expireIn, cancellationToken);
     }
 
-    public Task<TResult> WriteThroughAsync<TResult>(Func<Task<TResult>> modifyDatabaseFunc, Func<TResult, T?> getCacheValue) where TResult : IBenzeneResult
+    public Task<TResult> WriteThroughAsync<TResult>(Func<Task<TResult>> modifyDatabaseFunc, Func<TResult, T?> getCacheValue, TimeSpan? expireIn = null, CancellationToken cancellationToken = default) where TResult : IBenzeneResult
     {
-        return WriteThroughAsync(modifyDatabaseFunc, getCacheValue, DefaultCacheActionMapping);
+        return WriteThroughAsync(modifyDatabaseFunc, getCacheValue, DefaultCacheActionMapping, expireIn, cancellationToken);
     }
 
-    public async Task<TResult> WriteThroughAsync<TResult>(Func<Task<TResult>> modifyDatabaseFunc, Func<TResult, T?> getCacheValue, Func<TResult, CacheUpdateAction> getCacheAction) where TResult : IBenzeneResult
+    public async Task<TResult> WriteThroughAsync<TResult>(Func<Task<TResult>> modifyDatabaseFunc, Func<TResult, T?> getCacheValue, Func<TResult, CacheUpdateAction> getCacheAction, TimeSpan? expireIn = null, CancellationToken cancellationToken = default) where TResult : IBenzeneResult
     {
         using var timerScope = ProcessTimerFactory.Create("CacheActions_WriteThrough");
 
@@ -63,13 +73,15 @@ public abstract class CacheWriteActions<T> : CacheInvalidateActions, ICacheWrite
                 var cacheValue = getCacheValue(result);
                 if (cacheValue is not null)
                 {
-                    await SetValueAsync(cacheValue);
+                    // The database write already committed - see SyncCacheAfterWriteAsync (#139): a
+                    // cache-side failure here must not surface as this operation's own failure.
+                    await SyncCacheAfterWriteAsync(ct => SetValueAsync(cacheValue, expireIn, ct), "set", cancellationToken);
                 }
                 break;
 
             case CacheUpdateAction.Invalidate:
                 timerScope.SetTag("cache-action", "invalidate");
-                await InvalidateAsync();
+                await SyncCacheAfterWriteAsync(ct => InvalidateAsync(ct), "invalidate", cancellationToken);
                 break;
 
             default:
