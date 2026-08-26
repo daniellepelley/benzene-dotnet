@@ -43,7 +43,7 @@ public class TempoServiceGraphTopologyBuilderTest
         return $$"""{ "status": "success", "data": { "resultType": "vector", "result": [ {{string.Join(",", entries)}} ] } }""";
     }
 
-    private static TempoServiceGraphTopologyBuilder CreateBuilder(RoutingByMetricHttpMessageHandler handler)
+    private static TempoServiceGraphTopologyBuilder CreateBuilder(HttpMessageHandler handler)
     {
         var client = new PrometheusQueryClient(new HttpClient(handler));
         var options = new TempoTopologyOptions(PrometheusUrl);
