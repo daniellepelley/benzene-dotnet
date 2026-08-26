@@ -8,6 +8,11 @@ namespace Benzene.Azure.Function.SourceGenerators
     // forwards into the matching Benzene IAzureFunctionApp.HandleX(...) extension. Fully qualified
     // (global::) so the generated file needs no usings. Binding/dispatch shapes verified against
     // docs/azure-functions.md and src/Benzene.Azure.Function.*.
+    //
+    // Every reader validates Name first (AttributeReading.ValidateName - BENZ0008, WP-C #40), then its
+    // own required field(s) (BENZ0002-BENZ0007, WP-C #39) before building a binding: a reader that
+    // can't produce a valid trigger reports a blocking diagnostic (TriggerInfo.ForDiagnostic) instead
+    // of silently emitting an invalid/empty binding argument.
 
     internal static class ServiceBus
     {
@@ -18,11 +23,39 @@ namespace Benzene.Azure.Function.SourceGenerators
             var builder = ImmutableArray.CreateBuilder<TriggerInfo>();
             foreach (var a in context.Attributes)
             {
-                var name = AttributeReading.NamedString(a, "Name", "benzene-service-bus");
+                var location = AttributeReading.AttributeLocation(a);
+
+                var emptyName = AttributeReading.ValidateName(a, "benzene-service-bus", out var name);
+                if (emptyName is { } emptyNameDiagnostic)
+                {
+                    builder.Add(TriggerInfo.ForDiagnostic(AttributeReading.Literal(name), location, emptyNameDiagnostic));
+                    continue;
+                }
+
                 var queue = AttributeReading.NamedString(a, "QueueName", "");
                 var topic = AttributeReading.NamedString(a, "TopicName", "");
                 var subscription = AttributeReading.NamedString(a, "SubscriptionName", "");
                 var connection = AttributeReading.NamedString(a, "Connection", "ServiceBusConnection");
+
+                // #39 (BENZ0003): neither a queue nor a topic set - nothing to bind to.
+                if (queue.Length == 0 && topic.Length == 0)
+                {
+                    builder.Add(TriggerInfo.ForDiagnostic(
+                        AttributeReading.Literal(name),
+                        location,
+                        new PendingDiagnosticInfo(DiagnosticDescriptors.ServiceBusTriggerMissingDestination, AttributeReading.Literal(name))));
+                    continue;
+                }
+
+                // #42 (BENZ0009): both set - queue wins (unchanged behavior), but this used to discard
+                // the topic with no diagnostic at all. Warn, don't block: the trigger below is still
+                // generated using the same precedence as before.
+                var advisories = ImmutableArray<PendingDiagnosticInfo>.Empty;
+                if (queue.Length > 0 && (topic.Length > 0 || subscription.Length > 0))
+                {
+                    advisories = ImmutableArray.Create(
+                        new PendingDiagnosticInfo(DiagnosticDescriptors.ServiceBusAmbiguousQueueAndTopic, AttributeReading.Literal(name)));
+                }
 
                 // Queue trigger takes one positional (queue); topic trigger takes two (topic, subscription).
                 var entity = queue.Length > 0
@@ -36,7 +69,8 @@ namespace Benzene.Azure.Function.SourceGenerators
                     $"[{binding}] global::Azure.Messaging.ServiceBus.ServiceBusReceivedMessage message, global::System.Threading.CancellationToken cancellationToken",
                     "global::System.Threading.Tasks.Task",
                     "global::Benzene.Azure.Function.ServiceBus.Extensions.HandleServiceBusMessages(_app, cancellationToken, message)",
-                    AttributeReading.AttributeLocation(a)));
+                    location,
+                    advisories));
             }
 
             return builder.ToImmutable();
@@ -52,10 +86,28 @@ namespace Benzene.Azure.Function.SourceGenerators
             var builder = ImmutableArray.CreateBuilder<TriggerInfo>();
             foreach (var a in context.Attributes)
             {
-                var name = AttributeReading.NamedString(a, "Name", "benzene-event-hub");
+                var location = AttributeReading.AttributeLocation(a);
+
+                var emptyName = AttributeReading.ValidateName(a, "benzene-event-hub", out var name);
+                if (emptyName is { } emptyNameDiagnostic)
+                {
+                    builder.Add(TriggerInfo.ForDiagnostic(AttributeReading.Literal(name), location, emptyNameDiagnostic));
+                    continue;
+                }
+
                 var hub = AttributeReading.NamedString(a, "EventHubName", "");
                 var connection = AttributeReading.NamedString(a, "Connection", "EventHubConnection");
                 var consumerGroup = AttributeReading.NamedString(a, "ConsumerGroup", "");
+
+                // #39 (BENZ0004): EventHubName required.
+                if (hub.Length == 0)
+                {
+                    builder.Add(TriggerInfo.ForDiagnostic(
+                        AttributeReading.Literal(name),
+                        location,
+                        new PendingDiagnosticInfo(DiagnosticDescriptors.EventHubTriggerMissingEventHubName, AttributeReading.Literal(name))));
+                    continue;
+                }
 
                 var binding = $"global::Microsoft.Azure.Functions.Worker.EventHubTrigger({AttributeReading.Literal(hub)}, Connection = {AttributeReading.Literal(connection)}{AttributeReading.OptionalStringArg("ConsumerGroup", consumerGroup)})";
 
@@ -65,7 +117,7 @@ namespace Benzene.Azure.Function.SourceGenerators
                     $"[{binding}] global::Azure.Messaging.EventHubs.EventData[] events, global::System.Threading.CancellationToken cancellationToken",
                     "global::System.Threading.Tasks.Task",
                     "global::Benzene.Azure.Function.EventHub.Function.Extensions.HandleEventHub(_app, cancellationToken, events)",
-                    AttributeReading.AttributeLocation(a)));
+                    location));
             }
 
             return builder.ToImmutable();
@@ -81,10 +133,28 @@ namespace Benzene.Azure.Function.SourceGenerators
             var builder = ImmutableArray.CreateBuilder<TriggerInfo>();
             foreach (var a in context.Attributes)
             {
-                var name = AttributeReading.NamedString(a, "Name", "benzene-kafka");
+                var location = AttributeReading.AttributeLocation(a);
+
+                var emptyName = AttributeReading.ValidateName(a, "benzene-kafka", out var name);
+                if (emptyName is { } emptyNameDiagnostic)
+                {
+                    builder.Add(TriggerInfo.ForDiagnostic(AttributeReading.Literal(name), location, emptyNameDiagnostic));
+                    continue;
+                }
+
                 var brokerList = AttributeReading.NamedString(a, "BrokerList", "BrokerList");
                 var topic = AttributeReading.NamedString(a, "Topic", "");
                 var consumerGroup = AttributeReading.NamedString(a, "ConsumerGroup", "");
+
+                // #39 (BENZ0005): Topic required.
+                if (topic.Length == 0)
+                {
+                    builder.Add(TriggerInfo.ForDiagnostic(
+                        AttributeReading.Literal(name),
+                        location,
+                        new PendingDiagnosticInfo(DiagnosticDescriptors.KafkaTriggerMissingTopic, AttributeReading.Literal(name))));
+                    continue;
+                }
 
                 var binding = $"global::Microsoft.Azure.Functions.Worker.KafkaTrigger({AttributeReading.Literal(brokerList)}, {AttributeReading.Literal(topic)}{AttributeReading.OptionalStringArg("ConsumerGroup", consumerGroup)})";
 
@@ -94,7 +164,7 @@ namespace Benzene.Azure.Function.SourceGenerators
                     $"[{binding}] global::Benzene.Azure.Function.Kafka.KafkaRecord[] events, global::System.Threading.CancellationToken cancellationToken",
                     "global::System.Threading.Tasks.Task",
                     "global::Benzene.Azure.Function.Kafka.Extensions.HandleKafkaEvents(_app, cancellationToken, events)",
-                    AttributeReading.AttributeLocation(a)));
+                    location));
             }
 
             return builder.ToImmutable();
@@ -110,9 +180,27 @@ namespace Benzene.Azure.Function.SourceGenerators
             var builder = ImmutableArray.CreateBuilder<TriggerInfo>();
             foreach (var a in context.Attributes)
             {
-                var name = AttributeReading.NamedString(a, "Name", "benzene-queue");
+                var location = AttributeReading.AttributeLocation(a);
+
+                var emptyName = AttributeReading.ValidateName(a, "benzene-queue", out var name);
+                if (emptyName is { } emptyNameDiagnostic)
+                {
+                    builder.Add(TriggerInfo.ForDiagnostic(AttributeReading.Literal(name), location, emptyNameDiagnostic));
+                    continue;
+                }
+
                 var queue = AttributeReading.NamedString(a, "QueueName", "");
                 var connection = AttributeReading.NamedString(a, "Connection", "AzureWebJobsStorage");
+
+                // #39 (BENZ0006): QueueName required.
+                if (queue.Length == 0)
+                {
+                    builder.Add(TriggerInfo.ForDiagnostic(
+                        AttributeReading.Literal(name),
+                        location,
+                        new PendingDiagnosticInfo(DiagnosticDescriptors.QueueStorageTriggerMissingQueueName, AttributeReading.Literal(name))));
+                    continue;
+                }
 
                 var binding = $"global::Microsoft.Azure.Functions.Worker.QueueTrigger({AttributeReading.Literal(queue)}, Connection = {AttributeReading.Literal(connection)})";
 
@@ -122,7 +210,7 @@ namespace Benzene.Azure.Function.SourceGenerators
                     $"[{binding}] string messageText, global::System.Threading.CancellationToken cancellationToken",
                     "global::System.Threading.Tasks.Task",
                     "global::Benzene.Azure.Function.QueueStorage.Extensions.HandleQueueMessage(_app, messageText, cancellationToken)",
-                    AttributeReading.AttributeLocation(a)));
+                    location));
             }
 
             return builder.ToImmutable();
@@ -138,9 +226,27 @@ namespace Benzene.Azure.Function.SourceGenerators
             var builder = ImmutableArray.CreateBuilder<TriggerInfo>();
             foreach (var a in context.Attributes)
             {
-                var name = AttributeReading.NamedString(a, "Name", "benzene-blob");
+                var location = AttributeReading.AttributeLocation(a);
+
+                var emptyName = AttributeReading.ValidateName(a, "benzene-blob", out var name);
+                if (emptyName is { } emptyNameDiagnostic)
+                {
+                    builder.Add(TriggerInfo.ForDiagnostic(AttributeReading.Literal(name), location, emptyNameDiagnostic));
+                    continue;
+                }
+
                 var path = AttributeReading.NamedString(a, "Path", "");
                 var connection = AttributeReading.NamedString(a, "Connection", "AzureWebJobsStorage");
+
+                // #39 (BENZ0007): Path required.
+                if (path.Length == 0)
+                {
+                    builder.Add(TriggerInfo.ForDiagnostic(
+                        AttributeReading.Literal(name),
+                        location,
+                        new PendingDiagnosticInfo(DiagnosticDescriptors.BlobStorageTriggerMissingPath, AttributeReading.Literal(name))));
+                    continue;
+                }
 
                 var binding = $"global::Microsoft.Azure.Functions.Worker.BlobTrigger({AttributeReading.Literal(path)}, Connection = {AttributeReading.Literal(connection)})";
 
@@ -151,7 +257,7 @@ namespace Benzene.Azure.Function.SourceGenerators
                     $"[{binding}] byte[] content, string name, global::System.Threading.CancellationToken cancellationToken",
                     "global::System.Threading.Tasks.Task",
                     "global::Benzene.Azure.Function.BlobStorage.Extensions.HandleBlob(_app, name, content, cancellationToken)",
-                    AttributeReading.AttributeLocation(a)));
+                    location));
             }
 
             return builder.ToImmutable();
@@ -167,7 +273,14 @@ namespace Benzene.Azure.Function.SourceGenerators
             var builder = ImmutableArray.CreateBuilder<TriggerInfo>();
             foreach (var a in context.Attributes)
             {
-                var name = AttributeReading.NamedString(a, "Name", "benzene-event-grid");
+                var location = AttributeReading.AttributeLocation(a);
+
+                var emptyName = AttributeReading.ValidateName(a, "benzene-event-grid", out var name);
+                if (emptyName is { } emptyNameDiagnostic)
+                {
+                    builder.Add(TriggerInfo.ForDiagnostic(AttributeReading.Literal(name), location, emptyNameDiagnostic));
+                    continue;
+                }
 
                 // Bind as string (both the Event Grid schema and CloudEvents 1.0 arrive as JSON Benzene parses).
                 builder.Add(new TriggerInfo(
@@ -176,7 +289,7 @@ namespace Benzene.Azure.Function.SourceGenerators
                     "[global::Microsoft.Azure.Functions.Worker.EventGridTrigger] string eventJson, global::System.Threading.CancellationToken cancellationToken",
                     "global::System.Threading.Tasks.Task",
                     "global::Benzene.Azure.Function.EventGrid.Extensions.HandleEventGridEvent(_app, eventJson, cancellationToken)",
-                    AttributeReading.AttributeLocation(a)));
+                    location));
             }
 
             return builder.ToImmutable();
@@ -192,17 +305,25 @@ namespace Benzene.Azure.Function.SourceGenerators
             var builder = ImmutableArray.CreateBuilder<TriggerInfo>();
             foreach (var a in context.Attributes)
             {
-                var name = AttributeReading.NamedString(a, "Name", "benzene-cosmos");
+                var location = AttributeReading.AttributeLocation(a);
+
+                var emptyName = AttributeReading.ValidateName(a, "benzene-cosmos", out var name);
+                if (emptyName is { } emptyNameDiagnostic)
+                {
+                    builder.Add(TriggerInfo.ForDiagnostic(AttributeReading.Literal(name), location, emptyNameDiagnostic));
+                    continue;
+                }
+
                 var documentType = AttributeReading.NamedType(a, "DocumentType");
                 if (documentType == null)
                 {
                     // DocumentType is required (the change feed is generic over it). A declared
                     // trigger that's silently *not* generated is the worst outcome, so report BENZ0002
                     // instead of skipping it - see DiagnosticDescriptors.
-                    builder.Add(TriggerInfo.ForDiagnostic(Diagnostic.Create(
-                        DiagnosticDescriptors.CosmosDbTriggerMissingDocumentType,
-                        AttributeReading.AttributeLocation(a),
-                        AttributeReading.Literal(name))));
+                    builder.Add(TriggerInfo.ForDiagnostic(
+                        AttributeReading.Literal(name),
+                        location,
+                        new PendingDiagnosticInfo(DiagnosticDescriptors.CosmosDbTriggerMissingDocumentType, AttributeReading.Literal(name))));
                     continue;
                 }
 
@@ -227,7 +348,7 @@ namespace Benzene.Azure.Function.SourceGenerators
                     $"[{binding}] global::System.Collections.Generic.IReadOnlyList<{documentType}> documents, global::System.Threading.CancellationToken cancellationToken",
                     "global::System.Threading.Tasks.Task",
                     $"global::Benzene.Azure.Function.CosmosDb.Extensions.HandleCosmosDbChanges<{documentType}>(_app, documents, cancellationToken)",
-                    AttributeReading.AttributeLocation(a)));
+                    location));
             }
 
             return builder.ToImmutable();
@@ -243,7 +364,15 @@ namespace Benzene.Azure.Function.SourceGenerators
             var builder = ImmutableArray.CreateBuilder<TriggerInfo>();
             foreach (var a in context.Attributes)
             {
-                var name = AttributeReading.NamedString(a, "Name", "benzene-timer");
+                var location = AttributeReading.AttributeLocation(a);
+
+                var emptyName = AttributeReading.ValidateName(a, "benzene-timer", out var name);
+                if (emptyName is { } emptyNameDiagnostic)
+                {
+                    builder.Add(TriggerInfo.ForDiagnostic(AttributeReading.Literal(name), location, emptyNameDiagnostic));
+                    continue;
+                }
+
                 var schedule = AttributeReading.NamedString(a, "Schedule", "0 */5 * * * *");
                 var runOnStartup = AttributeReading.NamedBool(a, "RunOnStartup", false);
 
@@ -258,7 +387,7 @@ namespace Benzene.Azure.Function.SourceGenerators
                     // TimerTriggerInfo - there's no conversion, so (as before this change) it's bound
                     // but intentionally not forwarded; only cancellationToken is new here.
                     "global::Benzene.Azure.Function.Timer.Extensions.HandleTimer(_app, cancellationToken: cancellationToken)",
-                    AttributeReading.AttributeLocation(a)));
+                    location));
             }
 
             return builder.ToImmutable();

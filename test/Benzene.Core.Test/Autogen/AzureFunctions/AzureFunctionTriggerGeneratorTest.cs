@@ -232,4 +232,112 @@ namespace App { public class OrderDoc { } }
         Assert.Contains(@"[global::Microsoft.Azure.Functions.Worker.Function(""ok"")]", output);
         Assert.Equal(2, diagnostics.Length);
     }
+
+    // WP-C, #32: the BENZ0001 collision check used to run AFTER filtering out triggers that carry
+    // their own PendingDiagnostic (e.g. a CosmosDb trigger missing DocumentType) - so a collision where
+    // one side is broken reported only BENZ0002 and silently shipped the OTHER (valid) trigger under
+    // the shared name, with no BENZ0001 at all. The check must now run over the FULL declared set, so
+    // both diagnostics fire and NEITHER trigger is emitted.
+    [Fact]
+    public void DuplicateFunctionName_WhereOneSideHasItsOwnPendingDiagnostic_ReportsBoth()
+    {
+        var (output, diagnostics) = GenerateResult(
+            @"[assembly: Benzene.Azure.Function.CosmosDb.BenzeneCosmosDbTrigger(Name = ""dup"", DatabaseName = ""shop"", ContainerName = ""orders"")]" +
+            @"[assembly: Benzene.Azure.Function.Kafka.BenzeneKafkaTrigger(Name = ""dup"", Topic = ""orders"")]");
+
+        Assert.DoesNotContain("CosmosDBTrigger", output);
+        Assert.DoesNotContain(@"[global::Microsoft.Azure.Functions.Worker.Function(""dup"")]", output);
+
+        Assert.Contains(diagnostics, d => d.Id == "BENZ0002");
+        // The valid (Kafka) side of the collision must not silently ship under the shared name - it
+        // gets its own BENZ0001 even though the OTHER side's problem is a different diagnostic.
+        Assert.Contains(diagnostics, d => d.Id == "BENZ0001");
+    }
+
+    // WP-C, #39: only CosmosDb (BENZ0002) validated its required field; extended to the other five
+    // transports with a required binding value. Each must report a build-time diagnostic and emit
+    // nothing, instead of silently producing e.g. ServiceBusTrigger("", "").
+    [Theory]
+    [InlineData(
+        @"[assembly: Benzene.Azure.Function.ServiceBus.BenzeneServiceBusTrigger(Name = ""sb"", Connection = ""ServiceBusConnection"")]",
+        "BENZ0003", "ServiceBusTrigger")]
+    [InlineData(
+        @"[assembly: Benzene.Azure.Function.EventHub.BenzeneEventHubTrigger(Name = ""eh"")]",
+        "BENZ0004", "EventHubTrigger")]
+    [InlineData(
+        @"[assembly: Benzene.Azure.Function.Kafka.BenzeneKafkaTrigger(Name = ""k"", BrokerList = ""BrokerList"")]",
+        "BENZ0005", "KafkaTrigger")]
+    [InlineData(
+        @"[assembly: Benzene.Azure.Function.QueueStorage.BenzeneQueueTrigger(Name = ""q"")]",
+        "BENZ0006", "QueueTrigger")]
+    [InlineData(
+        @"[assembly: Benzene.Azure.Function.BlobStorage.BenzeneBlobTrigger(Name = ""b"")]",
+        "BENZ0007", "BlobTrigger")]
+    public void MissingRequiredField_ReportsDiagnosticAndEmitsNothing(string declaration, string expectedId, string bindingNameThatMustNotAppear)
+    {
+        var (output, diagnostics) = GenerateResult(declaration);
+
+        Assert.DoesNotContain(bindingNameThatMustNotAppear, output);
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(expectedId, diagnostic.Id);
+        Assert.Equal(DiagnosticSeverity.Error, diagnostic.Severity);
+    }
+
+    // WP-C, #40: AttributeReading.NamedString couldn't distinguish "Name absent" (correctly defaults)
+    // from "Name explicitly set to an empty/whitespace string" (invalid - [Function("")] is meaningless)
+    // across all 9 transports. Two representative transports (HTTP - single-attribute providers like
+    // it get no positional-argument-driven default path - and a messaging transport) exercise the
+    // shared AttributeReading.ValidateName path every transport now calls through.
+    [Theory]
+    [InlineData(@"[assembly: Benzene.Azure.Function.AspNet.BenzeneHttpTrigger(Name = """")]")]
+    [InlineData(@"[assembly: Benzene.Azure.Function.AspNet.BenzeneHttpTrigger(Name = ""   "")]")]
+    [InlineData(@"[assembly: Benzene.Azure.Function.QueueStorage.BenzeneQueueTrigger(Name = """", QueueName = ""qa"")]")]
+    public void ExplicitlyEmptyName_ReportsBENZ0008AndEmitsNothing(string declaration)
+    {
+        var (output, diagnostics) = GenerateResult(declaration);
+
+        Assert.DoesNotContain("global::Microsoft.Azure.Functions.Worker.Function(", output);
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal("BENZ0008", diagnostic.Id);
+        Assert.Equal(DiagnosticSeverity.Error, diagnostic.Severity);
+    }
+
+    // An ABSENT Name must still default, not trip the new #40 check - regression guard alongside the
+    // explicit-empty cases above.
+    [Fact]
+    public void AbsentName_StillDefaults_NoDiagnostic()
+    {
+        var (output, diagnostics) = GenerateResult(@"[assembly: Benzene.Azure.Function.QueueStorage.BenzeneQueueTrigger(QueueName = ""qa"")]");
+
+        Assert.Empty(diagnostics);
+        Assert.Contains(@"[global::Microsoft.Azure.Functions.Worker.Function(""benzene-queue"")]", output);
+    }
+
+    // WP-C, #42: setting both QueueName and TopicName/SubscriptionName used to silently prefer the
+    // queue and discard the topic with no diagnostic at all. Now warns (BENZ0009) but keeps the same
+    // precedence - the trigger is still generated, using the queue.
+    [Fact]
+    public void ServiceBus_BothQueueAndTopicSet_ReportsBENZ0009ButStillEmitsUsingQueue()
+    {
+        var (output, diagnostics) = GenerateResult(
+            @"[assembly: Benzene.Azure.Function.ServiceBus.BenzeneServiceBusTrigger(Name = ""sb"", QueueName = ""orders"", TopicName = ""audit"", SubscriptionName = ""svc"")]");
+
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal("BENZ0009", diagnostic.Id);
+        Assert.Equal(DiagnosticSeverity.Warning, diagnostic.Severity);
+
+        Assert.Contains(@"[global::Microsoft.Azure.Functions.Worker.Function(""sb"")]", output);
+        Assert.Contains(@"global::Microsoft.Azure.Functions.Worker.ServiceBusTrigger(""orders"", Connection = ""ServiceBusConnection"")", output);
+    }
+
+    // Setting only ONE of queue/topic must never trip the new #42 warning - regression guard alongside
+    // the existing ServiceBus_Queue_/ServiceBus_Topic_ tests above.
+    [Fact]
+    public void ServiceBus_OnlyQueueSet_NoAmbiguityDiagnostic()
+    {
+        var (_, diagnostics) = GenerateResult(
+            @"[assembly: Benzene.Azure.Function.ServiceBus.BenzeneServiceBusTrigger(Name = ""sb"", QueueName = ""orders"")]");
+
+        Assert.Empty(diagnostics);
+    }
 }

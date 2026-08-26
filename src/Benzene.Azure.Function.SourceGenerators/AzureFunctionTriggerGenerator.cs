@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using System.Text;
@@ -14,7 +16,8 @@ namespace Benzene.Azure.Function.SourceGenerators
     /// invocation into the built <c>IAzureFunctionApp</c>. The user declares <em>what</em> triggers
     /// they want (and their bindings — route, queue, hub, …); the generator writes the ceremony.
     /// See <c>work/archive/azure-functions-trigger-codegen-design-2026-08.md</c> and, for the
-    /// diagnostics path, <c>work/bug-fix-designs-2026-08.md</c> (WP-5a).
+    /// diagnostics path, <c>work/bug-fix-designs-2026-08.md</c> (WP-5a) and
+    /// <c>work/bug-fix-designs-round7-10-2026-08.md</c> (WP-C).
     /// </summary>
     [Generator]
     public class AzureFunctionTriggerGenerator : IIncrementalGenerator
@@ -34,21 +37,49 @@ namespace Benzene.Azure.Function.SourceGenerators
             var cosmosDb = MakeProvider(context, CosmosDb.AttributeName, CosmosDb.Read);
             var timer = MakeProvider(context, Timer.AttributeName, Timer.Read);
 
-            // Every transport's triggers merge into ONE array before Execute runs, rather than each
-            // transport getting its own RegisterSourceOutput (as before this change). A per-transport
-            // output could only ever see its own triggers, so it could never catch a Function name
-            // shared *across* transports - and round 6 proved that collision is real: a
-            // BenzeneQueueTrigger(Name="dup") and a BenzeneKafkaTrigger(Name="dup") in the same
-            // compilation collide just the same as two queue triggers named "dup" would (BENZ0001).
+            // A Function name must be unique ACROSS THE WHOLE APP, and Azure Functions doesn't know or
+            // care which binding produced it - round 6 proved the collision is cross-transport (a
+            // BenzeneQueueTrigger(Name="dup") and a BenzeneKafkaTrigger(Name="dup") collide just the
+            // same as two queue triggers named "dup" would). So collision detection stays a GLOBAL view
+            // over every transport's triggers, computed here...
+            //
+            // ...but emission does NOT: each transport gets its OWN RegisterSourceOutput below (restored
+            // from the pre-WP-5-merge shape - WP-C, #38's incrementality-regression half). A transport's
+            // own class names can never collide with another transport's (each appends its own distinct
+            // suffix - "…HttpFunction", "…ServiceBusFunction", … - see each Read() below), so
+            // per-transport emission needs no cross-transport class-name coordination either. This
+            // restores the incremental granularity WP-5's merge-into-one-array lost: an edit to one
+            // transport's declarations no longer forces every OTHER transport to re-emit - see
+            // RegisterTransport's doc comment for the (non-obvious) comparer this actually depends on.
+            //
+            // #32: the collision view is computed over the FULL declared set, INCLUDING an entry that
+            // carries its own blocking diagnostic (e.g. a CosmosDb trigger missing DocumentType) - so a
+            // collision where one side is broken still reports BENZ0001 for the other side instead of
+            // being masked by the broken side's own diagnostic. TriggerInfo.ForDiagnostic always
+            // records the attempted FunctionNameLiteral for exactly this reason.
             var allTriggers = Merge(http, serviceBus, eventHub, kafka, queueStorage, blobStorage, eventGrid, cosmosDb, timer);
+            var duplicateNames = allTriggers
+                .Select(static (triggers, _) => ComputeDuplicateNames(triggers))
+                .WithComparer(SequenceEqualComparer.Instance);
 
-            context.RegisterSourceOutput(allTriggers, static (spc, triggers) => Execute(spc, triggers));
+            // Tracking names exist purely so a test can assert the incremental granularity this
+            // restores (GeneratorDriverRunResult.Results[i].TrackedSteps) - they have no effect on
+            // emitted output.
+            RegisterTransport(context, "http", http, duplicateNames);
+            RegisterTransport(context, "serviceBus", serviceBus, duplicateNames);
+            RegisterTransport(context, "eventHub", eventHub, duplicateNames);
+            RegisterTransport(context, "kafka", kafka, duplicateNames);
+            RegisterTransport(context, "queueStorage", queueStorage, duplicateNames);
+            RegisterTransport(context, "blobStorage", blobStorage, duplicateNames);
+            RegisterTransport(context, "eventGrid", eventGrid, duplicateNames);
+            RegisterTransport(context, "cosmosDb", cosmosDb, duplicateNames);
+            RegisterTransport(context, "timer", timer, duplicateNames);
         }
 
         private static IncrementalValuesProvider<TriggerInfo> MakeProvider(
             IncrementalGeneratorInitializationContext context,
             string attributeMetadataName,
-            System.Func<GeneratorAttributeSyntaxContext, ImmutableArray<TriggerInfo>> read)
+            Func<GeneratorAttributeSyntaxContext, ImmutableArray<TriggerInfo>> read)
         {
             return context.SyntaxProvider
                 .ForAttributeWithMetadataName(
@@ -72,57 +103,98 @@ namespace Benzene.Azure.Function.SourceGenerators
             return combined;
         }
 
-        private static void Execute(SourceProductionContext context, ImmutableArray<TriggerInfo> triggers)
+        /// <summary>The set of Function-name literals used by more than one declared trigger (§32/§38 - see Initialize).</summary>
+        private static ImmutableArray<string> ComputeDuplicateNames(ImmutableArray<TriggerInfo> triggers)
+        {
+            if (triggers.IsDefaultOrEmpty)
+            {
+                return ImmutableArray<string>.Empty;
+            }
+
+            return triggers
+                .Where(static t => t.FunctionNameLiteral.Length > 0)
+                .GroupBy(static t => t.FunctionNameLiteral, StringComparer.Ordinal)
+                .Where(static g => g.Count() > 1)
+                .Select(static g => g.Key)
+                .OrderBy(static k => k, StringComparer.Ordinal)
+                .ToImmutableArray();
+        }
+
+        /// <summary>
+        /// Registers ONE transport's own <c>RegisterSourceOutput</c>: its own triggers, combined with
+        /// the (small, globally-computed) set of colliding Function names.
+        ///
+        /// Two comparers do the actual incrementality work here, and both are load-bearing -
+        /// <c>ImmutableArray&lt;T&gt;</c>'s own <see cref="IEquatable{T}"/> implementation compares the
+        /// underlying array by REFERENCE, not content, so without them EVERY node below would report
+        /// "changed" on every single run regardless of whether anything relevant actually changed,
+        /// silently defeating per-transport registration entirely (confirmed live: without
+        /// <see cref="TriggerInfoSequenceComparer"/>, editing one transport still forced every other
+        /// transport's <c>RegisterSourceOutput</c> callback to re-run - the exact regression this
+        /// restructure exists to fix):
+        /// - <see cref="TriggerInfoSequenceComparer"/> on <c>transport.Collect()</c>: this transport's
+        ///   own triggers, so an edit elsewhere (including to another transport) that leaves THIS
+        ///   transport's own declarations unchanged doesn't count as a change here.
+        /// - <see cref="SequenceEqualComparer"/> on <c>duplicateNames</c> (installed where it's built, in
+        ///   <see cref="Initialize"/>): the globally-computed set of colliding names, so a change to
+        ///   another transport that doesn't alter which names collide doesn't propagate into this
+        ///   transport's combine either, even though the global view underneath it was recomputed.
+        /// </summary>
+        private static void RegisterTransport(
+            IncrementalGeneratorInitializationContext context,
+            string trackingName,
+            IncrementalValuesProvider<TriggerInfo> transport,
+            IncrementalValueProvider<ImmutableArray<string>> duplicateNames)
+        {
+            var collected = transport.Collect().WithComparer(TriggerInfoSequenceComparer.Instance);
+            var combined = collected.Combine(duplicateNames).WithTrackingName(trackingName);
+            context.RegisterSourceOutput(combined, static (spc, pair) => Execute(spc, pair.Left, pair.Right));
+        }
+
+        private static void Execute(SourceProductionContext context, ImmutableArray<TriggerInfo> triggers, ImmutableArray<string> duplicateNames)
         {
             if (triggers.IsDefaultOrEmpty)
             {
                 return;
             }
 
-            var candidates = new System.Collections.Generic.List<TriggerInfo>(triggers.Length);
+            // Class names only need to be unique WITHIN this transport's own output - each transport's
+            // ClassName carries its own distinct suffix (e.g. "…QueueFunction" vs "…KafkaFunction"), so
+            // two different transports can never collide here even though each now runs its own
+            // RegisterSourceOutput independently.
+            var usedClassNames = new HashSet<string>();
+
             foreach (var trigger in triggers)
             {
-                if (trigger.PendingDiagnostic is { } diagnostic)
+                // A Function name must be unique across the whole app; deliberately NOT auto-renamed
+                // the way the class name below is - see DiagnosticDescriptors.DuplicateFunctionName.
+                var isDuplicate = trigger.FunctionNameLiteral.Length > 0 && duplicateNames.Contains(trigger.FunctionNameLiteral);
+                if (isDuplicate)
                 {
-                    // e.g. BENZ0002 - a transport reader couldn't produce a valid trigger and asked
-                    // for this to be reported instead of silently dropping the declaration.
-                    context.ReportDiagnostic(diagnostic);
+                    context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.DuplicateFunctionName, trigger.Location, trigger.FunctionNameLiteral));
+                }
+
+                if (trigger.BlockingDiagnostic is { } blocking)
+                {
+                    // e.g. BENZ0002.../BENZ0008 - a transport reader couldn't produce a valid trigger
+                    // and asked for this to be reported instead of silently dropping the declaration.
+                    context.ReportDiagnostic(blocking.ToDiagnostic(trigger.Location));
                     continue;
                 }
 
-                candidates.Add(trigger);
-            }
-
-            // A Function name must be unique across the whole app; a class name must be unique in the
-            // generated namespace. The class name is deduped deterministically (auto-uniquified below)
-            // since it's an internal implementation detail nothing outside the generated assembly sees.
-            //
-            // The Function name is NOT auto-uniquified the same way (this is a deliberate, recorded
-            // decision - see DiagnosticDescriptors.DuplicateFunctionName / BENZ0001): it's externally
-            // meaningful (bindings, host.json, scale rules, the portal's identity for the function), so
-            // silently picking a different one would only move the failure from build time to
-            // deployment time. Two or more triggers sharing a name is reported and none of them are
-            // emitted - which one would be "correct" to keep is exactly the ambiguity the user needs to
-            // resolve, so guessing would just trade one silent problem for another.
-            var usedClassNames = new System.Collections.Generic.HashSet<string>();
-
-            foreach (var group in candidates.GroupBy(t => t.FunctionNameLiteral))
-            {
-                var duplicates = group.ToList();
-                if (duplicates.Count > 1)
+                if (isDuplicate)
                 {
-                    foreach (var duplicate in duplicates)
-                    {
-                        context.ReportDiagnostic(Diagnostic.Create(
-                            DiagnosticDescriptors.DuplicateFunctionName,
-                            duplicate.Location,
-                            duplicate.FunctionNameLiteral));
-                    }
-
+                    // Neither colliding declaration is emitted - which one would be "correct" to keep
+                    // is exactly the ambiguity the user needs to resolve, so the generator doesn't guess.
                     continue;
                 }
 
-                var trigger = duplicates[0];
+                foreach (var advisory in trigger.AdvisoryDiagnostics)
+                {
+                    // e.g. BENZ0009 - non-blocking: the trigger below is still generated.
+                    context.ReportDiagnostic(advisory.ToDiagnostic(trigger.Location));
+                }
+
                 var className = Unique(usedClassNames, trigger.ClassName);
 
                 var sb = new StringBuilder();
@@ -146,7 +218,7 @@ namespace Benzene.Azure.Function.SourceGenerators
             }
         }
 
-        private static string Unique(System.Collections.Generic.HashSet<string> used, string candidate)
+        private static string Unique(HashSet<string> used, string candidate)
         {
             if (used.Add(candidate))
             {
@@ -160,6 +232,62 @@ namespace Benzene.Azure.Function.SourceGenerators
             }
 
             return candidate + i;
+        }
+
+        /// <summary>Sequence-equality comparer so a content-unchanged duplicate-name set doesn't invalidate the per-transport combine (see <see cref="RegisterTransport"/>).</summary>
+        private sealed class SequenceEqualComparer : IEqualityComparer<ImmutableArray<string>>
+        {
+            public static readonly SequenceEqualComparer Instance = new();
+
+            public bool Equals(ImmutableArray<string> x, ImmutableArray<string> y) =>
+                x.IsDefaultOrEmpty ? y.IsDefaultOrEmpty : !y.IsDefaultOrEmpty && x.SequenceEqual(y, StringComparer.Ordinal);
+
+            public int GetHashCode(ImmutableArray<string> obj)
+            {
+                if (obj.IsDefaultOrEmpty)
+                {
+                    return 0;
+                }
+
+                unchecked
+                {
+                    var hash = 17;
+                    foreach (var s in obj)
+                    {
+                        hash = hash * 31 + s.GetHashCode();
+                    }
+
+                    return hash;
+                }
+            }
+        }
+
+        /// <summary>Sequence-equality comparer so a content-unchanged transport doesn't invalidate its own <c>RegisterSourceOutput</c> combine (see <see cref="RegisterTransport"/>).</summary>
+        private sealed class TriggerInfoSequenceComparer : IEqualityComparer<ImmutableArray<TriggerInfo>>
+        {
+            public static readonly TriggerInfoSequenceComparer Instance = new();
+
+            public bool Equals(ImmutableArray<TriggerInfo> x, ImmutableArray<TriggerInfo> y) =>
+                x.IsDefaultOrEmpty ? y.IsDefaultOrEmpty : !y.IsDefaultOrEmpty && x.SequenceEqual(y);
+
+            public int GetHashCode(ImmutableArray<TriggerInfo> obj)
+            {
+                if (obj.IsDefaultOrEmpty)
+                {
+                    return 0;
+                }
+
+                unchecked
+                {
+                    var hash = 17;
+                    foreach (var t in obj)
+                    {
+                        hash = hash * 31 + t.GetHashCode();
+                    }
+
+                    return hash;
+                }
+            }
         }
     }
 }
