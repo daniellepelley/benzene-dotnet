@@ -920,6 +920,17 @@ seams".
   call sites directly (`AspNetCancellationForwardingTest`), isolated from the AspNetContext pipeline's
   own independent `RequestAborted` seeding middleware so each call site's forwarding is provable on
   its own. See WP-Y.
+- **[RESOLVED] #106 — `InlineAwsLambdaStartUp.Build()` ran `Configure` before `ConfigureServices`,
+  inverted vs. the production host (`AwsLambdaHost`'s constructor: `ConfigureServices` then
+  `Configure`).** Since transport `Use*` extensions self-register defaults via `TryAdd*` (first
+  registration wins), a user's `ConfigureServices` override of a framework default won in production
+  but silently lost under the inline test host. Swapped the two calls to match `AwsLambdaHost`'s
+  order. Added a red→green test registering a custom `IMessageHandlerResultSetter<SqsMessageContext>`
+  via `TryAddScoped` in `ConfigureServices`, ahead of `UseSqs`'s own `TryAdd` default — failed before
+  the fix (the default setter ran), passes after (`InlineAwsLambdaStartUpOrderingTest`). Also added an
+  XML-doc remark that `Build()` deliberately runs `RunStartUpChecks()` but not `WarmUp()` (warm-up
+  exists for Lambda's INIT phase, which an inline test host about to invoke immediately has no
+  equivalent of). See WP-Y.
 
 ---
 
