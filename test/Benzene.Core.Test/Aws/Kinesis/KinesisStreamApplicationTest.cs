@@ -199,4 +199,44 @@ public class KinesisStreamApplicationTest
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => application.HandleAsync(CreateKinesisEvent("1", "2"), ServiceResolverFactory()));
     }
+
+    [Fact]
+    public async Task HandleAsync_ResumePointRecordHasNoKinesisData_DoesNotThrow()
+    {
+        // Regression test for #162: FirstUncheckpointedSequenceNumber runs from the resultMapper,
+        // which the base MiddlewareApplication invokes AFTER CatchAndCheckpointPipeline's own
+        // try/catch has already returned - so it used to NRE straight past CatchExceptions whenever
+        // the record at the resume point had no Kinesis payload (a malformed record). It must
+        // degrade to a null resume point instead of crashing the whole invocation.
+        var malformedRecord = new KinesisEventRecord { EventSource = "aws:kinesis", EventId = "shardId-1", Kinesis = null };
+        var services = ServiceResolverMother.CreateServiceCollection();
+        var pipeline = new MiddlewarePipelineBuilder<StreamContext<KinesisEventRecord>>(
+                new MicrosoftBenzeneServiceContainer(services))
+            .UseStream(async context =>
+            {
+                var processed = 0;
+                await foreach (var record in context.Items)
+                {
+                    processed++;
+                    if (processed == 1)
+                    {
+                        await context.Checkpointer.CheckpointAsync(record);
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException("boom");
+                    }
+                }
+            })
+            .Build();
+        var application = new KinesisStreamApplication(pipeline);
+
+        var @event = new KinesisEvent { Records = new List<KinesisEventRecord> { NewRecord("1"), malformedRecord } };
+
+        var response = await application.HandleAsync(@event, ServiceResolverFactory());
+
+        // Can't name a sequence number for a record with no Kinesis payload, so this degrades to "no
+        // failure reported" rather than crashing the invocation with an unhandled NRE.
+        Assert.Empty(response.BatchItemFailures);
+    }
 }

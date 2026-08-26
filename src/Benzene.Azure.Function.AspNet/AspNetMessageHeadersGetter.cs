@@ -30,6 +30,12 @@ public class AspNetMessageHeadersGetter : IMessageHeadersGetter<AspNetContext>
         // Header field NAMES are case-insensitive (lower-case them for lookup stability), but VALUES
         // are opaque and case-sensitive (RFC 9110) - lower-casing a value corrupts bearer tokens,
         // correlation IDs, base64, etc. Preserve the value verbatim.
+        //
+        // OrdinalIgnoreCase on the returned dictionary itself (#165/#164 - the same defect class as
+        // ApiGatewayHttpRequestAdapter before #105): ToDictionary with no comparer built a
+        // plain-ordinal dictionary of already-lower-cased keys, so a lookup with any casing other
+        // than the exact lower-cased form chosen here would fail even though every key was already
+        // lower-cased.
         return context.HttpRequest.Headers
             .Select(x => _headerMapping.ContainsKey(x.Key.ToLowerInvariant())
                 ? (_headerMapping[x.Key.ToLowerInvariant()], context.HttpRequest.Headers[x.Key].First())
@@ -37,6 +43,6 @@ public class AspNetMessageHeadersGetter : IMessageHeadersGetter<AspNetContext>
             )
             .GroupBy(x => x.Item1)
             .Select(x => x.First())
-            .ToDictionary(x => x.Item1.ToLowerInvariant(), x => x.Item2);
+            .ToDictionary(x => x.Item1.ToLowerInvariant(), x => x.Item2, StringComparer.OrdinalIgnoreCase);
     }
 }

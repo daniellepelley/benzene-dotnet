@@ -92,6 +92,29 @@ namespace Benzene.Test.Aws.Sns
         }
 
         [Fact]
+        public void SnsMessageHeadersGetter_IsCaseInsensitive_RegardlessOfWhetherAttributesArePresent()
+        {
+            // Previously only the empty-dictionary fallback (no MessageAttributes) used
+            // OrdinalIgnoreCase; the populated path built a plain Dictionary, so header-name
+            // case-sensitivity silently depended on whether the record carried any attributes.
+            var withAttributes = SnsRecordContext.CreateInstance(null, new SNSEvent.SNSRecord
+            {
+                Sns = new SNSEvent.SNSMessage
+                {
+                    Message = "some-message",
+                    MessageAttributes = new Dictionary<string, SNSEvent.MessageAttribute>
+                    {
+                        { "Correlation-Id", new SNSEvent.MessageAttribute { Value = "abc-123" } }
+                    }
+                }
+            });
+
+            var headers = new SnsMessageHeadersGetter().GetHeaders(withAttributes);
+
+            Assert.Equal("abc-123", headers["correlation-id"]);
+        }
+
+        [Fact]
         public async System.Threading.Tasks.Task SnsMessageBodySetter_ReplacesTheRawMessage()
         {
             var snsRecordContext = SnsRecordContext.CreateInstance(null, new SNSEvent.SNSRecord

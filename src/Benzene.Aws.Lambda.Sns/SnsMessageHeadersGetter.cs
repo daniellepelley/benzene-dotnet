@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using Benzene.Abstractions.Messages.Mappers;
 
 namespace Benzene.Aws.Lambda.Sns;
@@ -21,8 +20,20 @@ public class SnsMessageHeadersGetter : IMessageHeadersGetter<SnsRecordContext>
         // object): an SNS record deserialized from a payload with no MessageAttributes field has a
         // null MessageAttributes, and the topic path handles that gracefully - the headers path must
         // too, rather than NRE-ing out of the invocation on the same record.
-        return context.SnsRecord.Sns?.MessageAttributes?
-            .ToDictionary(x => x.Key, x => x.Value.Value)
-            ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        //
+        // OrdinalIgnoreCase on both branches - previously only the empty-dictionary fallback used
+        // it, so the comparer (and therefore header-name case-sensitivity) silently depended on
+        // whether the record happened to carry any attributes.
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        if (context.SnsRecord.Sns?.MessageAttributes != null)
+        {
+            foreach (var attribute in context.SnsRecord.Sns.MessageAttributes)
+            {
+                headers[attribute.Key] = attribute.Value.Value;
+            }
+        }
+
+        return headers;
     }
 }

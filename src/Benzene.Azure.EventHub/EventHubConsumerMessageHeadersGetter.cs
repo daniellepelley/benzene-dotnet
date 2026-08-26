@@ -14,8 +14,18 @@ public class EventHubConsumerMessageHeadersGetter : IMessageHeadersGetter<EventH
     /// <returns>The message headers.</returns>
     public IDictionary<string, string> GetHeaders(EventHubConsumerContext context)
     {
-        return context.EventData.Properties
-            .Where(x => x.Value is string)
-            .ToDictionary(x => x.Key, x => (string)x.Value);
+        // OrdinalIgnoreCase, matching every other built-in getter's headers dictionary (#165) -
+        // ToDictionary with no comparer built a plain-ordinal (case-sensitive) dictionary here.
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var property in context.EventData.Properties)
+        {
+            if (property.Value is string value)
+            {
+                headers[property.Key] = value;
+            }
+        }
+
+        return headers;
     }
 }

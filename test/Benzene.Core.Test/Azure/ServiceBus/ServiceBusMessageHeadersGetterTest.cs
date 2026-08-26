@@ -25,4 +25,22 @@ public class ServiceBusMessageHeadersGetterTest
         Assert.Equal("some-topic", headers["topic"]);
         Assert.False(headers.ContainsKey("count"));
     }
+
+    [Fact]
+    public void GetHeaders_IsCaseInsensitive()
+    {
+        // #165: ToDictionary with no comparer built a plain-ordinal (case-sensitive) dictionary here,
+        // unlike every other built-in getter's headers dictionary.
+        var message = ServiceBusModelFactory.ServiceBusReceivedMessage(
+            body: new BinaryData("some-message"),
+            properties: new Dictionary<string, object>
+            {
+                { "Correlation-Id", "abc-123" }
+            });
+        var context = new ServiceBusContext(message);
+
+        var headers = new ServiceBusMessageHeadersGetter().GetHeaders(context);
+
+        Assert.Equal("abc-123", headers["correlation-id"]);
+    }
 }

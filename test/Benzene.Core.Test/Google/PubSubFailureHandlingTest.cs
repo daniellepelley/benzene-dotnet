@@ -1,5 +1,6 @@
 using System;
 using Benzene.Results;
+using System.Linq;
 using System.Threading.Tasks;
 using Benzene.Abstractions.DI;
 using Benzene.Abstractions.MessageHandlers.Info;
@@ -7,6 +8,7 @@ using Benzene.Abstractions.Middleware;
 using Benzene.Core.MessageHandlers;
 using Benzene.GoogleCloud.Functions.PubSub;
 using Benzene.GoogleCloud.Functions.PubSub.TestHelpers;
+using Benzene.Test.Logging.Helpers;
 using Google.Events.Protobuf.Cloud.PubSub.V1;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -110,5 +112,51 @@ public class PubSubFailureHandlingTest
 
         // Reaching the end without throwing proves the escalated failure was caught too.
         await application.HandleAsync(CreateData(), resolverFactory.Object);
+    }
+
+    [Fact]
+    public async Task HandleAsync_CatchExceptionsTrue_NoMessageOnEvent_LogsTheRealExceptionNotAnNre()
+    {
+        // Regression test for the NRE-masking bug: previously the catch block's own logging call
+        // dereferenced context.Message.MessageId unconditionally, so a CloudEvent with no Pub/Sub
+        // message replaced whatever real exception the pipeline threw with an unrelated
+        // NullReferenceException before it ever reached the logger.
+        var mockPipeline = new Mock<IMiddlewarePipeline<PubSubContext>>();
+        var realException = new InvalidOperationException("boom");
+        mockPipeline.Setup(x => x.HandleAsync(It.IsAny<PubSubContext>(), It.IsAny<IServiceResolver>()))
+            .ThrowsAsync(realException);
+
+        var loggerFactory = new FakeLoggerFactory();
+        var logger = new FakeLogger<PubSubMiddlewareApplication>(loggerFactory.Collector);
+        var mockResolver = new Mock<IServiceResolver>();
+        mockResolver.Setup(x => x.GetService<ISetCurrentTransport>()).Returns(Mock.Of<ISetCurrentTransport>());
+        mockResolver.Setup(x => x.GetService<ILogger<PubSubMiddlewareApplication>>()).Returns(logger);
+        var mockResolverFactory = new Mock<IServiceResolverFactory>();
+        mockResolverFactory.Setup(x => x.CreateScope()).Returns(mockResolver.Object);
+
+        var application = new PubSubMiddlewareApplication(mockPipeline.Object, new PubSubOptions { CatchExceptions = true });
+        var noMessageData = new PubSubMessageBuilder().BuildWithNoMessage();
+
+        await application.HandleAsync(noMessageData, mockResolverFactory.Object);
+
+        var entry = Assert.Single(loggerFactory.Collector.Entries);
+        Assert.Same(realException, entry.Exception);
+    }
+
+    [Fact]
+    public async Task HandleAsync_RaiseOnFailureStatusTrue_NoMessageOnEvent_ThrowsWithNullMessageIdInsteadOfNre()
+    {
+        var mockPipeline = new Mock<IMiddlewarePipeline<PubSubContext>>();
+        mockPipeline.Setup(x => x.HandleAsync(It.IsAny<PubSubContext>(), It.IsAny<IServiceResolver>()))
+            .Callback<PubSubContext, IServiceResolver>((context, _) => context.MessageResult = BenzeneResult.UnexpectedError())
+            .Returns(Task.CompletedTask);
+
+        var (_, resolverFactory) = CreateResolver();
+        var application = new PubSubMiddlewareApplication(mockPipeline.Object, new PubSubOptions { RaiseOnFailureStatus = true });
+        var noMessageData = new PubSubMessageBuilder().BuildWithNoMessage();
+
+        var exception = await Assert.ThrowsAsync<PubSubMessageProcessingException>(
+            () => application.HandleAsync(noMessageData, resolverFactory.Object));
+        Assert.Null(exception.MessageId);
     }
 }

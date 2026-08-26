@@ -55,8 +55,17 @@ internal class KinesisStreamCheckpointer : IStreamCheckpointer<KinesisEventRecor
     /// should resume the batch from - or <c>null</c> if every record has been checkpointed (or the
     /// batch is empty).
     /// </summary>
+    /// <remarks>
+    /// Null-conditional through <c>Kinesis</c> deliberately: this getter runs from
+    /// <c>KinesisStreamApplication</c>'s <c>resultMapper</c>, which the base
+    /// <c>MiddlewareApplication</c> invokes <em>after</em> <c>CatchAndCheckpointPipeline</c>'s own
+    /// try/catch has already returned - so an NRE here would not be caught by
+    /// <see cref="KinesisStreamOptions.CatchExceptions"/> and would cascade unhandled, discarding
+    /// whatever partial-resume point the handler had already checkpointed. A malformed record with no
+    /// <c>Kinesis</c> payload must degrade to a <c>null</c> resume point instead.
+    /// </remarks>
     public string? FirstUncheckpointedSequenceNumber =>
         _lastCheckpointedIndex + 1 < _records.Count
-            ? _records[_lastCheckpointedIndex + 1].Kinesis.SequenceNumber
+            ? _records[_lastCheckpointedIndex + 1]?.Kinesis?.SequenceNumber
             : null;
 }

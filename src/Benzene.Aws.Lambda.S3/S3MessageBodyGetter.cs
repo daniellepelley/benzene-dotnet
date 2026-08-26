@@ -25,7 +25,7 @@ public class S3MessageBodyGetter : IMessageBodyGetter<S3RecordContext>
             EventName = record.EventName,
             AwsRegion = record.AwsRegion,
             BucketName = record.S3?.Bucket?.Name,
-            Key = record.S3?.Object?.Key,
+            Key = S3ObjectKeyCodec.Decode(record.S3?.Object?.Key),
             Size = record.S3?.Object?.Size ?? 0,
             ETag = record.S3?.Object?.ETag
         };

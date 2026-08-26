@@ -30,11 +30,13 @@ public static class DependencyInjectionExtensions
     {
         services.TryAddScoped<JsonSerializer>();
 
-        services.AddScoped<IMessageTopicGetter<S3RecordContext>, S3MessageTopicGetter>();
-        services.AddHeaderMessageVersionGetter<S3RecordContext>();
-        services.AddScoped<IMessageHeadersGetter<S3RecordContext>, S3MessageHeadersGetter>();
-        services.AddScoped<IMessageBodyGetter<S3RecordContext>, S3MessageBodyGetter>();
-        services.AddScoped<IMessageHandlerResultSetter<S3RecordContext>, S3MessageHandlerResultSetter>();
+        // TryAdd: a user registration made earlier (ConfigureServices runs before Configure, where
+        // UseS3 calls this) wins over these per-context defaults, matching Benzene.Aws.Lambda.Sns.
+        services.TryAddScoped<IMessageTopicGetter<S3RecordContext>, S3MessageTopicGetter>();
+        services.TryAddHeaderMessageVersionGetter<S3RecordContext>();
+        services.TryAddScoped<IMessageHeadersGetter<S3RecordContext>, S3MessageHeadersGetter>();
+        services.TryAddScoped<IMessageBodyGetter<S3RecordContext>, S3MessageBodyGetter>();
+        services.TryAddScoped<IMessageHandlerResultSetter<S3RecordContext>, S3MessageHandlerResultSetter>();
         services.AddMediaFormatNegotiation<S3RecordContext>();
         services
             .TryAddScoped<IRequestMapper<S3RecordContext>,

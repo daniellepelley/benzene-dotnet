@@ -7,6 +7,7 @@ using Google.Cloud.PubSub.V1;
 using Google.Protobuf;
 using Void = Benzene.Abstractions.Results.Void;
 using Benzene.Abstractions;
+using Encoding = System.Text.Encoding;
 
 namespace Benzene.Clients.GoogleCloud.PubSub;
 
@@ -87,16 +88,71 @@ public class OutboundPubSubContextConverter : IContextConverter<OutboundContext,
         {
             if (!string.IsNullOrEmpty(header.Value))
             {
+                GuardAttribute(header.Key, header.Value);
                 message.Attributes[header.Key] = header.Value;
             }
         }
 
         if (!string.IsNullOrEmpty(contextIn.Topic))
         {
+            GuardAttribute(_topicAttributeKey, contextIn.Topic);
             message.Attributes[_topicAttributeKey] = contextIn.Topic;
         }
 
+        GuardAttributeCount(message.Attributes.Count);
+
         return Task.FromResult(new PubSubSendMessageContext(_topicName, message));
+    }
+
+    /// <summary>The maximum number of message attributes a single Pub/Sub publish accepts.</summary>
+    internal const int MaxMessageAttributes = 100;
+
+    /// <summary>The maximum size, in UTF-8 bytes, of a Pub/Sub message attribute key.</summary>
+    internal const int MaxAttributeKeyBytes = 256;
+
+    /// <summary>The maximum size, in UTF-8 bytes, of a Pub/Sub message attribute value.</summary>
+    internal const int MaxAttributeValueBytes = 1024;
+
+    // Pub/Sub reserves the "goog" attribute-key prefix (case-insensitive) for its own use and rejects
+    // a publish that sets one - guard it here rather than letting the client library throw an opaque
+    // error the send path would otherwise swallow into a generic ServiceUnavailable, mirroring
+    // SnsContextConverter.GuardAttributeLimit.
+    private const string ReservedKeyPrefix = "goog";
+
+    private static void GuardAttribute(string key, string value)
+    {
+        if (key.StartsWith(ReservedKeyPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"Pub/Sub message attribute key \"{key}\" is invalid: keys starting with \"{ReservedKeyPrefix}\" " +
+                "(case-insensitive) are reserved by Pub/Sub. Rename the header or exclude it from the outbound route.");
+        }
+
+        var keyBytes = Encoding.UTF8.GetByteCount(key);
+        if (keyBytes > MaxAttributeKeyBytes)
+        {
+            throw new InvalidOperationException(
+                $"Pub/Sub message attribute key \"{key}\" is {keyBytes} bytes, exceeding the {MaxAttributeKeyBytes}-byte limit.");
+        }
+
+        var valueBytes = Encoding.UTF8.GetByteCount(value);
+        if (valueBytes > MaxAttributeValueBytes)
+        {
+            throw new InvalidOperationException(
+                $"Pub/Sub message attribute \"{key}\" has a {valueBytes}-byte value, exceeding the {MaxAttributeValueBytes}-byte limit.");
+        }
+    }
+
+    private static void GuardAttributeCount(int attributeCount)
+    {
+        // Pub/Sub caps a publish at 100 message attributes (the routing topic attribute counts
+        // toward it), same reasoning as SnsContextConverter.GuardAttributeLimit.
+        if (attributeCount > MaxMessageAttributes)
+        {
+            throw new InvalidOperationException(
+                $"A Pub/Sub publish can carry at most {MaxMessageAttributes} message attributes, but {attributeCount} were set " +
+                "(the routing topic attribute counts toward the limit). Reduce the number of headers forwarded onto message attributes.");
+        }
     }
 
     /// <summary>

@@ -11,15 +11,19 @@ public class PubSubMessageProcessingException : Exception
     /// <summary>
     /// Initializes a new instance of the <see cref="PubSubMessageProcessingException"/> class.
     /// </summary>
-    /// <param name="messageId">The Pub/Sub message ID of the failing message.</param>
-    public PubSubMessageProcessingException(string messageId)
+    /// <param name="messageId">
+    /// The Pub/Sub message ID of the failing message, or <c>null</c> if the CloudEvent carried no
+    /// Pub/Sub message at all (a malformed/synthetic delivery).
+    /// </param>
+    public PubSubMessageProcessingException(string? messageId)
         : base($"Message handler reported an unsuccessful result for Pub/Sub message {messageId}.")
     {
         MessageId = messageId;
     }
 
     /// <summary>
-    /// Gets the Pub/Sub message ID of the failing message.
+    /// Gets the Pub/Sub message ID of the failing message, or <c>null</c> if the CloudEvent carried
+    /// no Pub/Sub message at all.
     /// </summary>
-    public string MessageId { get; }
+    public string? MessageId { get; }
 }

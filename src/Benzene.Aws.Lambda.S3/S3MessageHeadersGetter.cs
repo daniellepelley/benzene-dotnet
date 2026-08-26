@@ -36,7 +36,12 @@ public class S3MessageHeadersGetter : IMessageHeadersGetter<S3RecordContext>
 
         if (record.S3?.Object?.Key != null)
         {
-            headers["key"] = record.S3.Object.Key;
+            // S3 URL-encodes the key on the event notification (space -> '+', reserved/non-ASCII
+            // bytes percent-encoded). "key" carries the decoded form so it's usable directly with
+            // GetObjectAsync; "keyRaw" preserves the original wire encoding for callers who need it
+            // (e.g. constructing a pre-signed URL that expects the encoded form).
+            headers["key"] = S3ObjectKeyCodec.Decode(record.S3.Object.Key);
+            headers["keyRaw"] = record.S3.Object.Key;
         }
 
         return headers;

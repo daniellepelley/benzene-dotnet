@@ -47,8 +47,13 @@ public class PubSubMessageTopicGetter : IMessageTopicGetter<PubSubContext>
         return new Topic(GetTopicAttribute(context));
     }
 
-    private string GetTopicAttribute(PubSubContext context)
+    private string? GetTopicAttribute(PubSubContext context)
     {
-        return context.Message.Attributes.TryGetValue(_topicAttributeKey, out var value) ? value : null;
+        // Null-conditional throughout: a CloudEvent with no Pub/Sub message (or a message with no
+        // attributes) must degrade to "no topic attribute", not throw - matching the SNS/SQS
+        // getters' hardening for the equivalent malformed-delivery case.
+        return context.Message?.Attributes != null && context.Message.Attributes.TryGetValue(_topicAttributeKey, out var value)
+            ? value
+            : null;
     }
 }

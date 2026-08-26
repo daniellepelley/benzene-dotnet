@@ -75,6 +75,18 @@ public class EventHubConsumerMapperTest
     }
 
     [Fact]
+    public void GetHeaders_IsCaseInsensitive()
+    {
+        // #165: ToDictionary with no comparer built a plain-ordinal (case-sensitive) dictionary here,
+        // unlike every other built-in getter's headers dictionary.
+        var context = CreateContext(properties: ("Correlation-Id", (object)"abc-123"));
+
+        var headers = new EventHubConsumerMessageHeadersGetter().GetHeaders(context);
+
+        Assert.Equal("abc-123", headers["correlation-id"]);
+    }
+
+    [Fact]
     public void GetBody_ReturnsBodyAsString()
     {
         var context = CreateContext("{\"name\":\"some-name\"}");

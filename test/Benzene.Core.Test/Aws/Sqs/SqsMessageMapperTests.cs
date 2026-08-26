@@ -66,6 +66,26 @@ namespace Benzene.Test.Aws.Sqs
         }
 
         [Fact]
+        public void SqsMessageHeadersGetter_IsCaseInsensitive_RegardlessOfWhetherAttributesArePresent()
+        {
+            // #165: previously only the null-attributes fallback used OrdinalIgnoreCase, so the
+            // comparer (and therefore header-name case-sensitivity) silently depended on whether the
+            // message happened to carry any attributes.
+            var sqsMessageContext = SqsMessageContext.CreateInstance(null, new SQSEvent.SQSMessage
+            {
+                Body = "some-message",
+                MessageAttributes = new Dictionary<string, SQSEvent.MessageAttribute>
+                {
+                    { "Correlation-Id", new SQSEvent.MessageAttribute { DataType = "String", StringValue = "abc-123" } }
+                }
+            });
+
+            var headers = new SqsMessageHeadersGetter().GetHeaders(sqsMessageContext);
+
+            Assert.Equal("abc-123", headers["correlation-id"]);
+        }
+
+        [Fact]
         public async System.Threading.Tasks.Task SqsMessageBodySetter_ReplacesTheRawBody()
         {
             var sqsMessageContext = SqsMessageContext.CreateInstance(null, new SQSEvent.SQSMessage

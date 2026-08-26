@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Benzene.Clients;
@@ -138,5 +139,64 @@ public class OutboundPubSubContextConverterTest
         await middleware.HandleAsync(context, () => Task.CompletedTask);
 
         Assert.Equal("message-7", context.MessageId);
+    }
+
+    // #161: Pub/Sub's own attribute-limit guard, mirroring SnsContextConverter.GuardAttributeLimit.
+    // Tested directly against the converter (no publisher round-trip needed) - CreateRequestAsync
+    // must throw before ever reaching the publish call.
+    [Fact]
+    public async Task CreateRequestAsync_TooManyAttributes_Throws()
+    {
+        var converter = new OutboundPubSubContextConverter(Topic);
+        var headers = Enumerable.Range(0, 100).ToDictionary(i => $"header-{i}", i => "value");
+        var context = new OutboundContext(Defaults.Topic, new ExampleRequestPayload(), headers);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => converter.CreateRequestAsync(context));
+        Assert.Contains("100 message attributes", exception.Message);
+    }
+
+    [Fact]
+    public async Task CreateRequestAsync_AttributeKeyStartingWithGoog_Throws()
+    {
+        var converter = new OutboundPubSubContextConverter(Topic);
+        var context = new OutboundContext(Defaults.Topic, new ExampleRequestPayload(),
+            new Dictionary<string, string> { { "googReserved", "value" } });
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => converter.CreateRequestAsync(context));
+        Assert.Contains("reserved by Pub/Sub", exception.Message);
+    }
+
+    [Fact]
+    public async Task CreateRequestAsync_AttributeKeyTooLong_Throws()
+    {
+        var converter = new OutboundPubSubContextConverter(Topic);
+        var context = new OutboundContext(Defaults.Topic, new ExampleRequestPayload(),
+            new Dictionary<string, string> { { new string('k', 257), "value" } });
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => converter.CreateRequestAsync(context));
+        Assert.Contains("256-byte limit", exception.Message);
+    }
+
+    [Fact]
+    public async Task CreateRequestAsync_AttributeValueTooLong_Throws()
+    {
+        var converter = new OutboundPubSubContextConverter(Topic);
+        var context = new OutboundContext(Defaults.Topic, new ExampleRequestPayload(),
+            new Dictionary<string, string> { { "header", new string('v', 1025) } });
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => converter.CreateRequestAsync(context));
+        Assert.Contains("1024-byte limit", exception.Message);
+    }
+
+    [Fact]
+    public async Task CreateRequestAsync_WithinLimits_DoesNotThrow()
+    {
+        var converter = new OutboundPubSubContextConverter(Topic);
+        var context = new OutboundContext(Defaults.Topic, new ExampleRequestPayload(),
+            new Dictionary<string, string> { { "tenantId", "tenant-1" } });
+
+        var result = await converter.CreateRequestAsync(context);
+
+        Assert.Equal("tenant-1", result.Message.Attributes["tenantId"]);
     }
 }

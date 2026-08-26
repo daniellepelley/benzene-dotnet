@@ -53,4 +53,41 @@ public class PubSubGettersTest
 
         Assert.Equal("abc-123", headers["correlation-id"]);
     }
+
+    [Fact]
+    public void PubSubMessageHeadersGetter_IsCaseInsensitive_RegardlessOfWhetherAttributesArePresent()
+    {
+        var withAttributes = new PubSubMessageHeadersGetter()
+            .GetHeaders(new PubSubContext(new PubSubMessageBuilder().WithAttribute("Correlation-Id", "abc-123").Build()));
+        var withNoMessage = new PubSubMessageHeadersGetter()
+            .GetHeaders(new PubSubContext(new PubSubMessageBuilder().BuildWithNoMessage()));
+
+        Assert.Equal("abc-123", withAttributes["correlation-id"]);
+        Assert.False(withNoMessage.ContainsKey("anything"));
+        Assert.Empty(withNoMessage);
+    }
+
+    [Fact]
+    public void PubSubMessageBodyGetter_NoMessage_ReturnsNullInsteadOfThrowing()
+    {
+        var context = new PubSubContext(new PubSubMessageBuilder().BuildWithNoMessage());
+
+        Assert.Null(new PubSubMessageBodyGetter().GetBody(context));
+    }
+
+    [Fact]
+    public void PubSubMessageTopicGetter_NoMessage_ReturnsMissingInsteadOfThrowing()
+    {
+        var context = new PubSubContext(new PubSubMessageBuilder().BuildWithNoMessage());
+
+        Assert.Equal(Constants.Missing, new PubSubMessageTopicGetter().GetTopic(context).Id);
+    }
+
+    [Fact]
+    public void PubSubMessageHeadersGetter_NoMessage_ReturnsEmptyInsteadOfThrowing()
+    {
+        var context = new PubSubContext(new PubSubMessageBuilder().BuildWithNoMessage());
+
+        Assert.Empty(new PubSubMessageHeadersGetter().GetHeaders(context));
+    }
 }

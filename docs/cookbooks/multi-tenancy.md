@@ -95,7 +95,9 @@ app.UseTenant<MyContext>((context, resolver) =>
     // header regardless of which IMessageHeadersGetter<TContext> is in play. Every built-in
     // getter's headers dictionary is also case-insensitive by construction, but a raw
     // headers.TryGetValue("x-tenant-id", ...) still depends on that being true of whichever
-    // getter produced the dictionary - GetHeader doesn't have that assumption.
+    // getter produced the dictionary - GetHeader doesn't have that assumption. (This is also why
+    // GetHeader is the recommended lookup even now that every built-in getter agrees: a custom
+    // IMessageHeadersGetter<TContext> you write yourself has no obligation to follow suit.)
     var id = resolver.GetService<IMessageHeadersGetter<MyContext>>().GetHeader(context, "x-tenant-id");
     return string.IsNullOrEmpty(id) ? null : id;
 });
