@@ -28,10 +28,14 @@ public class BenzeneCosmosChangeFeedWorkerTest
         public Mock<IMiddlewarePipeline<StreamContext<OrderDocument>>> MockPipeline { get; } = new();
         public Mock<ChangeFeedProcessor> MockProcessor { get; } = new();
         public Mock<ICosmosChangeFeedProcessorFactory<OrderDocument>> MockFactory { get; } = new();
+        public Mock<ILogger<BenzeneCosmosChangeFeedWorker<OrderDocument>>> MockLogger { get; } = new();
         public BenzeneCosmosChangeFeedWorker<OrderDocument> Worker { get; }
         public Container.ChangeFeedHandlerWithManualCheckpoint<OrderDocument> OnChanges { get; private set; }
         public Container.ChangeFeedMonitorErrorDelegate OnError { get; private set; }
         public int CheckpointCalls { get; private set; }
+
+        // Overridable so tests can make checkpointAsync throw.
+        public Func<Task> CheckpointAsyncImpl { get; set; } = () => Task.CompletedTask;
 
         public Harness(BenzeneCosmosChangeFeedConfig config)
         {
@@ -52,7 +56,7 @@ public class BenzeneCosmosChangeFeedWorkerTest
             var mockResolver = new Mock<IServiceResolver>();
             mockResolver.Setup(x => x.GetService<ISetCurrentTransport>()).Returns(Mock.Of<ISetCurrentTransport>());
             mockResolver.Setup(x => x.GetService<ILogger<BenzeneCosmosChangeFeedWorker<OrderDocument>>>())
-                .Returns(Mock.Of<ILogger<BenzeneCosmosChangeFeedWorker<OrderDocument>>>());
+                .Returns(MockLogger.Object);
             var mockResolverFactory = new Mock<IServiceResolverFactory>();
             mockResolverFactory.Setup(x => x.CreateScope()).Returns(mockResolver.Object);
 
@@ -73,8 +77,21 @@ public class BenzeneCosmosChangeFeedWorkerTest
             mockContext.Setup(x => x.LeaseToken).Returns("0");
 
             return OnChanges(mockContext.Object, documents,
-                () => { CheckpointCalls++; return Task.CompletedTask; }, CancellationToken.None);
+                () =>
+                {
+                    CheckpointCalls++;
+                    return CheckpointAsyncImpl();
+                }, CancellationToken.None);
         }
+
+        public void VerifyLoggedError(Func<string, bool> messagePredicate, Times times) =>
+            MockLogger.Verify(x => x.Log(
+                LogLevel.Error,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((state, _) => messagePredicate(state.ToString())),
+                It.IsAny<Exception>(),
+                (Func<It.IsAnyType, Exception, string>)It.IsAny<object>()),
+                times);
     }
 
     [Fact]
@@ -182,6 +199,53 @@ public class BenzeneCosmosChangeFeedWorkerTest
         await harness.DeliverBatchAsync("order-1");
 
         Assert.Equal(1, harness.CheckpointCalls);
+    }
+
+    [Fact]
+    public async Task SuccessfulBatch_CheckpointThrows_Default_LogsAsCheckpointFailure_NotBatchFailure_AndDoesNotThrow()
+    {
+        var harness = new Harness(new BenzeneCosmosChangeFeedConfig());
+        var checkpointException = new InvalidOperationException("lease container throttled (429)");
+        harness.CheckpointAsyncImpl = () => throw checkpointException;
+        await harness.Worker.StartAsync(CancellationToken.None);
+
+        // The checkpoint failure must not escape the worker - it must be swallowed so the SDK
+        // simply redelivers the batch rather than the worker faulting.
+        await harness.DeliverBatchAsync("order-1");
+
+        // Checkpoint must be attempted exactly once - no zero-backoff retry of the failing call.
+        Assert.Equal(1, harness.CheckpointCalls);
+
+        // Must NOT be misattributed to the handler/batch.
+        harness.VerifyLoggedError(m => m.Contains("Processing change feed batch") && m.Contains("failed"), Times.Never());
+
+        // Must be logged with checkpoint-specific attribution (naming the lease container as the
+        // failing dependency, not the handler).
+        harness.VerifyLoggedError(
+            m => m.Contains("checkpoint", StringComparison.OrdinalIgnoreCase) &&
+                 m.Contains("lease container", StringComparison.OrdinalIgnoreCase),
+            Times.Once());
+    }
+
+    [Fact]
+    public async Task SuccessfulBatch_CheckpointThrows_SkipMode_ChecksPointsOnlyOnce_LogsAsCheckpointFailure_AndDoesNotThrow()
+    {
+        var harness = new Harness(new BenzeneCosmosChangeFeedConfig { CatchHandlerExceptions = true });
+        var checkpointException = new InvalidOperationException("lease container throttled (429)");
+        harness.CheckpointAsyncImpl = () => throw checkpointException;
+        await harness.Worker.StartAsync(CancellationToken.None);
+
+        await harness.DeliverBatchAsync("order-1");
+
+        // The bug: skip mode used to re-invoke the just-failed checkpoint a second time from its
+        // own catch block, with zero backoff. Must be exactly one call in skip mode too.
+        Assert.Equal(1, harness.CheckpointCalls);
+
+        harness.VerifyLoggedError(m => m.Contains("Processing change feed batch") && m.Contains("failed"), Times.Never());
+        harness.VerifyLoggedError(
+            m => m.Contains("checkpoint", StringComparison.OrdinalIgnoreCase) &&
+                 m.Contains("lease container", StringComparison.OrdinalIgnoreCase),
+            Times.Once());
     }
 
     [Fact]

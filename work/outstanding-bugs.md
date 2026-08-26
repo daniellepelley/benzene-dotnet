@@ -928,6 +928,17 @@ executed, ServiceBus #117 suspected); `CachingHealthCheckProcessor` has no singl
 one of the three validation adapters (#99). Per-finding evidence, rulings and work packages are in
 the ruling doc; each will get its `[RESOLVED]` line here as it lands.
 
+- **[RESOLVED] #108 — `BenzeneCosmosChangeFeedWorker`'s auto-checkpoint call sat inside the pipeline's
+  own try/catch, so a checkpoint failure after a successful batch was misattributed to the handler
+  ("Processing change feed batch ... failed"), and in skip mode (`CatchHandlerExceptions = true`) the
+  catch block re-invoked the very same `checkpointAsync()` call a second time with zero backoff — if
+  that retry also failed, the exception escaped the worker un-logged.** The auto-checkpoint call
+  (`OnChangesAsync`) now runs after the handler's try/catch returns, in its own try/catch: on failure
+  it is logged explicitly as a checkpoint failure naming the lease container as the failing
+  dependency (not the handler, not the batch), is never re-invoked, and the batch is simply left
+  un-checkpointed so the SDK redelivers it — the correct at-least-once outcome in both modes — without
+  faulting the worker. See WP-AA.
+
 New `[DECISION]` items surfaced by the same pass (recorded under "Open — maintainer decisions"
 below): worker self-stop leaves the process Ready with health green; EventHub has no poison-message
 escape hatch (Kafka's DLT argument applies verbatim); gRPC client per-call deadlines are not

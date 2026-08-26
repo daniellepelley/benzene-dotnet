@@ -82,14 +82,11 @@ public class BenzeneCosmosChangeFeedWorker<TDocument> : IBenzeneWorker
         Func<Task> checkpointAsync, CancellationToken cancellationToken)
     {
         var batch = new CosmosChangeFeedBatch<TDocument>(changes, checkpointAsync, context.LeaseToken, cancellationToken);
+        bool handlerCheckpointed;
 
         try
         {
-            var handlerCheckpointed = await _application.HandleAsync(batch, _serviceResolverFactory);
-            if (!handlerCheckpointed && _config.AutoCheckpointOnSuccess)
-            {
-                await checkpointAsync();
-            }
+            handlerCheckpointed = await _application.HandleAsync(batch, _serviceResolverFactory);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -119,6 +116,36 @@ public class BenzeneCosmosChangeFeedWorker<TDocument> : IBenzeneWorker
                 // advanced and the same batch is redelivered (at-least-once).
                 throw;
             }
+
+            return;
+        }
+
+        if (handlerCheckpointed || !_config.AutoCheckpointOnSuccess)
+        {
+            return;
+        }
+
+        // Deliberately OUTSIDE the handler's try/catch above: the handler pipeline already
+        // completed successfully at this point, so a failure here is a lease-container write
+        // failure, not a handler failure - it must not be logged as one, and (in skip mode) it
+        // must not be re-invoked from the handler's catch block, which would retry the very call
+        // that just failed with zero backoff.
+        try
+        {
+            await checkpointAsync();
+        }
+        catch (Exception ex)
+        {
+            using var loggingScope = _serviceResolverFactory.CreateScope();
+            loggingScope.GetService<ILogger<BenzeneCosmosChangeFeedWorker<TDocument>>>()
+                .LogError(ex,
+                    "Auto-checkpoint failed after successfully processing change feed batch of {count} documents " +
+                    "on lease {leaseToken}: the lease container write failed. The batch will be redelivered",
+                    changes.Count, context.LeaseToken);
+
+            // Do not retry and do not rethrow: the batch was already handled successfully, so
+            // leaving the checkpoint un-advanced and letting the SDK redeliver it is the correct
+            // at-least-once outcome in both modes - and this must not fault the worker itself.
         }
     }
 
