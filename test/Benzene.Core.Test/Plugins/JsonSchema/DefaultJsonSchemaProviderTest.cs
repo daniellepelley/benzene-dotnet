@@ -1,4 +1,5 @@
 using System.Threading.Tasks;
+using Benzene.Abstractions.Messages;
 using Benzene.Core.MessageHandlers;
 using Benzene.Core.MessageHandlers.BenzeneMessage;
 using Benzene.Core.MessageHandlers.TestHelpers;
@@ -75,5 +76,25 @@ public class DefaultJsonSchemaProviderTest
         var response = await app.HandleAsync(request, new MicrosoftServiceResolverFactory(serviceCollection.BuildServiceProvider()));
 
         Assert.Equal(BenzeneResultStatus.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task TwoHandlerVersions_ValidatesAgainstTheDeclaredVersionsSchema_NotTheMaxOrdinalFallback()
+    {
+        // WP-P (work/bug-fix-designs-round7-10-2026-08.md), task #69: without version-augmentation,
+        // the provider resolves the topic unversioned, which VersionSelector then falls back to
+        // resolving as the highest-ordinal registered version ("v2") regardless of what the request
+        // actually declares - so a genuinely valid v1 payload ({"id": 42}, an int) gets rejected
+        // against v2's schema (which requires "id" as a string). Reverting GetVersionedTopic's use in
+        // DefaultJsonSchemaProvider reproduces this: the assertion below flips to ValidationError.
+        var app = CreateApplication(out var serviceCollection);
+
+        var request = MessageBuilder.Create(VersionBlindnessDefaults.Topic, new VersionBlindnessV1Request { Id = 42 })
+            .WithHeader(MessageVersionHeaders.Default, "v1")
+            .AsBenzeneMessage();
+
+        var response = await app.HandleAsync(request, new MicrosoftServiceResolverFactory(serviceCollection.BuildServiceProvider()));
+
+        Assert.Equal(BenzeneResultStatus.Ok, response.StatusCode);
     }
 }

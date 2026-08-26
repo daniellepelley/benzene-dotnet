@@ -1,4 +1,5 @@
 using System.Threading.Tasks;
+using Benzene.Abstractions.Messages;
 using Benzene.Core.MessageHandlers;
 using Benzene.Core.MessageHandlers.BenzeneMessage;
 using Benzene.Core.MessageHandlers.TestHelpers;
@@ -104,5 +105,44 @@ public class SuppliedJsonSchemaProviderTest
         // Empty catalog: the provider falls back to the default generated-from-type schema,
         // which this valid payload passes.
         Assert.Equal(BenzeneResultStatus.Ok, await SendAsync(new SuppliedJsonSchemaCatalog(), "foo"));
+    }
+
+    private const string VersionBlindnessV1SchemaJson = /*lang=json*/ """
+        { "type": "object", "properties": { "id": { "type": "integer" } }, "required": [ "id" ] }
+        """;
+
+    private const string VersionBlindnessV2SchemaJson = /*lang=json*/ """
+        { "type": "object", "properties": { "id": { "type": "string" } }, "required": [ "id" ] }
+        """;
+
+    [Fact]
+    public async Task TwoHandlerVersions_CatalogLookup_UsesTheDeclaredVersionsRequestType()
+    {
+        // WP-P (work/bug-fix-designs-round7-10-2026-08.md), task #69: without version-augmentation,
+        // resolving the request type for the catalog lookup is version-blind too - it would resolve
+        // VersionBlindnessV2Request's catalog entry (the max-ordinal fallback) for a v1 request and
+        // reject the valid v1 int payload against v2's string-typed schema.
+        var catalog = new SuppliedJsonSchemaCatalog()
+            .AddJson(typeof(VersionBlindnessV1Request), VersionBlindnessV1SchemaJson)
+            .AddJson(typeof(VersionBlindnessV2Request), VersionBlindnessV2SchemaJson);
+
+        var serviceCollection = ServiceResolverMother.CreateServiceCollection();
+        serviceCollection.UsingBenzene(x => x.AddBenzeneMessage().AddSuppliedJsonSchemas(catalog));
+
+        var pipeline = new MiddlewarePipelineBuilder<BenzeneMessageContext>(
+            new MicrosoftBenzeneServiceContainer(serviceCollection));
+
+        pipeline.UseJsonSchema().UseMessageHandlers();
+
+        var app = new BenzeneMessageApplication(pipeline.Build());
+
+        var request = MessageBuilder.Create(VersionBlindnessDefaults.Topic, new VersionBlindnessV1Request { Id = 42 })
+            .WithHeader(MessageVersionHeaders.Default, "v1")
+            .AsBenzeneMessage();
+
+        var response = await app.HandleAsync(request,
+            new MicrosoftServiceResolverFactory(serviceCollection.BuildServiceProvider()));
+
+        Assert.Equal(BenzeneResultStatus.Ok, response.StatusCode);
     }
 }
