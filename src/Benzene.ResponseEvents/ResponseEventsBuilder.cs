@@ -52,6 +52,17 @@ public sealed class ResponseEventsBuilder
     /// <c>Created</c>/<c>Updated</c>/<c>Deleted</c> publishes the payload on <c>X:created</c>/
     /// <c>updated</c>/<c>deleted</c>.
     /// </summary>
+    /// <remarks>
+    /// <b>Overlap trap:</b> this covers <em>every</em> CRUD-shaped topic on the pipeline. If you also
+    /// register an explicit <see cref="Map(string, string, Func{IBenzeneResult, bool})"/> (or the
+    /// generic overload) for a topic this convention already covers - e.g. both
+    /// <c>.Map("order:create", "order:created")</c> and <c>.MapCrudConvention()</c> - the handled
+    /// message matches <em>both</em> mappings and <see cref="ResponseEventMappings.Resolve"/>'s
+    /// documented fan-out behavior means it publishes to <c>order:created</c> <em>twice</em>, not once.
+    /// That is not a bug in either mapping; it is this method combined with an overlapping explicit
+    /// <c>Map</c> call. Either rely on the convention alone for a given topic, or scope the explicit
+    /// mapping to a topic the convention doesn't cover.
+    /// </remarks>
     /// <returns>This builder, for chaining.</returns>
     public ResponseEventsBuilder MapCrudConvention()
     {
