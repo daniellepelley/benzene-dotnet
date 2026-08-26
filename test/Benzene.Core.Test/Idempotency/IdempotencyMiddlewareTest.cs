@@ -1,8 +1,12 @@
 using System;
+using System.Collections.Generic;
+using System.Threading;
 using Benzene.Abstractions.Results;
 using Benzene.Results;
 using System.Threading.Tasks;
+using Benzene.Abstractions.DI;
 using Benzene.Abstractions.MessageHandlers;
+using Benzene.Core;
 using Benzene.Core.MessageHandlers;
 using Benzene.Idempotency;
 using Xunit;
@@ -24,8 +28,80 @@ public class IdempotencyMiddlewareTest
     }
 
     private static IdempotencyMiddleware<TestContext> Middleware(
-        IIdempotencyStore store, string? key = "key-1", IdempotencyOptions? options = null)
-        => new(store, new FixedKeyStrategy(key), options ?? new IdempotencyOptions());
+        IIdempotencyStore store, string? key = "key-1", IdempotencyOptions? options = null,
+        ICancellationTokenAccessor? cancellation = null)
+        => new(store, new FixedKeyStrategy(key), options ?? new IdempotencyOptions(), cancellation: cancellation);
+
+    // Records the CancellationToken every call was actually invoked with, so a test can assert the
+    // ambient token reached the store rather than CancellationToken.None being passed regardless
+    // (mirrors the round-8 probe technique used for the sibling ClaimCheck middleware, WP-7 #1).
+    private class RecordingIdempotencyStore : IIdempotencyStore
+    {
+        private readonly InMemoryIdempotencyStore _inner = new();
+
+        public List<CancellationToken> ObservedTokens { get; } = new();
+
+        public Task<ClaimResult> TryClaimAsync(string key, CancellationToken cancellationToken = default)
+        {
+            ObservedTokens.Add(cancellationToken);
+            return _inner.TryClaimAsync(key, cancellationToken);
+        }
+
+        public Task<bool> CompleteAsync(string key, string claimToken, bool wasSuccessful, CancellationToken cancellationToken = default)
+        {
+            ObservedTokens.Add(cancellationToken);
+            return _inner.CompleteAsync(key, claimToken, wasSuccessful, cancellationToken);
+        }
+
+        public Task<bool> ReleaseAsync(string key, string claimToken, CancellationToken cancellationToken = default)
+        {
+            ObservedTokens.Add(cancellationToken);
+            return _inner.ReleaseAsync(key, claimToken, cancellationToken);
+        }
+    }
+
+    // #62: the middleware must thread the ambient ICancellationTokenAccessor token into every
+    // IIdempotencyStore call (TryClaimAsync, CompleteAsync, ReleaseAsync) rather than silently
+    // defaulting to CancellationToken.None - the same gap already fixed for the sibling
+    // ClaimCheckHydrateMiddleware/ClaimCheckOffloadMiddleware. A genuinely cancellable seeded token
+    // (CanBeCanceled == true) must be observed on every call.
+    [Fact]
+    public async Task StoreCalls_ObserveTheAmbientCancellationToken_OnTheHappyPath()
+    {
+        using var cts = new CancellationTokenSource();
+        var accessor = new CancellationTokenAccessor { CancellationToken = cts.Token };
+        var store = new RecordingIdempotencyStore();
+
+        // TryClaimAsync + CompleteAsync.
+        await Middleware(store, cancellation: accessor).HandleAsync(new TestContext(), () => Task.CompletedTask);
+
+        Assert.NotEmpty(store.ObservedTokens);
+        Assert.All(store.ObservedTokens, token =>
+        {
+            Assert.True(token.CanBeCanceled);
+            Assert.Equal(cts.Token, token);
+        });
+    }
+
+    [Fact]
+    public async Task StoreCalls_ObserveTheAmbientCancellationToken_OnTheReleasePath()
+    {
+        using var cts = new CancellationTokenSource();
+        var accessor = new CancellationTokenAccessor { CancellationToken = cts.Token };
+        var store = new RecordingIdempotencyStore();
+
+        // TryClaimAsync + (handler throws) ReleaseAsync.
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            Middleware(store, cancellation: accessor).HandleAsync(new TestContext(), () =>
+                throw new InvalidOperationException("boom")));
+
+        Assert.NotEmpty(store.ObservedTokens);
+        Assert.All(store.ObservedTokens, token =>
+        {
+            Assert.True(token.CanBeCanceled);
+            Assert.Equal(cts.Token, token);
+        });
+    }
 
     [Fact]
     public async Task FirstMessage_InvokesHandler_AndRecordsCompletion()

@@ -41,7 +41,8 @@ public static class Extensions
                 resolver.GetService<IIdempotencyStore>(),
                 keyStrategy,
                 options,
-                resolver.TryGetService<ILoggerFactory>()?.CreateLogger("Benzene.Idempotency"));
+                resolver.TryGetService<ILoggerFactory>()?.CreateLogger("Benzene.Idempotency"),
+                resolver.TryGetService<ICancellationTokenAccessor>());
         });
     }
 
