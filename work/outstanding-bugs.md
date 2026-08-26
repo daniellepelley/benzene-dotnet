@@ -292,6 +292,88 @@ real".
   confirmations enabled, verified via `GetNextPublishSequenceNumberAsync()` (the only public-API-visible
   proxy for that setting in this client version). See WP-8.
 
+### Tracked findings round 7–10, WP-N — Resilience & correlation (done)
+Decisions, rationale, and rejected alternatives are ruled in
+[`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-N — Resilience &
+correlation".
+- **[RESOLVED] #61 — nested `UseTimeout`: an OUTER deadline firing while inside an INNER wrap escaped
+  as a raw `OperationCanceledException`/`TaskCanceledException`, not the `TimeoutException`
+  `docs/resilience.md` promises.** The catch filter only recognized cancellation from *this* layer's own
+  `cts.Token`, but in nested composition the exception's `.CancellationToken` is always the innermost
+  live `CancellationTokenSource`'s token regardless of which layer's timer actually fired. Filter now
+  gates on `!original.IsCancellationRequested` alone (the true host/ambient token this layer saw on
+  entry never having fired) rather than an exact-token match. `TimeoutMiddleware.cs`.
+- **[RESOLVED] #62 — `IdempotencyMiddleware` never threaded the ambient `CancellationToken` into
+  `IIdempotencyStore.TryClaimAsync`/`CompleteAsync`/`ReleaseAsync`** (defaulted to
+  `CancellationToken.None` at every call site) - the same gap WP-7(c) fixed for the sibling
+  `ClaimCheckHydrateMiddleware`/`ClaimCheckOffloadMiddleware`, missed for this middleware (P8). Now
+  resolves `ICancellationTokenAccessor` in the constructor (optional, DI-supplied via `TryGetService`)
+  and reads `.CancellationToken` at the point of use for all three store calls.
+  `IdempotencyMiddleware.cs`, `Extensions.cs`.
+- **[RESOLVED] #63 — Polly's own unset `ShouldHandle` default already excludes
+  `OperationCanceledException` from tripping a circuit breaker, but this repo's own retry-oriented
+  test/doc pattern (`new PredicateBuilder().Handle<Exception>()`) reintroduces the bug if copy-pasted
+  onto a breaker's `ShouldHandle`.** Added `Benzene.Resilience.Polly`'s
+  `CancellationSafePredicateBuilderExtensions.ExcludingCancellation<TResult>()` (mirrors
+  `RetryMiddleware`'s own documented default, `ex is not OperationCanceledException`) plus an explicit
+  callout in `docs/cookbooks/polly-resilience.md`'s cancellation-caveat section warning that widening
+  `ShouldHandle` beyond Polly's default can silently drop cancellation-safety.
+- **[RESOLVED] #64 — an inbound `x-correlation-id` header value flowed completely unsanitized (no
+  length cap, no control-character check) into log scopes (`ILogger.BeginScope`) and outbound headers —
+  a caller-controlled CRLF-injection/log-forging and unbounded-length vector.** `CorrelationId.Set`
+  (the interface's reference implementation) now caps length at 128 chars and rejects any value
+  containing a control character (`\r`/`\n` included), silently keeping the existing (self-generated,
+  by default) id on rejection rather than accepting the forged value - `ICorrelationId`'s "always has a
+  value" contract holds either way. `CorrelationId.cs`, `ICorrelationId.cs`,
+  `InboundCorrelationIdMiddleware.cs`. **Closes the previously-open `[DECISION] CR/LF response-header
+  injection (defence-in-depth)` item**, moved below from "Open — maintainer decisions": that item held
+  the risk unconfirmed because the affected values were "Benzene-/handler-sourced today"; this
+  correlation-id path is directly caller-controlled, settling it.
+- **[RESOLVED, was `[DECISION]`] CR/LF response-header injection (defence-in-depth)** — API-Gateway/
+  self-host/AspNet response adapters still pass header values through without stripping CR/LF in
+  general, but #64 above is the confirming instance: an inbound header value (correlation id) is
+  directly caller-controlled and previously flowed unsanitized into a log scope and outbound headers.
+  Sanitized at the point it enters the process (`CorrelationId.Set`) per #64. The broader adapter-level
+  stripping this item originally scoped remains a defence-in-depth enhancement, not required now that
+  the one confirmed live vector is closed at its source.
+
+### Tracked findings round 7–10, WP-O — Observability & privacy-doc accuracy (done)
+Decisions and rationale are ruled in
+[`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-O — Observability &
+privacy-doc accuracy".
+- **[RESOLVED] #54 — `UseW3CTraceContext`'s manually-started `"W3CTraceContext.Root"` span
+  (`ActivityKind.Server`) was wrapped in a bare `using (activity) { await next(); }` with no try/catch,
+  so it was never marked `Error` on a thrown exception** - the highest-visibility span, the one OTel
+  backends key error-rate metrics off, unlike the sibling handler span
+  (`ActivityMiddlewareDecorator`) and `UseTimer` (`Diagnostics/Timers/Extensions.cs`), both already
+  correctly fixed for this bug class. Now wraps `next()` in try/catch, calling `AddException(ex)` +
+  `SetStatus(ActivityStatusCode.Error, ex.Message)` before rethrowing, matching that pattern.
+  `W3CTraceContextExtensions.cs`. (A related, lower-confidence, unconfirmed gap - `Tag()` running
+  before the try/catch in `ActivityMiddlewareDecorator` - is noted with a comment at the call site
+  rather than restructured; see the ruling.)
+- **[RESOLVED] #55 — `docs/privacy-and-data-handling.md` falsely claimed Benzene "emits no framework
+  log lines unless you explicitly add `UseLogResult(...)`/`UseLogContext(...)` middleware"**, but
+  `MessageRouter` logs unconditionally (missing-topic/no-handler-found/type-mismatch warnings, and an
+  unsuccessful-result warning that interpolates handler-authored `result.Errors` text) with zero
+  middleware wired. Corrected the "What Benzene captures automatically" section to describe the
+  router's baseline warnings, cross-referencing `docs/diagnosing-failures.md`'s "What you get with
+  nothing wired" table (which already documented this correctly), and flagged that the
+  unsuccessful-result line can carry handler-authored error text.
+
+### Tracked findings round 7–10, WP-M — Validation: JsonSchema parity (done)
+Ruled in [`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-M —
+Validation: JsonSchema parity".
+- **[RESOLVED / doc] #60 — `Benzene.JsonSchema`'s `DefaultJsonSchemaProvider` silently ignores
+  `System.ComponentModel.DataAnnotations` attributes** (`[Required]`/`[Range]`/`[MinLength]`, ...) - the
+  generator only understands `Json.Schema.Generation`'s own, differently-namespaced attribute set, so a
+  DTO validated correctly by `Benzene.DataAnnotations`/`Benzene.FluentValidation` gets a type-shape-only
+  check under `Benzene.JsonSchema`, with no warning. Documented the gap plainly in
+  `src/Benzene.JsonSchema/docs/README.md` (a new "Gap" section) and in `docs/capability-matrix.md`'s
+  Validation row, pointing to `SuppliedJsonSchemaCatalog` (hand-authored schema) and
+  `Json.Schema.Generation`'s own attributes as the ways to get real constraint coverage from this
+  package. (Ruling records this as the doc-only fix; a fuller fix projecting DataAnnotations attributes
+  into schema keywords during generation remains open as future work, not tracked as a bug.)
+
 ---
 
 ## Open — maintainer decisions (the real remaining backlog)
@@ -352,10 +434,6 @@ None of these is a clean self-contained bug; each changes behaviour, a public AP
 - **[RESOLVED] SQS/DynamoDb two-generation adapter + magic-string transport tags** — both converged
   onto `IHasMessageResult` (`92f4c459`, the `bool?` fork gone) and the tags now use
   `TransportNames.Sqs`/`.DynamoDb` (`ee342f7e`). (proposal items 2a + 2b)
-- **[DECISION] CR/LF response-header injection (defence-in-depth)** — API-Gateway/self-host/AspNet
-  response adapters pass header values through without stripping CR/LF. Not a confirmed live vector
-  (values are Benzene-/handler-sourced today); whether to strip centrally is the call.
-
 ### Latent / API-freeze
 - **[DECISION] `MiddlewareRouter` value-type request** — `request == null` on an unconstrained
   `TRequest` is always false for value types; the fix (`where TRequest : class`) is a source-breaking
