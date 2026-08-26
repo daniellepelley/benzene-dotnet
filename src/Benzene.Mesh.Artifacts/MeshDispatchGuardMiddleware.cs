@@ -1,7 +1,9 @@
 using System.Globalization;
+using System.Text;
 using Benzene.Abstractions.MessageHandlers.Response;
 using Benzene.Abstractions.Middleware;
 using Benzene.Http;
+using Benzene.Http.RequestBody;
 using Benzene.Http.Routing;
 using Microsoft.Extensions.Logging;
 
@@ -65,7 +67,9 @@ public static class MeshPathCanonicalizer
 /// because the audit record would be blind.
 /// </description></item>
 /// <item><description>
-/// <b>Size</b> — <c>Content-Length</c> against <see cref="MeshDispatchGuardOptions.MaxRequestBytes"/>,
+/// <b>Size</b> — the request body's actual byte count (not the caller-supplied <c>Content-Length</c>
+/// header, which a chunked <c>Transfer-Encoding</c> request omits entirely - see
+/// <see cref="RequestBodyBytes"/>) against <see cref="MeshDispatchGuardOptions.MaxRequestBytes"/>,
 /// before anything is deserialized.
 /// </description></item>
 /// <item><description>
@@ -98,9 +102,19 @@ public class MeshDispatchGuardMiddleware<TContext> : IMiddleware<TContext>
     private readonly IBenzeneResponseAdapter<TContext> _responseAdapter;
     private readonly IRouteFinder? _routeFinder;
     private readonly ILogger? _logger;
+    private readonly HttpRequestBodyBuffer? _bodyBuffer;
     private readonly string _guardedPath;
 
     /// <summary>Initializes a new instance of the <see cref="MeshDispatchGuardMiddleware{TContext}"/> class.</summary>
+    /// <param name="bodyBuffer">
+    /// Optional. When the transport buffers its request body up front (every ASP.NET Core host wired
+    /// through <c>Benzene.AspNet.Core.BenzeneExtensions.UseHttp</c> - see
+    /// <see cref="Benzene.Http.RequestBody.BufferRequestBodyMiddleware{TContext}"/>), this is how the
+    /// size check measures the request's ACTUAL byte count instead of trusting the caller-supplied
+    /// <c>Content-Length</c> header - see <see cref="RequestBodyBytes"/>. Null on a transport that
+    /// doesn't buffer (e.g. AWS API Gateway, where the whole body already arrives pre-materialized and
+    /// <c>Content-Length</c> is trustworthy), which falls back to the header check.
+    /// </param>
     public MeshDispatchGuardMiddleware(
         MeshDispatchGuardOptions options,
         MeshDispatchIdentity identity,
@@ -108,7 +122,8 @@ public class MeshDispatchGuardMiddleware<TContext> : IMiddleware<TContext>
         IHttpRequestAdapter<TContext> requestAdapter,
         IBenzeneResponseAdapter<TContext> responseAdapter,
         IRouteFinder? routeFinder = null,
-        ILogger? logger = null)
+        ILogger? logger = null,
+        HttpRequestBodyBuffer? bodyBuffer = null)
     {
         _options = options;
         _identity = identity;
@@ -117,6 +132,7 @@ public class MeshDispatchGuardMiddleware<TContext> : IMiddleware<TContext>
         _responseAdapter = responseAdapter;
         _routeFinder = routeFinder;
         _logger = logger;
+        _bodyBuffer = bodyBuffer;
         _guardedPath = MeshPathCanonicalizer.Canonicalize(options.Path);
     }
 
@@ -152,7 +168,7 @@ public class MeshDispatchGuardMiddleware<TContext> : IMiddleware<TContext>
             return;
         }
 
-        if (ContentLength(request) > _options.MaxRequestBytes)
+        if (RequestBodyBytes(request) > _options.MaxRequestBytes)
         {
             _logger?.LogWarning("Mesh dispatch refused for {email}: payload over {max} bytes",
                 _identity.Email, _options.MaxRequestBytes);
@@ -195,6 +211,36 @@ public class MeshDispatchGuardMiddleware<TContext> : IMiddleware<TContext>
         return topic != null && string.Equals(topic, _options.Topic, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Measures the size check should bound against: the ACTUAL body byte count when the transport has
+    /// already read it (see <see cref="_bodyBuffer"/>), falling back to <see cref="ContentLength"/> only
+    /// when nothing buffered the body. This closes #35 (live-verified, security-relevant, P9): a chunked
+    /// <c>Transfer-Encoding</c> request carries no <c>Content-Length</c> header at all - <c>ContentLength</c>
+    /// below returns 0 for "absent", not "empty" - which let an oversized chunked body sail straight past
+    /// a header-only check into the dispatch handler on the bare-Kestrel host, defeating the guard's own
+    /// threat model (a compromised session). <c>Benzene.AspNet.Core.BenzeneExtensions.UseHttp</c> always
+    /// wires <c>BufferRequestBodyMiddleware</c> ahead of every custom middleware (including this one), so
+    /// on every ASP.NET Core host the real byte count - Kestrel-decoded, chunked or not - is already sitting
+    /// in <see cref="_bodyBuffer"/> by the time this check runs; measuring it instead of the header is not
+    /// an extra read, just trusting what already happened over what the caller merely claimed. Kestrel's
+    /// own <c>MaxRequestBodySize</c> (set in <c>deploy/Mesh/Benzene.Mesh.Host/Program.cs</c>) is the
+    /// defence-in-depth layer that stops the buffering itself from being unbounded.
+    /// </summary>
+    private long RequestBodyBytes(HttpRequest request)
+    {
+        if (_bodyBuffer is { IsBuffered: true })
+        {
+            if (_bodyBuffer.IsBytesBuffered)
+            {
+                return _bodyBuffer.BodyBytes.Length;
+            }
+
+            return _bodyBuffer.Body == null ? 0 : Encoding.UTF8.GetByteCount(_bodyBuffer.Body);
+        }
+
+        return ContentLength(request);
+    }
+
     private static long ContentLength(HttpRequest request)
     {
         if (request.Headers == null)
@@ -212,9 +258,10 @@ public class MeshDispatchGuardMiddleware<TContext> : IMiddleware<TContext>
         }
 
         // An absent Content-Length is not evidence of a small body, but it is also not something this
-        // layer can measure without buffering. The edge (API Gateway) caps the request regardless, and
-        // the handler sees the parsed payload - so this check bounds what it can and does not pretend
-        // to bound what it cannot.
+        // layer can measure without buffering. Only reached on a transport with no HttpRequestBodyBuffer
+        // (e.g. AWS API Gateway, where the whole body already arrives pre-materialized and Content-Length
+        // is trustworthy) - see RequestBodyBytes, which prefers the actual buffered size wherever the
+        // transport provides one.
         return 0;
     }
 

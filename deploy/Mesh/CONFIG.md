@@ -164,6 +164,14 @@ first amending the WP-1 ruling.
 `allowedEmailDomains`/`requiredGroups` gets `403 Forbidden`, not `401 Unauthorized`. There is no
 per-service RBAC in v1 — authenticated and permitted means full read access to the whole catalog.
 
+**A second, independent axis: `dispatchRole` also needs `dispatch.enabled: true`.** Even under a mode
+that *can* carry group claims (the ✓ cells above), `dispatchRole` is inert unless dispatch itself is
+turned on — the role check only ever runs against the dispatch path (`InvokeAsync`'s check against
+`MeshAuthGate.DispatchPath`), which is not a reachable endpoint at all while `dispatch.enabled` stays
+false. `MeshAuthGate.Validate` rejects `dispatchRole` set with `dispatch.enabled` false, the same
+fail-fast treatment as the table above (P6 — no inert options; see
+`bug-fix-designs-round7-10-2026-08.md`'s "WP-D", #37).
+
 **The residual gap, stated plainly:** with `auth.ingestion.mode: "open"` (the default) and
 `auth.mode` set to anything else, the **read** surface (the dashboard, the catalog) is protected and
 the **write** surface (`/mesh/report`) is not — any caller who can reach the host can inject a report
