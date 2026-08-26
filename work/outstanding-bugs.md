@@ -106,6 +106,26 @@ lock-in; retry `Task.Delay` overflow; RabbitMq failed-startup lane leak; mesh pa
 SSRF/URL-restructuring; codegen NRE + int64 truncation + non-incremental generator; CORS
 wildcard+credentials and full Fetch-spec preflight compliance; spec-output caching.
 
+### Tracked findings round 7–10, WP-B — DynamoDB idempotency phantom win + fencing consistency (done)
+Decisions, rationale, and the rejected "won-but-unverified" alternative are ruled in
+[`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-B — DynamoDB
+idempotency phantom win + fencing consistency".
+- **[RESOLVED] #31 — `DynamoDbIdempotencyStore.TryClaimAsync`'s conflict path returned
+  `ClaimResult.Won(claimToken)` on an empty read-back without ever writing anything — a `Won` with no
+  durable row, defeating dedup and making the later fenced `CompleteAsync` always no-op (confirmed via
+  an executed test: `PutItemAsync` call count 1, yet `Claimed=True` with a token never persisted).**
+  `TryClaimAsync` never synthesizes a `Won` from an empty read: when the follow-up `GetItem` after a
+  `ConditionalCheckFailedException` finds the record absent (a race with a concurrent `ReleaseAsync`),
+  it bounded-retries the conditional `PutItem` against the now-observed-absent state (`MaxClaimAttempts`
+  = 3), returning `Won` only after an actual successful write. If every attempt still races the same way,
+  it throws `IdempotencyClaimContentionException` rather than fabricate an outcome — the invariant *every
+  `Won` corresponds to a durable write* now holds unconditionally. See WP-B.
+- **[RESOLVED] #51 — `InMemoryIdempotencyStore.IsLiveClaim` ANDed an `entry.ExpiresAt > now` check the
+  DynamoDb/Outbox fences deliberately omit, so a holder that merely outraced its own TTL (with nobody
+  having reclaimed the key) got a misleading "reclaimed by another worker" `false` and its outcome was
+  discarded.** Dropped the `ExpiresAt > now` conjunct — `IsLiveClaim` is now token match alone, matching
+  every sibling fencing implementation (`DynamoDbIdempotencyStore`, both Outbox stores). See WP-B.
+
 ### Tracked findings round 5–6, WP-4 — gRPC null-response crash (done)
 Decision, rationale, and why server-streaming/duplex are deliberately untouched are ruled in
 [`bug-fix-designs-2026-08.md`](archive/bug-fix-designs-2026-08.md) §"WP-4 — gRPC null-response crash (unary +

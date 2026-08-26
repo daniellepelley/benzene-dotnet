@@ -10,8 +10,15 @@ Kinesis/DynamoDB-Streams), where the single-process `InMemoryIdempotencyStore` c
   - `TryClaimAsync` — a conditional `PutItem` (`attribute_not_exists(pk) OR expiresAt < :now`) writes
     an `InProgress` record plus a freshly minted `claimToken` attribute; the condition is what makes
     the first-time claim **atomic** across instances, so concurrent redeliveries can't both win. On
-    `ConditionalCheckFailedException` it reads the live record and returns `ClaimResult.AlreadyExists(...)`;
-    on a win it returns `ClaimResult.Won(claimToken)`.
+    `ConditionalCheckFailedException` it reads the live record back: if a record is found, returns
+    `ClaimResult.AlreadyExists(...)`; on a successful write it returns `ClaimResult.Won(claimToken)`.
+    **Invariant: every `Won` corresponds to an actual successful write — never synthesized.** If the
+    read-back instead finds the record *absent* (a race: it was live when the condition failed but a
+    concurrent `ReleaseAsync` deleted it before the read completed), the method does **not** return
+    `Won` from that empty read — it retries the conditional `PutItem` against the now-observed-absent
+    state, bounded to `MaxClaimAttempts` (3) tries total. If every attempt races the same way (the put
+    loses, the read-back is absent, repeatedly), it throws `IdempotencyClaimContentionException` rather
+    than fabricate an outcome. See #31 in `work/outstanding-bugs.md`.
   - `CompleteAsync(key, claimToken, wasSuccessful, ct)` — `PutItem` setting `status=Completed` +
     `wasSuccessful`, **conditioned on `claimToken` matching** (see "Claim fencing" below). Returns
     `false` (nothing written) on a condition failure instead of throwing.

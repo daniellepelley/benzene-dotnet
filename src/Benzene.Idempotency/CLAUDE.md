@@ -86,6 +86,15 @@ token under the same lock the claim itself uses; `DynamoDbIdempotencyStore` stor
 MUST implement the same fencing — see `IIdempotencyStore`'s XML docs for the exact contract each method
 must honor.
 
+**The fence is token match ALONE — not token match *and* unexpired.** `InMemoryIdempotencyStore`'s
+`IsLiveClaim` (the gate `CompleteAsync`/`ReleaseAsync` check) compares only `ClaimToken`, matching every
+sibling (`DynamoDbIdempotencyStore`'s `ConditionExpression = "claimToken = :claimToken"`, both Outbox
+stores' lease fencing). A holder whose own TTL has lapsed, with nobody having reclaimed the key in the
+meantime, is still the only claimant on record and its settle still succeeds — an extra "and unexpired"
+conjunct would refuse that legitimate settle with a misleading "reclaimed by another worker" outcome
+when nothing actually reclaimed it (#51). Expiry only matters at claim time (`TryClaimAsync` decides
+whether an *existing* record blocks a *new* claim); it is not part of what makes a settle call fenced.
+
 ## `InProgressBehavior`
 A duplicate that arrives while the first copy is still `InProgress`:
 - `Skip` (default) — drop it without invoking the handler; never double-processes, but a duplicate is
@@ -133,11 +142,22 @@ default header/body-hash strategy (resolving the transport's `IMessageHeadersGet
 - `test/Benzene.Core.Test/Idempotency/InMemoryIdempotencyStoreTest.cs` — store semantics (claim wins
   once, refused while in-progress, completed outcome recorded, release/expiry allow re-claim, keys
   independent), plus claim-fencing: matching-token settle succeeds, stale-token settle is refused and
-  writes nothing, and `StaleHolder_LateCompleteAndRelease_AfterLegitimateReclaim_AreRejected_NotClobbered`
+  writes nothing, `StaleHolder_LateCompleteAndRelease_AfterLegitimateReclaim_AreRejected_NotClobbered`
   reproduces the round-5 scenario (a stale holder's claim lapses, a second worker reclaims, the stale
-  holder's late `Complete`/`Release` are both rejected without touching the new holder's state).
+  holder's late `Complete`/`Release` are both rejected without touching the new holder's state), and
+  `Complete_WithOriginalToken_AfterOwnTtlExpiry_WithNoCompetingClaimant_Succeeds` (#51) — a holder whose
+  own TTL lapsed with nobody having reclaimed the key still settles with its original token, proving
+  fencing is token match alone, not token-match-and-unexpired.
 - `test/Benzene.Core.Test/Idempotency/DynamoDb/DynamoDbIdempotencyStoreTest.cs` — same fencing contract
-  against the DynamoDB store's `ConditionExpression`-based settle writes.
+  against the DynamoDB store's `ConditionExpression`-based settle writes, plus (#31) three tests for the
+  never-synthesize-a-`Won` invariant:
+  `TryClaim_WhenReadBackAfterConflictFindsRecordGone_RetriesThePut_AndOnlyWinsAfterItSucceeds` (the
+  read-back-absent race retries the conditional `PutItem` and only reports `Won` once that retry
+  actually writes), `TryClaim_WhenRetryAlsoLosesToALiveRecord_ReturnsAlreadyExists_NotAPhantomWin` (the
+  retry itself loses to a now-genuinely-live record — `AlreadyExists`, never a fabricated `Won`), and
+  `TryClaim_WhenEveryRetryRacesAgainstAVanishingRecord_ThrowsRatherThanPhantomWin` (every bounded retry
+  exhausted without a write or a stable live record — throws `IdempotencyClaimContentionException`
+  rather than invent an outcome).
 - `test/Benzene.Core.Test/Idempotency/IdempotencyMiddlewareTest.cs` — first-time processes+records;
   duplicate short-circuits; completed-duplicate replays a successful result; throw/failed-result
   release the claim; no-key passes through; in-progress duplicate skip vs. throw.
