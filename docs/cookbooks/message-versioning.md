@@ -57,6 +57,15 @@ otherwise the **highest** registered version. So:
 That's all the wiring: register the handlers' assembly (`AddMessageHandlers(...)`) as usual. No caster
 config is involved.
 
+This version-augmentation (combining the topic with `IMessageVersionGetter<TContext>` before handler
+lookup) is centralized behind one shared helper, `GetVersionedTopic` on `IMessageTopicGetter<TContext>`
+(`Benzene.Abstractions.MessageHandlers.Mappers`) — `MessageRouter` and every other built-in consumer
+that resolves a handler by topic (`Benzene.JsonSchema`'s request validation, `Benzene.Diagnostics`'
+`ActivityMiddlewareDecorator`/`UseBenzeneEnrichment`, `Benzene.Aws.Lambda.XRay`'s subsegment tagging)
+call it, so a multi-version topic is validated and traced against the version the request actually
+declares, never `IVersionSelector`'s unversioned max-by-ordinal fallback. A custom middleware that
+looks up a handler by topic should call the same helper rather than re-deriving the combination.
+
 ## Mechanism B — one handler, transparent casting (with chaining)
 
 Keep a single handler on the newest schema and let Benzene cast older payloads up to it, and the response
