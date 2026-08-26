@@ -109,6 +109,28 @@ public class InboundCorrelationIdTest
         Assert.True(Guid.TryParse(resolver.GetService<ICorrelationId>().Get(), out _));
     }
 
+    // #64: an inbound header carrying embedded CR/LF (plus forged content) must not reach
+    // ICorrelationId verbatim - it would otherwise round-trip into a log scope (BeginScope) or an
+    // outbound header on this service's own downstream calls. The middleware/CorrelationId.Set falls
+    // back to the self-generated GUID rather than accepting the forged value.
+    [Fact]
+    public async Task UseCorrelationId_InboundHeaderWithEmbeddedCrLf_IsRejected_FallsBackToSelfGeneratedGuid()
+    {
+        var (pipeline, resolver) = Pipeline(app => app.UseCorrelationId());
+
+        await pipeline.HandleAsync(new FakeContext(new Dictionary<string, string>
+        {
+            { CorrelationHeaderDefaults.HeaderKey, "real-id\r\nX-Forged-Header: evil\r\n\r\nForged-Log-Line: injected" }
+        }), resolver);
+
+        var value = resolver.GetService<ICorrelationId>().Get();
+        // Rejected outright: falls back to the self-generated GUID, not a stripped/truncated variant
+        // of the forged value.
+        Assert.True(Guid.TryParse(value, out _));
+        Assert.DoesNotContain("\r", value);
+        Assert.DoesNotContain("\n", value);
+    }
+
     [Fact]
     public void UseCorrelationId_WithNoHeadersGetterRegistered_FailsWhenThePipelineIsResolved_NotOnTheMessagePath()
     {

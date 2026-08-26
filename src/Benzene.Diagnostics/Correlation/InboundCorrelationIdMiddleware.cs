@@ -45,7 +45,13 @@ public class InboundCorrelationIdMiddleware<TContext> : IMiddleware<TContext>
     /// <summary>
     /// Seeds <see cref="ICorrelationId"/> from the inbound correlation header, then continues the
     /// pipeline. A missing or empty header leaves the self-generated id in place - <c>ICorrelationId</c>
-    /// always has a value, so an uncorrelated message still gets one.
+    /// always has a value, so an uncorrelated message still gets one. The header value is caller-
+    /// controlled and untrusted: <see cref="ICorrelationId.Set"/> (see
+    /// <see cref="Benzene.Diagnostics.Correlation.CorrelationId.Set"/>) rejects anything longer than
+    /// <see cref="Benzene.Diagnostics.Correlation.CorrelationId.MaxLength"/> or containing a control
+    /// character (notably <c>\r</c>/<c>\n</c>, which could otherwise forge extra log lines via
+    /// <c>ILogger.BeginScope</c> or inject headers on this service's own outbound calls) - a rejected
+    /// value silently falls back to the self-generated id rather than being accepted verbatim.
     /// </summary>
     /// <param name="context">The inbound transport context.</param>
     /// <param name="next">The next middleware in the pipeline.</param>
