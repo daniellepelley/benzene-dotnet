@@ -76,6 +76,18 @@ public class XmlSerializer : ISerializer
     /// <returns>The deserialized object.</returns>
     public object? Deserialize(Type type, string payload)
     {
+        // ASP.NET Core's own StreamReader-based body-reading path defaults to
+        // detectEncodingFromByteOrderMarks: true, which strips a leading UTF-8 BOM before the string
+        // ever reaches a serializer. XmlReader has no equivalent leniency over an in-memory string (a
+        // leading U+FEFF isn't valid before the XML declaration/root element), so a BOM-prefixed body
+        // that every other transport in this pipeline accepts fails here with
+        // "There is an error in XML document (1,1)." Strip it here too, once, so every transport is
+        // consistent regardless of how the body arrived.
+        if (payload.Length > 0 && payload[0] == '\uFEFF')
+        {
+            payload = payload[1..];
+        }
+
         using var stringReader = new StringReader(payload);
         using var xmlReader = XmlReader.Create(stringReader, SafeReaderSettings);
         return GetSerializer(type).Deserialize(xmlReader);

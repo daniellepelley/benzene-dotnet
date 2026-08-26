@@ -60,3 +60,16 @@ bare `ISerializer` is required.
   resolvers, converters, or other settings.
 - Registered as an `IMediaFormat<TContext>` via `AddNewtonsoftJson`, so JSON-via-Json.NET is
   negotiated per message via `content-type`/`accept`, same as `Benzene.Xml`'s `AddXml`.
+- **`NaN`/`Infinity`/`-Infinity` doubles: mostly-converged wire format, one crash-vs-tolerate gap.**
+  Newtonsoft has always encoded `double.NaN`/`PositiveInfinity`/`NegativeInfinity` as the quoted JSON
+  strings `"NaN"`/`"Infinity"`/`"-Infinity"` and reads them back the same way - it never throws on these
+  values. The **default** `System.Text.Json`-based serializer
+  (`Benzene.Core.MessageHandlers.Serialization.JsonSerializer`, the process default `ISerializer`) used
+  to throw `ArgumentException` on the same values, since standard JSON (RFC 8259) has no numeric
+  representation for them; it now sets `JsonNumberHandling.AllowNamedFloatingPointLiterals`, which -
+  verified empirically, since the flag's behavior isn't obvious from its name - makes it write the
+  *exact same* quoted strings (`"NaN"` etc., not bare/unquoted tokens) and read them back the same way.
+  So a message round-tripping through **either** engine now produces the same bytes on the wire for
+  these values; the remaining divergence is that a caller who constructs their own
+  `JsonSerializerOptions` for the STJ path (bypassing the default constructor above) does not get this
+  behavior unless they also opt in, and would see the STJ-side crash Newtonsoft has never had.

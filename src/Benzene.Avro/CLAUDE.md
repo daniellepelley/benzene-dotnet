@@ -2,10 +2,25 @@
 
 ## What this package does
 Apache Avro serialization integration for Benzene. Avro is a compact binary format popular in
-finance/data streaming (Kafka) for its size and schema evolution. This package is the binary
-counterpart to `Benzene.Xml`: it plugs an `IMediaFormat<TContext>` (`application/avro`) into the
-request/response content-negotiation pipeline and, because Avro is binary, is the natural exercise of
-the byte-oriented `IPayloadSerializer` path (Phase 4).
+finance/data streaming (Kafka) for its size. This package is the binary counterpart to `Benzene.Xml`:
+it plugs an `IMediaFormat<TContext>` (`application/avro`) into the request/response content-negotiation
+pipeline and, because Avro is binary, is the natural exercise of the byte-oriented `IPayloadSerializer`
+path (Phase 4).
+
+> **No schema evolution support.** Avro-the-format has a reputation for schema evolution (readers and
+> writers reconciling different schema versions field-by-name); **this package does not implement
+> that.** `AvroSerializer` resolves one schema and uses it as *both* the writer and reader schema for
+> every call — there is no writer-schema negotiation, no field-by-name reconciliation, and no schema
+> exchanged on the wire. **The reader and writer must share the exact same reflected/registered schema**
+> (same fields, same order) for a message to decode correctly. A field removed, added, or reordered
+> between the producer's and the consumer's version of a type is **not detected or resolved**: a removed
+> middle field silently reads the *next* field's raw bytes into the wrong property (no exception, just
+> wrong data), and a field-count/order mismatch throws (an opaque low-level exception, or the clearer
+> `AvroSchemaMismatchException` the reflection path now raises for the cases it can detect — see
+> below). If your producers and consumers deploy independently and their message shapes can drift,
+> either keep every version's schema field-for-field identical (only ever *append* new fields at the
+> end, never insert/remove/reorder), version the type/topic explicitly so old and new never decode
+> against each other's data, or don't use this package for that traffic.
 
 ## Key types
 - `AvroSerializer : ISerializer, IPayloadSerializer` — the wire form is genuine Avro binary, but (like

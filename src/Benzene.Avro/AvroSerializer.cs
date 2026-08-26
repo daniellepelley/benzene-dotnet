@@ -22,6 +22,7 @@ public class AvroSerializer : ISerializer, IPayloadSerializer
 {
     private readonly IAvroSchemaResolver _schemaResolver;
     private readonly long? _maxDeserializeBytes;
+    private readonly int _maxDepth;
 
     /// <summary>Initializes a new instance backed by an explicit schema resolver.</summary>
     /// <param name="schemaResolver">Resolves the Avro schema for a CLR type.</param>
@@ -29,15 +30,20 @@ public class AvroSerializer : ISerializer, IPayloadSerializer
     /// Optional tighter cap on any single length-prefixed field on deserialize
     /// (see <see cref="AvroOptions.MaxDeserializeBytes"/>); the input-size bound always applies.
     /// </param>
-    public AvroSerializer(IAvroSchemaResolver schemaResolver, long? maxDeserializeBytes = null)
+    /// <param name="maxDepth">
+    /// The maximum nesting depth to follow on serialize/deserialize before throwing
+    /// <see cref="AvroPayloadTooDeepException"/> (see <see cref="AvroOptions.MaxDepth"/>).
+    /// </param>
+    public AvroSerializer(IAvroSchemaResolver schemaResolver, long? maxDeserializeBytes = null, int maxDepth = AvroOptions.DefaultMaxDepth)
     {
         _schemaResolver = schemaResolver;
         _maxDeserializeBytes = maxDeserializeBytes;
+        _maxDepth = maxDepth;
     }
 
     /// <summary>Initializes a new instance from options (reflection schemas on by default).</summary>
     /// <param name="options">The Avro options controlling schema resolution.</param>
-    public AvroSerializer(AvroOptions options) : this(new AvroSchemaResolver(options), options.MaxDeserializeBytes)
+    public AvroSerializer(AvroOptions options) : this(new AvroSchemaResolver(options), options.MaxDeserializeBytes, options.MaxDepth)
     {
     }
 
@@ -83,7 +89,7 @@ public class AvroSerializer : ISerializer, IPayloadSerializer
     private byte[] SerializeToAvroBytes(Type type, object payload)
     {
         var schema = _schemaResolver.GetSchema(type);
-        var datum = AvroDatumConverter.ToDatum(schema, payload);
+        var datum = AvroDatumConverter.ToDatum(schema, payload, _maxDepth);
         var datumWriter = new GenericDatumWriter<object>(schema);
 
         using var memoryStream = new MemoryStream();
@@ -111,8 +117,36 @@ public class AvroSerializer : ISerializer, IPayloadSerializer
         var maxLength = _maxDeserializeBytes.HasValue
             ? System.Math.Min(_maxDeserializeBytes.Value, avroBytes.Length)
             : avroBytes.Length;
-        var decoder = new BoundedBinaryDecoder(new BinaryDecoder(memoryStream), maxLength);
-        var datum = datumReader.Read(null!, decoder);
+        var decoder = new BoundedBinaryDecoder(new BinaryDecoder(memoryStream), maxLength, _maxDepth);
+
+        // No schema evolution: `schema` is used as both writer and reader schema, because the actual
+        // writer's schema is never exchanged on the wire (see Benzene.Avro/CLAUDE.md). If the producer's
+        // type had a different field count/order than what `schema` (resolved from the CONSUMER's
+        // type) expects, the reader silently misreads the bytes rather than detecting the mismatch by
+        // itself. Two checks close the two failure modes this produced (#57):
+        object datum;
+        try
+        {
+            datum = datumReader.Read(null!, decoder);
+        }
+        catch (Exception ex) when (ex is not AvroPayloadTooLargeException and not AvroPayloadTooDeepException)
+        {
+            // A field-order mismatch typically desyncs the byte stream mid-read (e.g. a length-prefixed
+            // field's bytes get interpreted as a different field's numeric/string encoding), which
+            // previously surfaced as an opaque low-level exception (commonly IndexOutOfRangeException).
+            // Wrap it with the actual likely cause - but never our own sentinel exceptions above, which
+            // already carry a clear, specific meaning of their own.
+            throw new AvroSchemaMismatchException(type, ex);
+        }
+
+        if (memoryStream.Position != memoryStream.Length)
+        {
+            // A field-count mismatch (most commonly a field removed since the payload was produced)
+            // reads fewer bytes than the payload contains without necessarily throwing - the resolved
+            // (smaller) schema just stops short, silently binding a LATER field's bytes to an EARLIER
+            // field's name along the way. Unconsumed trailing bytes are the tell.
+            throw new AvroSchemaMismatchException(type, memoryStream.Position, memoryStream.Length);
+        }
 
         return AvroDatumConverter.FromDatum(schema, datum, type);
     }

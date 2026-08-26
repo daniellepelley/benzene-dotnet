@@ -70,4 +70,23 @@ public class JsonSerializerTest
         Assert.Contains("'<missing>'", json);
         Assert.DoesNotContain("\\u", json);
     }
+
+    // #59: System.Text.Json throws ArgumentException serializing NaN/Infinity/-Infinity by default
+    // (standard JSON has no numeric representation for them), diverging from Benzene.NewtonsoftJson's
+    // serializer, which has always tolerated them (encoding as the quoted strings "NaN" etc.). The
+    // default options now set AllowNamedFloatingPointLiterals so this serializer no longer crashes on
+    // them - and, verified empirically, produces the same quoted-string wire form Newtonsoft always has.
+    [Theory]
+    [InlineData(double.NaN, "\"NaN\"")]
+    [InlineData(double.PositiveInfinity, "\"Infinity\"")]
+    [InlineData(double.NegativeInfinity, "\"-Infinity\"")]
+    public void Serialize_NamedFloatingPointLiteral_DoesNotThrow_AndRoundTrips(double value, string expectedJson)
+    {
+        var serializer = new JsonSerializer();
+
+        var json = serializer.Serialize(value);
+
+        Assert.Equal(expectedJson, json);
+        Assert.Equal(value, serializer.Deserialize<double>(json));
+    }
 }

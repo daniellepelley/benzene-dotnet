@@ -17,16 +17,36 @@ internal static class AvroDatumConverter
 
     // ---------- CLR object -> Avro datum ----------
 
-    public static object? ToDatum(Schema schema, object? value)
+    /// <summary>
+    /// Converts a CLR object graph to an Avro datum tree, guarding against unbounded recursion (e.g. a
+    /// self-referencing type's object graph gone very deep) driving a CLR stack overflow. Unlike the
+    /// deserialize-side guard in <see cref="BoundedBinaryDecoder"/>, this recursion is entirely our own
+    /// code, so - unlike that guard - <paramref name="depth"/> is an exact current-depth count (each
+    /// recursive call passes <c>depth + 1</c>, unwinding correctly on return), not an approximation.
+    /// </summary>
+    /// <param name="schema">The Avro schema describing <paramref name="value"/>'s shape.</param>
+    /// <param name="value">The CLR value to convert.</param>
+    /// <param name="maxDepth">The maximum nesting depth to follow (see <see cref="AvroOptions.MaxDepth"/>).</param>
+    public static object? ToDatum(Schema schema, object? value, int maxDepth = AvroOptions.DefaultMaxDepth)
     {
+        return ToDatum(schema, value, maxDepth, 0);
+    }
+
+    private static object? ToDatum(Schema schema, object? value, int maxDepth, int depth)
+    {
+        if (depth > maxDepth)
+        {
+            throw new AvroPayloadTooDeepException(depth, maxDepth, "serializing");
+        }
+
         switch (schema.Tag)
         {
             case Schema.Type.Union:
-                return ToUnionDatum((UnionSchema)schema, value);
+                return ToUnionDatum((UnionSchema)schema, value, maxDepth, depth);
             case Schema.Type.Record:
-                return ToRecord((RecordSchema)schema, value);
+                return ToRecord((RecordSchema)schema, value, maxDepth, depth);
             case Schema.Type.Array:
-                return ToArray((ArraySchema)schema, value);
+                return ToArray((ArraySchema)schema, value, maxDepth, depth);
             case Schema.Type.String:
                 return value == null ? null : ToAvroString(value);
             case Schema.Type.Boolean:
@@ -48,7 +68,7 @@ internal static class AvroDatumConverter
         }
     }
 
-    private static object? ToUnionDatum(UnionSchema union, object? value)
+    private static object? ToUnionDatum(UnionSchema union, object? value, int maxDepth, int depth)
     {
         if (value == null)
         {
@@ -56,10 +76,10 @@ internal static class AvroDatumConverter
         }
 
         var branch = NonNullBranch(union);
-        return ToDatum(branch, value);
+        return ToDatum(branch, value, maxDepth, depth + 1);
     }
 
-    private static GenericRecord ToRecord(RecordSchema schema, object? value)
+    private static GenericRecord ToRecord(RecordSchema schema, object? value, int maxDepth, int depth)
     {
         var record = new GenericRecord(schema);
         if (value == null)
@@ -72,13 +92,13 @@ internal static class AvroDatumConverter
         {
             var property = type.GetProperty(field.Name, BindingFlags.Public | BindingFlags.Instance);
             var propertyValue = property?.GetValue(value);
-            record.Add(field.Name, ToDatum(field.Schema, propertyValue));
+            record.Add(field.Name, ToDatum(field.Schema, propertyValue, maxDepth, depth + 1));
         }
 
         return record;
     }
 
-    private static object[] ToArray(ArraySchema schema, object? value)
+    private static object[] ToArray(ArraySchema schema, object? value, int maxDepth, int depth)
     {
         if (value is not IEnumerable enumerable)
         {
@@ -88,7 +108,7 @@ internal static class AvroDatumConverter
         var items = new List<object?>();
         foreach (var item in enumerable)
         {
-            items.Add(ToDatum(schema.ItemSchema, item));
+            items.Add(ToDatum(schema.ItemSchema, item, maxDepth, depth + 1));
         }
 
         return items.ToArray()!;

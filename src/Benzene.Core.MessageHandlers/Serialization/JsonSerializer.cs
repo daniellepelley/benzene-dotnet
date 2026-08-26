@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Benzene.Abstractions.Serialization;
 
 namespace Benzene.Core.MessageHandlers.Serialization;
@@ -24,6 +25,23 @@ namespace Benzene.Core.MessageHandlers.Serialization;
 /// read cleanly on the wire. This is the Microsoft-recommended setting for JSON that isn't
 /// embedded in HTML; if you serve Benzene JSON into an HTML context unescaped, supply your own
 /// <see cref="JsonSerializerOptions"/> via the other constructor.
+///
+/// <para>
+/// The default options also set <see cref="JsonNumberHandling.AllowNamedFloatingPointLiterals"/>, so
+/// <c>double.NaN</c>/<see cref="double.PositiveInfinity"/>/<see cref="double.NegativeInfinity"/>
+/// serialize successfully instead of throwing <see cref="System.ArgumentException"/> -
+/// <see cref="System.Text.Json"/> throws on those values by default because standard JSON (RFC 8259)
+/// has no numeric representation for them. Verified empirically (this flag's exact behavior isn't
+/// obvious from its name alone): with it set, <see cref="System.Text.Json"/> writes them as the
+/// **quoted JSON strings** <c>"NaN"</c>/<c>"Infinity"</c>/<c>"-Infinity"</c> - not bare/unquoted tokens
+/// - which is standard-JSON-compliant output any conformant JSON parser accepts (it just doesn't know
+/// to treat that particular string as numeric unless it also opts into this convention), and reads the
+/// same strings back as the original <see cref="double"/> values. This happens to match
+/// <c>Benzene.NewtonsoftJson</c>'s always-on behavior for the same values (Newtonsoft also encodes them
+/// as the quoted strings <c>"NaN"</c>/<c>"Infinity"</c>/<c>"-Infinity"</c>), so the two engines'
+/// wire representations for these values now agree - see that package's CLAUDE.md for the one
+/// remaining difference (STJ crashing outright without this option vs. Newtonsoft's default tolerance).
+/// </para>
 /// </remarks>
 public class JsonSerializer : ISerializer, IPayloadSerializer
 {
@@ -40,7 +58,12 @@ public class JsonSerializer : ISerializer, IPayloadSerializer
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             PropertyNameCaseInsensitive = true,
-            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+            // Without this, System.Text.Json throws ArgumentException serializing double.NaN/
+            // PositiveInfinity/NegativeInfinity - a hard crash on values a handler may legitimately
+            // produce - where Benzene.NewtonsoftJson's serializer has always tolerated them. See the
+            // class remarks above for what this does and does not guarantee on the wire.
+            NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals
         };
     }
 

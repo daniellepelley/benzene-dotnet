@@ -70,6 +70,24 @@ public class XmlSerializerTest
     }
 
     [Fact]
+    public void Deserialize_Utf8BomPrefixedBody_Succeeds()
+    {
+        // ASP.NET Core's own StreamReader-based body-reading path defaults to
+        // detectEncodingFromByteOrderMarks: true and strips a leading UTF-8 BOM before the string
+        // reaches a serializer, so a BOM-prefixed body is a valid, accepted input on every other
+        // transport in this pipeline. XmlReader has no equivalent leniency over an in-memory string;
+        // without the guard this threw "There is an error in XML document (1,1)." (#58).
+        var serializer = new XmlSerializer();
+        var xml = serializer.Serialize(new ExampleRequestPayload { Id = 42, Name = "foo" });
+        var bomPrefixed = "﻿" + xml;
+
+        var result = serializer.Deserialize<ExampleRequestPayload>(bomPrefixed);
+
+        Assert.Equal(42, result.Id);
+        Assert.Equal("foo", result.Name);
+    }
+
+    [Fact]
     public void Serialize_DeclaresUtf8_SoTheUtf8WireBytesParse()
     {
         // The body is returned as a string and transmitted as UTF-8 (like every other body). A
