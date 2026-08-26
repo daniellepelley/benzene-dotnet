@@ -292,6 +292,35 @@ real".
   confirmations enabled, verified via `GetNextPublishSequenceNumberAsync()` (the only public-API-visible
   proxy for that setting in this client version). See WP-8.
 
+### Tracked findings round 7–10, WP-A — RabbitMQ mandatory-publish coordinator hardening (done)
+Ruled in [`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-A — RabbitMQ
+mandatory-publish coordinator hardening" (WP-8's own new code — the riskiest code that round shipped, and
+the first dedicated review of it found three issues).
+- **[RESOLVED] #30 — the final `await tcs.Task.WaitAsync(cancellationToken)` in
+  `RabbitMqMandatoryPublishCoordinator.PublishMandatoryAsync` sat outside the try/catch that called
+  `Forget(tag, messageId)` on a failed publish, so a caller token firing while genuinely awaiting the
+  broker's ack/nack/return (i.e. after the publish itself had already succeeded) leaked the pending-publish
+  entry in `_byTag`/`_byMessageId` forever — confirmed via an executed leak probe.** The final wait is now
+  wrapped in its own try/catch: cancellation forgets the entry before the `OperationCanceledException`
+  propagates. Regression: `RabbitMqMandatoryPublishTest.PublishMandatoryAsync_CancelledWhileAwaitingBrokerOutcome_ForgetsThePendingPublish`.
+- **[RESOLVED] #45 — nothing bounded how long a caller could wait for the broker's publish confirm; a
+  stalled/unresponsive broker (confirms enabled but never firing) hung the caller forever.** Added an
+  optional publish-confirm timeout (`TimeSpan?`, defaulting to
+  `RabbitMqMandatoryPublishCoordinator.DefaultPublishConfirmTimeout` = 30s) threaded through
+  `PublishMandatoryAsync` → `RabbitMqClientMiddleware` → `Extensions.UseRabbitMqClient` →
+  `RabbitMqBenzeneMessageClient`. Composed with #30's fix as one `WaitAsync` on a token linked from the
+  caller's token and the timeout (mirrors `Benzene.Resilience.TimeoutMiddleware`'s timer-vs-host-token
+  distinction) — a timeout also forgets the pending-publish entry, surfacing as `TimeoutException` rather
+  than a bare cancellation. Regression:
+  `RabbitMqMandatoryPublishTest.PublishMandatoryAsync_BrokerNeverConfirms_TimesOutAndForgetsThePendingPublish`.
+- **[RESOLVED] #33 — `_byMessageId[messageId] = pending` used indexer-overwrite, so a second mandatory
+  publish sharing an already-in-flight `MessageId` silently stole the first publish's correlation entry,
+  risking a later `Basic.Return` being misattributed to the wrong publish.** Changed to `TryAdd`; a
+  duplicate now throws `InvalidOperationException` at publish time, before the message reaches the wire.
+  Unreachable through the shipped `RabbitMqClientMiddleware` surface today (it always stamps a fresh GUID),
+  but the coordinator's own contract invited it for a caller-supplied `MessageId`. Regression:
+  `RabbitMqMandatoryPublishTest.PublishMandatoryAsync_DuplicateMessageIdAlreadyInFlight_ThrowsClearly`.
+
 ---
 
 ## Open — maintainer decisions (the real remaining backlog)
