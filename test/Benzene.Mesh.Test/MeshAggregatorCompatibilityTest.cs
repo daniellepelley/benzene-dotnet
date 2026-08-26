@@ -199,6 +199,31 @@ public class MeshAggregatorCompatibilityTest : IDisposable
     }
 
     [Fact]
+    public async Task OneOfBranchReordering_IsNotBreaking_DespitePreComparisonRefInlining()
+    {
+        // #152: MeshAggregator inlines every $ref before comparing two schema versions, so a
+        // downstream consumer never has to resolve one - and stamps the inlined node's `title` with
+        // the original ref name for exactly this reason. Before JsonSchemaComparer's variant matching
+        // fell back to that `title`, an inlined oneOf member had no `$ref` left to key matching on
+        // (inlining REPLACES it), so reordering fell back to positional matching and every branch was
+        // reported as removed-then-added - a fabricated "breaking" verdict (two findings) for a schema
+        // that is byte-for-byte the same set of variants, merely reordered.
+        var spec = """
+        {"requests":[
+          {"topic":"pet:register","version":"1","response":{"oneOf":[{"$ref":"#/components/schemas/Dog"},{"$ref":"#/components/schemas/Cat"}]}},
+          {"topic":"pet:register","version":"2","response":{"oneOf":[{"$ref":"#/components/schemas/Cat"},{"$ref":"#/components/schemas/Dog"}]}}],
+         "components":{"schemas":{
+           "Dog":{"type":"object","properties":{"breed":{"type":"string"}}},
+           "Cat":{"type":"object","properties":{"lives":{"type":"integer"}}}}}}
+        """;
+
+        var v2 = Assert.Single((await Aggregate(spec)).Topics, t => t.Topic == "pet:register" && t.Version == "2");
+
+        Assert.Equal(MeshCompatibilityVerdict.Compatible, v2.Compatibility!.Overall);
+        Assert.Empty(v2.Compatibility.Changes);
+    }
+
+    [Fact]
     public async Task ReservedTopicsCarryNoCompatibility()
     {
         var catalog = await Aggregate(

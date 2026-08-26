@@ -15,6 +15,14 @@ public class FileSystemMeshArtifactStore : IMeshArtifactStore
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Writes to a temporary file in the same directory, then <see cref="File.Move(string,string,bool)"/>s
+    /// it into place, rather than truncating <paramref name="relativePath"/> in place with
+    /// <c>File.WriteAllTextAsync</c>. A rename is atomic on both POSIX and Windows - a concurrent
+    /// <see cref="TryReadAsync"/> either sees the old complete content or the new complete content,
+    /// never a torn read, which a truncate-then-write is exposed to (this store is the shipped Mesh
+    /// Host's default, read by the very same process that writes it on a poll timer).
+    /// </remarks>
     public async Task PublishAsync(string relativePath, string content)
     {
         var fullPath = ResolveWithinRoot(relativePath);
@@ -24,7 +32,21 @@ public class FileSystemMeshArtifactStore : IMeshArtifactStore
             Directory.CreateDirectory(directory);
         }
 
-        await File.WriteAllTextAsync(fullPath, content);
+        // The temp file must live in the same directory as the target so the later Move is a same-volume
+        // rename (atomic) rather than a cross-volume copy+delete (not atomic, and could fail partway).
+        var tempPath = fullPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            await File.WriteAllTextAsync(tempPath, content);
+            File.Move(tempPath, fullPath, overwrite: true);
+        }
+        catch
+        {
+            // Best-effort cleanup of the temp file on a failed write/move - never let a half-written
+            // scratch file accumulate next to the real artifacts.
+            try { File.Delete(tempPath); } catch { /* nothing more useful to do here */ }
+            throw;
+        }
     }
 
     /// <inheritdoc />

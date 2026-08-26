@@ -51,6 +51,34 @@ public class ArtifactStoreMeshReportPublisherTest : IDisposable
         Assert.True(snapshot!.ContractDrift);
     }
 
+    /// <summary>Delegates every call, but a throwing <see cref="TryReadAsync"/>.</summary>
+    private sealed class ReadThrowingStore : IMeshArtifactStore
+    {
+        private readonly IMeshArtifactStore _inner;
+        public ReadThrowingStore(IMeshArtifactStore inner) => _inner = inner;
+        public Task PublishAsync(string relativePath, string content) => _inner.PublishAsync(relativePath, content);
+        public Task<string?> TryReadAsync(string relativePath) => throw new InvalidOperationException("simulated throttled read");
+    }
+
+    [Fact]
+    public async Task PublishAsync_PreviousSnapshotReadThrows_StillPublishes()
+    {
+        // #149: shares MeshSnapshotBuilder.TryGetPreviousSpecHashAsync with the pulled-fetch path, so
+        // the same unguarded-read gap applied here too - an unreadable previous snapshot must be
+        // treated as "no baseline", not a failed publish.
+        var innerStore = new FileSystemMeshArtifactStore(_rootDirectory);
+        var store = new ReadThrowingStore(innerStore);
+        var publisher = new ArtifactStoreMeshReportPublisher(store);
+        var report = new MeshServiceReport("payments-fn", DateTimeOffset.UtcNow, "{\"info\":{\"title\":\"payments-fn\"}}", HealthyResponse(), null);
+
+        await publisher.PublishAsync(report);
+
+        var snapshotJson = await innerStore.TryReadAsync("services/payments-fn.json");
+        Assert.NotNull(snapshotJson);
+        var snapshot = JsonSerializer.Deserialize<MeshServiceSnapshot>(snapshotJson!, JsonOptions);
+        Assert.False(snapshot!.ContractDrift);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_rootDirectory))

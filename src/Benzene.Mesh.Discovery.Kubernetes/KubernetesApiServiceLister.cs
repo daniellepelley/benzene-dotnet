@@ -10,6 +10,12 @@ namespace Benzene.Mesh.Discovery.Kubernetes;
 /// </summary>
 public class KubernetesApiServiceLister : IKubernetesServiceLister
 {
+    // The API server returns all matching Services in one page unless a limit is set - so without an
+    // explicit one, this lister could silently drop every Service beyond whatever page size the server
+    // (or a proxy in front of it) happens to choose to enforce on its own. Set our own bound instead of
+    // depending on that, and follow `continue` until the server reports none left.
+    private const int PageSize = 500;
+
     private readonly IKubernetes _client;
 
     /// <summary>Initializes the lister over a Kubernetes client.</summary>
@@ -23,25 +29,39 @@ public class KubernetesApiServiceLister : IKubernetesServiceLister
     public async Task<IReadOnlyList<KubernetesServiceInfo>> ListServicesAsync(
         string? @namespace, string labelSelector, CancellationToken cancellationToken = default)
     {
-        var list = @namespace == null
-            ? await _client.CoreV1.ListServiceForAllNamespacesAsync(labelSelector: labelSelector, cancellationToken: cancellationToken)
-            : await _client.CoreV1.ListNamespacedServiceAsync(@namespace, labelSelector: labelSelector, cancellationToken: cancellationToken);
-
         var services = new List<KubernetesServiceInfo>();
-        foreach (var service in list.Items ?? new List<V1Service>())
+        string? continueToken = null;
+
+        do
         {
-            var name = service.Metadata?.Name;
-            if (string.IsNullOrEmpty(name))
+            var list = @namespace == null
+                ? await _client.CoreV1.ListServiceForAllNamespacesAsync(
+                    labelSelector: labelSelector, limit: PageSize, continueParameter: continueToken,
+                    cancellationToken: cancellationToken)
+                : await _client.CoreV1.ListNamespacedServiceAsync(
+                    @namespace, labelSelector: labelSelector, limit: PageSize, continueParameter: continueToken,
+                    cancellationToken: cancellationToken);
+
+            foreach (var service in list.Items ?? new List<V1Service>())
             {
-                continue;
+                var name = service.Metadata?.Name;
+                if (string.IsNullOrEmpty(name))
+                {
+                    continue;
+                }
+
+                services.Add(new KubernetesServiceInfo(
+                    name,
+                    service.Metadata?.NamespaceProperty ?? "default",
+                    service.Spec?.Ports?.FirstOrDefault()?.Port ?? 80,
+                    service.Metadata?.Labels is { } labels ? new Dictionary<string, string>(labels) : new Dictionary<string, string>()));
             }
 
-            services.Add(new KubernetesServiceInfo(
-                name,
-                service.Metadata?.NamespaceProperty ?? "default",
-                service.Spec?.Ports?.FirstOrDefault()?.Port ?? 80,
-                service.Metadata?.Labels is { } labels ? new Dictionary<string, string>(labels) : new Dictionary<string, string>()));
+            // An empty continue token means "no more pages" per the API's own contract - a non-empty
+            // one must be fed back into the next call with the SAME query parameters to get the rest.
+            continueToken = string.IsNullOrEmpty(list.Metadata?.ContinueProperty) ? null : list.Metadata.ContinueProperty;
         }
+        while (continueToken != null);
 
         return services;
     }

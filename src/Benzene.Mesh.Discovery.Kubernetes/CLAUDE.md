@@ -18,7 +18,10 @@ and emitting a mesh registry entry per Service. This is the Kubernetes analogue 
 - `IKubernetesServiceLister` / `KubernetesServiceInfo` — a thin port over the K8s API (list Services →
   name/namespace/port/labels) so the provider's logic is unit-testable without the SDK.
   `KubernetesApiServiceLister` is the real implementation over the client SDK's `IKubernetes`
-  (`CoreV1.ListService…`), kept logic-free.
+  (`CoreV1.ListService…`), kept logic-free. Paginates explicitly (`limit: 500`, following
+  `ContinueProperty` until the server reports none left) rather than trusting the API server to
+  return every match in one page — a cluster whose server ever enforces its own page size on an
+  unbounded request would otherwise silently drop every Service beyond the first page.
 - `Extensions.AddMeshKubernetesDiscovery()` — registers the provider over an **in-cluster**
   `IKubernetes` (`KubernetesClientConfiguration.InClusterConfig()`) plus a `MeshDiscoveryRunner`,
   mirroring `AddMeshAwsLambdaDiscovery`'s DI shape.
@@ -38,3 +41,6 @@ and emitting a mesh registry entry per Service. This is the Kubernetes analogue 
 - `test/Benzene.Mesh.Test/Discovery/KubernetesServiceDiscoveryProviderTest.cs` — mocks
   `IKubernetesServiceLister`: in-cluster DNS URL building, non-default port, scheme/path label
   overrides, valued-tag filtering, namespace+selector pass-through.
+- `test/Benzene.Mesh.Test/Discovery/KubernetesApiServiceListerTest.cs` — mocks the SDK's
+  `ICoreV1Operations` directly (both all-namespaces and single-namespace paths): the explicit
+  `limit`, and following a multi-page `continue` token to exhaustion.

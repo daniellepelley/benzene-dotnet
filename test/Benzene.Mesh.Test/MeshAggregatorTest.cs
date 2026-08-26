@@ -90,6 +90,216 @@ public class MeshAggregatorTest : IDisposable
     }
 
     [Fact]
+    public async Task RunOnceAsync_SpecFetchForbidden_ClassifiesTheErrorAsPermission()
+    {
+        // #154: a permission failure (401/403) must be distinguishable from a transient/unreachable
+        // one, so a reader knows to fix a role/policy rather than wait and retry.
+        var store = new FileSystemMeshArtifactStore(_rootDirectory);
+        var handler = new RoutingHttpMessageHandler()
+            .MapGet(SpecUrl, HttpStatusCode.Forbidden, null)
+            .MapGet(HealthUrl, HttpStatusCode.OK, SerializeHealth(true));
+        var aggregator = new MeshAggregator(new IMeshServiceSource[] { new HttpMeshServiceSource(new HttpClient(handler)) }, store);
+
+        await aggregator.RunOnceAsync(SingleServiceRegistry());
+
+        var snapshot = JsonSerializer.Deserialize<MeshServiceSnapshot>((await store.TryReadAsync("services/orders-api.json"))!, JsonOptions)!;
+        Assert.Equal(nameof(HttpRequestException), snapshot.Error);
+        Assert.Equal(MeshErrorClass.Permission, snapshot.ErrorClass);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_SpecFetchServerError_ClassifiesTheErrorAsUnreachable()
+    {
+        var store = new FileSystemMeshArtifactStore(_rootDirectory);
+        var handler = new RoutingHttpMessageHandler()
+            .MapGet(SpecUrl, HttpStatusCode.ServiceUnavailable, null)
+            .MapGet(HealthUrl, HttpStatusCode.OK, SerializeHealth(true));
+        var aggregator = new MeshAggregator(new IMeshServiceSource[] { new HttpMeshServiceSource(new HttpClient(handler)) }, store);
+
+        await aggregator.RunOnceAsync(SingleServiceRegistry());
+
+        var snapshot = JsonSerializer.Deserialize<MeshServiceSnapshot>((await store.TryReadAsync("services/orders-api.json"))!, JsonOptions)!;
+        Assert.Equal(MeshErrorClass.Unreachable, snapshot.ErrorClass);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_SpecFetchTimesOut_ClassifiesTheErrorAsTimeout()
+    {
+        var store = new FileSystemMeshArtifactStore(_rootDirectory);
+        var handler = new NeverRespondingHttpMessageHandler();
+        var aggregator = new MeshAggregator(new IMeshServiceSource[] { new HttpMeshServiceSource(new HttpClient(handler)) }, store);
+
+        await aggregator.RunOnceAsync(SingleServiceRegistry());
+
+        var snapshot = JsonSerializer.Deserialize<MeshServiceSnapshot>((await store.TryReadAsync("services/orders-api.json"))!, JsonOptions)!;
+        Assert.Equal(MeshErrorClass.Timeout, snapshot.ErrorClass);
+    }
+
+    /// <summary>Never completes until cancelled - simulates a hung call, tripping PerServiceFetchTimeout.</summary>
+    private class NeverRespondingHttpMessageHandler : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            throw new InvalidOperationException("unreachable");
+        }
+    }
+
+    /// <summary>Delegates every call, but a throwing <see cref="TryReadAsync"/> for <c>services/*</c> paths.</summary>
+    private sealed class ReadThrowingForServicesStore : IMeshArtifactStore
+    {
+        private readonly IMeshArtifactStore _inner;
+        public ReadThrowingForServicesStore(IMeshArtifactStore inner) => _inner = inner;
+
+        public Task PublishAsync(string relativePath, string content) => _inner.PublishAsync(relativePath, content);
+
+        public Task<string?> TryReadAsync(string relativePath) =>
+            relativePath.StartsWith("services/", StringComparison.Ordinal)
+                ? throw new InvalidOperationException("simulated throttled read")
+                : _inner.TryReadAsync(relativePath);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_PreviousSnapshotReadThrows_StillPublishesTheWholeRun()
+    {
+        // #149: MeshSnapshotBuilder's read of the previous snapshot (for drift comparison) had no
+        // try/catch - only the JSON deserialize below it did - so one throttled/failed read here
+        // aborted the Task.WhenAll driving the ENTIRE aggregation run: every other service, the
+        // manifest, topics, topology and asyncapi, all lost over one service's drift-comparison read
+        // hiccuping. It must now be treated as "no baseline to compare against" instead.
+        var innerStore = new FileSystemMeshArtifactStore(_rootDirectory);
+        var store = new ReadThrowingForServicesStore(innerStore);
+        var handler = new RoutingHttpMessageHandler()
+            .MapGet(SpecUrl, HttpStatusCode.OK, "{\"info\":{\"title\":\"orders-api\"}}")
+            .MapGet(HealthUrl, HttpStatusCode.OK, SerializeHealth(true));
+        var aggregator = new MeshAggregator(new IMeshServiceSource[] { new HttpMeshServiceSource(new HttpClient(handler)) }, store);
+
+        var manifest = await aggregator.RunOnceAsync(SingleServiceRegistry());
+
+        var entry = Assert.Single(manifest.Services);
+        Assert.Equal(MeshServiceStatus.Healthy, entry.Status);
+        Assert.False(entry.ContractDrift); // unreadable baseline -> "no baseline", never a failed run
+        Assert.NotNull(await innerStore.TryReadAsync("manifest.json"));
+        Assert.NotNull(await innerStore.TryReadAsync("topics.json"));
+        Assert.NotNull(await innerStore.TryReadAsync("topology.json"));
+        Assert.NotNull(await innerStore.TryReadAsync("services/orders-api.json"));
+    }
+
+    /// <summary>A single service source whose <see cref="FetchSpecAsync"/> can be told to block.</summary>
+    private sealed class BlockingMeshServiceSource : IMeshServiceSource
+    {
+        public string Key => MeshServiceSource.Http;
+        public Func<Task>? OnFetchSpec;
+
+        public async Task<string> FetchSpecAsync(MeshServiceRegistryEntry entry, CancellationToken cancellationToken)
+        {
+            if (OnFetchSpec != null)
+            {
+                await OnFetchSpec();
+            }
+
+            return "{}";
+        }
+
+        public Task<string> FetchHealthAsync(MeshServiceRegistryEntry entry, CancellationToken cancellationToken) =>
+            Task.FromResult(SerializeHealth(true));
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_SerialisesOverlappingCalls_OnTheSameInstance()
+    {
+        // #153: MeshAggregateMessageHandler and MeshPollBackgroundService both called RunOnceAsync
+        // directly, with no single-writer gate of their own - unlike MeshAggregationPass, which had
+        // always wrapped its own call in one. The gate now lives in RunOnceAsync itself, so it closes
+        // the gap for both of those call sites (and any future one) instead of trusting every host to
+        // remember to add its own.
+        var source = new BlockingMeshServiceSource();
+        var aggregator = new MeshAggregator(new IMeshServiceSource[] { source }, new FileSystemMeshArtifactStore(_rootDirectory));
+
+        var entered = new SemaphoreSlim(0, 1);
+        var release = new TaskCompletionSource();
+        source.OnFetchSpec = async () =>
+        {
+            entered.Release();
+            await release.Task;
+        };
+
+        var first = aggregator.RunOnceAsync(SingleServiceRegistry());
+        await entered.WaitAsync();
+        var second = aggregator.RunOnceAsync(SingleServiceRegistry());
+
+        // Give the second call a real chance to start running before checking it hasn't.
+        await Task.Delay(50);
+        Assert.False(second.IsCompleted);
+
+        release.SetResult();
+        await Task.WhenAll(first, second);
+    }
+
+    /// <summary>Records the relative path of every <see cref="PublishAsync"/> call, in call order.</summary>
+    private sealed class RecordingOrderStore : IMeshArtifactStore
+    {
+        private readonly IMeshArtifactStore _inner;
+        public RecordingOrderStore(IMeshArtifactStore inner) => _inner = inner;
+        public readonly List<string> PublishOrder = new();
+
+        public async Task PublishAsync(string relativePath, string content)
+        {
+            lock (PublishOrder) { PublishOrder.Add(relativePath); }
+            await _inner.PublishAsync(relativePath, content);
+        }
+
+        public Task<string?> TryReadAsync(string relativePath) => _inner.TryReadAsync(relativePath);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_PublishesManifestLast_AfterEveryOtherArtifactHasLanded()
+    {
+        // #156: manifest.json used to be written concurrently with every other artifact via the same
+        // Task.WhenAll, so a reader (or a run whose store failed partway through the other writes)
+        // could see a freshly-updated manifest referencing an artifact that hadn't landed yet.
+        var recordingStore = new RecordingOrderStore(new FileSystemMeshArtifactStore(_rootDirectory));
+        var handler = new RoutingHttpMessageHandler()
+            .MapGet(SpecUrl, HttpStatusCode.OK, "{}")
+            .MapGet(HealthUrl, HttpStatusCode.OK, SerializeHealth(true));
+        var aggregator = new MeshAggregator(new IMeshServiceSource[] { new HttpMeshServiceSource(new HttpClient(handler)) }, recordingStore);
+
+        await aggregator.RunOnceAsync(SingleServiceRegistry());
+
+        Assert.True(recordingStore.PublishOrder.Count > 1);
+        Assert.Equal("manifest.json", recordingStore.PublishOrder[^1]);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_EveryArtifactSharesTheManifestsGeneratedAtUtc_AsARunId()
+    {
+        // #156: every artifact of a run is stamped with the same timestamp (reusing the manifest's
+        // own GeneratedAtUtc rather than adding a new field) so it doubles as a run id - a reader who
+        // fetches manifest.json and a service snapshot separately (never one atomic read) can tell a
+        // snapshot that belongs to THIS run from one left over from an earlier run.
+        var at = new DateTimeOffset(2026, 8, 1, 12, 0, 0, TimeSpan.Zero);
+        var store = new FileSystemMeshArtifactStore(_rootDirectory);
+        var handler = new RoutingHttpMessageHandler()
+            .MapGet(SpecUrl, HttpStatusCode.OK, "{\"requests\":[{\"topic\":\"order:create\"}]}")
+            .MapGet(HealthUrl, HttpStatusCode.OK, SerializeHealth(true));
+        var aggregator = new MeshAggregator(new IMeshServiceSource[] { new HttpMeshServiceSource(new HttpClient(handler)) }, store, () => at);
+
+        var manifest = await aggregator.RunOnceAsync(SingleServiceRegistry());
+
+        Assert.Equal(at, manifest.GeneratedAtUtc);
+        Assert.Equal(at, Assert.Single(manifest.Services).SnapshotAtUtc);
+
+        var snapshot = JsonSerializer.Deserialize<MeshServiceSnapshot>((await store.TryReadAsync("services/orders-api.json"))!, JsonOptions)!;
+        Assert.Equal(at, snapshot.FetchedAtUtc);
+
+        var topics = JsonSerializer.Deserialize<MeshTopicCatalog>((await store.TryReadAsync("topics.json"))!, JsonOptions)!;
+        Assert.Equal(at, topics.GeneratedAtUtc);
+
+        var topology = JsonSerializer.Deserialize<MeshTopology>((await store.TryReadAsync("topology.json"))!, JsonOptions)!;
+        Assert.Equal(at, topology.GeneratedAtUtc);
+    }
+
+    [Fact]
     public void MeshManifestEntry_SnapshotAtUtc_RoundTrips_AndIsBackwardCompatible()
     {
         var at = new DateTimeOffset(2026, 7, 20, 9, 0, 0, TimeSpan.Zero);

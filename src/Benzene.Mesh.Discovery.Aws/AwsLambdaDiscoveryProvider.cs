@@ -77,7 +77,15 @@ public class AwsLambdaDiscoveryProvider : IMeshDiscoveryProvider
             {
                 var tagsResponse = await _lambda.ListTagsAsync(
                     new ListTagsRequest { Resource = function.FunctionArn }, cancellationToken);
-                return (function, tags: tagsResponse.Tags ?? new Dictionary<string, string>());
+                return (function, tags: (IReadOnlyDictionary<string, string>?)(tagsResponse.Tags ?? new Dictionary<string, string>()));
+            }
+            catch (Exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                // A single function's tags being unreadable (deleted between ListFunctions and here,
+                // or an access-denied on that one function's ARN) must not lose every other function's
+                // result - it can't be tag-matched anyway without its tags, so it's dropped below
+                // rather than failing the whole Task.WhenAll (and therefore the whole discovery run).
+                return (function, tags: (IReadOnlyDictionary<string, string>?)null);
             }
             finally
             {
@@ -90,7 +98,7 @@ public class AwsLambdaDiscoveryProvider : IMeshDiscoveryProvider
         var entries = new List<MeshServiceRegistryEntry>();
         foreach (var (function, tags) in tagged)
         {
-            if (!filter.Matches(tags))
+            if (tags == null || !filter.Matches(tags))
             {
                 continue;
             }

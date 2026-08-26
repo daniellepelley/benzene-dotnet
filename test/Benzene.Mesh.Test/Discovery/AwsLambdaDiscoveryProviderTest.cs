@@ -146,6 +146,30 @@ public class AwsLambdaDiscoveryProviderTest
     }
 
     [Fact]
+    public async Task Discover_OneFunctionsTagReadFails_OthersAreStillDiscovered()
+    {
+        // #150: Task.WhenAll over per-function ListTags meant one function's tag read failing (deleted
+        // between ListFunctions and here, or access-denied on that one function's ARN) lost every
+        // other function's result too - verified end-to-end here rather than just at the throttle
+        // level, since the failure has to survive the SemaphoreSlim-bounded Task.WhenAll intact.
+        var ok = Fn("orders");
+        var deleted = Fn("deleted-fn");
+        var mock = new Mock<IAmazonLambda>();
+        mock.Setup(x => x.ListFunctionsAsync(It.IsAny<ListFunctionsRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ListFunctionsResponse { Functions = new List<FunctionConfiguration> { ok, deleted } });
+        mock.Setup(x => x.ListTagsAsync(It.Is<ListTagsRequest>(r => r.Resource == ok.FunctionArn), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ListTagsResponse { Tags = new Dictionary<string, string> { ["benzene"] = "true" } });
+        mock.Setup(x => x.ListTagsAsync(It.Is<ListTagsRequest>(r => r.Resource == deleted.FunctionArn), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ResourceNotFoundException("Function not found"));
+
+        var provider = new AwsLambdaDiscoveryProvider(mock.Object);
+        var entries = await provider.DiscoverAsync(new MeshDiscoveryFilter());
+
+        var entry = Assert.Single(entries);
+        Assert.Equal("orders", entry.Name);
+    }
+
+    [Fact]
     public async Task Discover_RegionFilter_UnreadableArnIsNeverExcluded()
     {
         var functions = new Dictionary<string, (FunctionConfiguration, Dictionary<string, string>)>

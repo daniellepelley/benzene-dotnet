@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Benzene.Mesh.Aggregator;
 using Xunit;
@@ -47,6 +49,58 @@ public class FileSystemMeshArtifactStoreTest : IDisposable
         await store.PublishAsync("manifest.json", "{\"version\":2}");
 
         Assert.Equal("{\"version\":2}", await store.TryReadAsync("manifest.json"));
+    }
+
+    [Fact]
+    public async Task PublishAsync_LeavesNoTemporaryFileBehind()
+    {
+        // #151: PublishAsync writes to a temp file and renames it into place - verify that temp file
+        // never lingers next to the real artifact after a successful publish.
+        var store = new FileSystemMeshArtifactStore(_rootDirectory);
+
+        await store.PublishAsync("manifest.json", "{}");
+
+        var leftovers = Directory.GetFiles(_rootDirectory).Where(f => f.EndsWith(".tmp", StringComparison.Ordinal));
+        Assert.Empty(leftovers);
+    }
+
+    [Fact]
+    public async Task PublishAsync_ConcurrentWithTryReadAsync_NeverObservesATornRead()
+    {
+        // #151: PublishAsync used to truncate-then-write in place (File.WriteAllTextAsync), so a
+        // concurrent TryReadAsync against the very same process (this store is the shipped Mesh Host's
+        // default, polled and read back by one process on a timer) could observe a torn read - some
+        // prefix of the old content plus some prefix of the new, or a truncated/empty file. Large
+        // content makes the write take long enough for a concurrent reader to have a real chance of
+        // catching it mid-write; an atomic temp-file-then-rename write makes that structurally
+        // impossible regardless of timing - every read is either the complete old value or the
+        // complete new one.
+        var store = new FileSystemMeshArtifactStore(_rootDirectory);
+        var oldContent = new string('a', 4_000_000);
+        var newContent = new string('b', 4_000_000);
+        await store.PublishAsync("manifest.json", oldContent);
+
+        using var cts = new CancellationTokenSource();
+        var observedTornRead = false;
+        var reader = Task.Run(async () =>
+        {
+            while (!cts.IsCancellationRequested)
+            {
+                var read = await store.TryReadAsync("manifest.json");
+                if (read != null && read != oldContent && read != newContent)
+                {
+                    observedTornRead = true;
+                    break;
+                }
+            }
+        });
+
+        await store.PublishAsync("manifest.json", newContent);
+        cts.Cancel();
+        await reader;
+
+        Assert.False(observedTornRead, "TryReadAsync observed content that was neither the old nor the new value.");
+        Assert.Equal(newContent, await store.TryReadAsync("manifest.json"));
     }
 
     [Theory]
