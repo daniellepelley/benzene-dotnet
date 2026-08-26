@@ -292,6 +292,14 @@ real".
   confirmations enabled, verified via `GetNextPublishSequenceNumberAsync()` (the only public-API-visible
   proxy for that setting in this client version). See WP-8.
 
+### Tracked findings round 7–10, WP-U — Examples build regression (done)
+Ruled in [`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-U — Examples
+build regression (URGENT, land first)".
+- **[RESOLVED] #68 — `Benzene.Examples.sln` failed to build (CS0535, ~18 files): WP-7a's `IHealthCheck`
+  interface change to `ExecuteAsync(CancellationToken)` was swept across `src/` but not `examples/`.**
+  All 18 example `IHealthCheck` implementers (`AwsMesh`, `AzureFunctionsMesh`, `GoogleCloudMesh`,
+  `K8sMesh`, `Mesh` examples) updated to the new signature. See WP-U.
+
 ---
 
 ## Open — maintainer decisions (the real remaining backlog)
