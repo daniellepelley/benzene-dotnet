@@ -15,7 +15,7 @@ public class OrdersDatabaseHealthCheck : IHealthCheck
 
     public string Type => "PostgresDatabase";
 
-    public Task<IHealthCheckResult> ExecuteAsync()
+    public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var data = new Dictionary<string, object> { ["latencyMs"] = 4, ["pool"] = "8/20" };
 
@@ -36,7 +36,7 @@ public class OrdersCacheHealthCheck : IHealthCheck
 
     public string Type => "RedisCache";
 
-    public Task<IHealthCheckResult> ExecuteAsync()
+    public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var data = new Dictionary<string, object> { ["hitRate"] = "0.97" };
 
@@ -57,7 +57,7 @@ public class OrdersQueueHealthCheck : IHealthCheck
 
     public string Type => "SqsQueue";
 
-    public Task<IHealthCheckResult> ExecuteAsync()
+    public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var data = new Dictionary<string, object> { ["approxDepth"] = 0 };
 

@@ -9,7 +9,7 @@ public class OrdersDatabaseHealthCheck : IHealthCheck
 
     public string Type => "PostgresDatabase";
 
-    public Task<IHealthCheckResult> ExecuteAsync()
+    public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var data = new Dictionary<string, object> { ["latencyMs"] = 4 };
         return Task.FromResult(HealthCheckResult.CreateInstance(true, Type, data, Dependencies));
@@ -23,7 +23,7 @@ public class OrdersQueueHealthCheck : IHealthCheck
 
     public string Type => "SqsQueue";
 
-    public Task<IHealthCheckResult> ExecuteAsync()
+    public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var data = new Dictionary<string, object> { ["approxDepth"] = 0 };
         return Task.FromResult(HealthCheckResult.CreateInstance(true, Type, data, Dependencies));
