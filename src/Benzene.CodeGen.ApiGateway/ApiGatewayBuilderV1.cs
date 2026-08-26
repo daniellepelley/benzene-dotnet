@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using Benzene.CodeGen.Core;
+using Benzene.Core.Exceptions;
 using Benzene.Schema.OpenApi.EventService;
 using Microsoft.AspNetCore.Routing.Template;
 
@@ -31,9 +32,31 @@ namespace Benzene.CodeGen.ApiGateway
             stringBuilder.AppendLine($"# AUTOGEN START {_options.Url.ToUpperInvariant()}");
             stringBuilder.AppendLine("");
 
-            var paths = source.Requests
+            var mappings = source.Requests
                 .Where(x => x.HttpMappings != null)
                 .SelectMany(request => request.HttpMappings.Select(http => new { request, http }))
+                .ToArray();
+
+            // Two topics sharing a method+path used to fall straight through into duplicate-key YAML
+            // (`get:` emitted twice under one path) and a corrupted CORS header
+            // (`'GET,GET,OPTIONS'`). Fail loudly instead, mirroring
+            // Benzene.Http.Routing.ReflectionHttpEndpointFinder's own duplicate-route check - a
+            // method+path collision is a spec authoring error, not something codegen can silently
+            // resolve.
+            var duplicates = mappings
+                .GroupBy(x => new { x.http.Method, x.http.Path })
+                .Where(x => x.Count() > 1)
+                .ToArray();
+
+            if (duplicates.Any())
+            {
+                var duplicate = duplicates[0];
+                var topics = string.Join(", ", duplicate.Select(x => x.request.Topic));
+                throw new BenzeneException(
+                    $"Route '{duplicate.Key.Method} - {duplicate.Key.Path}' has been assigned to more than one topic ({topics}), this is not permitted");
+            }
+
+            var paths = mappings
                 .GroupBy(x => x.http.Path)
                 .ToArray();
 
@@ -71,7 +94,12 @@ namespace Benzene.CodeGen.ApiGateway
         {
             var routeTemplate = TemplateParser.Parse(path);
             var tag = CreateTag(path);
-            var verbsText = string.Join(',', verbs.Select(x => x.ToUpperInvariant()));
+            // Distinct as defense-in-depth: BuildCodeFiles fails loudly on a method+path collision
+            // before this is reached, but BuildOptions/BuildPath are public and can be called
+            // directly (e.g. from tests) with a caller-supplied verb list that already repeats a
+            // verb - Distinct keeps the CORS header ('GET,OPTIONS', never 'GET,GET,OPTIONS') valid
+            // either way.
+            var verbsText = string.Join(',', verbs.Select(x => x.ToUpperInvariant()).Distinct());
 
             var stringBuilder = new StringBuilder();
             stringBuilder.AppendLine(@"    options:");

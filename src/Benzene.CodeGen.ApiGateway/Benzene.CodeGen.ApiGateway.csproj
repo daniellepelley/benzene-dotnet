@@ -10,6 +10,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Benzene.CodeGen.Core\Benzene.CodeGen.Core.csproj" />
+    <!-- BenzeneException, for BuildCodeFiles' method+path collision fail-fast - mirrors
+         Benzene.Http.Routing.ReflectionHttpEndpointFinder's own duplicate-route check. -->
+    <ProjectReference Include="..\Benzene.Core\Benzene.Core.csproj" />
   </ItemGroup>
 
 </Project>
