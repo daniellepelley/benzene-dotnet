@@ -457,6 +457,39 @@ example parity + resolved-note correction".
   residual-risk comment on the resource (what this does and does not protect against - an S3
   conditional-write/lease is named as the fuller fix if true single-flight is ever needed). See WP-E.
 
+### Tracked findings round 7–10, WP-P — Core version-blindness (done)
+Ruled in [`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-P — Core
+version-blindness (shared root cause)".
+- **[RESOLVED] #69 — `DefaultJsonSchemaProvider`/`SuppliedJsonSchemaProvider`'s `Get()` resolved the
+  topic via a bare version-less `GetTopic(context)`, never consulting `IMessageVersionGetter<TContext>`
+  — so for a topic with 2+ registered handler versions, request validation ran against whichever
+  version `VersionSelector`'s unversioned max-by-ordinal fallback happened to land on, not the version
+  the request actually declared, which could reject a genuinely valid request (a v1 payload validated
+  against v2's schema).** Fixed at the shared root cause, not per call site: both providers now call
+  `IMessageTopicGetter<TContext>.GetVersionedTopic(context, IMessageVersionGetter<TContext>?)` before
+  `FindHandler`. See WP-P.
+- **[RESOLVED] #70 — `ActivityMiddlewareDecorator`/`EnrichmentExtensions`/`XRayMiddlewareDecorator` had
+  the identical bug: they tagged `benzene.handler`/annotated `benzene_handler` with the wrong
+  (never-run) handler and `benzene.version`/`benzene_version` blank on every multi-version topic,
+  undermining mesh trace-backed flow reconstruction.** Same fix as #69, applied to all three
+  consumers. See WP-P.
+- **Centralized, not five separate fixes.** `MessageRouter<TContext>` was already the one call site that
+  got this right (combining `IMessageGetter<TContext>.GetTopic` with `IMessageVersionGetter<TContext>`
+  before `FindHandler`); rather than teaching each of the other four consumers to duplicate that logic,
+  the combination is now one shared extension method, `GetVersionedTopic`, on
+  `IMessageTopicGetter<TContext>` (`Benzene.Abstractions.MessageHandlers.Mappers` — the interface
+  `IMessageGetter<TContext>` already extends, so every existing call site keeps working unchanged).
+  `MessageRouter` itself was refactored onto the same helper, so there is exactly one implementation of
+  "resolve the topic the request actually declares" for every current *and future* by-topic consumer to
+  call. `DefaultJsonSchemaProvider`/`SuppliedJsonSchemaProvider` take an optional (nullable, `= null`)
+  constructor `IMessageVersionGetter<TContext>` for back-compat with existing direct constructions; the
+  DI-resolved instance (`AddJsonSchema`/`AddSuppliedJsonSchemas`) always gets one, since every transport
+  that registers message-handler dispatch already registers `IMessageVersionGetter<TContext>` (a hard
+  dependency of `MessageRouter` itself). The diagnostics/XRay decorators resolve it via the existing
+  `TryGetService` pattern (degrading to unversioned resolution, today's behaviour, if genuinely
+  unregistered) rather than a hard constructor dependency, matching how they already resolve
+  `IMessageGetter<TContext>`.
+
 ---
 
 ## Open — maintainer decisions (the real remaining backlog)

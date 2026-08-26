@@ -181,7 +181,14 @@ app.UseMessageHandlers(typeof(CreateOrderMessageHandler).Assembly, router => rou
 Every overload ultimately registers a **`MessageRouter<TContext>`** as an `IMiddleware<TContext>` in
 the pipeline. `MessageRouter<TContext>.HandleAsync`:
 
-1. Extracts the topic via `IMessageGetter<TContext>`. The built-in topic getters never return a
+1. Extracts the topic via `IMessageGetter<TContext>`, then augments it with the message's own
+   version signal (`IMessageVersionGetter<TContext>`) via the shared `GetVersionedTopic` extension
+   method (`Benzene.Abstractions.MessageHandlers.Mappers`) whenever the topic getter didn't already
+   supply one — this is what lets `IMessageHandlerDefinitionLookUp.FindHandler` below resolve the
+   *version the request actually declares* rather than `IVersionSelector`'s unversioned max-by-ordinal
+   fallback. Any other consumer that resolves a handler by topic (validation, tracing/log diagnostics)
+   should call the same `GetVersionedTopic` helper rather than re-deriving this combination — see
+   [message versioning](cookbooks/message-versioning.md). The built-in topic getters never return a
    null topic — an unresolvable topic becomes the `"<missing>"` sentinel — so the router's
    `validation-error` ("Topic is missing") short-circuit fires only for a custom topic getter that
    returns null/empty.

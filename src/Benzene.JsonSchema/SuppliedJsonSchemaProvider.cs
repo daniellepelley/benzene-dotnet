@@ -14,6 +14,7 @@ public class SuppliedJsonSchemaProvider<TContext> : IJsonSchemaProvider<TContext
 {
     private readonly SuppliedJsonSchemaCatalog _catalog;
     private readonly IMessageTopicGetter<TContext> _messageTopicGetter;
+    private readonly IMessageVersionGetter<TContext>? _messageVersionGetter;
     private readonly IMessageHandlerDefinitionLookUp _messageHandlerDefinitionLookUp;
     private readonly DefaultJsonSchemaProvider<TContext> _fallback;
 
@@ -23,20 +24,30 @@ public class SuppliedJsonSchemaProvider<TContext> : IJsonSchemaProvider<TContext
     /// <param name="catalog">The hand-authored schemas to check before falling back to the generated default.</param>
     /// <param name="messageTopicGetter">Resolves the current message's topic from the context.</param>
     /// <param name="messageHandlerDefinitionLookUp">Looks up the handler (and its request type) registered for a topic.</param>
+    /// <param name="messageVersionGetter">
+    /// Extracts the message's own version signal, combined with the topic before handler lookup
+    /// (<c>GetVersionedTopic</c>) so a topic with 2+ registered handler versions validates against the
+    /// version the request actually declares, not <c>VersionSelector</c>'s unversioned max-by-ordinal
+    /// fallback. Optional (defaults to <c>null</c>) for the same back-compat reason as
+    /// <see cref="DefaultJsonSchemaProvider{TContext}"/>'s equivalent parameter; every DI-resolved
+    /// instance gets one via <see cref="DependencyInjectionExtensions.AddSuppliedJsonSchemas"/>.
+    /// </param>
     public SuppliedJsonSchemaProvider(SuppliedJsonSchemaCatalog catalog,
         IMessageTopicGetter<TContext> messageTopicGetter,
-        IMessageHandlerDefinitionLookUp messageHandlerDefinitionLookUp)
+        IMessageHandlerDefinitionLookUp messageHandlerDefinitionLookUp,
+        IMessageVersionGetter<TContext>? messageVersionGetter = null)
     {
         _catalog = catalog;
         _messageTopicGetter = messageTopicGetter;
         _messageHandlerDefinitionLookUp = messageHandlerDefinitionLookUp;
-        _fallback = new DefaultJsonSchemaProvider<TContext>(messageTopicGetter, messageHandlerDefinitionLookUp);
+        _messageVersionGetter = messageVersionGetter;
+        _fallback = new DefaultJsonSchemaProvider<TContext>(messageTopicGetter, messageHandlerDefinitionLookUp, messageVersionGetter);
     }
 
     /// <inheritdoc />
     public Json.Schema.JsonSchema? Get(TContext context)
     {
-        var topic = _messageTopicGetter.GetTopic(context);
+        var topic = _messageTopicGetter.GetVersionedTopic(context, _messageVersionGetter);
         if (string.IsNullOrEmpty(topic?.Id))
         {
             return null;

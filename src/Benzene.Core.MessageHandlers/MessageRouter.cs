@@ -2,7 +2,6 @@ using Benzene.Abstractions.MessageHandlers;
 using Benzene.Abstractions.MessageHandlers.Mappers;
 using Benzene.Abstractions.MessageHandlers.Request;
 using Benzene.Abstractions.Middleware;
-using Benzene.Core.Messages;
 using Benzene.Results;
 using Microsoft.Extensions.Logging;
 
@@ -74,18 +73,11 @@ public class MessageRouter<TContext> : IMiddleware<TContext>, ITerminalMiddlewar
     /// <param name="next">Unused - this middleware never calls the rest of the pipeline (see remarks).</param>
     public async Task HandleAsync(TContext context, Func<Task> next)
     {
-        var topic = _messageGetter.GetTopic(context);
-        // A version already on the topic (e.g. an explicit UsePresetTopic(topicId, version)) is a
-        // deliberate override and wins; the message's own version signal only fills the gap when
-        // the topic getter didn't already supply one.
-        if (!string.IsNullOrEmpty(topic?.Id) && string.IsNullOrEmpty(topic.Version))
-        {
-            var version = _messageVersionGetter.GetVersion(context);
-            if (!string.IsNullOrEmpty(version))
-            {
-                topic = new Topic(topic.Id, version);
-            }
-        }
+        // Version-augmentation (combining the topic with the message's own version signal before
+        // FindHandler) is the shared GetVersionedTopic helper - see its doc comment and WP-P
+        // (work/bug-fix-designs-round7-10-2026-08.md) for why this must never be re-derived per
+        // consumer.
+        var topic = _messageGetter.GetVersionedTopic(context, _messageVersionGetter);
 
         if (string.IsNullOrEmpty(topic?.Id))
         {

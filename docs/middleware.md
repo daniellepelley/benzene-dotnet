@@ -343,8 +343,10 @@ public async Task HandleAsync(TContext context, Func<Task> next)
 ```
 
 Tags applied when resolvable: `benzene.transport` (from `ICurrentTransport`), `benzene.topic` /
-`benzene.version` (from `IMessageGetter<TContext>`), and `benzene.handler` (from
-`IMessageHandlerDefinitionLookUp`, looked up by topic). Because this happens inside
+`benzene.version` (from `IMessageGetter<TContext>`, augmented with `IMessageVersionGetter<TContext>`
+via the shared `GetVersionedTopic` helper so a multi-version topic reports the version the request
+actually declares), and `benzene.handler` (from `IMessageHandlerDefinitionLookUp`, looked up by that
+version-augmented topic). Because this happens inside
 `DefaultMiddlewareFactory.Create`, it applies uniformly to hand-written middleware, `.Use(...)`
 inline middleware, `MessageRouter<TContext>`, and everything else in the pipeline — with no
 per-middleware opt-in. `Benzene.Diagnostics` also ships a second `IMiddlewareWrapper`

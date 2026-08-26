@@ -4,12 +4,20 @@ using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using Benzene.Abstractions.MessageHandlers.Info;
+using Benzene.Abstractions.Messages;
 using Benzene.Abstractions.Middleware;
+using Benzene.Core.MessageHandlers;
+using Benzene.Core.MessageHandlers.BenzeneMessage;
+using Benzene.Core.MessageHandlers.DI;
 using Benzene.Core.MessageHandlers.Info;
+using Benzene.Core.MessageHandlers.TestHelpers;
+using Benzene.Core.Messages.BenzeneMessage;
 using Benzene.Core.Middleware;
 using Benzene.Diagnostics;
 using Benzene.Diagnostics.Timers;
 using Benzene.Microsoft.Dependencies;
+using Benzene.Test.Examples;
+using Benzene.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -431,6 +439,39 @@ public class ActivityMiddlewareTest
         Assert.Equal("exception", span.GetTagItem("benzene.status"));
         // The WHY rides alongside: the thrown exception's TYPE (never its message) on the same span.
         Assert.Equal("System.InvalidOperationException", span.GetTagItem("benzene.exception.type"));
+    }
+
+    [Fact]
+    public async Task AddDiagnostics_TagsHandlerAndVersion_ForTheDeclaredVersion_NotTheMaxOrdinalFallback()
+    {
+        // WP-P (work/bug-fix-designs-round7-10-2026-08.md), task #70: without version-augmentation,
+        // the decorator resolves the topic unversioned, which VersionSelector then falls back to
+        // resolving as the highest-ordinal registered version ("v2") regardless of what the request
+        // actually declares - so a v1 request would be tagged with the (never-run) V2 handler's name
+        // and a blank benzene.version. Reverting GetVersionedTopic's use in ActivityMiddlewareDecorator
+        // reproduces this: the assertions below flip to VersionBlindnessV2Handler / null.
+        var (activities, listener) = ListenToBenzeneActivities();
+        using var _ = listener;
+
+        var serviceCollection = ServiceResolverMother.CreateServiceCollection();
+        serviceCollection.UsingBenzene(x => x.AddBenzeneMessage());
+        var container = new MicrosoftBenzeneServiceContainer(serviceCollection);
+        container.AddDiagnostics();
+
+        var pipeline = new MiddlewarePipelineBuilder<BenzeneMessageContext>(container);
+        pipeline.UseMessageHandlers();
+
+        var app = new BenzeneMessageApplication(pipeline.Build());
+
+        var request = MessageBuilder.Create(VersionBlindnessDefaults.Topic, new VersionBlindnessV1Request { Id = 42 })
+            .WithHeader(MessageVersionHeaders.Default, "v1")
+            .AsBenzeneMessage();
+
+        await app.HandleAsync(request, new MicrosoftServiceResolverFactory(serviceCollection.BuildServiceProvider()));
+
+        var span = Assert.Single(activities, a => a.GetTagItem("benzene.topic") is not null);
+        Assert.Equal("v1", span.GetTagItem("benzene.version"));
+        Assert.Equal(nameof(VersionBlindnessV1Handler), span.GetTagItem("benzene.handler"));
     }
 
     [Fact]

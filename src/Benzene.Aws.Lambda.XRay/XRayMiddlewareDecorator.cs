@@ -101,7 +101,11 @@ public class XRayMiddlewareDecorator<TContext> : IMiddleware<TContext>
             Safe(() => recorder.AddAnnotation("benzene_transport", transport.Name));
         }
 
-        var topic = _serviceResolver.TryGetService<IMessageGetter<TContext>>()?.GetTopic(context);
+        // Version-augmented (GetVersionedTopic - WP-P, work/bug-fix-designs-round7-10-2026-08.md) so
+        // benzene_handler/benzene_version annotate the handler/version that actually ran, not whichever
+        // version VersionSelector's unversioned fallback happens to land on (task #70).
+        var versionGetter = _serviceResolver.TryGetService<IMessageVersionGetter<TContext>>();
+        var topic = _serviceResolver.TryGetService<IMessageGetter<TContext>>()?.GetVersionedTopic(context, versionGetter);
         if (topic is not null && !string.IsNullOrEmpty(topic.Id))
         {
             Safe(() => recorder.AddAnnotation("benzene_topic", topic.Id));

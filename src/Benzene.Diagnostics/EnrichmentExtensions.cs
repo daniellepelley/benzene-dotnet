@@ -39,7 +39,11 @@ public static class EnrichmentExtensions
             var activity = Activity.Current;
             var invocation = resolver.TryGetService<IBenzeneInvocation>();
             var transport = resolver.TryGetService<ICurrentTransport>();
-            var topic = resolver.TryGetService<IMessageGetter<TContext>>()?.GetTopic(context);
+            // Version-augmented (GetVersionedTopic - WP-P, work/bug-fix-designs-round7-10-2026-08.md)
+            // so the "handler" log-scope key names the handler that actually ran, not whichever version
+            // VersionSelector's unversioned fallback happens to land on (task #70).
+            var topic = resolver.TryGetService<IMessageGetter<TContext>>()
+                ?.GetVersionedTopic(context, resolver.TryGetService<IMessageVersionGetter<TContext>>());
             var handler = topic is not null && !string.IsNullOrEmpty(topic.Id)
                 ? resolver.TryGetService<IMessageHandlerDefinitionLookUp>()?.FindHandler(topic)
                 : null;
