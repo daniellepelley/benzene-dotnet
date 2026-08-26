@@ -15,16 +15,23 @@ surface needed.
   fully overridable (`Matches(tags)` = every required key present, non-null values matched exactly).
 - `MeshDiscoveryRunner` — runs all providers, unions with an optional hand-written static seed
   (**seed wins on a name clash** — a human pin is an intentional override), dedups by name → a
-  `MeshServiceRegistry`.
+  `MeshServiceRegistry`. Each provider call is individually try/caught and bounded by a 10-second
+  `PerProviderTimeout` (matching the aggregator's own `PerServiceFetchTimeout` convention) - one
+  failing/hung provider contributes nothing but never aborts the run, and its failure is surfaced via
+  the optional `failures` out-parameter (provider key + exception type) rather than swallowed.
 - `MeshRegistryJson` — serializes a `MeshServiceRegistry` to the `mesh.json` `{ "services": [...] }`
   shape the aggregator host reads. **This is the discovery↔runtime seam**: discovery *writes* this
   document, runtime monitoring *reads* it (a drop-in for a hand-written `mesh.json`).
 
 ## Key types (this package)
 - `AwsLambdaDiscoveryProvider` — `IMeshDiscoveryProvider` over `IAmazonLambda`. Paginated
-  `ListFunctions` + per-function `ListTags`; keeps functions matching the filter; emits entries with
-  `Source = AwsLambdaInvoke` and `SourceOptions["functionName"]`. An optional `benzene:mesh-path` tag
-  is carried into `SourceOptions["meshPath"]` for services serving the descriptor at a non-default path.
+  `ListFunctions` + per-function `ListTags` (bounded concurrency, `MaxConcurrentTagReads`); keeps
+  functions matching the filter; emits entries with `Source = AwsLambdaInvoke` and
+  `SourceOptions["functionName"]`. One function's `ListTags` failing (deleted between `ListFunctions`
+  and here, or access-denied on that one function's ARN) drops just that function - it can't be
+  tag-matched without its tags anyway - rather than losing every other function's result via the
+  shared `Task.WhenAll`. An optional `benzene:mesh-path` tag is carried into
+  `SourceOptions["meshPath"]` for services serving the descriptor at a non-default path.
 - `Extensions.AddMeshAwsLambdaDiscovery()` — registers a default-credential `AmazonLambdaClient`, the
   provider (as an additional `IMeshDiscoveryProvider`), and a `MeshDiscoveryRunner` over all providers.
 

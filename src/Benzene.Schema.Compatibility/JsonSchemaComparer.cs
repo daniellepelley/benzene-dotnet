@@ -351,10 +351,30 @@ public static class JsonSchemaComparer
         return $"idx:{index}";
     }
 
-    /// <summary>The <c>$ref</c> target name of a member, e.g. <c>"Dog"</c> from
-    /// <c>"#/components/schemas/Dog"</c>, or <c>null</c> when the member is inline.</summary>
-    private static string? RefId(JsonObject member) =>
-        member["$ref"] is JsonValue value && value.TryGetValue<string>(out var text) ? RefTargetName(text) : null;
+    /// <summary>
+    /// The <c>$ref</c> target name of a member, e.g. <c>"Dog"</c> from <c>"#/components/schemas/Dog"</c>.
+    /// </summary>
+    /// <remarks>
+    /// Falls back to the member's <c>title</c> when there is no <c>$ref</c> to read. This matters for a
+    /// caller (the mesh aggregator) that pre-inlines every <c>$ref</c> before comparing two schema
+    /// versions: inlining resolves and REPLACES the <c>$ref</c> node with the target component's own
+    /// body, so by the time this runs there is no <c>$ref</c> left to key variant matching on - only
+    /// the <c>title</c> the inliner deliberately stamped with the original ref name for exactly this
+    /// reason. Without this fallback, every inlined <c>oneOf</c>/<c>anyOf</c>/<c>allOf</c> member keyed
+    /// on position instead (<see cref="VariantKey"/>'s <c>idx:</c> branch), so a pure branch reordering
+    /// - no schema change at all - was reported as every variant being removed and re-added, and
+    /// (worse) a real change to a reordered variant was misattributed to whichever variant now happened
+    /// to sit at its old index.
+    /// </remarks>
+    private static string? RefId(JsonObject member)
+    {
+        if (member["$ref"] is JsonValue refValue && refValue.TryGetValue<string>(out var refText))
+        {
+            return RefTargetName(refText);
+        }
+
+        return member["title"] is JsonValue titleValue && titleValue.TryGetValue<string>(out var title) ? title : null;
+    }
 
     /// <summary>The schema name a <c>$ref</c>/discriminator-mapping pointer targets, e.g. <c>"Dog"</c>
     /// from either a bare name or a full <c>"#/components/schemas/Dog"</c> pointer.</summary>

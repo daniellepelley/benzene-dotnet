@@ -30,6 +30,15 @@ public class MeshAggregator
     private readonly Func<DateTimeOffset> _clock;
     private readonly IMeshUsageSource[] _usageSources;
 
+    // Serialises RunOnceAsync itself, rather than relying on every call site to remember its own gate.
+    // MeshAggregationPass already had one (its own single-writer requirement predates this), but
+    // MeshAggregateMessageHandler and MeshPollBackgroundService both called RunOnceAsync directly with
+    // none - so a periodic poll and an on-demand refresh could genuinely interleave their writes and
+    // leave manifest.json from one run beside services/*.json from the other. Putting the gate here
+    // closes the gap for those two call sites and for any future one, instead of trusting each host to
+    // reimplement it (see MeshAggregationPass's own remarks on exactly that history).
+    private readonly SemaphoreSlim _runGate = new(1, 1);
+
     /// <summary>Initializes a new instance of the <see cref="MeshAggregator"/> class.</summary>
     /// <param name="sources">
     /// Every registered <see cref="IMeshServiceSource"/>, keyed by <see cref="IMeshServiceSource.Key"/>
@@ -66,19 +75,47 @@ public class MeshAggregator
     /// </summary>
     /// <param name="registry">The services to poll.</param>
     /// <returns>The published manifest.</returns>
+    /// <remarks>
+    /// At most one run executes at a time per <see cref="MeshAggregator"/> instance - a second,
+    /// overlapping call waits for the first to finish rather than interleaving its writes with it (see
+    /// the single-writer gate discussed on <see cref="MeshAggregationPass"/>, which now sits underneath
+    /// every call site rather than only the ones that remembered to add their own).
+    /// </remarks>
     public async Task<MeshManifest> RunOnceAsync(MeshServiceRegistry registry)
     {
+        await _runGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            return await RunOnceCoreAsync(registry).ConfigureAwait(false);
+        }
+        finally
+        {
+            _runGate.Release();
+        }
+    }
+
+    private async Task<MeshManifest> RunOnceCoreAsync(MeshServiceRegistry registry)
+    {
+        // One timestamp for every artifact this run produces - not a fresh `_clock()` call per
+        // artifact. Every artifact of a run is stamped with it (reusing the manifest's own
+        // GeneratedAtUtc field rather than adding a new one), so it doubles as a run id: a reader who
+        // fetches manifest.json and a service snapshot separately (they are never one atomic read) can
+        // tell a snapshot that belongs to THIS run from one left over from an earlier run whose own
+        // artifact write failed partway - see the manifest-published-last note below for the other
+        // half of that guarantee.
+        var runGeneratedAtUtc = _clock();
+
         var entries = registry.Services;
         // Usage adapters are polled concurrently with the services themselves - independent I/O.
-        var usageTask = FetchUsageAsync();
-        var results = await Task.WhenAll(entries.Select(BuildServiceAsync));
+        var usageTask = FetchUsageAsync(runGeneratedAtUtc);
+        var results = await Task.WhenAll(entries.Select(entry => BuildServiceAsync(entry, runGeneratedAtUtc)));
 
         // Build every artifact's content first (cheap, in-memory), then publish them all concurrently.
         // The artifacts are independent blobs, so writing them one-await-at-a-time cost one S3 round-trip
         // each in series (the dominant part of a run once the services had responded); a single
         // Task.WhenAll collapses that to roughly one round-trip's wall-clock.
         var manifestEntries = new List<MeshManifestEntry>(entries.Length);
-        var writes = new List<Task>(entries.Length + 4);
+        var writes = new List<Task>(entries.Length + 3);
         for (var i = 0; i < entries.Length; i++)
         {
             var entry = entries[i];
@@ -90,13 +127,12 @@ public class MeshAggregator
                 entry.OwningTeam, results[i].Transports.ToArray(), snapshot.FetchedAtUtc));
         }
 
-        var manifest = new MeshManifest(_clock(), manifestEntries.ToArray());
-        writes.Add(_store.PublishAsync("manifest.json", JsonSerializer.Serialize(manifest, JsonOptions)));
+        var manifest = new MeshManifest(runGeneratedAtUtc, manifestEntries.ToArray());
 
         // Cross-service topic catalog: every topic across the mesh -> which service(s) expose it,
         // diffed against the previous run's own catalog for the topic-level "what changed"
         // substance (added/removed topics, schema/participant changes) a drift hash can't give.
-        var catalog = await ApplyCatalogDiffAsync(BuildTopicCatalog(entries, results));
+        var catalog = await ApplyCatalogDiffAsync(BuildTopicCatalog(entries, results, runGeneratedAtUtc));
         writes.Add(_store.PublishAsync("topics.json", JsonSerializer.Serialize(catalog, JsonOptions)));
 
         // Observed usage (docs/mesh-usage-feed.md) is awaited here - before the topology below - so
@@ -112,12 +148,12 @@ public class MeshAggregator
         // Where the usage feed can unambiguously attribute a topic's traffic to a specific edge, the
         // edge also carries a usage-derived req/min + error rate; latency percentiles are never
         // available from this feed and stay null.
-        var topology = BuildTopology(entries, results, usage);
+        var topology = BuildTopology(entries, results, usage, runGeneratedAtUtc);
         writes.Add(_store.PublishAsync("topology.json", JsonSerializer.Serialize(topology, JsonOptions)));
 
         // Composite AsyncAPI: merge every service's own AsyncAPI 3.0 doc (fetched from its spec
         // endpoint) into one fleet-wide document loadable in an AsyncAPI editor.
-        writes.Add(_store.PublishAsync("asyncapi.json", BuildCompositeAsyncApi(entries, results)));
+        writes.Add(_store.PublishAsync("asyncapi.json", BuildCompositeAsyncApi(entries, results, runGeneratedAtUtc)));
 
         if (usage != null)
         {
@@ -125,6 +161,16 @@ public class MeshAggregator
         }
 
         await Task.WhenAll(writes);
+
+        // manifest.json is published LAST, only after every artifact it can reference has already
+        // landed. Before this, manifest.json was written concurrently with everything else via the
+        // same Task.WhenAll - so a reader racing a run (or a run whose store failed partway through
+        // the OTHER writes) could see a freshly-updated manifest pointing at a service/topic/topology
+        // artifact that either doesn't exist yet or still holds a previous run's content. Publishing it
+        // last can't fully close that gap (a manifest write can itself still fail after everything else
+        // succeeded, leaving a stale-but-consistent manifest - a strictly better failure than the
+        // reverse), but it removes the far more common ordering hazard.
+        await _store.PublishAsync("manifest.json", JsonSerializer.Serialize(manifest, JsonOptions));
 
         return manifest;
     }
@@ -136,7 +182,7 @@ public class MeshAggregator
     /// concatenated (each already carries its own <see cref="MeshUsageEntry.Source"/>), window
     /// bounds widened to cover every report. Returns <c>null</c> when no source reported.
     /// </summary>
-    private async Task<MeshUsage?> FetchUsageAsync()
+    private async Task<MeshUsage?> FetchUsageAsync(DateTimeOffset runGeneratedAtUtc)
     {
         if (_usageSources.Length == 0)
         {
@@ -151,7 +197,7 @@ public class MeshAggregator
         }
 
         return new MeshUsage(
-            _clock(),
+            runGeneratedAtUtc,
             available.Select(report => report.WindowStartUtc).Min(),
             available.Select(report => report.WindowEndUtc).Max(),
             available.SelectMany(report => report.Entries).ToArray());
@@ -176,7 +222,7 @@ public class MeshAggregator
     /// passing each service's reserved-topic ids (from its benzene spec) so utility channels are
     /// dropped. See <see cref="AsyncApiCompositor"/>.
     /// </summary>
-    private string BuildCompositeAsyncApi(MeshServiceRegistryEntry[] entries, ServiceResult[] results)
+    private static string BuildCompositeAsyncApi(MeshServiceRegistryEntry[] entries, ServiceResult[] results, DateTimeOffset runGeneratedAtUtc)
     {
         var documents = new List<AsyncApiCompositor.ServiceDocument>();
         for (var i = 0; i < entries.Length; i++)
@@ -194,7 +240,7 @@ public class MeshAggregator
             documents.Add(new AsyncApiCompositor.ServiceDocument(entries[i].Name, results[i].AsyncApiJson!, reserved));
         }
 
-        return AsyncApiCompositor.Merge(documents, _clock());
+        return AsyncApiCompositor.Merge(documents, runGeneratedAtUtc);
     }
 
     // The synthesized `result`-tag tokens the metric standard (Benzene.Diagnostics.MetricsExtensions)
@@ -229,7 +275,7 @@ public class MeshAggregator
     /// classifiable) error rate; latency percentiles are never available from this feed. Attribution
     /// is all-or-nothing per edge and never shows a lower bound - see <see cref="AttributeTopicToEdge"/>.
     /// </summary>
-    private MeshTopology BuildTopology(MeshServiceRegistryEntry[] entries, ServiceResult[] results, MeshUsage? usage)
+    private static MeshTopology BuildTopology(MeshServiceRegistryEntry[] entries, ServiceResult[] results, MeshUsage? usage, DateTimeOffset runGeneratedAtUtc)
     {
         // Consumers of a topic (spec `requests`, non-reserved) and producers of it (spec `events`).
         var consumersByTopic = new Dictionary<string, List<string>>(StringComparer.Ordinal);
@@ -311,7 +357,7 @@ public class MeshAggregator
                 p50LatencyMs: null, p95LatencyMs: null, p99LatencyMs: null));
         }
 
-        return new MeshTopology(_clock(), edges.ToArray());
+        return new MeshTopology(runGeneratedAtUtc, edges.ToArray());
     }
 
     /// <summary>
@@ -427,7 +473,7 @@ public class MeshAggregator
     /// itself; only looking across the whole fleet at once can answer it
     /// (work/service-mesh-roadmap-1.0.md §10.9).
     /// </summary>
-    private MeshTopicCatalog BuildTopicCatalog(MeshServiceRegistryEntry[] entries, ServiceResult[] results)
+    private static MeshTopicCatalog BuildTopicCatalog(MeshServiceRegistryEntry[] entries, ServiceResult[] results, DateTimeOffset runGeneratedAtUtc)
     {
         var byTopic = new Dictionary<(string Topic, string Version), TopicAggregate>();
         for (var i = 0; i < entries.Length; i++)
@@ -470,7 +516,7 @@ public class MeshAggregator
 
         var versionCompatibility = BuildVersionCompatibility(byTopic);
 
-        return new MeshTopicCatalog(_clock(), ApplyCrossVersionCompatibility(topics),
+        return new MeshTopicCatalog(runGeneratedAtUtc, ApplyCrossVersionCompatibility(topics),
             versionCompatibility: versionCompatibility);
     }
 
@@ -949,7 +995,7 @@ public class MeshAggregator
         public JsonObject? MessageSchema;
     }
 
-    private async Task<ServiceResult> BuildServiceAsync(MeshServiceRegistryEntry entry)
+    private async Task<ServiceResult> BuildServiceAsync(MeshServiceRegistryEntry entry, DateTimeOffset runGeneratedAtUtc)
     {
         var source = ResolveSource(entry.Source);
 
@@ -963,23 +1009,24 @@ public class MeshAggregator
         var asyncApiTask = FetchAsyncApiAsync(source, entry);
         await Task.WhenAll(specTask, healthTask, asyncApiTask);
 
-        var (specJson, specError) = specTask.Result;
-        var (health, healthError) = healthTask.Result;
+        var (specJson, specError, specErrorClass) = specTask.Result;
+        var (health, healthError, healthErrorClass) = healthTask.Result;
         var asyncApiJson = asyncApiTask.Result;
 
         // Preserve the previous precedence: a spec-fetch error is recorded first, otherwise the health one.
         var error = specError ?? healthError;
+        var errorClass = specError != null ? specErrorClass : healthErrorClass;
 
-        var snapshot = await MeshSnapshotBuilder.BuildAsync(_store, entry.Name, _clock(), specJson, health, error);
+        var snapshot = await MeshSnapshotBuilder.BuildAsync(_store, entry.Name, runGeneratedAtUtc, specJson, health, error, errorClass);
         return new ServiceResult(snapshot, ParseTopics(specJson), ParseOutboundTopics(specJson), ParseTransports(specJson), asyncApiJson);
     }
 
-    private static async Task<(string? SpecJson, string? Error)> FetchSpecAsync(IMeshServiceSource source, MeshServiceRegistryEntry entry)
+    private static async Task<(string? SpecJson, string? Error, string? ErrorClass)> FetchSpecAsync(IMeshServiceSource source, MeshServiceRegistryEntry entry)
     {
         try
         {
             using var timeout = new CancellationTokenSource(PerServiceFetchTimeout);
-            return (await source.FetchSpecAsync(entry, timeout.Token), null);
+            return (await source.FetchSpecAsync(entry, timeout.Token), null, null);
         }
         catch (Exception ex)
         {
@@ -987,23 +1034,110 @@ public class MeshAggregator
             // something with broader visibility than one service's own health endpoint (same posture
             // as the Data["Error"] fix across the HealthChecks family). A timeout surfaces here as
             // TaskCanceledException, same as any other fetch failure.
-            return (null, ex.GetType().Name);
+            return (null, ex.GetType().Name, ClassifyError(ex));
         }
     }
 
-    private static async Task<(HealthCheckResponse? Health, string? Error)> FetchHealthAsync(IMeshServiceSource source, MeshServiceRegistryEntry entry)
+    private static async Task<(HealthCheckResponse? Health, string? Error, string? ErrorClass)> FetchHealthAsync(IMeshServiceSource source, MeshServiceRegistryEntry entry)
     {
         try
         {
             using var timeout = new CancellationTokenSource(PerServiceFetchTimeout);
             var healthJson = await source.FetchHealthAsync(entry, timeout.Token);
-            return (JsonSerializer.Deserialize<HealthCheckResponse>(healthJson, JsonOptions), null);
+            return (JsonSerializer.Deserialize<HealthCheckResponse>(healthJson, JsonOptions), null, null);
         }
         catch (Exception ex)
         {
-            return (null, ex.GetType().Name);
+            return (null, ex.GetType().Name, ClassifyError(ex));
         }
     }
+
+    /// <summary>
+    /// Classifies a spec/health fetch failure into <see cref="MeshErrorClass"/>, alongside (never
+    /// instead of) the existing redacted <c>ex.GetType().Name</c> error field — #154: a permission
+    /// failure (403/AccessDenied) previously looked identical to a transient network blip or a hung
+    /// call, both surfacing only as whichever exception type the source's SDK happened to throw
+    /// (<c>AmazonServiceException</c>, <c>HttpRequestException</c>, ...). A reader who can tell "the
+    /// mesh has no access to this service" apart from "this service was briefly unreachable" needs
+    /// this, and the two calls for very different follow-up action.
+    /// </summary>
+    /// <remarks>
+    /// <c>MeshAggregator</c> deliberately has no compile-time dependency on any cloud SDK — an
+    /// <see cref="IMeshServiceSource"/> can be backed by AWS, Azure, Google Cloud, Kubernetes or plain
+    /// HTTP, each throwing its own SDK's exception shape. Rather than pull in every SDK just to catch
+    /// its exception type, this reads the status code every one of them already exposes, by name, via
+    /// reflection: <c>HttpRequestException.StatusCode</c>, <c>AmazonServiceException.StatusCode</c>,
+    /// <c>Google.GoogleApiException.HttpStatusCode</c> (all <see cref="System.Net.HttpStatusCode"/>),
+    /// <c>Azure.RequestFailedException.Status</c> (<see cref="int"/>), and the Kubernetes client's
+    /// <c>HttpOperationException</c>, which nests its status one level down as
+    /// <c>Response.StatusCode</c>. A shape this doesn't recognise classifies as
+    /// <see cref="MeshErrorClass.Other"/> rather than guessing.
+    /// </remarks>
+    private static string ClassifyError(Exception ex)
+    {
+        if (ex is OperationCanceledException)
+        {
+            return MeshErrorClass.Timeout;
+        }
+
+        foreach (var propertyName in StatusCodePropertyNames)
+        {
+            var property = ex.GetType().GetProperty(propertyName);
+            if (property != null && TryReadStatusCode(property.GetValue(ex), out var code))
+            {
+                return ClassifyStatusCode(code);
+            }
+        }
+
+        // The Kubernetes client's HttpOperationException carries no top-level status property at all -
+        // it nests the response one level down instead.
+        var responseProperty = ex.GetType().GetProperty("Response");
+        if (responseProperty?.GetValue(ex) is { } response)
+        {
+            var statusProperty = response.GetType().GetProperty("StatusCode");
+            if (statusProperty != null && TryReadStatusCode(statusProperty.GetValue(response), out var code))
+            {
+                return ClassifyStatusCode(code);
+            }
+        }
+
+        if (ex is HttpRequestException or System.Net.Sockets.SocketException)
+        {
+            // No status code to read at all - a connect-level failure (DNS, refused, reset), which is
+            // squarely "unreachable" rather than "other".
+            return MeshErrorClass.Unreachable;
+        }
+
+        return MeshErrorClass.Other;
+    }
+
+    // Every SDK shape this needs to read exposes its status under one of these two property names -
+    // see ClassifyError's remarks for exactly which type carries which one.
+    private static readonly string[] StatusCodePropertyNames = { "StatusCode", "HttpStatusCode" };
+
+    private static bool TryReadStatusCode(object? value, out int code)
+    {
+        switch (value)
+        {
+            case System.Net.HttpStatusCode httpStatusCode:
+                code = (int)httpStatusCode;
+                return true;
+            case int intCode:
+                code = intCode;
+                return true;
+            default:
+                code = 0;
+                return false;
+        }
+    }
+
+    private static string ClassifyStatusCode(int statusCode) => statusCode switch
+    {
+        401 or 403 => MeshErrorClass.Permission,
+        408 => MeshErrorClass.Timeout,
+        >= 500 => MeshErrorClass.Unreachable,
+        _ => MeshErrorClass.Other,
+    };
 
     private static async Task<string?> FetchAsyncApiAsync(IMeshServiceSource source, MeshServiceRegistryEntry entry)
     {

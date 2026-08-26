@@ -21,6 +21,87 @@ public class MeshDiscoveryRunnerTest
     private static MeshServiceRegistryEntry Lambda(string name)
         => new(name, "", "", MeshServiceSource.AwsLambdaInvoke, new Dictionary<string, string> { ["functionName"] = name });
 
+    /// <summary>A provider that always fails, regardless of the token it's given.</summary>
+    private class ThrowingProvider : IMeshDiscoveryProvider
+    {
+        private readonly Exception _exception;
+        public ThrowingProvider(string key, Exception exception) { Key = key; _exception = exception; }
+        public string Key { get; }
+        public Task<IReadOnlyList<MeshServiceRegistryEntry>> DiscoverAsync(MeshDiscoveryFilter filter, CancellationToken ct = default)
+            => Task.FromException<IReadOnlyList<MeshServiceRegistryEntry>>(_exception);
+    }
+
+    [Fact]
+    public async Task Discover_OneProviderThrows_OthersStillContribute_AndTheFailureIsRecorded()
+    {
+        // #148: one provider throwing must not lose every other provider's results.
+        var runner = new MeshDiscoveryRunner(new IMeshDiscoveryProvider[]
+        {
+            new ThrowingProvider("aws", new InvalidOperationException("access denied")),
+            new FakeProvider("k8s", Lambda("orders"), Lambda("billing")),
+        });
+        var failures = new List<MeshDiscoveryProviderFailure>();
+
+        var registry = await runner.DiscoverAsync(new MeshDiscoveryFilter(), failures: failures);
+
+        Assert.Equal(new[] { "billing", "orders" }, registry.Services.Select(s => s.Name).OrderBy(n => n));
+        var failure = Assert.Single(failures);
+        Assert.Equal("aws", failure.ProviderKey);
+        Assert.Equal(nameof(InvalidOperationException), failure.ErrorType);
+    }
+
+    [Fact]
+    public async Task Discover_OneProviderThrows_FailuresParameterOmitted_StillIsolatesTheFailure()
+    {
+        // The failures collection is opt-in - a caller that only wants the registry (every existing
+        // call site before this fix) must not be forced to pass one, and must still get the surviving
+        // providers' results rather than an exception.
+        var runner = new MeshDiscoveryRunner(new IMeshDiscoveryProvider[]
+        {
+            new ThrowingProvider("aws", new InvalidOperationException("boom")),
+            new FakeProvider("k8s", Lambda("orders")),
+        });
+
+        var registry = await runner.DiscoverAsync(new MeshDiscoveryFilter());
+
+        Assert.Equal("orders", Assert.Single(registry.Services).Name);
+    }
+
+    [Fact]
+    public async Task Discover_AllProvidersThrow_ReturnsEmptyRegistry_WithEveryFailureRecorded()
+    {
+        var runner = new MeshDiscoveryRunner(new IMeshDiscoveryProvider[]
+        {
+            new ThrowingProvider("aws", new InvalidOperationException()),
+            new ThrowingProvider("k8s", new TimeoutException()),
+        });
+        var failures = new List<MeshDiscoveryProviderFailure>();
+
+        var registry = await runner.DiscoverAsync(new MeshDiscoveryFilter(), failures: failures);
+
+        Assert.Empty(registry.Services);
+        Assert.Equal(2, failures.Count);
+        Assert.Contains(failures, f => f.ProviderKey == "aws" && f.ErrorType == nameof(InvalidOperationException));
+        Assert.Contains(failures, f => f.ProviderKey == "k8s" && f.ErrorType == nameof(TimeoutException));
+    }
+
+    [Fact]
+    public async Task Discover_CallerCancellation_PropagatesInsteadOfBeingRecordedAsAProviderFailure()
+    {
+        // A genuine caller-driven cancellation (e.g. host shutdown) must not be swallowed as "one more
+        // failed provider" the way an ordinary exception or this runner's own per-provider timeout is -
+        // it must actually stop the run.
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var runner = new MeshDiscoveryRunner(new IMeshDiscoveryProvider[]
+        {
+            new ThrowingProvider("aws", new OperationCanceledException()),
+        });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => runner.DiscoverAsync(new MeshDiscoveryFilter(), cancellationToken: cts.Token));
+    }
+
     [Fact]
     public async Task Discover_UnionsProvidersAndSeed()
     {

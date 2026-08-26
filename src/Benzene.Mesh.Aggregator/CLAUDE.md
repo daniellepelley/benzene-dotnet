@@ -18,10 +18,20 @@ already runs, not a bespoke standalone tool.
   whole run, and one service's failure never prevents the rest from being published; determines `Healthy`/`Unhealthy`/
   `Unreachable` status (unreachable if the health document couldn't be fetched/deserialized,
   regardless of whether the spec endpoint responded - health is the primary "is this okay" signal);
-  compares the new spec hash against the previous run's (read back via `IMeshArtifactStore`) to set
-  `ContractDrift`. **The actual fetch is delegated to `IMeshServiceSource`** (see below) - the
-  timeout, error-type-name-only recording, and status/drift logic all live in `MeshAggregator`
-  itself, uniform across every source.
+  compares the new spec hash against the previous run's (read back via `IMeshArtifactStore`,
+  itself guarded against a throttled/failed read - treated as "no baseline", never a failed run) to
+  set `ContractDrift`. **The actual fetch is delegated to `IMeshServiceSource`** (see below) - the
+  timeout, error recording (`Error` - the exception type name, plus `ErrorClass` -
+  permission/unreachable/timeout/other, derived from the SDK's own status-code shape via reflection
+  rather than a compile-time dependency on any cloud SDK), and status/drift logic all live in
+  `MeshAggregator` itself, uniform across every source. `RunOnceAsync` also holds its own
+  single-writer gate (`SemaphoreSlim(1,1)` around the whole method body) - every call site is
+  serialised, including `MeshAggregateMessageHandler` and a poll-loop host, so two overlapping
+  passes against one remote artifact store can never interleave their writes (see
+  `MeshAggregationPass`'s own remarks on exactly that history); stamps every artifact of one run
+  with the same timestamp (the manifest's own `GeneratedAtUtc`, reused rather than adding a new
+  field, so it's a de-facto run id); and publishes `manifest.json` last, after every other artifact
+  write has completed, so a reader can't observe it referencing an artifact that hasn't landed yet.
 - `IMeshServiceSource` - the fetch port `MeshAggregator` depends on instead of an `HttpClient`
   directly: `FetchSpecAsync`/`FetchHealthAsync(MeshServiceRegistryEntry, CancellationToken)`, each
   returning raw JSON text (or throwing on failure - `MeshAggregator` catches and records the

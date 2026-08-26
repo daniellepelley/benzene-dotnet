@@ -1334,6 +1334,77 @@ already-completed work runs under `CancellationToken.None`, never the run/stop t
   cancelled token → still completes; failure + cancelled token → still abandons; handler throws +
   abandon also throws → original exception still propagates, both logged).
 
+### Tracked findings round 11, WP — Mesh discovery + catalog pipeline (done)
+Decisions, rationale, and the residual scope note are ruled in
+[`bug-fix-designs-round11-2026-08.md`](bug-fix-designs-round11-2026-08.md) §"§4 Mesh discovery +
+catalog pipeline".
+- **[RESOLVED] #148 — `MeshDiscoveryRunner`'s `foreach` over providers had no try/catch; one provider
+  throwing lost every other provider's results, and the discovery host wrote no registry document at
+  all on any failure.** Each provider call is now individually try/caught (with its own timeout, see
+  #157) and a failed provider contributes nothing but the loop continues; failures are surfaced via a
+  new optional `ICollection<MeshDiscoveryProviderFailure>? failures` out-parameter on `DiscoverAsync`
+  (provider key + exception type, never the message). `Benzene.Mesh.Discovery.Host`'s `Program.cs` now
+  refuses to publish (non-zero exit, previous registry left untouched) only when *every* configured
+  provider failed — decided in new `DiscoveryPublicationDecision.ShouldPublish` (unit-tested directly)
+  — while publishing the partial registry, with the failures logged to stderr, when only *some* did. A
+  run with zero providers configured is unaffected (README's documented "nothing wired" case, distinct
+  from "everything failed").
+- **[RESOLVED] #149 — `MeshSnapshotBuilder.TryGetPreviousSpecHashAsync`'s `store.TryReadAsync` call had
+  no try/catch (only the JSON deserialize below it was guarded), so one throttled/failed read aborted
+  the `Task.WhenAll` driving the WHOLE aggregation run.** Now guarded the same way
+  `MeshAggregator.ApplyCatalogDiffAsync`'s equivalent read already was: an unreadable previous snapshot
+  is treated as "no baseline", never a failed run. `ArtifactStoreMeshReportPublisher.PublishAsync`
+  shares the same fix for free, since it calls the same builder method.
+- **[RESOLVED] #150 — `AwsLambdaDiscoveryProvider`'s `Task.WhenAll` over per-function `ListTags` calls
+  meant one function failure (deleted/access-denied) lost every other function's result.** Each
+  `ListTagsAsync` call is now individually try/caught inside the `Select` lambda; a function whose tags
+  can't be read is dropped (it can't be tag-matched without them) and every other function still
+  contributes.
+- **[RESOLVED] #151 — `FileSystemMeshArtifactStore.PublishAsync` wrote via
+  `File.WriteAllTextAsync` (truncate-then-write in place), exposing a concurrent `TryReadAsync` in the
+  same process to a torn read.** Now writes to a temp file in the same directory, then
+  `File.Move(tmp, path, overwrite: true)` - atomic on both POSIX and Windows.
+- **[RESOLVED] #152 — `MeshAggregator.InlineSchema`'s pre-comparison `$ref` inlining defeated
+  `JsonSchemaComparer`'s `$ref`-name-based variant matching (inlining replaces the `$ref` node
+  entirely), so a pure `oneOf`/`anyOf`/`allOf` branch reordering was published as a fabricated
+  "breaking" change.** `JsonSchemaComparer.RefId` now falls back to the member's `title` when there is
+  no `$ref` to read - exactly the field `InlineSchema` already stamps with the original ref name for
+  this purpose. Verified red→green: `MeshAggregatorCompatibilityTest.OneOfBranchReordering_IsNotBreaking_DespitePreComparisonRefInlining`
+  failed (reported `breaking`) before the fix and passes (`compatible`, zero changes) after.
+- **[RESOLVED] #153 — `MeshAggregateMessageHandler` bypassed `MeshAggregationPass`'s single-writer
+  gate entirely by calling `_aggregator.RunOnceAsync` directly, as did `MeshPollBackgroundService`.**
+  The gate now lives inside `MeshAggregator.RunOnceAsync` itself (a `SemaphoreSlim(1,1)` wrapping the
+  whole run), so every call site is covered, including both of those and any future one, without
+  relying on each host to remember to add its own. `MeshAggregationPass`'s own gate is now a redundant
+  (harmless) outer layer for its own call site; left in place since removing it would be a bigger,
+  unrequested behavioural change and it costs nothing extra.
+- **[RESOLVED] #154 — permission failures (403/`AccessDenied`) were indistinguishable from transient
+  failures (network/timeout) in `MeshAggregator`'s recorded error (`ex.GetType().Name` only).** Added
+  `MeshServiceSnapshot.ErrorClass` (`MeshErrorClass`: permission/unreachable/timeout/other), populated
+  by a new `MeshAggregator.ClassifyError` that reads each SDK's status-code shape via reflection
+  (`HttpRequestException.StatusCode`, `AmazonServiceException.StatusCode`,
+  `Google.GoogleApiException.HttpStatusCode`, `Azure.RequestFailedException.Status`, the Kubernetes
+  client's `HttpOperationException.Response.StatusCode`) rather than taking a compile-time dependency
+  on every cloud SDK from the SDK-agnostic aggregator package. Additive/optional field, backward
+  compatible with snapshots written before it existed.
+- **[RESOLVED] #155 — `KubernetesApiServiceLister` ignored pagination (`limit`/`continueParameter`
+  never set, `ContinueProperty` never read), silently dropping Services beyond the first page if the
+  API server ever returned a continuation token.** Now sets an explicit `limit` (500) and loops on
+  `ContinueProperty` until the server reports none left. This adapter had zero prior test coverage
+  (every existing discovery test exercised the `IKubernetesServiceLister` port, not this SDK-backed
+  implementation) - new `KubernetesApiServiceListerTest` covers both the all-namespaces and
+  single-namespace paths, multi-page continuation, and the explicit `limit`.
+- **[RESOLVED] #156 — a failed artifact write could leave a split catalog (old manifest beside new
+  per-service artifacts) with no run stamp to detect the mismatch.** Every artifact of a run is now
+  stamped with one shared timestamp captured once at the top of `RunOnceAsync` (reusing the manifest's
+  own `GeneratedAtUtc`/each snapshot's `FetchedAtUtc` field rather than adding a new one, so it's a
+  free run id), and `manifest.json` is now published LAST, strictly after `Task.WhenAll` of every other
+  artifact write - so a reader can no longer see a manifest referencing an artifact that hasn't landed.
+- **[RESOLVED] #157 — `MeshDiscoveryRunner` had no per-provider timeout, unlike
+  `MeshAggregator.PerServiceFetchTimeout`.** Added an equivalent `PerProviderTimeout` (10s, same
+  convention), wrapping each provider call with a token linked to the caller's own, so a genuine
+  caller-driven cancellation still propagates instead of being recorded as a provider failure.
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.
