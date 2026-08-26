@@ -74,7 +74,10 @@ public abstract class CacheEntry<T> : CacheWriteActions<T>, ICacheEntry<T>
 
             var benzeneResult = await databaseReadFunc();
 
-            if (benzeneResult.IsSuccessful)
+            // A successful result's Payload can itself be null (e.g. a reference-type T the database
+            // read legitimately produced no value for) - there's nothing to write back to the cache in
+            // that case, so skip the write rather than caching a "null" placeholder.
+            if (benzeneResult.IsSuccessful && benzeneResult.Payload is not null)
             {
                 await SetValueAsync(benzeneResult.Payload);
             }

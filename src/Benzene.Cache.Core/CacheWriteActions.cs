@@ -43,12 +43,12 @@ public abstract class CacheWriteActions<T> : CacheInvalidateActions, ICacheWrite
         return WriteThroughAsync(modifyDatabaseFunc, result => result.Payload, DefaultCacheActionMapping);
     }
 
-    public Task<TResult> WriteThroughAsync<TResult>(Func<Task<TResult>> modifyDatabaseFunc, Func<TResult, T> getCacheValue) where TResult : IBenzeneResult
+    public Task<TResult> WriteThroughAsync<TResult>(Func<Task<TResult>> modifyDatabaseFunc, Func<TResult, T?> getCacheValue) where TResult : IBenzeneResult
     {
         return WriteThroughAsync(modifyDatabaseFunc, getCacheValue, DefaultCacheActionMapping);
     }
 
-    public async Task<TResult> WriteThroughAsync<TResult>(Func<Task<TResult>> modifyDatabaseFunc, Func<TResult, T> getCacheValue, Func<TResult, CacheUpdateAction> getCacheAction) where TResult : IBenzeneResult
+    public async Task<TResult> WriteThroughAsync<TResult>(Func<Task<TResult>> modifyDatabaseFunc, Func<TResult, T?> getCacheValue, Func<TResult, CacheUpdateAction> getCacheAction) where TResult : IBenzeneResult
     {
         using var timerScope = ProcessTimerFactory.Create("CacheActions_WriteThrough");
 
@@ -58,7 +58,13 @@ public abstract class CacheWriteActions<T> : CacheInvalidateActions, ICacheWrite
         {
             case CacheUpdateAction.Set:
                 timerScope.SetTag("cache-action", "set");
-                await SetValueAsync(getCacheValue(result));
+                // getCacheValue can legitimately produce null (e.g. the default Payload-based mapping
+                // for a reference-type T) - nothing to write back to the cache in that case.
+                var cacheValue = getCacheValue(result);
+                if (cacheValue is not null)
+                {
+                    await SetValueAsync(cacheValue);
+                }
                 break;
 
             case CacheUpdateAction.Invalidate:

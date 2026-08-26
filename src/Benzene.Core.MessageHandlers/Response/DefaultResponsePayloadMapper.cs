@@ -67,7 +67,7 @@ public class DefaultResponsePayloadMapper<TContext> : IResponsePayloadMapper<TCo
         return ProblemTypes.From(result);
     }
 
-    private string SerializePayload(Type type, object payload, ISerializer serializer)
+    private string SerializePayload(Type type, object? payload, ISerializer serializer)
     {
         if (payload == null)
         {

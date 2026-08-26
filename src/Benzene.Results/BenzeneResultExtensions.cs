@@ -158,7 +158,7 @@ public static class BenzeneResultExtensions
     }
 
     public static IBenzeneResult<TOutput> As<T, TOutput>(this IBenzeneResult<T> serviceBenzeneResult,
-        Func<T, TOutput> map)
+        Func<T?, TOutput> map)
     {
         return serviceBenzeneResult.IsSuccessful
            ? BenzeneResult.Set(serviceBenzeneResult.Status, map(serviceBenzeneResult.Payload), true)
@@ -177,7 +177,7 @@ public static class BenzeneResultExtensions
     }
 
     public static async Task<IBenzeneResult<TOutput>> As<T, TOutput>(this Task<IBenzeneResult<T>> source,
-        Func<T, TOutput> map)
+        Func<T?, TOutput> map)
     {
         await source;
         return source.Result.As(map);

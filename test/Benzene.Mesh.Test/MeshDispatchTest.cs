@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Amazon.Lambda;
 using Benzene.Clients;
 using Benzene.Clients.Aws.Lambda;
+using Benzene.Core.Messages;
 using Benzene.Mesh.Aws.Lambda;
 using Benzene.Mesh.Contracts;
 using Benzene.Mesh.Dispatch;
@@ -139,8 +140,9 @@ public class MeshDispatchMessageHandlerTest
         Assert.Equal("order:create", dispatcher.Envelope!.Topic);
         Assert.Equal("{\"a\":1}", dispatcher.Envelope!.Body);
         // The service's response envelope is serialized into the payload.
-        Assert.Contains("created", result.Payload.Content);
-        Assert.Contains("id", result.Payload.Content);
+        var payload = Assert.IsType<RawStringMessage>(result.Payload);
+        Assert.Contains("created", payload.Content);
+        Assert.Contains("id", payload.Content);
     }
 }
 

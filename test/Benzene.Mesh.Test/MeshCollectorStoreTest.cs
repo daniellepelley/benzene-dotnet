@@ -377,7 +377,8 @@ public class MeshCollectorStoreTest
         Assert.Equal("not-found", (await handler.HandleAsync(new CorrelationQuery { CorrelationId = "nope" })).Status);
         var ok = await handler.HandleAsync(new CorrelationQuery { CorrelationId = "corr-1" });
         Assert.Equal("ok", ok.Status);
-        Assert.Equal("corr-1", ok.Payload.CorrelationId);
-        Assert.Single(ok.Payload.Traces);
+        var okPayload = Assert.IsType<CorrelationView>(ok.Payload);
+        Assert.Equal("corr-1", okPayload.CorrelationId);
+        Assert.Single(okPayload.Traces);
     }
 }

@@ -19,17 +19,21 @@ namespace Benzene.Saga;
 public class SagaStep<T> : ISagaStep
 {
     private readonly Func<SagaContext, Task<IBenzeneResult<T>>> _forward;
-    private readonly Func<SagaContext, T, Task<IBenzeneResult>>? _compensate;
+    private readonly Func<SagaContext, T?, Task<IBenzeneResult>>? _compensate;
     private readonly string? _key;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SagaStep{T}"/> class.
     /// </summary>
     /// <param name="forward">The forward action, run with the saga context.</param>
-    /// <param name="compensate">The optional compensation, given the context and the forward result; omit for a step with no effect to undo.</param>
+    /// <param name="compensate">
+    /// The optional compensation, given the context and the forward result; omit for a step with no
+    /// effect to undo. The forward result's payload is passed as-is, including <c>null</c> should the
+    /// succeeded forward action's <see cref="IBenzeneResult{T}.Payload"/> itself be <c>null</c>.
+    /// </param>
     /// <param name="key">An optional explicit context key to publish the result under.</param>
     public SagaStep(Func<SagaContext, Task<IBenzeneResult<T>>> forward,
-        Func<SagaContext, T, Task<IBenzeneResult>>? compensate = null, string? key = null)
+        Func<SagaContext, T?, Task<IBenzeneResult>>? compensate = null, string? key = null)
     {
         _forward = forward;
         _compensate = compensate;

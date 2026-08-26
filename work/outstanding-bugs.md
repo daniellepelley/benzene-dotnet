@@ -1094,8 +1094,8 @@ executed, ServiceBus #117 originally suspected — confirmed and fixed, see WP-A
 WP-AC above); and `ValidationStatusAttribute` — documented in the shared abstractions package — is
 honored by exactly one of the three validation adapters (#99 — now RESOLVED, see WP-W above).
 Per-finding evidence, rulings and work packages are in the ruling doc; each will get its
-`[RESOLVED]` line here as it lands. **WP-AA, WP-AB, WP-AC, WP-W, WP-Z and WP-AE have landed** - see
-the resolved sections above; the remaining round-10 work packages below are still open.
+`[RESOLVED]` line here as it lands. **WP-AA, WP-AB, WP-AC, WP-W, WP-X, WP-Z and WP-AE have landed** -
+see the resolved sections above; the remaining round-10 work packages below are still open.
 
 - **[RESOLVED] #108 — `BenzeneCosmosChangeFeedWorker`'s auto-checkpoint call sat inside the pipeline's
   own try/catch, so a checkpoint failure after a successful batch was misattributed to the handler
@@ -1113,6 +1113,67 @@ below): worker self-stop leaves the process Ready with health green; EventHub ha
 escape hatch (Kafka's DLT argument applies verbatim); gRPC client per-call deadlines are not
 settable; missing-topic status asymmetry (`ValidationError` vs `NotFound`) across
 EventGrid/QueueStorage/Timer vs the sentinel transports.
+
+### Tracked findings round 10, WP-X — contract-annotation alignment (done)
+Ruled in [`bug-fix-designs-round10-2026-08.md`](bug-fix-designs-round10-2026-08.md) §"WP-X —
+contract-annotation alignment (#100, #101, #103)". Annotation-only, no behavioral change: aligning
+three nullable-reference-type contracts with what their implementations/callers already did in
+practice, landed after WP-V (which touches the same `MessageGetter.cs`).
+- **[RESOLVED] #100 — `IBenzeneResult.PayloadAsObject`/`IBenzeneResult<T>.Payload` were declared
+  non-nullable but were `null` for every failed/void result** (`ServiceBenzeneResultInternal<T>`
+  emitted a CS8603 warning at its own `PayloadAsObject` getter; seasoned consumers already
+  null-checked or used `?.`, e.g. `CrudConventionResponseEventMapping`,
+  `SerializerResponseRenderer`). Annotated `object? PayloadAsObject` and `T? Payload` on both
+  interfaces and documented the failure/void-path `null` behavior in their XML docs. Did a full
+  solution build after the annotation change and worked through every newly-surfaced warning with
+  honest null-handling (real null-checks, `??`, pattern matching / `Assert.IsType<T>` - never `!`):
+  `Benzene.CloudService/MeshAnnouncer.cs` (`??` fallback for the health-report payload),
+  `Benzene.Core.MessageHandlers/Response/DefaultResponsePayloadMapper.cs` (`SerializePayload`'s
+  `payload` parameter widened to `object?` - the method already null-checked its body, only the
+  signature was overclaiming), `Benzene.Cache.Core/CacheEntry.cs` + `CacheWriteActions.cs` +
+  `ICacheWriteActions.cs` (a `null` payload/cache-value is now an explicit "nothing to write back"
+  skip rather than an assumed-non-null write), `Benzene.MapReduce/ScatterGatherExtensions.cs`
+  (`Outcome.Ok`'s `partial` parameter widened to match the field it was already stored in as),
+  `Benzene.Results/BenzeneResultExtensions.cs` (`As`'s `map` delegate parameter widened to `T?` on
+  both the sync and `Task`-returning overloads), `Benzene.Saga/SagaStep.cs` + `StepBuilder.cs` (the
+  `Compensate` delegate's payload parameter widened to `T?` to match the forward result's now-honest
+  `Payload` type), and five test-file dereferences (`GrpcBenzeneMessageClientTest`,
+  `GrpcClientIntegrationTest`, `MeshAggregateMessageHandlerTest`, `MeshCollectorStoreTest`,
+  `MeshDispatchTest`) fixed with `?.` or `Assert.IsType<T>(...)`, matching the pattern already used
+  elsewhere in the test suite. The same ripple reached the (separately-built) example solution:
+  `examples/Saga/Benzene.Example.Saga/SignupSaga.cs`'s four `Compensate` lambdas now
+  `ArgumentNullException.ThrowIfNull` their payload before use (compensation only ever runs for an
+  already-succeeded step, so this is a checked assumption, not a behavior change), and
+  `InMemoryOrderDbClientTest`/`OrderServiceTest` got the same `?.` treatment. Full solution build
+  after all fixes: 0 errors, and the CS8xxx warning set is a strict subset of the pre-change
+  baseline (three pre-existing warnings - the ones this exact annotation fixes - disappeared; zero
+  new ones appeared). `Benzene.Core.Test` (3056/2/0), `Benzene.Mesh.Test` (536), and
+  `Benzene.Mesh.Host.Test` (141) all still pass, and `Benzene.Examples.sln` still builds with 0
+  errors and no new warnings after the example-file fixes.
+- **[RESOLVED] #101 — `MessageGetter<TContext>`'s `GetBody`/`GetTopic` facade methods narrowed the
+  nullability of the interfaces they forward to** (`string`/`ITopic` vs. the underlying
+  `IMessageBodyGetter<TContext>`/`IMessageTopicGetter<TContext>`'s own `string?`/`ITopic?`, with two
+  `!` null-forgiving suppressions in `GetTopic` papering over the mismatch). Re-read WP-V's merged
+  `GetTopic` (the version-join + `ResolvedTopicCache` logic, task #98) before touching this file, per
+  the ruling's coordination note. Aligned both signatures to `string?`/`ITopic?` and removed both `!`
+  suppressions - they're no longer needed once the return type is honest; no caller actually required
+  a non-null guarantee at either call site (every consumer already reads `IMessageGetter<TContext>`
+  through the interface, which was already nullable, so this was a false non-null promise the
+  concrete class alone made and nothing in the solution relied on). Updated the class's XML docs to
+  state the `null` contract explicitly. Full solution build shows zero new warnings from this change
+  (one pre-existing warning at the old `GetBody` implementation disappeared, since the honest
+  signature no longer needs a null check the old one lacked).
+- **[RESOLVED] #103 — `IVersionSelector.Select(string requestedVersion, ...)` declared a
+  non-nullable `requestedVersion`, but its only caller (`MessageHandlerDefinitionLookUp.FindHandler`)
+  passes `topic.Version`, which is null/empty for every unversioned message per
+  `IMessageVersionGetter`'s documented "null/empty means the topic's default version" contract.**
+  Declared the parameter `string? requestedVersion` on the interface and the default
+  `VersionSelector` implementation, and documented that the "return value must be one of
+  `availableVersions`" contract presumes a non-empty array - which can't hold for zero available
+  versions, but is unreachable via the default lookup path today (`MessageHandlerDefinitionLookUp`
+  early-returns on zero registered handlers before calling `Select`, and fast-paths past `Select`
+  entirely when exactly one is registered) - documented only, no defensive code added for the
+  unreachable case, per the ruling. No behavioral change; no new warnings.
 
 ### Tracked findings round 10, WP-AB — gRPC client cancellation + health bridge diagnosability (done)
 Ruled in [`bug-fix-designs-round10-2026-08.md`](bug-fix-designs-round10-2026-08.md) §"WP-AB — gRPC

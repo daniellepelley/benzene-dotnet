@@ -22,7 +22,8 @@ public class MeshAggregateMessageHandlerTest : IDisposable
         var result = await handler.HandleAsync(new Void());
 
         Assert.True(result.IsSuccessful);
-        Assert.Empty(result.Payload.Services);
+        var payload = Assert.IsType<MeshManifest>(result.Payload);
+        Assert.Empty(payload.Services);
     }
 
     public void Dispose()

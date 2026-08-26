@@ -17,9 +17,12 @@ public interface IBenzeneResult
     bool IsSuccessful { get; }
 
     /// <summary>
-    /// Gets the payload as an object for non-generic access.
+    /// Gets the payload as an object for non-generic access. <c>null</c> for a failed result and for
+    /// a void/no-payload result (e.g. <see cref="IBenzeneResult{T}"/> where <c>T</c> is
+    /// <see cref="Void"/>) - callers should null-check or use <c>?.</c> rather than assume a payload
+    /// is always present.
     /// </summary>
-    object PayloadAsObject { get; }
+    object? PayloadAsObject { get; }
 
     /// <summary>
     /// Gets the structured errors, if any occurred during the operation. Never <c>null</c> - an empty
@@ -38,7 +41,10 @@ public interface IBenzeneResult
 public interface IBenzeneResult<T> : IBenzeneResult
 {
     /// <summary>
-    /// Gets the strongly-typed payload of the result.
+    /// Gets the strongly-typed payload of the result. <c>null</c>/<c>default</c> for a failed result
+    /// and for a void/no-payload result - callers should null-check (or rely on <typeparamref name="T"/>
+    /// being a non-nullable value type, where <c>default</c> is never actually <c>null</c>) rather than
+    /// assume a payload is always present.
     /// </summary>
-    T Payload { get; }
+    T? Payload { get; }
 }
