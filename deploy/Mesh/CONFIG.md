@@ -106,6 +106,14 @@ plane at it.
 | `dispatch.enabled` | bool | `false` | Always applies | Wires `mesh:dispatch` (invokes a registered service's **real** handler with a chosen payload — real side-effects execute). Off by default: this is a deliberate, non-default choice. |
 | `dispatch.allowInProduction` | bool | `false` | Only checked when `dispatch.enabled` is `true` | The second gate: even with `enabled: true`, dispatch refuses to run in a Production environment (an unset environment counts as Production) unless this is also `true`. |
 
+When `dispatch.enabled` is `true`, `UseMeshDispatchGuard` (mounted automatically, no config knob)
+bounds a dispatch request's body at 128 KiB (`MeshDispatchGuardOptions.DefaultMaxRequestBytes`) — the
+check measures the request's ACTUAL byte count (not the caller-supplied `Content-Length` header, which
+a chunked `Transfer-Encoding` request omits entirely), so a chunked oversized body can't bypass it.
+`Program.cs` also sets Kestrel's own `MaxRequestBodySize` to the same value, host-wide, as
+defence-in-depth against the buffering itself running unbounded (see `bug-fix-designs-round7-10-2026-08.md`'s
+"WP-D", #35).
+
 ## `auth` — who may reach the dashboard
 
 | Key | Type | Default | Required when | What it does |

@@ -260,6 +260,23 @@ public class MeshAuthGate
                 "configured. Choose one of those, or remove auth.dispatchRole.");
         }
 
+        // #37 (P6 - no inert options): dispatchRole gates ONE path, InvokeAsync's check against
+        // DispatchPath (see its remarks) - and that path is only ever reachable at all when
+        // dispatch.enabled is true (Startup.Configure only mounts the mesh:dispatch envelope behind
+        // that flag). A dispatchRole configured while dispatch stays disabled is never evaluated by
+        // anything - not unsafe (there is nothing to bypass), just a config an operator would
+        // reasonably read as "role-gate dispatch" that silently does nothing. Same fail-fast treatment
+        // as every other inert/unsatisfiable combination this method already rejects (dispatch.enabled
+        // + mode "none" below is the mirror image: a real endpoint with a check that can never pass).
+        if (!string.IsNullOrEmpty(config.DispatchRole) && !dispatchEnabled)
+        {
+            throw new InvalidOperationException(
+                "auth.dispatchRole is set but dispatch.enabled is false - dispatchRole only gates " +
+                "mesh:dispatch (InvokeAsync's role check runs against DispatchPath), which is not a " +
+                "reachable endpoint at all while dispatch stays disabled, so the role requirement would " +
+                "never be evaluated. Set dispatch.enabled true, or remove auth.dispatchRole.");
+        }
+
         // #3: under "none" there is no identity to filter at all. Also rejected under "basic" - not
         // part of #3's own repro, but the same rationale extends to it: the operator defines the one
         // basic-auth account themselves, so domain-filtering it is meaningless busywork, not a real

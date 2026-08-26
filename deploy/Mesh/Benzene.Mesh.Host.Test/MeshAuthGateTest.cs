@@ -257,7 +257,9 @@ public class MeshAuthGateTest
         config.DispatchRole = "mesh-admins";
         config.Proxy.GroupsHeader = "X-Forwarded-Groups";
 
-        var exception = Record.Exception(() => MeshAuthGate.Validate(config));
+        // dispatchEnabled: true - #37's own inert-option check (below) would otherwise reject this
+        // combination for an unrelated reason; this test is about the group-claims check alone.
+        var exception = Record.Exception(() => MeshAuthGate.Validate(config, dispatchEnabled: true));
 
         Assert.Null(exception);
     }
@@ -271,10 +273,58 @@ public class MeshAuthGateTest
             config.Oidc.Authority = "https://idp.example.com";
             config.Oidc.ClientId = "client-id";
 
-            var exception = Record.Exception(() => MeshAuthGate.Validate(config));
+            // dispatchEnabled: true - see the sibling proxy test above for why.
+            var exception = Record.Exception(() => MeshAuthGate.Validate(config, dispatchEnabled: true));
 
             Assert.Null(exception);
         });
+    }
+
+    // --- #37 (P6 - no inert options): auth.dispatchRole is only ever evaluated against DispatchPath,
+    // which isn't a reachable endpoint at all while dispatch.enabled is false - so the combination is
+    // rejected at startup, the same way this file's other inert/unsatisfiable combinations are. ------
+
+    [Fact]
+    public void Validate_DispatchRoleSetWithDispatchDisabled_Throws()
+    {
+        WithEnvVars(("MESH_OIDC_CLIENT_SECRET", "shh"), () =>
+        {
+            var config = new MeshAuthConfig { Mode = "oidc", DispatchRole = "mesh-admins" };
+            config.Oidc.Authority = "https://idp.example.com";
+            config.Oidc.ClientId = "client-id";
+
+            var exception = Assert.Throws<InvalidOperationException>(
+                () => MeshAuthGate.Validate(config, dispatchEnabled: false));
+
+            Assert.Contains("dispatchRole", exception.Message);
+            Assert.Contains("dispatch.enabled", exception.Message);
+        });
+    }
+
+    [Fact]
+    public void Validate_DispatchRoleSetWithDispatchEnabled_DoesNotThrow()
+    {
+        WithEnvVars(("MESH_OIDC_CLIENT_SECRET", "shh"), () =>
+        {
+            var config = new MeshAuthConfig { Mode = "oidc", DispatchRole = "mesh-admins" };
+            config.Oidc.Authority = "https://idp.example.com";
+            config.Oidc.ClientId = "client-id";
+
+            var exception = Record.Exception(() => MeshAuthGate.Validate(config, dispatchEnabled: true));
+
+            Assert.Null(exception);
+        });
+    }
+
+    [Fact]
+    public void Validate_DispatchRoleUnsetWithDispatchDisabled_DoesNotThrow()
+    {
+        // No dispatchRole configured at all - nothing inert to reject, regardless of dispatch.enabled.
+        var config = new MeshAuthConfig { Mode = "none" };
+
+        var exception = Record.Exception(() => MeshAuthGate.Validate(config, dispatchEnabled: false));
+
+        Assert.Null(exception);
     }
 
     // allowedEmailDomains (#3)
