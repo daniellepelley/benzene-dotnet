@@ -54,11 +54,31 @@ public class GrpcHealthCheck : IHealthCheck
             return HealthCheckResult.CreateInstance(true, Type,
                 new Dictionary<string, object> { { "Target", _channel.Target } }, dependencies);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The caller's own token fired (ambient shutdown, or the processor's per-check timeout via
+            // TimeOutHealthCheck) - not this check's own connect budget. Propagate rather than reporting
+            // it as an ordinary connectivity failure, so ExceptionHandlingHealthCheck (which every check
+            // runs under via HealthCheckProcessor) classifies it as the distinct "Cancelled" outcome
+            // (WP-K), the same way TcpHealthCheck's own catch/rethrow does.
+            throw;
+        }
         catch (Exception ex)
         {
-            // Unreachable target -> the timeout fires (OperationCanceledException) -> transient Failed. Any
-            // RpcException is classified by its gRPC status (PermissionDenied -> 403 / Unauthenticated -> 401,
-            // both a persistent Failed), never its message.
+            // Unreachable target -> this check's own connect budget (_timeout) elapses, cancelling cts.Token
+            // independently of the caller's cancellationToken -> a genuine transient Failed, not "Cancelled":
+            // HealthCheckError.Classify now re-throws any OperationCanceledException it is given (WP-K), which
+            // would be wrong here since this cancellation is this check's own SLA, not caller-driven - so
+            // build the failed result directly instead of routing it through Classify. Any RpcException is
+            // still classified by its gRPC status via Classify (PermissionDenied -> 403 / Unauthenticated ->
+            // 401, both a persistent Failed), never its message.
+            if (ex is OperationCanceledException)
+            {
+                return HealthCheckResult.CreateInstance(false, Type,
+                    new Dictionary<string, object> { { "Target", _channel.Target }, { "Error", "Timed Out" } },
+                    dependencies);
+            }
+
             var (errorCode, statusCode) = GrpcErrorDetails(ex);
             return HealthCheckError.Classify(Type, ex, dependencies, errorCode, statusCode,
                 new Dictionary<string, object> { { "Target", _channel.Target } });

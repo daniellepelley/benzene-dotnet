@@ -141,4 +141,39 @@ public class SqsHealthCheckTest
         Assert.NotNull(response);
         Assert.False(response!.IsHealthy);
     }
+
+    // WP-K (#50): before this fix, SqsHealthCheck's own catch (Exception ex) caught the
+    // OperationCanceledException the processor's timeout produces (via the token forwarding proven
+    // above) along with every genuine SDK failure, and fed it through HealthCheckError.Classify the same
+    // way - misclassifying a timeout/shutdown as an ordinary transient dependency failure
+    // ({"Error": "TaskCanceledException"}), indistinguishable from a real dead queue. It must instead
+    // propagate so ExceptionHandlingHealthCheck (which every check runs under via HealthCheckProcessor)
+    // reports the distinct "Cancelled" outcome, the same way TcpHealthCheck's own catch/rethrow already
+    // does. Fixed once in HealthCheckError.Classify rather than in this file (or any of the ~10 other
+    // affected checks) individually.
+    [Fact]
+    public async Task ProcessorTimeout_OnAHungSqsCall_ClassifiesAsCancelled_NotAnOrdinaryDependencyFailure()
+    {
+        var mockSqsClient = new Mock<IAmazonSQS>();
+        mockSqsClient
+            .Setup(x => x.GetQueueAttributesAsync(It.IsAny<GetQueueAttributesRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(async (GetQueueAttributesRequest _, CancellationToken ct) =>
+            {
+                // Never completes on its own - only the processor's (much shorter) timeout ends this await.
+                await Task.Delay(Timeout.Infinite, ct);
+                return new GetQueueAttributesResponse { HttpStatusCode = HttpStatusCode.OK };
+            });
+
+        var healthCheck = new SqsHealthCheck("some-queue-url", mockSqsClient.Object);
+        var processor = new HealthCheckProcessor(TimeSpan.FromMilliseconds(50));
+
+        var result = await processor.PerformHealthChecksAsync(new IHealthCheck[] { healthCheck });
+
+        var response = result.PayloadAsObject as HealthCheckResponse;
+        Assert.NotNull(response);
+        var check = response!.HealthChecks["Sqs"];
+        Assert.Equal(HealthCheckStatus.Failed, check.Status);
+        // Not "TaskCanceledException" (the pre-fix misclassification) - the distinct "Cancelled" outcome.
+        Assert.Equal("Cancelled", check.Data["Error"]);
+    }
 }

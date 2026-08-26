@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Azure.Messaging.ServiceBus;
+using Benzene.HealthChecks;
 using Benzene.HealthChecks.Azure.ServiceBus;
 using Benzene.HealthChecks.Core;
 using Moq;
@@ -101,5 +102,41 @@ public class ServiceBusHealthCheckTest
         await new ServiceBusHealthCheck(client.Object, "orders").ExecuteAsync(CancellationToken.None);
 
         receiver.Verify(x => x.DisposeAsync(), Times.Once);
+    }
+
+    // WP-K (#50): before this fix, ServiceBusHealthCheck's own catch (Exception ex) caught the
+    // OperationCanceledException the processor's timeout produces along with every genuine SDK failure,
+    // and fed it through HealthCheckError.Classify the same way - misclassifying a timeout/shutdown as an
+    // ordinary transient dependency failure ({"Error": "TaskCanceledException"}), indistinguishable from
+    // a real dead entity. It must instead propagate so ExceptionHandlingHealthCheck (which every check
+    // runs under via HealthCheckProcessor) reports the distinct "Cancelled" outcome, the same way
+    // TcpHealthCheck's own catch/rethrow already does. Fixed once in HealthCheckError.Classify rather than
+    // in this file (or any of the ~10 other affected checks) individually.
+    [Fact]
+    public async Task ProcessorTimeout_OnAHungPeek_ClassifiesAsCancelled_NotAnOrdinaryDependencyFailure()
+    {
+        var receiver = new Mock<ServiceBusReceiver>();
+        receiver.Setup(x => x.PeekMessageAsync(It.IsAny<long?>(), It.IsAny<CancellationToken>()))
+            .Returns(async (long? _, CancellationToken ct) =>
+            {
+                // Never completes on its own - only the processor's (much shorter) timeout ends this await.
+                await Task.Delay(Timeout.Infinite, ct);
+                return (ServiceBusReceivedMessage?)null;
+            });
+
+        var client = new Mock<ServiceBusClient>();
+        client.Setup(x => x.CreateReceiver("orders")).Returns(receiver.Object);
+
+        var healthCheck = new ServiceBusHealthCheck(client.Object, "orders");
+        var processor = new HealthCheckProcessor(TimeSpan.FromMilliseconds(50));
+
+        var result = await processor.PerformHealthChecksAsync(new IHealthCheck[] { healthCheck });
+
+        var response = result.PayloadAsObject as HealthCheckResponse;
+        Assert.NotNull(response);
+        var check = response!.HealthChecks["ServiceBus"];
+        Assert.Equal(HealthCheckStatus.Failed, check.Status);
+        // Not "TaskCanceledException" (the pre-fix misclassification) - the distinct "Cancelled" outcome.
+        Assert.Equal("Cancelled", check.Data["Error"]);
     }
 }
