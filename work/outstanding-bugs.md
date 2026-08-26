@@ -292,6 +292,29 @@ real".
   confirmations enabled, verified via `GetNextPublishSequenceNumberAsync()` (the only public-API-visible
   proxy for that setting in this client version). See WP-8.
 
+### Tracked findings round 7–10, WP-G — AWS client / health-check consistency (done)
+Decisions and rationale ruled in
+[`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-G — AWS client /
+health-check consistency (P8)".
+- **[RESOLVED] #43 — `AwsLambdaBenzeneMessageClient`'s fire-and-forget (`InvocationType.Event`) path
+  unconditionally returned `Accepted` regardless of the invoke's actual `InvokeResponse.StatusCode` —
+  the same bug WP-6(a)/#12 fixed in the sibling `UseAwsLambda<T>()`/`LambdaContextConverter<T>` pipeline,
+  left unswept in this one.** `AwsLambdaClient.SendMessageAsync` now throws
+  `AwsLambdaEventInvokeFailedException` when an `Event` invoke's `InvokeResponse.StatusCode` is not 2xx,
+  symmetric with its existing `FunctionError` → `AwsLambdaFunctionErrorException` throw for the
+  request/response branch; it flows through `AwsLambdaBenzeneMessageClient`'s existing catch and is
+  reported as `ServiceUnavailable`, never a false `Accepted`. See WP-G.
+- **[RESOLVED] #44 — `AwsLambdaHealthCheck`/`StepFunctionsHealthCheck` still ran an internal
+  `Task.WhenAny`+`Task.Delay(10000)` timeout guard, the same shape WP-7(b)/#26 deliberately removed from
+  `SqsHealthCheck` once ambient-token forwarding made the processor's own timeout wrap genuinely
+  effective — left unswept on these two.** Both already forwarded the real ambient token into their SDK
+  calls (`GetFunctionConfigurationAsync`/`DescribeStateMachineAsync`/`StartExecutionAsync`), so the
+  guard was redundant; deleted on both, now relying purely on the processor's uniform timeout wrap,
+  matching `SqsHealthCheck`'s/`SnsHealthCheck`'s/`EventBridgeHealthCheck`'s current shape. (The Active-mode
+  Lambda ping via `AwsLambdaBenzeneMessageClient` still cannot forward a token into its own SDK call —
+  that client has no `CancellationToken` overload — unchanged from before and out of this fix's scope,
+  same caveat WP-7(b) already carried.) See WP-G.
+
 ---
 
 ## Open — maintainer decisions (the real remaining backlog)

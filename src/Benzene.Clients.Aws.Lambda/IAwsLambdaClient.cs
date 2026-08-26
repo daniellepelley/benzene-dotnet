@@ -20,6 +20,13 @@ namespace Benzene.Clients.Aws.Lambda
         /// <param name="functionName">The name of the function to invoke.</param>
         /// <param name="invocationType">Whether to invoke fire-and-forget or request/response.</param>
         /// <returns>A task that resolves to the deserialized response.</returns>
+        /// <exception cref="AwsLambdaFunctionErrorException">
+        /// A <see cref="InvocationType.RequestResponse"/> invoke's target function threw
+        /// (<c>InvokeResponse.FunctionError</c> was set).
+        /// </exception>
+        /// <exception cref="AwsLambdaEventInvokeFailedException">
+        /// A <see cref="InvocationType.Event"/> invoke's <c>InvokeResponse.StatusCode</c> was not 2xx.
+        /// </exception>
         Task<TResponse> SendMessageAsync<TRequest, TResponse>(TRequest request, string functionName, InvocationType invocationType);
     }
 }

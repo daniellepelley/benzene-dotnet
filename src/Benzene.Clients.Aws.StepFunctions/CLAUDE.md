@@ -22,7 +22,10 @@ Functions health check. Pins **only** `AWSSDK.StepFunctions`.
   `HealthCheckError.Classify` (§3.9, reversed): an authorization/permission failure (403) is a
   **persistent `Failed`**, surfacing as unhealthy rather than being softened to a Warning (a
   deterministic misconfiguration that won't self-heal); the SDK `ErrorCode`/`StatusCode` are surfaced in
-  `Data`, never the exception message.
+  `Data`, never the exception message. **No internal timeout guard** — both the reachability and active
+  SDK calls are passed the real ambient `CancellationToken` directly, and the check relies purely on the
+  processor's uniform per-check timeout wrap (`HealthCheckProcessor`/`TimeOutHealthCheck`), same shape as
+  `SqsHealthCheck`.
 - `Extensions` — **`AddStepFunctionsClient(arn)`** (the DI-registration seam this package previously
   lacked: registers `IStepFunctionsClientFactory`/`IStepFunctionsClient` for a fixed ARN, resolving
   `IAmazonStepFunctions` from DI, and — unless `healthCheck: false` — **auto-wires** a non-destructive

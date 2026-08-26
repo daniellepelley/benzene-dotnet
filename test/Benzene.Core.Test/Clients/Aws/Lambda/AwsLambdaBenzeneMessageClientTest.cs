@@ -65,6 +65,25 @@ public class AwsLambdaBenzeneMessageClientTest
     }
 
     [Fact]
+    public async Task FireAndForget_NonSuccessStatusCode_DoesNotReturnAccepted()
+    {
+        // The same bug WP-6 fixed in the sibling UseAwsLambda<T>() pipeline: a fire-and-forget (Event)
+        // invoke whose InvokeResponse.StatusCode is not 2xx (e.g. throttled) must not be reported as
+        // Accepted just because no exception surfaced from the SDK call itself.
+        var mockInnerAwsLambdaClient = new Mock<IAmazonLambda>();
+        mockInnerAwsLambdaClient
+            .Setup(x => x.InvokeAsync(It.IsAny<InvokeRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new InvokeResponse { StatusCode = 429 });
+
+        var client = new AwsLambdaBenzeneMessageClient(Defaults.LambdaName, mockInnerAwsLambdaClient.Object, NullLogger.Instance);
+        var result = await client.SendMessageAsync<ExamplePayload, Void>("some-topic", new ExamplePayload());
+
+        Assert.NotNull(result);
+        Assert.NotEqual(BenzeneResultStatus.Accepted, result.Status);
+        Assert.Equal(BenzeneResultStatus.ServiceUnavailable, result.Status);
+    }
+
+    [Fact]
     public async Task Failure()
     {
         var mockInnerAwsLambdaClient = new Mock<IAmazonLambda>();

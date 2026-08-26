@@ -39,6 +39,13 @@ namespace Benzene.Clients.Aws.Lambda
         /// <param name="functionName">The name of the function to invoke.</param>
         /// <param name="invocationType">Whether to invoke fire-and-forget or request/response.</param>
         /// <returns>A task that resolves to the deserialized response.</returns>
+        /// <exception cref="AwsLambdaFunctionErrorException">
+        /// A <see cref="InvocationType.RequestResponse"/> invoke's target function threw
+        /// (<c>InvokeResponse.FunctionError</c> was set).
+        /// </exception>
+        /// <exception cref="AwsLambdaEventInvokeFailedException">
+        /// A <see cref="InvocationType.Event"/> invoke's <c>InvokeResponse.StatusCode</c> was not 2xx.
+        /// </exception>
         public async Task<TResponse> SendMessageAsync<TRequest, TResponse>(TRequest request, string functionName, InvocationType invocationType)
         {
             var invokeRequest = new InvokeRequest
@@ -52,6 +59,15 @@ namespace Benzene.Clients.Aws.Lambda
 
             if (InvocationType.Event == invocationType)
             {
+                // A fire-and-forget invoke's HTTP-style StatusCode confirms whether the invocation was
+                // actually accepted (e.g. a throttling or validation error can be surfaced synchronously
+                // by the Invoke API itself even for an Event invoke). A non-2xx status must not be
+                // reported as a successful send.
+                if (lambdaResponse.StatusCode is < 200 or >= 300)
+                {
+                    throw new AwsLambdaEventInvokeFailedException(functionName, lambdaResponse.StatusCode);
+                }
+
                 return default;
             }
 

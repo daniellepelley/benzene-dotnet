@@ -22,7 +22,7 @@ public class AwsLambdaClientTest
         var mockLambdaClient = new Mock<IAmazonLambda>();
         mockLambdaClient
             .Setup(x => x.InvokeAsync(It.IsAny<InvokeRequest>(), default))
-            .ReturnsAsync(new InvokeResponse());
+            .ReturnsAsync(new InvokeResponse { StatusCode = 202 });
 
         var client = new AwsLambdaClient(mockLambdaClient.Object);
 
@@ -31,6 +31,26 @@ public class AwsLambdaClientTest
         Assert.Null(result);
         mockLambdaClient.Verify(x => x.InvokeAsync(
             It.Is<InvokeRequest>(r => r.InvocationType == InvocationType.Event && r.FunctionName == "some-function"), default));
+    }
+
+    [Fact]
+    public async Task SendMessageAsync_EventInvocationNonSuccessStatusCode_ThrowsInsteadOfReportingAccepted()
+    {
+        // A fire-and-forget (Event) invoke's StatusCode confirms whether the Invoke API actually
+        // accepted the invocation - e.g. a throttling error can be surfaced synchronously even for an
+        // Event invoke. A non-2xx status must not be silently treated as a successful send.
+        var mockLambdaClient = new Mock<IAmazonLambda>();
+        mockLambdaClient
+            .Setup(x => x.InvokeAsync(It.IsAny<InvokeRequest>(), default))
+            .ReturnsAsync(new InvokeResponse { StatusCode = 429 });
+
+        var client = new AwsLambdaClient(mockLambdaClient.Object);
+
+        var exception = await Assert.ThrowsAsync<AwsLambdaEventInvokeFailedException>(
+            () => client.SendMessageAsync<string, string>("some-request", "some-function", InvocationType.Event));
+
+        Assert.Equal("some-function", exception.FunctionName);
+        Assert.Equal(429, exception.StatusCode);
     }
 
     [Fact]
