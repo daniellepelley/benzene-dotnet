@@ -13,7 +13,13 @@ host's `IHostedService`, so a Benzene worker starts/stops with the host. This is
   replace a `TryAdd`ed Benzene default; it does not override what the startup itself plain-`Add`s.
 - `BenzeneHostedServiceAdapter : IHostedService` - wraps an `IBenzeneWorker`; `StartAsync`/`StopAsync`
   delegate straight to the worker's `StartAsync`/`StopAsync` (graceful shutdown is the worker's own
-  drain logic — see `Benzene.SelfHost`).
+  drain logic — see `Benzene.SelfHost`). Also observes the worker's own task for an unhandled fault
+  the moment it happens (not only when the host later gets around to calling `StopAsync`): with an
+  optional `ILogger<BenzeneHostedServiceAdapter>` it logs the fault at `Critical`, and with an optional
+  `IHostApplicationLifetime` it calls `StopApplication()` — matching `BackgroundService`'s modern
+  default of stopping the whole host on an unhandled worker fault, rather than leaving the process "up"
+  with a silently dead worker. Both are optional constructor parameters (default `null`); `UseBenzene`
+  below wires both from DI, `BuildHostedService` below has no resolver to supply them.
 - `HostBuilderExtensions.UseBenzene<TStartUp>(this IHostBuilder)` - runs a platform-neutral
   `BenzeneStartUp` as a hosted worker: builds a `WorkerApplicationBuilder`, runs `ConfigureServices`/
   `Configure`, and registers the resulting worker as a singleton `IHostedService`.
