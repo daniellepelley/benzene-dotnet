@@ -113,7 +113,7 @@ public static class ScatterGatherExtensions
         /// </summary>
         public Exception? Reason { get; }
 
-        public static Outcome<TShard, TPartial> Ok(TShard shard, TPartial partial) => new(shard, true, partial, reason: null);
+        public static Outcome<TShard, TPartial> Ok(TShard shard, TPartial? partial) => new(shard, true, partial, reason: null);
         public static Outcome<TShard, TPartial> Failed(TShard shard, Exception? reason) => new(shard, false, default, reason);
     }
 }

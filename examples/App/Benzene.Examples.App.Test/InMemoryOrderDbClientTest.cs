@@ -33,7 +33,7 @@ public class InMemoryOrderDbClientTest
 
         Assert.Equal(BenzeneResultStatus.Created, createResult.Status);
         Assert.Equal(BenzeneResultStatus.Ok, getResult.Status);
-        Assert.Equal(order.Name, getResult.Payload.Name);
+        Assert.Equal(order.Name, getResult.Payload?.Name);
     }
 
     [Fact]
@@ -54,8 +54,8 @@ public class InMemoryOrderDbClientTest
         var getResult = await _client.GetAsync(order.Id);
 
         Assert.Equal(BenzeneResultStatus.Updated, updateResult.Status);
-        Assert.Equal("changed", getResult.Payload.Name);
-        Assert.Equal("shipped", getResult.Payload.Status);
+        Assert.Equal("changed", getResult.Payload?.Name);
+        Assert.Equal("shipped", getResult.Payload?.Status);
     }
 
     [Fact]
@@ -97,7 +97,7 @@ public class InMemoryOrderDbClientTest
         var result = await _client.GetAllAsync(new PaginationMessage().AsPagination());
 
         Assert.Equal(BenzeneResultStatus.Ok, result.Status);
-        Assert.Equal(3, result.Payload.Length);
+        Assert.Equal(3, result.Payload?.Length);
     }
 
     [Fact]
@@ -109,6 +109,6 @@ public class InMemoryOrderDbClientTest
 
         var firstPage = await _client.GetAllAsync(new Pagination { PageNumber = 0, ItemsPerPage = 2 });
 
-        Assert.Equal(2, firstPage.Payload.Length);
+        Assert.Equal(2, firstPage.Payload?.Length);
     }
 }

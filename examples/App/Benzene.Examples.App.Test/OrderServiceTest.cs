@@ -34,9 +34,9 @@ public class OrderServiceTest
         var result = await _orderService.SaveAsync(new CreateOrderMessage { Name = "acme", Status = "new" });
 
         Assert.Equal(BenzeneResultStatus.Created, result.Status);
-        Assert.NotEqual(Guid.Empty, result.Payload.Id);
-        Assert.Equal("acme", result.Payload.Name);
-        Assert.Equal("new", result.Payload.Status);
+        Assert.NotEqual(Guid.Empty, result.Payload?.Id);
+        Assert.Equal("acme", result.Payload?.Name);
+        Assert.Equal("new", result.Payload?.Status);
     }
 
     [Fact]
@@ -61,8 +61,8 @@ public class OrderServiceTest
         var result = await _orderService.UpdateAsync(new UpdateOrderMessage { Id = id.ToString(), Name = "new", Status = "shipped" });
 
         Assert.Equal(BenzeneResultStatus.Updated, result.Status);
-        Assert.Equal("new", result.Payload.Name);
-        Assert.Equal("shipped", result.Payload.Status);
+        Assert.Equal("new", result.Payload?.Name);
+        Assert.Equal("shipped", result.Payload?.Status);
         _dbClient.Verify(x => x.UpdateAsync(It.Is<OrderDto>(o => o.Id == id && o.Name == "new")), Times.Once);
     }
 
@@ -114,7 +114,7 @@ public class OrderServiceTest
         var result = await _orderService.GetAsync(id);
 
         Assert.Equal(BenzeneResultStatus.Ok, result.Status);
-        Assert.Equal(id, result.Payload.Id);
+        Assert.Equal(id, result.Payload?.Id);
     }
 
     [Fact]

@@ -31,7 +31,7 @@ public class GrpcBenzeneMessageClientTest
 
         Assert.True(result.IsSuccessful);
         Assert.Equal(BenzeneResultStatus.Ok, result.Status);
-        Assert.Equal("hello", result.Payload.Message);
+        Assert.Equal("hello", result.Payload?.Message);
     }
 
     [Fact]

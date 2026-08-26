@@ -9,7 +9,7 @@ namespace Benzene.Saga;
 public class StepBuilder<T>
 {
     private Func<SagaContext, Task<IBenzeneResult<T>>>? _forward;
-    private Func<SagaContext, T, Task<IBenzeneResult>>? _compensate;
+    private Func<SagaContext, T?, Task<IBenzeneResult>>? _compensate;
     private string? _key;
 
     /// <summary>
@@ -31,7 +31,7 @@ public class StepBuilder<T>
     /// </summary>
     /// <param name="compensate">The compensation action.</param>
     /// <returns>This builder, for chaining.</returns>
-    public StepBuilder<T> Compensate(Func<SagaContext, T, Task<IBenzeneResult>> compensate)
+    public StepBuilder<T> Compensate(Func<SagaContext, T?, Task<IBenzeneResult>> compensate)
     {
         _compensate = compensate;
         return this;

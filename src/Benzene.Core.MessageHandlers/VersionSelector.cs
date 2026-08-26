@@ -12,13 +12,13 @@ public class VersionSelector : IVersionSelector
     /// <summary>
     /// Selects which of the available handler versions to use for a request.
     /// </summary>
-    /// <param name="requestedVersion">The version requested by the incoming message (may be empty/unversioned).</param>
+    /// <param name="requestedVersion">The version requested by the incoming message (may be <c>null</c>/empty/unversioned).</param>
     /// <param name="availableVersions">The versions registered for the topic.</param>
     /// <returns>
     /// <paramref name="requestedVersion"/> if it is present in <paramref name="availableVersions"/>;
     /// otherwise the maximum value in <paramref name="availableVersions"/> by ordinal string comparison.
     /// </returns>
-    public string Select(string requestedVersion, string[] availableVersions)
+    public string Select(string? requestedVersion, string[] availableVersions)
     {
         return availableVersions.Contains(requestedVersion)
             ? requestedVersion

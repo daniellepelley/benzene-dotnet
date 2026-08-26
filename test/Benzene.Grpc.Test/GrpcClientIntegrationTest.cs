@@ -44,7 +44,7 @@ public class GrpcClientIntegrationTest
             new BenzeneClientRequest<EchoRequest>("echo-topic", new EchoRequest { Name = "world" }, new Dictionary<string, string>()));
 
         Assert.True(result.IsSuccessful);
-        Assert.Equal("Hello world", result.Payload.Message);
+        Assert.Equal("Hello world", result.Payload?.Message);
     }
 
     private static async Task<IHost> BuildHostAsync()

@@ -10,8 +10,12 @@ namespace Benzene.Core.MessageHandlers;
 /// and <see cref="IMessageHeadersGetter{TContext}"/> for <typeparamref name="TContext"/> into a
 /// single facade, so callers that need all three don't have to depend on each mapper individually.
 /// <see cref="GetTopic"/> also joins in the optionally-registered <see cref="IMessageVersionGetter{TContext}"/>
-/// (task #98, work/bug-fix-designs-round10-2026-08.md WP-V), so this facade's topic is always the same
-/// version-resolved <see cref="ITopic"/> <see cref="MessageRouter{TContext}"/> routes on.
+/// (task #98, work/bug-fix-designs-round10-2026-08.md WP-V), so whenever this facade's topic is
+/// resolvable at all, it is the same version-resolved <see cref="ITopic"/> <see cref="MessageRouter{TContext}"/>
+/// routes on - <see cref="GetTopic"/> can still return <c>null</c>, exactly matching
+/// <see cref="IMessageTopicGetter{TContext}.GetTopic"/>'s own contract (task #101,
+/// work/bug-fix-designs-round10-2026-08.md WP-X - this facade used to narrow the interfaces it
+/// forwards to non-nullable without actually guaranteeing that).
 /// </summary>
 /// <typeparam name="TContext">The transport-specific context type messages are extracted from.</typeparam>
 public class MessageGetter<TContext> : IMessageGetter<TContext>
@@ -55,8 +59,10 @@ public class MessageGetter<TContext> : IMessageGetter<TContext>
     /// Gets the raw body of the message, via the registered <see cref="IMessageBodyGetter{TContext}"/>.
     /// </summary>
     /// <param name="context">The transport-specific context to extract the body from.</param>
-    /// <returns>The raw message body.</returns>
-    public string GetBody(TContext context)
+    /// <returns>The raw message body, or <c>null</c> if the registered getter couldn't determine one -
+    /// matching <see cref="IMessageBodyGetter{TContext}.GetBody"/>'s own contract exactly (this facade
+    /// used to narrow it to non-null without actually guaranteeing that).</returns>
+    public string? GetBody(TContext context)
     {
         return _messageBodyGetter.GetBody(context);
     }
@@ -77,8 +83,12 @@ public class MessageGetter<TContext> : IMessageGetter<TContext>
     /// WP-V) when the topic getter didn't already supply one.
     /// </summary>
     /// <param name="context">The transport-specific context to extract the topic from.</param>
-    /// <returns>The message's version-joined <see cref="ITopic"/>.</returns>
-    public ITopic GetTopic(TContext context)
+    /// <returns>The message's version-joined <see cref="ITopic"/>, or <c>null</c> if the registered
+    /// topic getter couldn't resolve one - matching <see cref="IMessageTopicGetter{TContext}.GetTopic"/>'s
+    /// own contract exactly (this facade used to narrow it to non-null without actually guaranteeing
+    /// that; several built-in topic getters - <c>EventGridMessageTopicGetter</c>,
+    /// <c>QueueStorageMessageTopicGetter</c>, <c>TimerMessageMappers</c> - do return <c>null</c>).</returns>
+    public ITopic? GetTopic(TContext context)
     {
         // Extract once per message and reuse: the router, health-check middleware and every tracing
         // decorator's tagging all call this, so on a traced request it would otherwise re-run the
@@ -89,16 +99,16 @@ public class MessageGetter<TContext> : IMessageGetter<TContext>
         // Benzene.Auth.Core, ...) read a version-blind topic even though ITopic has a Version property.
         if (_resolvedTopicCache is null)
         {
-            return _messageTopicGetter.GetVersionedTopic(context, _messageVersionGetter)!;
+            return _messageTopicGetter.GetVersionedTopic(context, _messageVersionGetter);
         }
 
         if (_resolvedTopicCache.HasValue)
         {
-            return _resolvedTopicCache.Topic!;
+            return _resolvedTopicCache.Topic;
         }
 
         var topic = _messageTopicGetter.GetVersionedTopic(context, _messageVersionGetter);
         _resolvedTopicCache.Set(topic);
-        return topic!;
+        return topic;
     }
 }

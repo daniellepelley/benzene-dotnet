@@ -451,9 +451,9 @@ public static class BenzeneResult
         public ProblemDetails? Problem { get; }
         public IReadOnlyList<BenzeneError> Errors { get; }
 
-        public T Payload { get; }
+        public T? Payload { get; }
 
-        public object PayloadAsObject => Payload;
+        public object? PayloadAsObject => Payload;
 
         public static IBenzeneResult<T> Internal(string status, bool isSuccessful)
         {

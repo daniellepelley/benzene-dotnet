@@ -111,7 +111,7 @@ internal sealed class MeshAnnouncer : IAsyncDisposable, IDisposable
             var result = await HealthCheckProcessor.PerformHealthChecksAsync(
                 HealthChecks.Constants.DefaultHealthCheckTopic, _healthChecks);
             return result is IBenzeneResult<HealthCheckResponse> typed
-                ? typed.Payload
+                ? typed.Payload ?? new HealthCheckResponse(result.IsSuccessful, new Dictionary<string, HealthCheckResult>())
                 : new HealthCheckResponse(result.IsSuccessful, new Dictionary<string, HealthCheckResult>());
         }
         catch

@@ -106,7 +106,7 @@ returns `BadRequest`, not `ValidationError`; undecorated handlers keep `Validati
 drop `AttributeTargets.Method`** (pre-1.0, source-breaking only for code that was already silently
 broken). Do it in the same commit as #99 so the attribute's surface is ruled once.
 
-### WP-X — contract-annotation alignment (#100, #101, #103) — low risk, annotation-only
+### WP-X — contract-annotation alignment (#100, #101, #103) — low risk, annotation-only (done)
 
 **#100 — `IBenzeneResult.PayloadAsObject` (and `IBenzeneResult<T>.Payload`) declared non-nullable
 but null for every failed/void result** (`IBenzeneResult.cs:22`; `BenzeneResult.cs:456` emits
