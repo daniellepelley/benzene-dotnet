@@ -292,6 +292,30 @@ real".
   confirmations enabled, verified via `GetNextPublishSequenceNumberAsync()` (the only public-API-visible
   proxy for that setting in this client version). See WP-8.
 
+### Tracked findings round 7–10, WP-J — Schema comparer discriminator matching + coverage (done)
+Decision, rationale, and rejected alternatives are ruled in
+[`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-J — Schema comparer
+discriminator matching + coverage".
+- **[RESOLVED] #53 — a discriminator mapping's *coverage* of a `$ref`'d `oneOf`/`anyOf` variant
+  changing between baseline and current (e.g. a mapping entry newly added for a variant that was
+  previously unmapped, nothing else about the variant changing) made `VariantKey` produce `disc:X` on
+  the mapped side and `ref:X` on the unmapped side for the SAME logical variant — a key mismatch that
+  made the pairwise matcher report a spurious `UnionVariantRemoved`+`UnionVariantAdded` pair, Breaking
+  in either direction per `SchemaCompatibilityRules`, so a harmless additive discriminator-mapping edit
+  failed a compatibility gate.** Matching priority in both twin comparers
+  (`SchemaCompatibilityComparer`/`JsonSchemaComparer`) is now `$ref` target name first (when the member
+  has one — a `$ref` already uniquely and stably identifies the target component, regardless of mapping
+  coverage), then the discriminator mapping value (inline members only, where there is no `$ref` name to
+  prefer), then position. The pre-existing reordered-and-fully-mapped-`$ref`'d-variants case
+  (`OneOfDiscriminator_ReorderedVariants_MatchByDiscriminatorNotIndex`) still matches correctly under
+  the new priority, since both sides now key on the same `$ref` name regardless of order. See WP-J.
+- **[RESOLVED] #49 — `oneOf`+`allOf`-both-present and nested-`oneOf`-within-`oneOf` schemas were
+  correct (verified by direct execution in the review round) but had no regression test.** Two corpus
+  cases added to the shared-corpus parity test, run against both comparers: a schema carrying both
+  `oneOf` and `allOf`, each losing a member (both `UnionVariantRemoved` findings asserted); and an outer
+  `oneOf` variant that is itself a `oneOf`, losing an inner variant (both the outer
+  `UnionVariantChanged` and the inner `UnionVariantRemoved` asserted). See WP-J.
+
 ---
 
 ## Open — maintainer decisions (the real remaining backlog)

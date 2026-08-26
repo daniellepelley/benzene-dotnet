@@ -140,9 +140,16 @@ walk a `spec.json` pair field by field and classify every difference as `SchemaC
 **Matching a `oneOf`/`anyOf`/`allOf` member across baseline and current** (so a reordered or
 renumbered union doesn't manufacture spurious adds/removes) uses this priority, per member:
 
-1. The discriminator mapping value, when the owning schema declares a `discriminator` — matches by the
-   discriminator's semantic name (e.g. `"dog"`), independent of position.
-2. Else the member's `$ref` target name (e.g. `"Dog"` from `#/components/schemas/Dog`).
+1. The member's `$ref` target name, when it has one (e.g. `"Dog"` from `#/components/schemas/Dog`) —
+   a `$ref` already uniquely and stably identifies the target component, so it takes priority
+   regardless of whether a discriminator mapping happens to cover it. Keying on mapping coverage
+   instead of the `$ref` name made an *additive* mapping edit — a mapping entry newly added for a
+   variant that was already `$ref`'d and unchanged otherwise — look like the variant was replaced
+   (matched by mapping on one side, by `$ref` on the other), manufacturing a spurious
+   `UnionVariantRemoved`/`UnionVariantAdded` pair (fixed as part of WP-J/#53; see
+   `work/bug-fix-designs-round7-10-2026-08.md`).
+2. Else the discriminator mapping value, when the owning schema declares a `discriminator` — this only
+   applies to an inline (non-`$ref`) member, since there is no `$ref` name to prefer over it.
 3. Else its position in the array.
 
 `allOf` matches its `$ref` members by target name and its inline members by position among the inline
