@@ -53,6 +53,25 @@ public class GrpcHealthCheckTest
         Assert.Equal("Grpc", Assert.Single(result.Dependencies).Kind);
     }
 
+    // WP-K (#50): GrpcHealthCheck layers its own connect budget (_timeout, above) on top of the caller's
+    // token, so HealthCheckError.Classify's blanket OperationCanceledException re-throw (fixed once for
+    // the ~10 other affected checks) cannot be used here unguarded - it would turn every unreachable-target
+    // case above into a false "Cancelled" outcome. GrpcHealthCheck must instead distinguish: only the
+    // caller's own token firing (ambient shutdown, or the processor's per-check timeout) propagates as
+    // cancellation; this check's own budget elapsing stays an ordinary transient Failed (the test above).
+    [Fact]
+    public async Task ExecuteAsync_AmbientTokenAlreadyCancelled_PropagatesCancellation_InsteadOfReportingAnOrdinaryFailure()
+    {
+        using var channel = GrpcChannel.ForAddress("http://localhost:1"); // nothing listens on port 1
+        // A generous own-budget that would never itself elapse during this test - isolates the assertion
+        // to the ambient token, not a race with GrpcHealthCheck's own CancelAfter.
+        var check = new GrpcHealthCheck(channel, TimeSpan.FromSeconds(30));
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => check.ExecuteAsync(cts.Token));
+    }
+
     [Fact]
     public void AddGrpcClient_AutoRegistersADependencyCheck_OnTheDependencyCategoryOnly()
     {

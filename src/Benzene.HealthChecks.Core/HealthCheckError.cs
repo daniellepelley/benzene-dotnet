@@ -75,10 +75,34 @@ public static class HealthCheckError
     /// <param name="statusCode">The HTTP status the SDK surfaced, if available. Feeds the authorization detection alongside <paramref name="errorCode"/>.</param>
     /// <param name="data">Optional check-specific diagnostic entries to include (e.g. the resource identifier). Never put secrets here.</param>
     /// <returns>A <b>persistent</b> <see cref="HealthCheckStatus.Failed"/> for an authorization denial, otherwise a transient <see cref="HealthCheckStatus.Failed"/>.</returns>
+    /// <exception cref="OperationCanceledException">
+    /// Re-thrown, never classified, when <paramref name="exception"/> is one (WP-K). A caller-driven
+    /// cancellation - the ambient <see cref="Benzene.Abstractions.DI.ICancellationTokenAccessor"/> token, or the
+    /// processor's own per-check timeout (<c>TimeOutHealthCheck</c>) - is not a dependency failure, and
+    /// nearly every caller of this method reaches it from a blanket <c>catch (Exception ex)</c> that
+    /// cannot itself distinguish the two: <see cref="IHealthCheck.ExecuteAsync"/> forwards the token
+    /// straight into its SDK call with no extra layer, so any <see cref="OperationCanceledException"/> it
+    /// sees <em>is</em> the caller-driven signal. Re-throwing here (the same outcome
+    /// <c>TcpHealthCheck</c>'s own catch/rethrow already produces) lets
+    /// <c>ExceptionHandlingHealthCheck</c> - which every check runs under via <c>HealthCheckProcessor</c> -
+    /// turn it into the distinct <c>"Cancelled"</c> outcome, instead of the generic
+    /// <c>{"Error": "TaskCanceledException"}</c> transient failure this method would otherwise build,
+    /// which is indistinguishable from a real dead dependency. Fixed once here so every caller gets it for
+    /// free; the two checks that layer their <em>own</em> internal timeout on top of the forwarded token
+    /// (<c>GrpcHealthCheck</c>, <c>RabbitMqHealthCheck</c>) cannot rely on this - a cancellation this
+    /// method cannot tell apart from the caller-driven one - and instead guard at the call site so their
+    /// own timeout still classifies as an ordinary transient failure. See the WP-K ruling
+    /// (<c>work/bug-fix-designs-round7-10-2026-08.md</c>) for the full reasoning.
+    /// </exception>
     public static IHealthCheckResult Classify(string type, Exception exception, HealthCheckDependency[] dependencies,
         string? errorCode = null, int? statusCode = null, IDictionary<string, object>? data = null,
         string? requiredPermission = null)
     {
+        if (exception is OperationCanceledException)
+        {
+            throw exception;
+        }
+
         var payload = data ?? new Dictionary<string, object>();
         payload["Error"] = exception.GetType().Name;
         // On an authorization denial, name the permission the probe needs (e.g. "events:DescribeEventBus")

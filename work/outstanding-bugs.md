@@ -292,6 +292,24 @@ real".
   confirmations enabled, verified via `GetNextPublishSequenceNumberAsync()` (the only public-API-visible
   proxy for that setting in this client version). See WP-8.
 
+### Tracked findings round 7–10, WP-K — Health-check cancellation classification (done)
+Decision, rationale, and the three-check implementation divergence (`GrpcHealthCheck`/`RabbitMqHealthCheck`
+guard at the call site; `DynamoDbHealthCheck` gets `TcpHealthCheck`'s own explicit catch/rethrow; every
+other affected check is fixed by the shared class alone) are ruled in
+[`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-K — Health-check
+cancellation classification (P8 completion of WP-7)".
+- **[RESOLVED] #50 — WP-7a's own requirement that every `IHealthCheck` forward its `CancellationToken`
+  made a cancellation-swallowing bug newly reachable in ~10 backend checks** (`Sns`/`Sqs`/`EventBridge`/
+  `ServiceBus`/`EventHub`/`QueueStorage`/`Kafka`/`RabbitMq`/`Grpc`/`HttpBenzeneMessage`/`DynamoDb`), each
+  catching the generic `Exception` (including `OperationCanceledException`) and misclassifying a real
+  timeout/shutdown as an ordinary transient dependency failure (`{"Error": "TaskCanceledException"}`) -
+  indistinguishable from a genuinely dead dependency. `HealthCheckError.Classify` now re-throws an
+  `OperationCanceledException` instead of classifying it, so `ExceptionHandlingHealthCheck` (which every
+  check runs under via `HealthCheckProcessor`) reports the distinct `"Cancelled"` outcome instead - the
+  same behaviour `TcpHealthCheck`'s own catch/rethrow already had. Live-verified against the real
+  processor (real `SqsHealthCheck`/`ServiceBusHealthCheck`/`RabbitMqHealthCheck`/`DynamoDbHealthCheck`
+  driven through `HealthCheckProcessor` with a timeout shorter than a hung SDK call). See WP-K.
+
 ---
 
 ## Open — maintainer decisions (the real remaining backlog)

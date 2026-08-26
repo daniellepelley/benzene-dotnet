@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using Benzene.HealthChecks.Core;
 using Xunit;
 
@@ -89,6 +90,30 @@ public class HealthCheckErrorTest
         {
             Assert.DoesNotContain("hunter2", value.ToString());
         }
+    }
+
+    // WP-K (#50): before this fix, Classify built a classified {"Error": "TaskCanceledException"} Failed
+    // result for an OperationCanceledException the same way it does for a genuine SDK failure -
+    // indistinguishable from a real dead dependency. Every caller reaches Classify from a blanket
+    // catch (Exception ex) that cannot itself tell a caller-driven cancellation (ambient shutdown, or the
+    // processor's own per-check timeout) apart from a real fault, so the distinction has to live here:
+    // re-throw instead of classifying, so ExceptionHandlingHealthCheck (which every check runs under via
+    // HealthCheckProcessor) reports the distinct "Cancelled" outcome, fixing every caller at once.
+    [Fact]
+    public void OperationCanceledException_IsReThrown_NeverClassified()
+    {
+        var ex = Assert.Throws<OperationCanceledException>(
+            () => HealthCheckError.Classify("Sqs", new OperationCanceledException(), Deps));
+        Assert.NotNull(ex);
+    }
+
+    [Fact]
+    public void TaskCanceledException_IsReThrown_NeverClassified()
+    {
+        // TaskCanceledException derives from OperationCanceledException - the common concrete type an
+        // awaited, cancelled Task<T> actually throws.
+        Assert.Throws<TaskCanceledException>(
+            () => HealthCheckError.Classify("Sqs", new TaskCanceledException(), Deps));
     }
 
     [Fact]

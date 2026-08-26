@@ -298,6 +298,39 @@ add the `OperationCanceledException` re-throw inside `HealthCheckError.Classify`
 so every caller gets it for free**, rather than N per-check edits. Live-verified against the real
 processor.
 
+**Implementation note (divergence from a pure single-file fix, resolved as part of this same commit).**
+`HealthCheckError.Classify` got the unconditional re-throw as decided above, and that alone was sufficient
+for 9 of the ~10 named checks (`Sns`/`Sqs`/`EventBridge`/`ServiceBus`/`EventHub`/`QueueStorage`/`Kafka`/
+`Http` [`HttpBenzeneMessageHealthCheck` — `HttpPingHealthCheck` itself was already correct, like `Tcp`, and
+was never in the affected set; the ticket's name was imprecise]) — none of these layer any cancellation
+source beyond the token `ExecuteAsync` is given, so *any* `OperationCanceledException` they see genuinely
+is the caller-driven signal (ambient shutdown, or the processor's own per-check timeout). Three checks
+needed a small additional per-file touch, each for a distinct reason the shared class can't resolve on its
+own:
+- **`GrpcHealthCheck` and `RabbitMqHealthCheck`** each layer their *own* internal connect/round-trip budget
+  (`_timeout`, linked into the same `CancellationTokenSource` as the caller's token — pre-existing,
+  intentional design, e.g. so a half-open connection can't hang past its own SLA even under a longer
+  processor-wide timeout) on top of the token they're given. `Classify`'s blanket re-throw cannot tell
+  "the caller's own token fired" apart from "this check's own budget elapsed" — both surface as an
+  `OperationCanceledException` off the same linked token — so applying it unguarded would have
+  misclassified the *existing, tested* "unreachable target, own timeout fires" case
+  (`GrpcHealthCheckTest.ExecuteAsync_UnreachableTarget_TimesOut_ReturnsFailed`) as `"Cancelled"` too, which
+  is wrong: that is a genuine dependency failure, not a shutdown signal. Both checks now guard at the call
+  site — `catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }`
+  before the general catch — so only the caller-driven case reaches `Classify`'s re-throw; their own budget
+  elapsing still builds an ordinary transient Failed (`{"Error": "Timed Out"}`) directly, bypassing
+  `Classify` (which would otherwise re-throw that `OperationCanceledException` too).
+- **`DynamoDbHealthCheck`** doesn't call `HealthCheckError.Classify` at all (it builds its Failed result
+  inline), so the shared fix can't reach it structurally. Given it has no internal timeout layer of its
+  own, the fix is the same shape as `TcpHealthCheck`'s pre-existing one: an explicit
+  `catch (OperationCanceledException) { throw; }` ahead of its `catch (Exception ex)`.
+
+`StepFunctionsHealthCheck` and `AwsLambdaHealthCheck` were considered and left **out of scope**: neither
+was named in the original ~10, and both use a materially different `Task.WhenAny(call, Task.Delay(...))`
+race (not a `try`/`catch` around the SDK call) with their own pre-existing gap in the cancelled-but-not-
+faulted case — a distinct finding, not a WP-K instance, and better tracked separately than folded in here
+under this ruling's decision.
+
 ### WP-L — Serialization: Avro DoS + evolution, XML BOM, Newtonsoft divergence
 **Tasks #56, #57, #58, #59.**
 - **#56 (high, security/DoS, P9, confirmed by two independent agents):** Avro serialize/deserialize

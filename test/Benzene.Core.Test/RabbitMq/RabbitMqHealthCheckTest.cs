@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Benzene.HealthChecks;
 using Benzene.HealthChecks.Core;
 using Benzene.RabbitMq;
 using Moq;
@@ -87,5 +88,63 @@ public class RabbitMqHealthCheckTest
 
         Assert.Equal(HealthCheckStatus.Failed, result.Status);
         Assert.Equal("orders", Assert.Single(result.Dependencies).Name);
+    }
+
+    // WP-K (#50): before this fix, RabbitMqHealthCheck's own catch (Exception ex) caught the
+    // OperationCanceledException the processor's timeout produces along with every genuine broker
+    // failure, and fed it through HealthCheckError.Classify the same way - misclassifying a
+    // timeout/shutdown as an ordinary transient dependency failure ({"Error": "TaskCanceledException"}),
+    // indistinguishable from a real dead broker. It must instead propagate so ExceptionHandlingHealthCheck
+    // (which every check runs under via HealthCheckProcessor) reports the distinct "Cancelled" outcome,
+    // the same way TcpHealthCheck's own catch/rethrow already does.
+    [Fact]
+    public async Task ProcessorTimeout_OnAHungDeclare_ClassifiesAsCancelled_NotAnOrdinaryDependencyFailure()
+    {
+        var channel = ChannelMock();
+        channel.Setup(x => x.QueueDeclarePassiveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(async (string _, CancellationToken ct) =>
+            {
+                // Never completes on its own - only the processor's (much shorter) timeout ends this await.
+                await Task.Delay(Timeout.Infinite, ct);
+                return new QueueDeclareOk("orders", 0, 0);
+            });
+
+        var healthCheck = new RabbitMqHealthCheck(ProviderWith(channel), "orders");
+        var processor = new HealthCheckProcessor(TimeSpan.FromMilliseconds(50));
+
+        var result = await processor.PerformHealthChecksAsync(new IHealthCheck[] { healthCheck });
+
+        var response = result.PayloadAsObject as HealthCheckResponse;
+        Assert.NotNull(response);
+        var check = response!.HealthChecks["RabbitMq"];
+        Assert.Equal(HealthCheckStatus.Failed, check.Status);
+        // Not "TaskCanceledException" (the pre-fix misclassification) - the distinct "Cancelled" outcome.
+        Assert.Equal("Cancelled", check.Data["Error"]);
+    }
+
+    // Unlike the check-level Classify fix above, RabbitMqHealthCheck layers its own connect+declare
+    // budget (_timeout) on top of the caller's token (the same shape as GrpcHealthCheck) - a half-open
+    // connection hanging past that budget, with no ambient/processor cancellation involved, is a genuine
+    // dependency problem and must stay an ordinary transient Failed, not the "Cancelled" outcome reserved
+    // for caller-driven cancellation. Guards against over-broadly treating every OperationCanceledException
+    // from this check as "Cancelled".
+    [Fact]
+    public async Task OwnConnectBudgetElapsing_StillClassifiesAsOrdinaryFailed_NotCancelled()
+    {
+        var channel = ChannelMock();
+        channel.Setup(x => x.QueueDeclarePassiveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(async (string _, CancellationToken ct) =>
+            {
+                await Task.Delay(Timeout.Infinite, ct);
+                return new QueueDeclareOk("orders", 0, 0);
+            });
+
+        // CancellationToken.None: no ambient/processor cancellation, only this check's own 50ms budget.
+        var check = new RabbitMqHealthCheck(ProviderWith(channel), "orders", TimeSpan.FromMilliseconds(50));
+
+        var result = await check.ExecuteAsync(CancellationToken.None);
+
+        Assert.Equal(HealthCheckStatus.Failed, result.Status);
+        Assert.Equal("Timed Out", result.Data["Error"]);
     }
 }

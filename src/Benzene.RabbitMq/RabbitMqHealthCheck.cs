@@ -57,12 +57,33 @@ public class RabbitMqHealthCheck : IHealthCheck
             return HealthCheckResult.CreateInstance(true, Type,
                 new Dictionary<string, object> { { "Queue", _queueName } }, dependencies);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The caller's own token fired (ambient shutdown, or the processor's per-check timeout via
+            // TimeOutHealthCheck) - not this check's own connect+declare budget (_timeout). Propagate
+            // rather than reporting it as an ordinary connectivity failure, so ExceptionHandlingHealthCheck
+            // (which every check runs under via HealthCheckProcessor) classifies it as the distinct
+            // "Cancelled" outcome (WP-K), the same way TcpHealthCheck's own catch/rethrow does.
+            throw;
+        }
         catch (Exception ex)
         {
-            // Expected failures (broker unreachable, queue missing, no permission) are a classified result,
-            // not a throw. HealthCheckError applies the shared policy: an authorization failure (401/403,
-            // or a known auth error code) is a persistent Failed, anything else a transient Failed,
-            // enriched with the AMQP reply code, never the exception message.
+            // A half-open connection hangs past this check's own budget -> _timeout elapses, cancelling
+            // cts.Token independently of the caller's cancellationToken -> a genuine transient Failed, not
+            // "Cancelled": HealthCheckError.Classify now re-throws any OperationCanceledException it is
+            // given (WP-K), which would be wrong here since this cancellation is this check's own SLA, not
+            // caller-driven - so build the failed result directly instead of routing it through Classify.
+            // Every other expected failure (broker unreachable, queue missing, no permission) is still a
+            // classified result via the shared policy: an authorization failure (401/403, or a known auth
+            // error code) is a persistent Failed, anything else a transient Failed, enriched with the AMQP
+            // reply code, never the exception message.
+            if (ex is OperationCanceledException)
+            {
+                return HealthCheckResult.CreateInstance(false, Type,
+                    new Dictionary<string, object> { { "Queue", _queueName }, { "Error", "Timed Out" } },
+                    dependencies);
+            }
+
             var (errorCode, statusCode) = RabbitMqErrorDetails(ex);
             return HealthCheckError.Classify(Type, ex, dependencies, errorCode, statusCode,
                 new Dictionary<string, object> { { "Queue", _queueName } });

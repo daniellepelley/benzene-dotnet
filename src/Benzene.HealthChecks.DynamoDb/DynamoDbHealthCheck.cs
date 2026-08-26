@@ -39,6 +39,16 @@ public class DynamoDbHealthCheck : IHealthCheck
                 new Dictionary<string, object> { { "TableName", _tableName }, { "TableStatus", status ?? "unknown" } },
                 dependencies);
         }
+        catch (OperationCanceledException)
+        {
+            // Let cancellation (ambient token / the processor's own per-check timeout) propagate rather
+            // than reporting it as an ordinary connectivity failure - ExceptionHandlingHealthCheck (which
+            // every check runs under via HealthCheckProcessor) classifies a propagated cancellation as a
+            // distinct "Cancelled" outcome, the same way TcpHealthCheck's own catch/rethrow does (WP-K).
+            // This check forwards cancellationToken straight into the SDK call with no extra layer of its
+            // own, so any OperationCanceledException here is that caller-driven signal, never its own.
+            throw;
+        }
         catch (Exception ex)
         {
             // Expected failures (table missing, no connectivity) are a failed result, not a throw;
