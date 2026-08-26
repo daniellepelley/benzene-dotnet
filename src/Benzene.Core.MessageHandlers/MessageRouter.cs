@@ -27,7 +27,6 @@ public class MessageRouter<TContext> : IMiddleware<TContext>, ITerminalMiddlewar
     private readonly IMessageHandlerFactory _messageHandlerFactory;
     private readonly IMessageHandlerDefinitionLookUp _messageHandlerDefinitionLookUp;
     private readonly IMessageGetter<TContext> _messageGetter;
-    private readonly IMessageVersionGetter<TContext> _messageVersionGetter;
     private readonly IRequestMapper<TContext> _requestMapper;
     private readonly IDefaultStatuses _defaultStatuses;
     private readonly IMessageHandlerResultSetter<TContext> _messageHandlerResultSetter;
@@ -36,8 +35,15 @@ public class MessageRouter<TContext> : IMiddleware<TContext>, ITerminalMiddlewar
     /// Initializes a new instance of the <see cref="MessageRouter{TContext}"/> class.
     /// </summary>
     /// <param name="messageHandlerFactory">Creates the invocable handler for a resolved definition.</param>
-    /// <param name="messageGetter">Extracts the topic id (and other message data) from the context.</param>
-    /// <param name="messageVersionGetter">Extracts the payload schema version from the context, combined with the topic id below into the <see cref="ITopic"/> used for handler-version dispatch (docs/specification/versioning.md §2.3).</param>
+    /// <param name="messageGetter">
+    /// Extracts the topic (and other message data) from the context. <see cref="IMessageGetter{TContext}.GetTopic"/>
+    /// already returns the version-joined <see cref="ITopic"/> used for handler-version dispatch
+    /// (docs/specification/versioning.md §2.3) - the join used to happen here, locally, via the shared
+    /// <c>GetVersionedTopic</c> helper and a separately-injected <c>IMessageVersionGetter&lt;TContext&gt;</c>;
+    /// it now happens once, in the getter itself, so every other reader of the same topic (mesh trace,
+    /// health checks, cloud-service dispatch, ...) sees the same version-resolved answer this router
+    /// routes on (task #98, work/bug-fix-designs-round10-2026-08.md WP-V).
+    /// </param>
     /// <param name="messageHandlerDefinitionLookUpUp">Resolves the handler definition registered for a topic.</param>
     /// <param name="requestMapper">Maps the context into the handler's request type.</param>
     /// <param name="messageHandlerResultSetter">Writes the outcome of dispatch back onto the context.</param>
@@ -45,7 +51,6 @@ public class MessageRouter<TContext> : IMiddleware<TContext>, ITerminalMiddlewar
     /// <param name="logger">Logger used to record routing decisions and failures.</param>
     public MessageRouter(IMessageHandlerFactory messageHandlerFactory,
         IMessageGetter<TContext> messageGetter,
-        IMessageVersionGetter<TContext> messageVersionGetter,
         IMessageHandlerDefinitionLookUp messageHandlerDefinitionLookUpUp,
         IRequestMapper<TContext> requestMapper,
         IMessageHandlerResultSetter<TContext> messageHandlerResultSetter,
@@ -58,7 +63,6 @@ public class MessageRouter<TContext> : IMiddleware<TContext>, ITerminalMiddlewar
         _messageHandlerDefinitionLookUp = messageHandlerDefinitionLookUpUp;
         _logger = logger;
         _messageGetter = messageGetter;
-        _messageVersionGetter = messageVersionGetter;
         _messageHandlerFactory = messageHandlerFactory;
     }
 
@@ -74,10 +78,13 @@ public class MessageRouter<TContext> : IMiddleware<TContext>, ITerminalMiddlewar
     public async Task HandleAsync(TContext context, Func<Task> next)
     {
         // Version-augmentation (combining the topic with the message's own version signal before
-        // FindHandler) is the shared GetVersionedTopic helper - see its doc comment and WP-P
-        // (work/archive/bug-fix-designs-round7-10-2026-08.md) for why this must never be re-derived per
-        // consumer.
-        var topic = _messageGetter.GetVersionedTopic(context, _messageVersionGetter);
+        // FindHandler) now happens inside IMessageGetter<TContext>.GetTopic itself (task #98,
+        // work/bug-fix-designs-round10-2026-08.md WP-V) - this used to be the one place that called the
+        // shared GetVersionedTopic helper (WP-P, work/archive/bug-fix-designs-round7-10-2026-08.md) and
+        // threw the joined result away instead of caching it, leaving every other reader of the topic
+        // (mesh trace, health checks, cloud-service dispatch, ...) to see a version-blind topic. Simply
+        // consuming the getter's own answer here means this router and every other consumer agree.
+        var topic = _messageGetter.GetTopic(context);
 
         if (string.IsNullOrEmpty(topic?.Id))
         {
@@ -95,10 +102,16 @@ public class MessageRouter<TContext> : IMiddleware<TContext>, ITerminalMiddlewar
         var messageHandlerDefinition = _messageHandlerDefinitionLookUp.FindHandler(topic);
         if (messageHandlerDefinition == null)
         {
-            // Every built-in topic getter converts an unresolvable topic into the "<missing>"
-            // sentinel (Topic's constructor does it), so the null-topic branch above never fires for
-            // them and THIS branch is where a wrong-attribute producer actually lands. Name the
-            // remedy here too - "No handler found for topic '<missing>'" on its own gives a
+            // Most built-in topic getters convert an unresolvable topic into the "<missing>" sentinel
+            // (Topic's constructor does it), so the null-topic branch above never fires for them and
+            // THIS branch is where a wrong-attribute producer actually lands. That is NOT universal,
+            // though (task #98, work/bug-fix-designs-round10-2026-08.md WP-V, correcting an earlier
+            // version of this comment): EventGridMessageTopicGetter, QueueStorageMessageTopicGetter and
+            // TimerMessageMappers return a null ITopic instead, which the null-topic branch above DOES
+            // catch (reported as ValidationError there, rather than NotFound here) - a recorded, not
+            // yet resolved, cross-transport asymmetry (see the missing-topic status asymmetry
+            // [DECISION] in work/outstanding-bugs.md), not something this comment should paper over.
+            // Name the remedy here too - "No handler found for topic '<missing>'" on its own gives a
             // newcomer nothing actionable to go on.
             var detail = topic.Id == Benzene.Core.Messages.Constants.Missing.Id
                 ? "No topic could be resolved from the message. On HTTP this means no route matched; " +

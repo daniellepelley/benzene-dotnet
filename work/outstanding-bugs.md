@@ -908,6 +908,32 @@ parity (P8 — the alternate container must match the reference)".
 - **[RESOLVED] #85 — `AutofacServiceResolverFactory` didn't implement `IAsyncDisposable`, unlike
   `MicrosoftServiceResolverFactory`.** Added; disposes the owned container asynchronously when the
   factory owns one (a non-owning factory's `DisposeAsync` is a no-op, matching its `Dispose`). See WP-Q.
+- **[RESOLVED] #98 — `IMessageGetter`/`ResolvedTopicCache` served a version-blind topic to every
+  non-router consumer** (confirmed live: a `benzene-version: v2` header through `UseMeshTrace(...)`
+  exported `TopicVersion = null`; `Benzene.CloudService`, `Benzene.HealthChecks` and
+  `Benzene.Auth.Core` read plain `GetTopic()` too and were equally blind — `Benzene.Diagnostics`'s
+  `ActivityMiddlewareDecorator`/`EnrichmentExtensions` and the XRay decorator were already
+  self-joining via `GetVersionedTopic` per WP-N/#70, so those were unaffected). **Fixed at the getter
+  layer, not per-consumer, per the WP-V ruling:** `MessageGetter<TContext>.GetTopic` now joins the
+  topic with the optionally-registered `IMessageVersionGetter<TContext>` (via the shared
+  `GetVersionedTopic` helper, WP-P) and caches the JOINED topic in `ResolvedTopicCache`;
+  `MessageRouter<TContext>` no longer takes its own `IMessageVersionGetter<TContext>` dependency and
+  simply consumes `_messageGetter.GetTopic(context)`. **Scope extension beyond the generic facade:**
+  `BenzeneMessageGetter` (`Benzene.Core.MessageHandlers.BenzeneMessage`) implements
+  `IMessageGetter<BenzeneMessageContext>` directly and is registered ahead of the open-generic
+  `MessageGetter<TContext>` facade (a closed-type DI registration always wins over an open-generic
+  one, verified empirically) - so BenzeneMessage, the transport nearly every test in this repo uses,
+  would otherwise have stayed version-blind even after the facade fix. `BenzeneMessageGetter` got the
+  identical optional version-getter + `ResolvedTopicCache` join, reusing `GetVersionedTopic` via a
+  small internal raw-topic adapter (to avoid the extension method's `GetTopic()` call re-entering
+  `GetTopic()` itself). Also fixed the stale `MessageRouter` comment (:105-114) claiming every
+  built-in topic getter converts an unresolvable topic to the `"<missing>"` sentinel — false for
+  EventGrid/QueueStorage/Timer, which return a null `ITopic` (the ValidationError-vs-NotFound
+  asymmetry this causes is an existing `[DECISION]`, unchanged). Tests: `MeshTraceVersionJoinTest`
+  (resurrects the reviewer's `benzene-version: v2` + `UseMeshTrace` probe, red before / green after),
+  `MessageGetterVersionJoinTest` (join, per-message caching, no-version-getter-registered
+  degradation, preset-wins, missing-topic-id short-circuit), and `MessageRouterVersionWiringTest`
+  rewritten for the router's new pass-through contract. See WP-V.
 
 ### Tracked findings round 10, WP-Z — API Gateway request adapter headers (done)
 Ruled in [`bug-fix-designs-round10-2026-08.md`](bug-fix-designs-round10-2026-08.md) §"WP-Z — API Gateway
