@@ -14,7 +14,18 @@ public class EventStoreConcurrencyException : Exception
     /// <param name="expectedVersion">The version the caller expected.</param>
     /// <param name="actualVersion">The stream's actual current version.</param>
     public EventStoreConcurrencyException(string streamId, long expectedVersion, long actualVersion)
-        : base($"Concurrency conflict appending to stream '{streamId}': expected version {expectedVersion} but the stream is at {actualVersion}.")
+        : this(streamId, expectedVersion, actualVersion, innerException: null)
+    {
+    }
+
+    /// <summary>Initializes a new instance of the <see cref="EventStoreConcurrencyException"/> class,
+    /// preserving the underlying store failure that surfaced as the conflict.</summary>
+    /// <param name="streamId">The stream that conflicted.</param>
+    /// <param name="expectedVersion">The version the caller expected.</param>
+    /// <param name="actualVersion">The stream's actual current version.</param>
+    /// <param name="innerException">The underlying store exception that was translated into this conflict, if any.</param>
+    public EventStoreConcurrencyException(string streamId, long expectedVersion, long actualVersion, Exception? innerException)
+        : base($"Concurrency conflict appending to stream '{streamId}': expected version {expectedVersion} but the stream is at {actualVersion}.", innerException)
     {
         StreamId = streamId;
         ExpectedVersion = expectedVersion;

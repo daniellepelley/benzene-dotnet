@@ -1,5 +1,9 @@
+using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
+using System.Threading;
 using System.Threading.Tasks;
 using Benzene.EventSourcing;
 using Xunit;
@@ -84,5 +88,77 @@ public class InMemoryEventStoreTest
             : bal + int.Parse(e.Payload));
 
         Assert.Equal(20, balance);
+    }
+
+    [Fact]
+    public async Task Append_WhenABatchElementThrowsMidBatch_LeavesTheStreamUnaffected()
+    {
+        // #125: a mid-batch failure (here, a null event) must not leave a partial append visible —
+        // the store's atomicity guarantee must match DynamoDbEventStore's all-or-nothing transaction.
+        var store = new InMemoryEventStore();
+        await store.AppendAsync("acct-1", 0, new[] { Event("Opened") });   // stream now at v1
+
+        await Assert.ThrowsAsync<NullReferenceException>(() =>
+            store.AppendAsync("acct-1", expectedVersion: 1, new[] { Event("Debited"), null!, Event("Credited") }));
+
+        var events = await store.ReadAsync("acct-1");
+        Assert.Equal(new[] { "Opened" }, events.Select(e => e.EventType));
+        Assert.Equal(new long[] { 1 }, events.Select(e => e.Version));
+
+        // The stream must still be exactly at v1, so a correct retry with expectedVersion=1 succeeds.
+        var newVersion = await store.AppendAsync("acct-1", expectedVersion: 1, new[] { Event("Debited") });
+        Assert.Equal(2, newVersion);
+    }
+
+    [Fact]
+    public async Task AppendAsync_WithAnAlreadyCancelledToken_ThrowsWithoutMutatingState()
+    {
+        // #130
+        var store = new InMemoryEventStore();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            store.AppendAsync("acct-1", 0, new[] { Event("Opened") }, cts.Token));
+
+        Assert.Empty(await store.ReadAsync("acct-1"));
+    }
+
+    [Fact]
+    public async Task ReadAsync_WithAnAlreadyCancelledToken_Throws()
+    {
+        // #130
+        var store = new InMemoryEventStore();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            store.ReadAsync("acct-1", cancellationToken: cts.Token));
+    }
+
+    [Fact]
+    public async Task Append_MoreThanMaxEventsPerAppend_Throws()
+    {
+        // #131 — mirrors DynamoDbEventStore's transaction-size limit so app code written against
+        // either store observes the same ceiling.
+        var store = new InMemoryEventStore();
+        var tooMany = Enumerable.Range(0, 101).Select(_ => Event("E")).ToArray();
+
+        await Assert.ThrowsAsync<ArgumentException>(() => store.AppendAsync("acct-1", 0, tooMany));
+    }
+
+    [Fact]
+    public async Task Append_RejectedAgainstAnUnknownStream_DoesNotLeakAnEmptyStreamEntry()
+    {
+        // #132 — a rejected append must not register the unknown stream id at all; otherwise every
+        // rejected append against an unknown id leaks an empty List<StoredEvent> forever.
+        var store = new InMemoryEventStore();
+
+        await Assert.ThrowsAsync<EventStoreConcurrencyException>(() =>
+            store.AppendAsync("never-existed", expectedVersion: 5, new[] { Event("X") }));
+
+        var streamsField = typeof(InMemoryEventStore).GetField("_streams", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var streams = (IDictionary)streamsField.GetValue(store)!;
+        Assert.Empty(streams.Keys.Cast<string>());
     }
 }

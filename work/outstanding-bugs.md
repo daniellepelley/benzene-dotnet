@@ -1334,6 +1334,105 @@ already-completed work runs under `CancellationToken.None`, never the run/stop t
   cancelled token → still completes; failure + cancelled token → still abandons; handler throws +
   abandon also throws → original exception still propagates, both logged).
 
+> **Tracked findings, 2026-08-26 (round 11, §2 Event Sourcing) — all 12 fixed.** The round-11 review
+> pass's event-sourcing section (`Benzene.EventSourcing` + `Benzene.EventSourcing.DynamoDb`) produced
+> 12 evidence-backed findings (tasks #121–#132). All landed in one pass. Full evidence and fix
+> rationale remain in
+> **[`bug-fix-designs-round11-2026-08.md`](bug-fix-designs-round11-2026-08.md)** §2 (not yet archived
+> at time of writing — other round-11 sections were still in flight); consult it before touching this
+> code again so a decision made here doesn't get silently re-litigated.
+
+- **[RESOLVED] #121 — `DynamoDbEventStore.AppendAsync` never verified the stream was actually AT
+  `expectedVersion`, only that the target Put slots were free.** An `expectedVersion` ahead of the
+  real head found its target slots free (nothing had written them yet), so the transaction succeeded
+  and permanently gapped the stream for any correct writer that folds it from the start; a negative
+  `expectedVersion` wrote durable events `ReadAsync` could never return. Fixed: when
+  `expectedVersion > 0`, the transaction now includes a `ConditionCheck` transact item on
+  `(streamId, expectedVersion)` with `attribute_exists(#pk)`, so the head must genuinely be at that
+  version, not merely have free slots above it; `expectedVersion < 0` now throws
+  `ArgumentOutOfRangeException` before any request is built. Tests:
+  `Append_WithExpectedVersionGreaterThanZero_IncludesAConditionCheckOnTheExpectedVersion`,
+  `Append_WithExpectedVersionZero_OmitsTheConditionCheck`,
+  `Append_WithANegativeExpectedVersion_Throws`.
+- **[RESOLVED] #122 — a blanket `catch (TransactionCanceledException)` mislabeled throttling,
+  capacity, and validation failures as concurrency conflicts**, with a message that compared the
+  stream's head to itself. Fixed: each `CancellationReason.Code` in the exception's
+  `CancellationReasons` is now inspected; only `ConditionalCheckFailed`/`TransactionConflict`
+  translate to `EventStoreConcurrencyException`, everything else rethrows the original exception
+  untouched. Tests: `Append_WhenTransactionCancelledByAConditionalCheckFailure_...`,
+  `Append_WhenTransactionCancelledForAThrottlingReason_RethrowsTheOriginalException`.
+- **[RESOLVED] #123 — `EventStoreConcurrencyException` had no inner-exception constructor**, so the
+  real AWS failure behind a translated conflict was always discarded (this blocked fixing #122
+  properly, since there was nowhere to hang the original `TransactionCanceledException`). Added an
+  overload taking `Exception? innerException`, passed through to the base `Exception` constructor;
+  the existing 3-arg constructor now delegates to it with `null`. Covered by the #122 tests above,
+  which assert `ex.InnerException` is the original exception.
+- **[RESOLVED] #124 — the post-conflict "actual version" diagnostic read (`CurrentVersionAsync`) ran
+  on the caller's own `CancellationToken` with no guard**, so a throttled read-back or a raced
+  cancellation could replace a genuine conflict exception with an unrelated one, silently losing the
+  conflict. Fixed: the read-back now runs under its own `CancellationToken.None` (a caller racing
+  another writer and then cancelling should still see the conflict, not an OCE) and is wrapped in its
+  own try/catch, falling back to `ActualVersion = -1` ("unknown", already documented on the property)
+  on any failure rather than letting that failure propagate in place of the conflict. Tests:
+  `Append_WhenConflictDiagnosticReadFails_FallsBackToUnknownActualVersion`,
+  `Append_WhenConflictDiagnosticRead_IgnoresTheCallersCancellationToken`.
+- **[RESOLVED] #125 — `InMemoryEventStore.AppendAsync` was not atomic across a batch**; a mid-batch
+  throw (e.g. a null element) left a partial append visible to readers, diverging from
+  `DynamoDbEventStore`'s genuine all-or-nothing `TransactWriteItems` — the store every test suite runs
+  against by default behaved differently from the one that ships to a fleet. Fixed: the new
+  `StoredEvent`s are now built into a local list first; only after the whole batch builds without
+  error are they spliced into the stream (and, per #132 below, only then is a brand-new stream
+  registered in the dictionary at all). Test:
+  `Append_WhenABatchElementThrowsMidBatch_LeavesTheStreamUnaffected` (a null element mid-batch;
+  asserts the stream is still exactly at its pre-append version and a correct retry succeeds).
+- **[RESOLVED] #126 — `DynamoDbEventStore`'s constructor had no fail-fast validation of its table/key
+  configuration** (null client, null/empty table name, empty partition/sort key attribute name,
+  `pk == sk`, or a key attribute colliding with one of the reserved event attribute names
+  `eventType`/`payload`/`timestamp` — any of which would silently corrupt every write). Added
+  constructor guards for all of the above (`ArgumentNullException` for the client,
+  `ArgumentException` for the rest). Tests: `Constructor_WithANullClient_Throws`,
+  `Constructor_WithAnInvalidTableName_Throws`,
+  `Constructor_WithTheSamePartitionAndSortKeyAttribute_Throws`,
+  `Constructor_WithAPartitionKeyCollidingWithAReservedAttribute_Throws`,
+  `Constructor_WithASortKeyCollidingWithAReservedAttribute_Throws`.
+- **[RESOLVED] #127 — `ToStoredEvent` silently defaulted an unrecognized or missing `eventType`/
+  `payload` attribute to `string.Empty`** rather than surfacing the corruption (a non-`S`-type
+  attribute leaves `AttributeValue.S` null, which the old code handed straight to the non-nullable
+  `StoredEvent.EventType`/`Payload` properties). Fixed: a shared `RequireStringAttribute` helper now
+  throws `InvalidOperationException` naming the stream id and version when the attribute is missing
+  or not a string (`S`) type. Tests: `Read_WhenAnEventItemIsMissingARequiredAttribute_Throws` (theory
+  over `eventType`/`payload`), `Read_WhenEventTypeIsNotAStringAttribute_Throws`.
+- **[RESOLVED] #128 — an empty-batch append skipped the concurrency check in `DynamoDbEventStore`
+  only**, diverging from `InMemoryEventStore` (which always checks, even for an empty batch, since its
+  check runs before the loop over events). Picked `InMemoryEventStore`'s semantic — both stores must
+  still validate an empty append against the stream's real current version. Since an empty batch has
+  no Put items to hang a transact-item condition off, `DynamoDbEventStore` now runs its existing
+  `CurrentVersionAsync` (`ConsistentRead`) helper directly for the empty-batch case and throws
+  `EventStoreConcurrencyException` on a mismatch. Tests:
+  `Append_EmptyBatch_StillChecksConcurrency_AndThrowsOnMismatch`,
+  `Append_EmptyBatch_ReturnsExpectedVersionWhenItMatchesTheHead`.
+- **[RESOLVED] #129 — no `ClientRequestToken` on the transact-write**, so an ambiguous retry (client
+  timeout, network blip) after DynamoDB had actually applied the write would look like a fresh,
+  potentially conflicting attempt rather than a safe retry of the same one. Fixed: a deterministic
+  token is now derived from `(streamId, expectedVersion, each event's EventType + Payload)` via
+  SHA-256, folded into a `Guid` (DynamoDB's 1–36 character limit). Test:
+  `Append_SameStreamExpectedVersionAndEvents_ProducesTheSameClientRequestToken` (same inputs → same
+  token; a different payload → a different token).
+- **[RESOLVED] #130 — `InMemoryEventStore` never observed its `CancellationToken` parameter.** Added
+  `cancellationToken.ThrowIfCancellationRequested()` at the top of both `AppendAsync` and `ReadAsync`.
+  Tests: `AppendAsync_WithAnAlreadyCancelledToken_ThrowsWithoutMutatingState`,
+  `ReadAsync_WithAnAlreadyCancelledToken_Throws`.
+- **[RESOLVED] #131 — `MaxEventsPerAppend` (the 100-event transaction-size ceiling) was enforced only
+  in `DynamoDbEventStore`**, so app code developed against `InMemoryEventStore` (the default in most
+  test suites) could pass a batch that only fails once pointed at the real store. Mirrored the same
+  constant and check in `InMemoryEventStore`. Test: `Append_MoreThanMaxEventsPerAppend_Throws`.
+- **[RESOLVED] #132 — `InMemoryEventStore` created the empty `List<StoredEvent>` stream entry in its
+  dictionary *before* the concurrency check**, so every rejected append against an unknown stream id
+  leaked a permanent empty entry. Fixed (alongside #125): the dictionary insert now happens only after
+  the version check has passed. Test:
+  `Append_RejectedAgainstAnUnknownStream_DoesNotLeakAnEmptyStreamEntry` (reflects into the private
+  `_streams` field to assert it stays empty after a rejected append).
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.

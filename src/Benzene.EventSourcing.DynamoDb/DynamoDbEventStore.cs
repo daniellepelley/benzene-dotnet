@@ -1,3 +1,6 @@
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using Amazon.DynamoDBv2;
 using Amazon.DynamoDBv2.Model;
 
@@ -20,6 +23,11 @@ public class DynamoDbEventStore : IEventStore
     // TransactWriteItems is atomic but bounded; an append larger than this must be split by the caller.
     private const int MaxEventsPerAppend = 100;
 
+    // Attribute names this store writes onto every event item; a key attribute colliding with one of
+    // these would silently corrupt writes (the key value would be clobbered by the event data, or
+    // vice versa), so the constructor rejects it up front.
+    private static readonly HashSet<string> ReservedAttributeNames = new(StringComparer.Ordinal) { "eventType", "payload", "timestamp" };
+
     private readonly IAmazonDynamoDB _dynamoDb;
     private readonly string _tableName;
     private readonly string _partitionKey;
@@ -39,6 +47,47 @@ public class DynamoDbEventStore : IEventStore
         string sortKeyAttribute = "version",
         Func<DateTimeOffset>? now = null)
     {
+        if (dynamoDb is null)
+        {
+            throw new ArgumentNullException(nameof(dynamoDb));
+        }
+
+        if (string.IsNullOrWhiteSpace(tableName))
+        {
+            throw new ArgumentException("Table name must not be null or empty.", nameof(tableName));
+        }
+
+        if (string.IsNullOrWhiteSpace(partitionKeyAttribute))
+        {
+            throw new ArgumentException("Partition key attribute must not be null or empty.", nameof(partitionKeyAttribute));
+        }
+
+        if (string.IsNullOrWhiteSpace(sortKeyAttribute))
+        {
+            throw new ArgumentException("Sort key attribute must not be null or empty.", nameof(sortKeyAttribute));
+        }
+
+        if (partitionKeyAttribute == sortKeyAttribute)
+        {
+            throw new ArgumentException(
+                $"Partition key attribute and sort key attribute must be different (both were '{partitionKeyAttribute}').",
+                nameof(sortKeyAttribute));
+        }
+
+        if (ReservedAttributeNames.Contains(partitionKeyAttribute))
+        {
+            throw new ArgumentException(
+                $"Partition key attribute '{partitionKeyAttribute}' collides with a reserved event attribute name (one of: {string.Join(", ", ReservedAttributeNames)}).",
+                nameof(partitionKeyAttribute));
+        }
+
+        if (ReservedAttributeNames.Contains(sortKeyAttribute))
+        {
+            throw new ArgumentException(
+                $"Sort key attribute '{sortKeyAttribute}' collides with a reserved event attribute name (one of: {string.Join(", ", ReservedAttributeNames)}).",
+                nameof(sortKeyAttribute));
+        }
+
         _dynamoDb = dynamoDb;
         _tableName = tableName;
         _partitionKey = partitionKeyAttribute;
@@ -49,9 +98,9 @@ public class DynamoDbEventStore : IEventStore
     /// <inheritdoc />
     public async Task<long> AppendAsync(string streamId, long expectedVersion, IReadOnlyList<EventEnvelope> events, CancellationToken cancellationToken = default)
     {
-        if (events.Count == 0)
+        if (expectedVersion < 0)
         {
-            return expectedVersion;
+            throw new ArgumentOutOfRangeException(nameof(expectedVersion), expectedVersion, "Expected version cannot be negative.");
         }
 
         if (events.Count > MaxEventsPerAppend)
@@ -61,9 +110,47 @@ public class DynamoDbEventStore : IEventStore
                 nameof(events));
         }
 
+        if (events.Count == 0)
+        {
+            // An empty batch has no Put items to hang a condition off, so the concurrency check has
+            // to be a direct read instead — otherwise an empty append would silently accept any
+            // expectedVersion, diverging from InMemoryEventStore (which always checks, even for an
+            // empty batch).
+            var actualVersion = await CurrentVersionAsync(streamId, cancellationToken);
+            if (actualVersion != expectedVersion)
+            {
+                throw new EventStoreConcurrencyException(streamId, expectedVersion, actualVersion);
+            }
+
+            return expectedVersion;
+        }
+
         var now = _now();
         var version = expectedVersion;
-        var writes = new List<TransactWriteItem>(events.Count);
+        var writes = new List<TransactWriteItem>(events.Count + 1);
+
+        if (expectedVersion > 0)
+        {
+            // Verify the stream is actually AT expectedVersion, not merely that the Put slots below
+            // are free: without this, an expectedVersion ahead of the real head would find its target
+            // slots free (nothing has written them yet), the transaction would succeed, and the
+            // stream would be permanently gapped for any correct writer that folds it from the start.
+            writes.Add(new TransactWriteItem
+            {
+                ConditionCheck = new ConditionCheck
+                {
+                    TableName = _tableName,
+                    Key = new Dictionary<string, AttributeValue>
+                    {
+                        [_partitionKey] = new AttributeValue { S = streamId },
+                        [_sortKey] = new AttributeValue { N = expectedVersion.ToString() }
+                    },
+                    ConditionExpression = "attribute_exists(#pk)",
+                    ExpressionAttributeNames = new Dictionary<string, string> { ["#pk"] = _partitionKey }
+                }
+            });
+        }
+
         foreach (var e in events)
         {
             version++;
@@ -90,14 +177,65 @@ public class DynamoDbEventStore : IEventStore
 
         try
         {
-            await _dynamoDb.TransactWriteItemsAsync(new TransactWriteItemsRequest { TransactItems = writes }, cancellationToken);
+            await _dynamoDb.TransactWriteItemsAsync(
+                new TransactWriteItemsRequest
+                {
+                    TransactItems = writes,
+                    // Deterministic from the append's own content: a retried request (client timeout,
+                    // network blip) for the exact same append reuses the same token so DynamoDB
+                    // treats it as the same idempotent attempt rather than a fresh conflicting one.
+                    ClientRequestToken = BuildClientRequestToken(streamId, expectedVersion, events)
+                },
+                cancellationToken);
             return version;
         }
-        catch (TransactionCanceledException)
+        catch (TransactionCanceledException ex)
         {
-            var actual = await CurrentVersionAsync(streamId, cancellationToken);
-            throw new EventStoreConcurrencyException(streamId, expectedVersion, actual);
+            if (!IsConcurrencyConflict(ex))
+            {
+                // Throttling, capacity, or validation failures are not concurrency conflicts —
+                // rethrow so the caller sees (and can react to) the real failure.
+                throw;
+            }
+
+            var actual = await SafeCurrentVersionAsync(streamId);
+            throw new EventStoreConcurrencyException(streamId, expectedVersion, actual, ex);
         }
+    }
+
+    private static bool IsConcurrencyConflict(TransactionCanceledException ex) =>
+        ex.CancellationReasons?.Any(r => r.Code is "ConditionalCheckFailed" or "TransactionConflict") ?? false;
+
+    private async Task<long> SafeCurrentVersionAsync(string streamId)
+    {
+        // This is a diagnostic-only read-back after a confirmed conflict: it must run under its own
+        // cancellation (not the caller's token — a caller racing another writer and then cancelling
+        // should still see the conflict, not an unrelated OperationCanceledException), and a failure
+        // here (e.g. throttling) must fall back to "unknown" rather than replacing the real conflict
+        // exception with this one.
+        try
+        {
+            return await CurrentVersionAsync(streamId, CancellationToken.None);
+        }
+        catch
+        {
+            return -1;
+        }
+    }
+
+    private static string BuildClientRequestToken(string streamId, long expectedVersion, IReadOnlyList<EventEnvelope> events)
+    {
+        var content = new StringBuilder();
+        content.Append(streamId).Append('\u001F').Append(expectedVersion);
+        foreach (var e in events)
+        {
+            content.Append('\u001F').Append(e.EventType).Append('\u001F').Append(e.Payload);
+        }
+
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(content.ToString()));
+        var guidBytes = new byte[16];
+        Array.Copy(hash, guidBytes, 16);
+        return new Guid(guidBytes).ToString();
     }
 
     /// <inheritdoc />
@@ -144,12 +282,26 @@ public class DynamoDbEventStore : IEventStore
     private StoredEvent ToStoredEvent(string streamId, IReadOnlyDictionary<string, AttributeValue> item)
     {
         var version = long.Parse(item[_sortKey].N);
-        var eventType = item.TryGetValue("eventType", out var t) ? t.S : string.Empty;
-        var payload = item.TryGetValue("payload", out var p) ? p.S : string.Empty;
+        var eventType = RequireStringAttribute(item, "eventType", streamId, version);
+        var payload = RequireStringAttribute(item, "payload", streamId, version);
         var timestamp = item.TryGetValue("timestamp", out var ts) && DateTimeOffset.TryParse(ts.S, out var parsed)
             ? parsed
             : default;
         return new StoredEvent(streamId, version, eventType, payload, timestamp);
+    }
+
+    // A missing or wrong-type "eventType"/"payload" attribute means the item was never written by
+    // this store (or the table is shared with something else) — defaulting to string.Empty would
+    // silently hand the caller a fabricated event instead of surfacing the corruption.
+    private static string RequireStringAttribute(IReadOnlyDictionary<string, AttributeValue> item, string attributeName, string streamId, long version)
+    {
+        if (!item.TryGetValue(attributeName, out var value) || value.S is null)
+        {
+            throw new InvalidOperationException(
+                $"Stream '{streamId}' version {version}: attribute '{attributeName}' is missing or not a string (S) type.");
+        }
+
+        return value.S;
     }
 
     private async Task<long> CurrentVersionAsync(string streamId, CancellationToken cancellationToken)
