@@ -79,7 +79,7 @@ public class InMemoryIdempotencyStore : IIdempotencyStore
 
         lock (_gate)
         {
-            if (!IsLiveClaim(key, claimToken, _now()))
+            if (!IsLiveClaim(key, claimToken))
             {
                 // The claim lapsed and was reclaimed by another worker, or was already settled -
                 // refuse the write rather than clobbering whoever holds the claim now.
@@ -104,7 +104,7 @@ public class InMemoryIdempotencyStore : IIdempotencyStore
 
         lock (_gate)
         {
-            if (!IsLiveClaim(key, claimToken, _now()))
+            if (!IsLiveClaim(key, claimToken))
             {
                 return Task.FromResult(false);
             }
@@ -115,14 +115,20 @@ public class InMemoryIdempotencyStore : IIdempotencyStore
     }
 
     /// <summary>
-    /// Whether <paramref name="key"/> currently has a live, still-<see cref="IdempotencyStatus.InProgress"/>
+    /// Whether <paramref name="key"/> currently has a still-<see cref="IdempotencyStatus.InProgress"/>
     /// claim whose token is <paramref name="claimToken"/>. Must be called under <see cref="_gate"/>.
-    /// The same liveness definition <see cref="TryClaimAsync"/> uses to decide whether an existing
-    /// record blocks a new claim (unexpired), plus the token match that makes a settle call fenced.
     /// </summary>
-    private bool IsLiveClaim(string key, string claimToken, DateTimeOffset now)
+    /// <remarks>
+    /// Fencing is by token match alone - this deliberately does NOT also require
+    /// <c>entry.ExpiresAt > now</c>. A holder that outraces its own TTL but is still the only claimant
+    /// (nobody has reclaimed the key) must still be able to settle; requiring an unexpired entry too
+    /// would refuse that legitimate settle with a misleading "reclaimed by another worker" outcome when
+    /// nothing actually reclaimed it. This matches every sibling fencing implementation
+    /// (<c>DynamoDbIdempotencyStore</c>, both Outbox stores), which check token match alone. See
+    /// "Claim fencing" in this package's <c>CLAUDE.md</c>.
+    /// </remarks>
+    private bool IsLiveClaim(string key, string claimToken)
         => _entries.TryGetValue(key, out var entry)
             && entry.Status == IdempotencyStatus.InProgress
-            && entry.ExpiresAt > now
             && entry.ClaimToken == claimToken;
 }
