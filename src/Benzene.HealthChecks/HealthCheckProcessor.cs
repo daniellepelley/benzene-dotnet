@@ -18,6 +18,10 @@ namespace Benzene.HealthChecks;
 /// result downgraded to <see cref="HealthCheckStatus.Warning"/> so it never flips the probe unhealthy -
 /// <em>unless</em> that failure is persistent (<see cref="IHealthCheckResult.IsPersistent"/>, e.g. an
 /// authorization denial), which escapes the downgrade and stays <see cref="HealthCheckStatus.Failed"/>.
+/// A misbehaving check that throws out of its own <see cref="IHealthCheck.Timeout"/>,
+/// <see cref="IHealthCheck.IsNonCritical"/>, or <see cref="IHealthCheck.Type"/> getter - not just its
+/// <see cref="IHealthCheck.ExecuteAsync"/> - degrades to a <see cref="HealthCheckStatus.Failed"/> result
+/// for that check alone; it never takes down the whole aggregation and every other check's result with it.
 /// </summary>
 public class HealthCheckProcessor : IHealthCheckProcessor
 {
@@ -52,29 +56,70 @@ public class HealthCheckProcessor : IHealthCheckProcessor
 
     // Times a single check and stamps the measured duration onto its (rebuilt) result. Runs
     // concurrently with the other checks - each has its own stopwatch, so there is no shared state.
+    //
+    // Everything that touches the check's own members - Timeout, IsNonCritical, and (via the decorators'
+    // own catch paths) Type - is read inside THIS method's try/catch, the same guarded scope as the
+    // check's execution. A throwing getter on one check (or a throw the decorators can't themselves
+    // recover from, e.g. Type throwing while ExceptionHandlingHealthCheck/TimeOutHealthCheck build a
+    // failure result off it) degrades to a Failed result for that ONE check instead of propagating out of
+    // Task.WhenAll and losing every other, perfectly healthy, check's result with it.
     private async Task<HealthCheckResult> RunTimedAsync(IHealthCheck healthCheck)
     {
-        // A check may override the processor-wide timeout (IHealthCheck.Timeout) - honour it here.
-        var check = new TimeOutHealthCheck(new ExceptionHandlingHealthCheck(healthCheck), healthCheck.Timeout ?? _timeout);
+        // Snapshot Type once, up front, before it's needed anywhere else (including inside the
+        // decorators' own catch handlers) - so a later re-read of a throwing Type getter can't happen,
+        // and the fallback result below always has a usable identifier even if Type itself is the thing
+        // that's broken.
+        string type;
+        try
+        {
+            type = healthCheck.Type;
+        }
+        catch (Exception typeEx)
+        {
+            return BuildCrashedResult(healthCheck.GetType().Name, typeEx);
+        }
 
-        // PerformHealthChecksAsync takes no ambient CancellationToken (out of scope for this change),
-        // so the only cancellation signal reaching the check is the one TimeOutHealthCheck derives
-        // from its own timeout.
         var stopwatch = Stopwatch.StartNew();
-        var result = await check.ExecuteAsync(CancellationToken.None);
-        stopwatch.Stop();
+        try
+        {
+            // A check may override the processor-wide timeout (IHealthCheck.Timeout) - honour it here.
+            var check = new TimeOutHealthCheck(new ExceptionHandlingHealthCheck(healthCheck), healthCheck.Timeout ?? _timeout);
 
-        // A non-critical check (IHealthCheck.IsNonCritical == true) normally never flips the probe
-        // unhealthy: a Failed result is downgraded to Warning so a non-critical dependency being down
-        // degrades the instance rather than taking it out of service (§3.4). The exception is a
-        // *persistent* failure (IHealthCheckResult.IsPersistent) - a deterministic fault like an
-        // authorization denial that won't self-heal - which escapes the downgrade and stays Failed, so a
-        // real misconfiguration surfaces as unhealthy on the deep layer rather than sitting yellow forever.
-        var status = result.Status == HealthCheckStatus.Failed && healthCheck.IsNonCritical && !result.IsPersistent
-            ? HealthCheckStatus.Warning
-            : result.Status;
+            // PerformHealthChecksAsync takes no ambient CancellationToken (out of scope for this change),
+            // so the only cancellation signal reaching the check is the one TimeOutHealthCheck derives
+            // from its own timeout.
+            var result = await check.ExecuteAsync(CancellationToken.None);
+            stopwatch.Stop();
 
-        return new HealthCheckResult(status, result.Type, result.Data, result.Dependencies, stopwatch.Elapsed, result.IsPersistent);
+            // A non-critical check (IHealthCheck.IsNonCritical == true) normally never flips the probe
+            // unhealthy: a Failed result is downgraded to Warning so a non-critical dependency being down
+            // degrades the instance rather than taking it out of service (§3.4). The exception is a
+            // *persistent* failure (IHealthCheckResult.IsPersistent) - a deterministic fault like an
+            // authorization denial that won't self-heal - which escapes the downgrade and stays Failed, so a
+            // real misconfiguration surfaces as unhealthy on the deep layer rather than sitting yellow forever.
+            var status = result.Status == HealthCheckStatus.Failed && healthCheck.IsNonCritical && !result.IsPersistent
+                ? HealthCheckStatus.Warning
+                : result.Status;
+
+            return new HealthCheckResult(status, result.Type, result.Data, result.Dependencies, stopwatch.Elapsed, result.IsPersistent);
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            return BuildCrashedResult(type, ex);
+        }
+    }
+
+    // A check whose own Timeout/IsNonCritical/Type member throws (or whose execution otherwise escapes
+    // the ExceptionHandlingHealthCheck/TimeOutHealthCheck decorators) degrades to this instead of taking
+    // the whole PerformHealthChecksAsync batch down. Reports the exception's type name only, never its
+    // message (a message can carry sensitive detail), matching every other check's failure reporting.
+    private static HealthCheckResult BuildCrashedResult(string type, Exception ex)
+    {
+        return new HealthCheckResult(HealthCheckStatus.Failed, type, new Dictionary<string, object>
+        {
+            { "Exception", ex.GetType().Name }
+        });
     }
 
     /// <summary>

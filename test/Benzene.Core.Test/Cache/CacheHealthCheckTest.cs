@@ -45,4 +45,18 @@ public class CacheHealthCheckTest
         var dependency = Assert.Single(result.Dependencies);
         Assert.Equal("Cache", dependency.Kind);
     }
+
+    [Fact]
+    public async Task ExecuteAsync_PropagatesCancellation_RatherThanReportingItAsAConnectionFailure()
+    {
+        // #114 scope extension: CacheHealthCheck had the same broad catch(Exception) shape as the EF
+        // checks, which would swallow an OperationCanceledException raised by the underlying cache
+        // client instead of letting ExceptionHandlingHealthCheck classify it as "Cancelled".
+        var mockCacheService = new Mock<ICacheService>();
+        mockCacheService.Setup(x => x.CanConnectAsync()).ThrowsAsync(new OperationCanceledException());
+
+        var healthCheck = new CacheHealthCheck<ICacheService>(mockCacheService.Object, NullLogger<CacheHealthCheck<ICacheService>>.Instance);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => healthCheck.ExecuteAsync(CancellationToken.None));
+    }
 }

@@ -53,6 +53,14 @@ public class ClientHealthCheck : IHealthCheck
         {
             result = await _client.HealthCheckAsync();
         }
+        catch (OperationCanceledException)
+        {
+            // A caller-driven cancellation (ambient token / the processor's own per-check timeout) is not
+            // a connectivity failure - propagate uncaught so ExceptionHandlingHealthCheck (which every
+            // check runs under via HealthCheckProcessor) classifies it as the distinct "Cancelled" outcome
+            // instead of an ordinary reachability failure.
+            throw;
+        }
         catch (Exception ex)
         {
             // IHealthCheck contract: report expected failures (e.g. connection refused) as a Failed

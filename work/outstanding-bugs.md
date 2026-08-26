@@ -937,6 +937,51 @@ request adapter headers".
   mapped request, two case-colliding header names resolve first-wins without throwing, and null
   `Method`/`Path` map to `string.Empty` without throwing. See WP-Z.
 
+### Tracked findings round 10, WP-AC — health-check processor + adapters (done)
+Ruling, rationale, and the red/green test conventions are in
+[`bug-fix-designs-round10-2026-08.md`](bug-fix-designs-round10-2026-08.md) §"WP-AC — health-check
+processor + adapters (#111, #112, #113, #114)".
+- **[RESOLVED] #111 — `CachingHealthCheckProcessor` had no single-flight guard: 50 concurrent
+  cold-cache callers produced 50 full inner runs, recurring at every TTL expiry.** Added a per-key
+  single-flight guard (`ConcurrentDictionary<string, Lazy<Task<IBenzeneResult>>>` with
+  `LazyThreadSafetyMode.ExecutionAndPublication`), with the in-flight entry removed once its run
+  settles (success or failure) so a faulted run doesn't poison later calls and the next cache miss
+  after TTL expiry gets a fresh single-flight window. Corrected the class's XML remark, which
+  previously (wrongly) blessed the stampede as "a couple of times concurrently - acceptable". The
+  reviewer's 50-concurrent-caller repro (a gated inner processor) now asserts exactly one inner
+  execution.
+- **[RESOLVED] #112 — `HttpPingHealthCheck` lost the `Url` and dependency identity specifically on
+  the "endpoint didn't respond at all" failure mode** (connection-refused escaped as
+  `HttpRequestException` to the generic `ExceptionHandlingHealthCheck` decorator, which has no `Url`
+  or dependency to report). `ExecuteAsync` now catches `HttpRequestException` and returns a failed
+  result carrying `Url`, the dependency entry, and the exception type name - mirroring the EF/SNS/SQS
+  checks - with `catch (OperationCanceledException) { throw; }` ahead of it so ambient/timeout
+  cancellation still propagates for the "Cancelled" classification (#114's contract).
+- **[RESOLVED] #113 — a throwing `Timeout`/`IsNonCritical`/`Type` health-check property getter
+  crashed the entire `PerformHealthChecksAsync` aggregation, losing every other, healthy check's
+  result with it** (the reads lived outside any try/catch, inside the `Task.WhenAll` selector).
+  `HealthCheckProcessor.RunTimedAsync` now reads every per-check member inside its own guarded scope:
+  `Type` is snapshotted once up front (so a later re-read through a decorator's own catch path can't
+  re-throw), and `Timeout`/`IsNonCritical` plus the check's execution are wrapped in a try/catch that
+  degrades to a `Failed` result for that one check on any exception instead of propagating to
+  `Task.WhenAll`.
+- **[RESOLVED] #114 — EF health checks (`DatabaseConnectionHealthCheck`, `DatabaseHealthCheck`)
+  swallowed `OperationCanceledException` as an ordinary connection/migration failure, defeating
+  `ExceptionHandlingHealthCheck`'s dedicated `"Cancelled"` classification** (the WP-K/#50 contract).
+  Added `catch (OperationCanceledException) { throw; }` before the catch-all in both files'
+  `TryConnect`/`TryGetAppliedMigrationsAsync`. **Scope extension** (grepped every `IHealthCheck`
+  implementation for the same broad-catch shape not already covered by `HealthCheckError.Classify`):
+  the same one-line rethrow was added to `Benzene.Clients.HealthChecks/ClientHealthCheck.cs` and
+  `Benzene.Cache.Core/CacheHealthCheck.cs`, which had the identical unguarded
+  `catch (Exception ex)` shape. `Benzene.HealthChecks.Disk/DiskHealthCheck.cs` and
+  `Benzene.HealthChecks/MemoryHealthCheck.cs` were audited and left as-is: both are fully synchronous
+  (no cancellable I/O reachable from their `try` blocks - `DriveInfo`/`GC.GetGCMemoryInfo()` never
+  observe a `CancellationToken`), so the same catch shape there is not reachable for a genuine OCE and
+  a rethrow guard would be dead code. Every other `IHealthCheck` implementer already either routes
+  through `HealthCheckError.Classify` (which re-throws OCE) or has its own explicit
+  catch/rethrow (`TcpHealthCheck`, `DynamoDbHealthCheck`, `RabbitMqHealthCheck`, `GrpcHealthCheck`) -
+  confirmed clean, no change needed.
+
 ---
 
 ## Open — tracked findings, round 10 (2026-08-26) — ruled, not yet implemented
@@ -951,10 +996,12 @@ and ruled in [`bug-fix-designs-round10-2026-08.md`](bug-fix-designs-round10-2026
 four self-hosted workers settle successfully-processed messages through calls gated on the shutdown
 token, converting graceful shutdown into silent double-processing (SQS #115 executed, EventHub #116
 executed, ServiceBus #117 suspected); `CachingHealthCheckProcessor` has no single-flight guard
-(50 concurrent cold-cache callers → 50 full dependency-hammering runs, #111); and
-`ValidationStatusAttribute` — documented in the shared abstractions package — is honored by exactly
-one of the three validation adapters (#99). Per-finding evidence, rulings and work packages are in
-the ruling doc; each will get its `[RESOLVED]` line here as it lands.
+(50 concurrent cold-cache callers → 50 full dependency-hammering runs, #111 — now RESOLVED, see
+WP-AC above); and `ValidationStatusAttribute` — documented in the shared abstractions package — is
+honored by exactly one of the three validation adapters (#99). Per-finding evidence, rulings and work
+packages are in the ruling doc; each will get its `[RESOLVED]` line here as it lands. **WP-AC
+(#111–#114, health-check processor + adapters) has landed** - see the resolved section above; the
+remaining round-10 work packages below are still open.
 
 - **[RESOLVED] #108 — `BenzeneCosmosChangeFeedWorker`'s auto-checkpoint call sat inside the pipeline's
   own try/catch, so a checkpoint failure after a successful batch was misattributed to the handler
