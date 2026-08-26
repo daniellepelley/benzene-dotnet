@@ -711,6 +711,42 @@ null-response diagnostic symmetry".
   generated code today (protoc-emitted types always have a public parameterless constructor) — fixed for
   error-message symmetry/quality. See WP-I.
 
+### Tracked findings round 7–10, WP-H — CI-gating tools & codegen correctness (done)
+Decisions, rationale, and the CLI `--fail-on` flag convention are ruled in
+[`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-H — CI-gating tools &
+codegen correctness (P10, P11)".
+- **[RESOLVED] #46 — `EventServiceDocumentDeserializer` reused one `EventServiceDocumentBuilder`
+  (hence one `SchemaBuilder`/`SchemaRepository`) across calls, and `SchemaBuilder.AddSchema` is
+  first-write-wins, so calling `Deserialize()` twice on one instance with two documents sharing a
+  schema name silently resolved the second document's schema to the first's.** Corrupted both
+  `benzene diff` (`DiffCommand`) and `SchemaCompatibility.EnsureBackwardCompatible(string,string)` -
+  both call `Deserialize()` twice on a shared instance - so a real breaking change (a removed
+  property) was silently reported as no change. `Deserialize()` now builds a fresh builder per call.
+  See WP-H.
+- **[RESOLVED] #65 — `benzene healthcheck` printed the response body and returned unconditionally,
+  never inspecting `isHealthy`.** Never failed CI regardless of target health, unlike its
+  already-fixed `diff`/`profile-check` siblings. Now parses `isHealthy` and throws
+  `HealthCheckFailedException` when false, gated by `--fail-on` (default `unhealthy`). See WP-H.
+- **[RESOLVED] #66 — `benzene build`'s C# client generator had no `oneOf`/`anyOf` branch in
+  `CSharpTypeName.GetName`, so a top-level polymorphic request/response schema fell through to
+  `return openApiSchema.Type;` (null), emitting uncompilable `Task<IBenzeneResult<>>`.** Now typed
+  as the union members' shared `allOf` base when discoverable, else `object` (always compiles). See
+  WP-H.
+- **[RESOLVED] #67 — `CSharpNameFormatter.Format` never called the existing
+  `CodeGenHelpers.RemoveNonIdentifierCharacters()` helper, so a schema property name like
+  `"order-id"` generated uncompilable `public string Order-id { get; set; }`.** Now wired in
+  (`"order-id"` → `Orderid`). See WP-H.
+- **[RESOLVED] #86 — `Benzene.CodeGen.Markdown`'s `MarkdownTypeBuilder` had the same `oneOf`-blindness
+  as #66, rendering a polymorphic property blank (`payment: ` with nothing after it).** Now renders
+  the shared base type name when discoverable via `AllOf`, else a `oneOf: {A|B}` union listing. See
+  WP-H.
+- **[RESOLVED] #87 — `Benzene.CodeGen.ApiGateway`'s `ApiGatewayBuilderV1` grouped HTTP mappings only
+  by `Path`, not `(Method, Path)`, so two topics sharing a method+path emitted duplicate-key YAML
+  (two `get:` blocks under one path) and a corrupted CORS header (`'GET,GET,OPTIONS'`).** `BuildCodeFiles`
+  now fails loudly with a `BenzeneException` on a method+path collision, mirroring
+  `ReflectionHttpEndpointFinder`'s own duplicate-route check; `BuildOptions`'s CORS verb list is also
+  `.Distinct()`ed as defense-in-depth for direct callers. See WP-H.
+
 ---
 
 ## Open — maintainer decisions (the real remaining backlog)

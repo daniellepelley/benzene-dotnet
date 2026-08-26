@@ -198,6 +198,33 @@ public class MarkdownTypeBuilder
             return "bool";
         }
 
+        // A polymorphic property (oneOf, no own .Type) fell through to the generic
+        // `return openApiSchema.Type;` below and rendered as blank ("payment: " with nothing
+        // after it). Render the shared base type when every member is a $ref sharing a common
+        // allOf base (mirroring OpenApiSchemaCSharpTypeBuilder.GetTypeName's C#-generator
+        // handling of the same shape), else an informative union listing of the member type
+        // names.
+        if (openApiSchema.OneOf is { Count: > 0 } oneOf)
+        {
+            if (oneOf.All(x => x.Reference != null))
+            {
+                var baseTypeIds = oneOf
+                    .Select(x => _schemaGetter.GetOpenApiSchema(x).AllOf?
+                        .FirstOrDefault(branch => branch.Reference != null)?.Reference.Id)
+                    .Distinct()
+                    .ToArray();
+
+                if (baseTypeIds is [{ Length: > 0 } sharedBase])
+                {
+                    return sharedBase;
+                }
+
+                return $"oneOf: {{{string.Join("|", oneOf.Select(x => x.Reference.Id))}}}";
+            }
+
+            return $"oneOf: {{{string.Join("|", oneOf.Select(GetPropertyTypeName))}}}";
+        }
+
         return openApiSchema.Type;
     }
 }

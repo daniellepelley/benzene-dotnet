@@ -122,4 +122,74 @@ public class MarkdownTypeBuilderTest
 
         Assert.Contains("name: string", lineWriter.GetLines().ToText());
     }
+
+    private static OpenApiSchema Ref(string id) => new()
+    {
+        Reference = new OpenApiReference { Id = id, Type = ReferenceType.Schema }
+    };
+
+    [Fact]
+    public void BuildType_OneOfProperty_WithNoSharedBase_RendersAUnionListing_NotBlank()
+    {
+        // A oneOf property (no own .Type) fell through MapProperty's generic fallback branch to
+        // GetPropertyTypeName, which had no oneOf handling and returned openApiSchema.Type - null,
+        // rendered as "payment: " with nothing after it.
+        var schemas = new Dictionary<string, OpenApiSchema>
+        {
+            ["CardPayment"] = new() { Type = "object", Properties = new Dictionary<string, OpenApiSchema> { ["cardNumber"] = new() { Type = "string" } } },
+            ["BankPayment"] = new() { Type = "object", Properties = new Dictionary<string, OpenApiSchema> { ["iban"] = new() { Type = "string" } } },
+            ["Root"] = new()
+            {
+                Type = "object",
+                Properties = new Dictionary<string, OpenApiSchema>
+                {
+                    ["payment"] = new() { OneOf = new List<OpenApiSchema> { Ref("CardPayment"), Ref("BankPayment") } }
+                }
+            }
+        };
+
+        var lineWriter = new LineWriter();
+        var markdownTypeBuilder = new MarkdownTypeBuilder(new SchemaGetter(schemas));
+        markdownTypeBuilder.BuildType("Root", lineWriter);
+
+        var text = lineWriter.GetLines().ToText();
+
+        Assert.DoesNotContain("payment: " + Environment.NewLine, text);
+        Assert.Contains("payment: oneOf: {CardPayment|BankPayment}", text);
+    }
+
+    [Fact]
+    public void BuildType_OneOfProperty_MembersShareAnAllOfBase_RendersTheSharedBaseTypeName()
+    {
+        var schemas = new Dictionary<string, OpenApiSchema>
+        {
+            ["PaymentMethod"] = new() { Type = "object", Properties = new Dictionary<string, OpenApiSchema> { ["currency"] = new() { Type = "string" } } },
+            ["CardPayment"] = new()
+            {
+                Type = "object",
+                AllOf = new List<OpenApiSchema> { Ref("PaymentMethod") },
+                Properties = new Dictionary<string, OpenApiSchema> { ["cardNumber"] = new() { Type = "string" } }
+            },
+            ["BankPayment"] = new()
+            {
+                Type = "object",
+                AllOf = new List<OpenApiSchema> { Ref("PaymentMethod") },
+                Properties = new Dictionary<string, OpenApiSchema> { ["iban"] = new() { Type = "string" } }
+            },
+            ["Root"] = new()
+            {
+                Type = "object",
+                Properties = new Dictionary<string, OpenApiSchema>
+                {
+                    ["payment"] = new() { OneOf = new List<OpenApiSchema> { Ref("CardPayment"), Ref("BankPayment") } }
+                }
+            }
+        };
+
+        var lineWriter = new LineWriter();
+        var markdownTypeBuilder = new MarkdownTypeBuilder(new SchemaGetter(schemas));
+        markdownTypeBuilder.BuildType("Root", lineWriter);
+
+        Assert.Contains("payment: PaymentMethod", lineWriter.GetLines().ToText());
+    }
 }

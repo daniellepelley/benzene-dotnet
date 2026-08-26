@@ -3,6 +3,7 @@ using System.IO;
 using Benzene.Abstractions.MessageHandlers;
 using Benzene.CodeGen.ApiGateway;
 using Benzene.CodeGen.Core;
+using Benzene.Core.Exceptions;
 using Benzene.Core.MessageHandlers;
 using Benzene.Http.Routing;
 using Benzene.Schema.OpenApi.EventService;
@@ -136,5 +137,44 @@ public class LambdaOpenApiBuilderTest
         Assert.DoesNotContain("Authoriser", yaml);
         Assert.DoesNotContain("$context.authorizer", yaml);
         Assert.Contains("\"UserAgent\": \"$context.identity.userAgent\"", yaml);
+    }
+
+    [Fact]
+    public void BuildCodeFiles_TwoTopicsShareAMethodAndPath_FailsLoudly_NotDuplicateKeyYaml()
+    {
+        // Two topics both mapped to GET user/{id} used to fall straight through into duplicate-key
+        // YAML (two "get:" blocks under one path) and a corrupted CORS header
+        // ('GET,GET,OPTIONS'). Mirrors ReflectionHttpEndpointFinder's own duplicate-route
+        // fail-fast: a method+path collision is a spec authoring error the generator should refuse
+        // to paper over.
+        var messageHandlerDefinitions = new IMessageHandlerDefinition[]
+        {
+            MessageHandlerDefinition.CreateInstance("user:get", typeof(GetUserMessage), typeof(GetUserMessage), typeof(UserDto)),
+            MessageHandlerDefinition.CreateInstance("user:get-legacy", typeof(GetUserMessage), typeof(GetUserMessage), typeof(UserDto)),
+        };
+        var httpEndpointDefinitions = new[]
+        {
+            HttpEndpointDefinition.CreateInstance("GET", "user/{id}", "user:get"),
+            HttpEndpointDefinition.CreateInstance("GET", "user/{id}", "user:get-legacy"),
+        };
+        var eventServiceDocument = httpEndpointDefinitions.ToEventServiceDocument(messageHandlerDefinitions);
+
+        var builder = new ApiGatewayBuilderV1("MY_FUNC_URI");
+
+        var exception = Assert.Throws<BenzeneException>(() => builder.BuildCodeFiles(eventServiceDocument));
+
+        Assert.Contains("GET", exception.Message);
+        Assert.Contains("user/{id}", exception.Message);
+    }
+
+    [Fact]
+    public void BuildOptions_RepeatedVerb_CorsHeaderIsDeduped_NotRepeated()
+    {
+        // Defense-in-depth: BuildOptions is public and callable directly with a caller-supplied verb
+        // list, independent of BuildCodeFiles' fail-fast guard.
+        var options = new ApiGatewayBuilderV1("URI").BuildOptions(new[] { "GET", "GET" }, "user/{id}", "user:get");
+
+        Assert.Contains("'GET,OPTIONS'", options);
+        Assert.DoesNotContain("'GET,GET,OPTIONS'", options);
     }
 }

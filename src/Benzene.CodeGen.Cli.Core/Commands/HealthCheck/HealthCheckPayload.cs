@@ -9,4 +9,7 @@ public class HealthCheckPayload
     public string Profile { get; set; }
     [Arg(Name = Constants.LambdaName, Description = Constants.LambdaNameDescription)]
     public string LambdaName { get; set; }
+
+    [Arg(Name = Constants.FailOn, DefaultValue = Constants.HealthCheckFailOnDefault, Description = Constants.HealthCheckFailOnDescription)]
+    public string FailOn { get; set; }
 }

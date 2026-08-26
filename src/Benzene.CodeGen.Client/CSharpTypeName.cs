@@ -17,6 +17,32 @@ namespace Benzene.CodeGen.Client
                 return openApiSchema.Reference.Id;
             }
 
+            // A bare (non-$ref) oneOf/anyOf schema - typically a top-level polymorphic
+            // request/response - has no .Type, so falling through to `return openApiSchema.Type;`
+            // below produced null (uncompilable `Task<IBenzeneResult<>>`). Mirror
+            // OpenApiSchemaCSharpTypeBuilder.GetTypeName's handling: when every member is a $ref
+            // whose own body was parsed inline (so its AllOf branches are visible without a separate
+            // schema catalogue) and they share a common allOf base, type it as that base; otherwise
+            // fall back to object, which always compiles.
+            var union = openApiSchema.OneOf is { Count: > 0 } ? openApiSchema.OneOf : openApiSchema.AnyOf;
+            if (union is { Count: > 0 })
+            {
+                if (union.All(x => x.Reference != null))
+                {
+                    var baseTypeIds = union
+                        .Select(x => x.AllOf?.FirstOrDefault(branch => branch.Reference != null)?.Reference.Id)
+                        .Distinct()
+                        .ToArray();
+
+                    if (baseTypeIds is [{ Length: > 0 } sharedBase])
+                    {
+                        return sharedBase;
+                    }
+                }
+
+                return "object";
+            }
+
             if (openApiSchema.Type == "array")
             {
                 var type = GetArrayType(openApiSchema.Items);
