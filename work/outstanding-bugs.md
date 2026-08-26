@@ -31,6 +31,16 @@ first). **[PERF]** performance hygiene, not a correctness bug. **[RESOLVED]** ve
 > **[`bug-fix-designs-2026-08.md`](archive/bug-fix-designs-2026-08.md)** (now archived); consult it
 > before touching any of this code again so a decision made here doesn't get silently re-litigated.
 
+> **Tracked findings, 2026-08-26 (review rounds 7–10) — fix designs ruled, not yet implemented.** The
+> later review rounds (which re-reviewed the round-5/6 fix code and swept previously-unscrutinized
+> areas: core/DI, validation, resilience, observability, CLI/codegen, serialization, the Autofac
+> adapter, the mesh backend adapters, the schema registry, the testing infra, hosting, abstractions)
+> logged a further batch of evidence-backed findings on the shared task board (tasks #30 onward). Their
+> fix designs — decisions, rationale, rejected alternatives, work packages, sequencing — are ruled in
+> **[`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md)** (a living doc while
+> the review sequence is open). Do not re-decide or re-review those areas without reading that ruling
+> first. As each work package lands, its items move to the Resolved half below with a pointer to it.
+
 ---
 
 ## Resolved since the prior triage (verified in current source)

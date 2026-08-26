@@ -84,6 +84,9 @@ What remains, and why it is live:
 - `benzene-clients-vision.md` — standing vision document for the clients story.
 - `benzene-outbound-model-plan.md` — in-flight plan (the outbound model the descriptor tool needs).
 - `benzene-result-errors-ruling.md` — standing decision record, cited by `docs/migration-alpha-to-1.0.md`.
+- `bug-fix-designs-round7-10-2026-08.md` — ACTIVE ruling + implementation plan for the evidence-backed
+  findings from the 2026-08 review rounds 7–10 (shared task board #30 onward). Living while the review
+  sequence is open; archives when its work packages land, like its round-5/6 predecessor.
 - `deployment-descriptor-design.md` — living design record behind `src/Benzene.Descriptor`, cited by
   `docs/contract-artifacts.md`.
 - `enterprise/` — slices 0, 1, 2, 3 and 5 have shipped; **slice 4** and the "Deferred — deliberately in
