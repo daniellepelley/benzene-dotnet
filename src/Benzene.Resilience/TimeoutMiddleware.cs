@@ -31,12 +31,22 @@ namespace Benzene.Resilience;
 /// </para>
 /// <list type="bullet">
 /// <item><description>
-/// <b>The timer fired</b> (the exception's token is this middleware's linked token, and the
-/// <i>original</i> token had not itself been cancelled) - a service-side deadline the operator
-/// configured, not a genuine cancellation. Translated into a <see cref="TimeoutException"/>, which
-/// does not carry a fired token, so <c>ExceptionHandlerMiddleware</c> (or, inside a handler wrapper,
-/// <c>MessageHandler</c>'s own <c>catch (TimeoutException)</c>) converts it into a
-/// <c>BenzeneResultStatus.Timeout</c> failure result instead of triggering redelivery.
+/// <b>A timer somewhere in this nesting fired</b> (the <i>original</i> token this layer saw on entry
+/// had not itself been cancelled) - a service-side deadline, not a genuine cancellation. Translated
+/// into a <see cref="TimeoutException"/>, which does not carry a fired token, so
+/// <c>ExceptionHandlerMiddleware</c> (or, inside a handler wrapper, <c>MessageHandler</c>'s own
+/// <c>catch (TimeoutException)</c>) converts it into a <c>BenzeneResultStatus.Timeout</c> failure
+/// result instead of triggering redelivery. Note this deliberately does NOT require the exception's
+/// <see cref="OperationCanceledException.CancellationToken"/> to equal <i>this</i> layer's own
+/// <c>cts.Token</c>: in nested <c>UseTimeout</c> composition, the exception's token is always the
+/// innermost live <c>CancellationTokenSource</c>'s token regardless of which layer's timer actually
+/// fired - an OUTER deadline firing while execution is inside an INNER wrap still throws with the
+/// inner layer's token attached, because the inner layer's linked source observes its own parent (this
+/// layer's <c>cts.Token</c>) being cancelled and reports itself as the source. Requiring an exact match
+/// against <c>cts.Token</c> here would let that case escape this layer's catch entirely, as a raw
+/// <see cref="OperationCanceledException"/>, when a timer - just not this exact CTS - is exactly what
+/// fired. Comparing only against the true original/host token (never cancelled by any timer) is what
+/// correctly distinguishes "some timer in this nesting fired" from "the host cancelled".
 /// </description></item>
 /// <item><description>
 /// <b>The host's own token fired</b> (shutdown, client disconnect - <c>original.IsCancellationRequested</c>
