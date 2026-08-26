@@ -3,6 +3,7 @@ using Benzene.Abstractions.Middleware;
 using Benzene.Http;
 using Benzene.Http.Cors;
 using Benzene.Mesh.Aggregator;
+using Microsoft.Extensions.Logging;
 
 namespace Benzene.Mesh.Artifacts;
 
@@ -31,17 +32,20 @@ public class MeshArtifactMiddleware<TContext> : IMiddleware<TContext> where TCon
     private readonly IBenzeneResponseAdapter<TContext> _responseAdapter;
     private readonly CorsSettings? _corsSettings;
     private readonly CorsOriginChecker _corsOriginChecker = new();
+    private readonly ILogger? _logger;
 
     public MeshArtifactMiddleware(
         IMeshArtifactStore store,
         IHttpRequestAdapter<TContext> requestAdapter,
         IBenzeneResponseAdapter<TContext> responseAdapter,
-        CorsSettings? corsSettings = null)
+        CorsSettings? corsSettings = null,
+        ILogger? logger = null)
     {
         _store = store;
         _requestAdapter = requestAdapter;
         _responseAdapter = responseAdapter;
         _corsSettings = corsSettings;
+        _logger = logger;
     }
 
     public string Name => "MeshArtifacts";
@@ -70,7 +74,29 @@ public class MeshArtifactMiddleware<TContext> : IMiddleware<TContext> where TCon
 
         if (method == "get" || method == "head")
         {
-            var content = await _store.TryReadAsync(key);
+            string? content;
+            try
+            {
+                content = await _store.TryReadAsync(key);
+            }
+            catch (Exception exception)
+            {
+                // #72 (live-verified): the three cloud artifact stores (S3/Blob/GCS) deliberately
+                // RE-THROW on a non-404 failure (a documented, tested contract - see each store's own
+                // CLAUDE.md), so an uncaught call here turned a transient hiccup into a raw unhandled
+                // 500 on the mesh UI's primary read path. Match the "clean refusal, no detail leakage,
+                // logged server-side" convention MeshRefreshGuardMiddleware.DenyAsync already uses
+                // elsewhere in this package, rather than letting the exception surface.
+                _logger?.LogWarning(exception,
+                    "Mesh artifact read failed for {key}; the artifact store is unavailable", key);
+                ApplyCorsHeaders(context, request);
+                _responseAdapter.SetStatusCode(context, "503");
+                _responseAdapter.SetContentType(context, "application/json");
+                _responseAdapter.SetBody(context, "{\"error\":\"unavailable\"}");
+                await _responseAdapter.FinalizeAsync(context);
+                return;
+            }
+
             ApplyCorsHeaders(context, request);
             _responseAdapter.SetStatusCode(context, content == null ? "404" : "200");
             _responseAdapter.SetContentType(context, "application/json");

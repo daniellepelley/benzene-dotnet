@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Benzene.Abstractions.MessageHandlers.Response;
 using Benzene.Http;
+using Benzene.Http.RequestBody;
 using Benzene.Mesh.Artifacts;
 using Benzene.Mesh.Dispatch;
 using Moq;
@@ -42,7 +43,8 @@ public class MeshDispatchGuardMiddlewareTest
             IDictionary<string, string>? headers = null,
             string? email = "someone@example.com",
             MeshDispatchGuardOptions? options = null,
-            MeshDispatchRateLimiter? limiter = null)
+            MeshDispatchRateLimiter? limiter = null,
+            HttpRequestBodyBuffer? bodyBuffer = null)
         {
             var request = new Mock<IHttpRequestAdapter<FakeHttpContext>>();
             request.Setup(x => x.Map(Context)).Returns(new HttpRequest
@@ -56,7 +58,7 @@ public class MeshDispatchGuardMiddlewareTest
                 options ?? new MeshDispatchGuardOptions(),
                 new MeshDispatchIdentity { Email = email },
                 limiter ?? new MeshDispatchRateLimiter(() => Now),
-                request.Object, Response.Object, routeFinder: null, logger: null);
+                request.Object, Response.Object, routeFinder: null, logger: null, bodyBuffer: bodyBuffer);
         }
 
         public Task RunAsync() => _middleware.HandleAsync(Context, () =>
@@ -142,6 +144,57 @@ public class MeshDispatchGuardMiddlewareTest
         harness.AssertRefused("413");
         // Envelope-shaped, so the console renders the reason rather than a generic failure.
         Assert.Contains("\"statusCode\":\"bad-request\"", harness.CapturedBody());
+    }
+
+    // Regression for #35 (security, P9, live-verified): a chunked Transfer-Encoding request carries NO
+    // Content-Length header at all - ContentLength() returns 0 for "absent", not "empty" - so a
+    // header-only size check let an oversized chunked body sail straight past the guard. The fix
+    // measures the transport's ACTUAL buffered body (HttpRequestBodyBuffer, populated ahead of this
+    // middleware by BufferRequestBodyMiddleware on every ASP.NET Core host) instead of trusting the
+    // header.
+    [Fact]
+    public async Task AnOversizedBufferedBody_IsRefused_EvenWithNoContentLengthHeader()
+    {
+        var buffer = new HttpRequestBodyBuffer();
+        buffer.Set(new string('a', 2000)); // 2000 bytes - over the 1024 cap below
+
+        var harness = new Harness(
+            headers: Headers(contentLength: null), // simulates chunked Transfer-Encoding: no header at all
+            options: new MeshDispatchGuardOptions { MaxRequestBytes = 1024 },
+            bodyBuffer: buffer);
+        await harness.RunAsync();
+
+        harness.AssertRefused("413");
+        Assert.Contains("\"statusCode\":\"bad-request\"", harness.CapturedBody());
+    }
+
+    [Fact]
+    public async Task ABufferedBodyWithinTheLimit_IsAllowedThrough_EvenWithNoContentLengthHeader()
+    {
+        var buffer = new HttpRequestBodyBuffer();
+        buffer.Set(new string('a', 100));
+
+        var harness = new Harness(
+            headers: Headers(contentLength: null),
+            options: new MeshDispatchGuardOptions { MaxRequestBytes = 1024 },
+            bodyBuffer: buffer);
+        await harness.RunAsync();
+
+        harness.AssertAllowed();
+    }
+
+    [Fact]
+    public async Task WithNoBodyBuffer_FallsBackToTheContentLengthHeader()
+    {
+        // No HttpRequestBodyBuffer resolved (e.g. AWS API Gateway, which never buffers) - the check
+        // must still work off the header exactly as before, not silently allow everything through.
+        var harness = new Harness(
+            headers: Headers(contentLength: "999999"),
+            options: new MeshDispatchGuardOptions { MaxRequestBytes = 1024 },
+            bodyBuffer: null);
+        await harness.RunAsync();
+
+        harness.AssertRefused("413");
     }
 
     [Fact]

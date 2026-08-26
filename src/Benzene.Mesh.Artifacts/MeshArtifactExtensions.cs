@@ -4,6 +4,7 @@ using Benzene.Abstractions.Middleware;
 using Benzene.Core.Middleware;
 using Benzene.Http;
 using Benzene.Http.Cors;
+using Benzene.Http.RequestBody;
 using Benzene.Http.Routing;
 using Benzene.Mesh.Aggregator;
 using Benzene.Mesh.Dispatch;
@@ -35,7 +36,8 @@ public static class MeshArtifactExtensions
                 resolver.GetService<IMeshArtifactStore>(),
                 resolver.GetService<IHttpRequestAdapter<TContext>>(),
                 resolver.GetService<IBenzeneResponseAdapter<TContext>>(),
-                corsSettings
+                corsSettings,
+                resolver.TryGetService<ILogger<MeshArtifactMiddleware<TContext>>>()
             )));
 
         return app.Use<TContext, MeshArtifactMiddleware<TContext>>();
@@ -123,7 +125,8 @@ public static class MeshArtifactExtensions
                 resolver.GetService<IHttpRequestAdapter<TContext>>(),
                 resolver.GetService<IBenzeneResponseAdapter<TContext>>(),
                 resolver.TryGetService<IRouteFinder>(),
-                resolver.TryGetService<ILogger<MeshDispatchGuardMiddleware<TContext>>>()
+                resolver.TryGetService<ILogger<MeshDispatchGuardMiddleware<TContext>>>(),
+                resolver.TryGetService<HttpRequestBodyBuffer>()
             ));
         });
 

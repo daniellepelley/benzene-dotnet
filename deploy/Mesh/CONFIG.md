@@ -106,6 +106,14 @@ plane at it.
 | `dispatch.enabled` | bool | `false` | Always applies | Wires `mesh:dispatch` (invokes a registered service's **real** handler with a chosen payload — real side-effects execute). Off by default: this is a deliberate, non-default choice. |
 | `dispatch.allowInProduction` | bool | `false` | Only checked when `dispatch.enabled` is `true` | The second gate: even with `enabled: true`, dispatch refuses to run in a Production environment (an unset environment counts as Production) unless this is also `true`. |
 
+When `dispatch.enabled` is `true`, `UseMeshDispatchGuard` (mounted automatically, no config knob)
+bounds a dispatch request's body at 128 KiB (`MeshDispatchGuardOptions.DefaultMaxRequestBytes`) — the
+check measures the request's ACTUAL byte count (not the caller-supplied `Content-Length` header, which
+a chunked `Transfer-Encoding` request omits entirely), so a chunked oversized body can't bypass it.
+`Program.cs` also sets Kestrel's own `MaxRequestBodySize` to the same value, host-wide, as
+defence-in-depth against the buffering itself running unbounded (see `bug-fix-designs-round7-10-2026-08.md`'s
+"WP-D", #35).
+
 ## `auth` — who may reach the dashboard
 
 | Key | Type | Default | Required when | What it does |
@@ -163,6 +171,14 @@ first amending the WP-1 ruling.
 **Authorization**, once authenticated (any mode): a caller who authenticates but fails
 `allowedEmailDomains`/`requiredGroups` gets `403 Forbidden`, not `401 Unauthorized`. There is no
 per-service RBAC in v1 — authenticated and permitted means full read access to the whole catalog.
+
+**A second, independent axis: `dispatchRole` also needs `dispatch.enabled: true`.** Even under a mode
+that *can* carry group claims (the ✓ cells above), `dispatchRole` is inert unless dispatch itself is
+turned on — the role check only ever runs against the dispatch path (`InvokeAsync`'s check against
+`MeshAuthGate.DispatchPath`), which is not a reachable endpoint at all while `dispatch.enabled` stays
+false. `MeshAuthGate.Validate` rejects `dispatchRole` set with `dispatch.enabled` false, the same
+fail-fast treatment as the table above (P6 — no inert options; see
+`bug-fix-designs-round7-10-2026-08.md`'s "WP-D", #37).
 
 **The residual gap, stated plainly:** with `auth.ingestion.mode: "open"` (the default) and
 `auth.mode` set to anything else, the **read** surface (the dashboard, the catalog) is protected and

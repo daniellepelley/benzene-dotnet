@@ -131,6 +131,21 @@ done
 
 (Scope these down for a real deployment; this is the broad set that lets one SA run the whole demo.)
 
+## Security posture
+
+**The mesh Cloud Function itself is publicly reachable and unauthenticated — not just the services it
+polls.** `/mesh-ui`, the catalog artifacts, and `POST /mesh/refresh` all answer any caller who can reach
+the function's URL; there is no login gate in front of any of them (contrast `AwsMesh`, whose mesh Lambda
+sits behind `Benzene.Mesh.Auth.Oidc`). The only thing standing in front of `POST /mesh/refresh` is
+`UseMeshRefreshGuard` — a CSRF header (`X-Benzene-Refresh`, which a cross-site form or a bare cross-origin
+`fetch()` cannot set) plus a manifest-age throttle — which bounds *abuse of the refresh trigger* (Cloud
+Scheduler's own invocation is a separate, trusted path), not *who can read the catalog or open the UI*.
+This is demo-only posture, the same as the K8sMesh/AzureMesh/AzureFunctionsMesh siblings: the services
+being polled are themselves `--allow-unauthenticated` for this demo (see above), and the mesh that polls
+them carries no auth of its own either. Do not copy this posture into a real deployment — put a login gate
+(OIDC, an IAM invoker binding + a private/authenticated caller, a load balancer with IAP) in front of the
+mesh function, the way `AwsMesh` does, before anything here is internet-facing for real.
+
 ## Known first-deploy iteration points
 
 - **Runtime `dotnet10`** — the workflow assumes a GCF `dotnet10` runtime; adjust if the managed runtime

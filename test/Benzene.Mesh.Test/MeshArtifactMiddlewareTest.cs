@@ -35,6 +35,18 @@ public class MeshArtifactMiddlewareTest
         }
     }
 
+    // Simulates one of the three cloud artifact stores' documented, tested contract: re-throw on a
+    // non-404 failure (a transient S3/Blob/GCS hiccup), rather than degrading to null like a genuine
+    // "not found".
+    private sealed class ThrowingMeshArtifactStore : IMeshArtifactStore
+    {
+        public Task PublishAsync(string relativePath, string content) =>
+            throw new NotSupportedException("The middleware under test never publishes.");
+
+        public Task<string?> TryReadAsync(string relativePath) =>
+            throw new InvalidOperationException("simulated transient store failure");
+    }
+
     private static (Mock<IHttpRequestAdapter<FakeHttpContext>> RequestAdapter, Mock<IBenzeneResponseAdapter<FakeHttpContext>> ResponseAdapter)
         CreateAdapters(FakeHttpContext context, string method, string path)
     {
@@ -102,6 +114,30 @@ public class MeshArtifactMiddlewareTest
         // this test proves the middleware itself never forwards a traversal-shaped key at all.
         Assert.True(nextCalled);
         Assert.Empty(store.ReadKeys);
+    }
+
+    // Regression for #72 (worth-fixing, live-verified): HandleAsync called _store.TryReadAsync with no
+    // try/catch, but all three cloud artifact stores deliberately re-throw on a non-404 failure - so a
+    // transient hiccup crashed this middleware, the mesh UI's primary read path, as a raw unhandled 500.
+    [Fact]
+    public async Task HandleAsync_StoreThrows_DegradesToAClean503_RatherThanAnUnhandledException()
+    {
+        var context = new FakeHttpContext();
+        var (requestAdapter, responseAdapter) = CreateAdapters(context, "GET", "/manifest.json");
+        var store = new ThrowingMeshArtifactStore();
+        var middleware = new MeshArtifactMiddleware<FakeHttpContext>(store, requestAdapter.Object, responseAdapter.Object);
+
+        var nextCalled = false;
+        var exception = await Record.ExceptionAsync(() =>
+            middleware.HandleAsync(context, () => { nextCalled = true; return Task.CompletedTask; }));
+
+        Assert.Null(exception);
+        Assert.False(nextCalled);
+        responseAdapter.Verify(x => x.SetStatusCode(context, "503"), Times.Once);
+        responseAdapter.Verify(x => x.SetContentType(context, "application/json"), Times.Once);
+        // No detail leakage: the exception's message/type never reaches the response body.
+        responseAdapter.Verify(x => x.SetBody(context, "{\"error\":\"unavailable\"}"), Times.Once);
+        responseAdapter.Verify(x => x.FinalizeAsync(context), Times.Once);
     }
 
     [Fact]

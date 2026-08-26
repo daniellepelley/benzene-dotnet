@@ -1,3 +1,4 @@
+using Benzene.Mesh.Dispatch;
 using Benzene.Mesh.Host;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
@@ -23,7 +24,18 @@ var host = Host.CreateDefaultBuilder(args)
         MeshConfigLoader.ConfigureMeshConfig(config, Environment.GetEnvironmentVariable("MESH_CONFIG_PATH"));
     })
     .ConfigureWebHost(webBuilder => webBuilder
-        .UseKestrel()
+        // #35 (WP-D, defence-in-depth): MeshDispatchGuardMiddleware's own size check (measuring the
+        // ACTUAL buffered body, not the caller-supplied Content-Length header) is the fix for the
+        // chunked-Transfer-Encoding bypass this closes at the application layer - see that class's
+        // remarks. This is the second, transport layer: it bounds how large a body Kestrel will even
+        // read into memory in the first place, tracking the same MaxRequestBytes value, so a request
+        // this host was never going to accept can't run the buffering itself unbounded. Applies to
+        // every route on this host, not just /mesh/dispatch - the push-ingestion endpoint
+        // (/mesh/report, MeshAuthGate.IngestionPath) publishes one service's own spec/health document,
+        // which is expected to stay well under this - an operator with an unusually large spec should
+        // widen this rather than the dispatch guard's own (deliberately small, "one human iterating on
+        // a payload") default.
+        .UseKestrel(options => options.Limits.MaxRequestBodySize = MeshDispatchGuardOptions.DefaultMaxRequestBytes)
         .UseStartup<Startup>())
     .Build();
 
