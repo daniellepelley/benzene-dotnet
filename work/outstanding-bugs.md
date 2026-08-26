@@ -839,6 +839,45 @@ adapters".
   `BenzeneException`.** The `GroupBy` key now case-folds `Method`/`Path` (the stored values are
   unchanged). See WP-S.
 
+### Tracked findings round 7–10, WP-T — MapReduce / SchemaRegistry / ResponseEvents (done)
+Ruled in [`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-T —
+MapReduce / SchemaRegistry / ResponseEvents".
+- **[RESOLVED] #92 — `ScatterGatherAsync` discarded all per-shard exception detail: `Outcome.Failed`
+  carried only the shard, so a thrown `ScatterGatherPartialFailureException` had `InnerException ==
+  null` and no per-shard reasons, making "which shard failed and why" undiagnosable.** Every failed
+  shard now carries its own reason: the new `FailedShard<TShard>` (`Shard` + `Exception? Reason`)
+  replaces the bare shard in both `ScatterGatherResult<,>.FailedShards` (the `BestEffort` path) and
+  `ScatterGatherPartialFailureException.Failures` (the `ThrowOnAnyFailure` path), and the exception
+  aggregates every non-null reason onto `InnerException` as an `AggregateException` (plus a per-shard
+  message listing shard + failure) so ordinary .NET exception inspection finds them too. `Reason` is
+  `null` when a shard failed by returning an unsuccessful result rather than throwing (nothing to
+  carry). Regression test (`ScatterGatherTest.ThrowOnAnyFailure_CarriesEachFailedShardsDistinctException`)
+  sends 10 shards where 5 throw 5 *different* exception types concurrently and asserts every failed
+  shard's own reason is captured and distinguishable, not just the shard identity or the count. See WP-T.
+- **[RESOLVED] #93 — `InMemorySchemaRegistryClient.RegisterAsync` crashed with a raw
+  `ArgumentNullException: Value cannot be null. (Parameter 'key')` (a `Dictionary<string,...>`
+  null-key lookup) when `schema.Subject` was null, instead of a clear validation error (P9).**
+  `SchemaDefinition`'s constructor now guards `Subject`/`Schema` for non-null/non-empty/non-whitespace,
+  throwing a descriptive `ArgumentException` at construction time - before a bad value can travel deep
+  into the registry. Regression test (`SchemaDefinitionTest`) covers null/empty/whitespace for both
+  parameters. See WP-T.
+- **[RESOLVED, doc] #94 — `CrudConventionResponseEventMapping` combined with an overlapping explicit
+  `Map(...)` call double-publishes the same event topic** (confirmed: `.Map("order:create",
+  "order:created")` + `.MapCrudConvention()` produce TWO `ResponseEventPublication`s for one handled
+  message). Consistent with `ResponseEventMappings.Resolve`'s documented "multiple matches fan out"
+  behaviour, so not a broken contract - no code change. Added a doc callout to
+  `MapCrudConvention()`'s XML doc `<remarks>` and to `docs/cookbooks/response-as-event.md`'s CRUD
+  convention section warning against registering an explicit `create`/`update`/`delete` mapping that
+  overlaps a CRUD-convention-covered topic, since both will fire. See WP-T.
+- **[RESOLVED, doc] #95 — `SchemaRegistrySerializer.Deserialize(Type, ReadOnlySpan<byte>)` decodes and
+  discards the embedded Confluent wire-format schema id without validating it against the caller's
+  requested `Type`, so bytes framed under one schema's id silently deserialize as a different type
+  with no error.** Consistent with the class's documented scope (producer-side interop framing, not
+  registry-driven consumer-side schema resolution - there is genuinely no id-to-type reverse map to
+  check against even in principle), so no code change. Added a doc callout to the class's XML doc
+  `<remarks>` and to `src/Benzene.SchemaRegistry.Core/CLAUDE.md` stating plainly that the embedded
+  schema id is NOT validated against the caller's expected type. See WP-T.
+
 ---
 
 ## Open — maintainer decisions (the real remaining backlog)

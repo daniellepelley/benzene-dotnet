@@ -15,6 +15,20 @@ namespace Benzene.SchemaRegistry.Core;
 /// path. Serializing a type with no registered id throws, surfacing a missing startup registration
 /// immediately. Like <c>Benzene.Avro</c>, the string members Base64-armor the framed bytes so the
 /// serializer also flows through string-body pipelines unchanged.
+/// <para>
+/// <b>Deserialization does not validate the embedded schema id against the caller's requested
+/// <see cref="Type"/>.</b> <see cref="Deserialize(Type, ReadOnlySpan{byte})"/> decodes and discards
+/// the Confluent-framed schema id, then deserializes the remaining bytes as the caller-supplied
+/// <see cref="Type"/> unconditionally — bytes framed under one schema's id are silently interpreted
+/// as whatever type the caller asked for, even if that's a completely different schema. This is
+/// deliberate given this class's scope: it is interop framing for <em>producers</em> (the id map is
+/// forward, type-to-id, built at startup for what this process writes), not registry-driven
+/// consumer-side schema resolution — there is no id-to-type reverse map to check against, even in
+/// principle. A corrupted, misrouted, or cross-subject payload is silently misinterpreted rather
+/// than rejected; if you need id-checked consumption, resolve the id via
+/// <see cref="ISchemaRegistryClient.GetByIdAsync"/> yourself and compare it against what the caller
+/// expects before trusting the decoded payload.
+/// </para>
 /// </remarks>
 public class SchemaRegistrySerializer : ISerializer, IPayloadSerializer
 {

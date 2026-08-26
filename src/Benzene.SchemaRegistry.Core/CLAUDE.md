@@ -34,7 +34,11 @@ limits (byte-identical only) and how to get structural evolution checking.
   serializer (Avro/JSON/MessagePack) — it adds the registry framing, not a format. Schema ids are
   resolved once at startup into the map (so serialize stays synchronous, no registry call on the hot
   path); an unregistered type throws. Base64-armors the framed bytes on the string path, like
-  `Benzene.Avro`, so it flows through string-body pipelines too.
+  `Benzene.Avro`, so it flows through string-body pipelines too. **Deserialize does not validate the
+  decoded schema id against the caller's requested `Type`** — it decodes and discards the id, then
+  deserializes as whatever `Type` the caller asked for. This is producer-side interop framing, not
+  registry-driven consumer resolution (there's no id-to-type reverse map to check against); a
+  corrupted/misrouted/cross-subject payload is silently misinterpreted, not rejected.
 - `ISchemaResolver` / `DelegateSchemaResolver` — maps a CLR type to its `SchemaDefinition`. Pluggable
   and format-specific (an adapter over `Benzene.Avro`'s `IAvroSchemaResolver` supplies the Avro
   schema) — keeps this package Avro-free.

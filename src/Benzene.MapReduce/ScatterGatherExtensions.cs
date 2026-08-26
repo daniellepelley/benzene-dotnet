@@ -57,24 +57,32 @@ public static class ScatterGatherExtensions
                     var result = await sender.SendAsync<TShard, TPartial>(topic, shard);
                     return result.IsSuccessful
                         ? Outcome<TShard, TPartial>.Ok(shard, result.Payload)
-                        : Outcome<TShard, TPartial>.Failed(shard);
+                        : Outcome<TShard, TPartial>.Failed(shard, reason: null);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     // A transport-level throw is a failed shard; the policy below decides what that means.
                     // OperationCanceledException is deliberately excluded (matching RetryMiddleware's
                     // DefaultShouldRetry) so a caller-requested cancellation propagates as cancellation
-                    // instead of being silently reported as a failed shard.
-                    return Outcome<TShard, TPartial>.Failed(shard);
+                    // instead of being silently reported as a failed shard. The exception itself is
+                    // carried alongside the shard so a thrown ScatterGatherPartialFailureException (or
+                    // the BestEffort result's FailedShards) can say which shard failed and why.
+                    return Outcome<TShard, TPartial>.Failed(shard, ex);
                 }
             },
             options.MaxDegreeOfParallelism);
 
-        var failed = outcomes.Where(o => !o.Success).Select(o => o.Shard).ToList();
+        var failed = outcomes
+            .Where(o => !o.Success)
+            .Select(o => new FailedShard<TShard>(o.Shard, o.Reason))
+            .ToList();
 
         if (options.PartialFailureMode == PartialFailureMode.ThrowOnAnyFailure && failed.Count > 0)
         {
-            throw new ScatterGatherPartialFailureException(failed.Count, shardList.Count);
+            throw new ScatterGatherPartialFailureException(
+                failed.Count,
+                shardList.Count,
+                failed.Select(f => ((object?)f.Shard, f.Reason)).ToList());
         }
 
         var value = outcomes
@@ -86,18 +94,26 @@ public static class ScatterGatherExtensions
 
     private readonly struct Outcome<TShard, TPartial>
     {
-        private Outcome(TShard shard, bool success, TPartial? partial)
+        private Outcome(TShard shard, bool success, TPartial? partial, Exception? reason)
         {
             Shard = shard;
             Success = success;
             Partial = partial;
+            Reason = reason;
         }
 
         public TShard Shard { get; }
         public bool Success { get; }
         public TPartial? Partial { get; }
 
-        public static Outcome<TShard, TPartial> Ok(TShard shard, TPartial partial) => new(shard, true, partial);
-        public static Outcome<TShard, TPartial> Failed(TShard shard) => new(shard, false, default);
+        /// <summary>
+        /// The exception the worker call threw, when <see cref="Success"/> is <c>false</c> because it
+        /// threw rather than returned an unsuccessful result. <c>null</c> for a successful outcome, and
+        /// also <c>null</c> for a failed outcome whose worker returned (rather than threw).
+        /// </summary>
+        public Exception? Reason { get; }
+
+        public static Outcome<TShard, TPartial> Ok(TShard shard, TPartial partial) => new(shard, true, partial, reason: null);
+        public static Outcome<TShard, TPartial> Failed(TShard shard, Exception? reason) => new(shard, false, default, reason);
     }
 }

@@ -112,6 +112,15 @@ payload on `X:created`/`X:updated`/`X:deleted`:
 .UseResponseEvents(events => events.MapCrudConvention())
 ```
 
+> **Overlap trap:** `MapCrudConvention()` covers *every* CRUD-shaped topic on the pipeline, and
+> *every* registered mapping that matches a handled message fires, by design (that's how one
+> handler can publish to more than one topic). If you also register an explicit `Map` for a topic
+> the convention already covers — e.g. both `.Map("order:create", "order:created")` and
+> `.MapCrudConvention()` — the handled message matches *both*, so it publishes to `order:created`
+> **twice**, not once. That's not a bug in either mapping individually; it's this combination. Rely
+> on the convention alone for a topic, or scope an explicit `Map` to a topic the convention doesn't
+> cover — don't register both for the same topic.
+
 ### Custom rules
 
 Anything the built-ins can't express is an `IResponseEventMapping` implementation added via
