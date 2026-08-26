@@ -82,10 +82,13 @@ public class SayHelloHandler : IMessageHandler<HelloRequest, HelloResponse> { /*
 ## `[ValidationStatus]`
 
 **Package:** `Benzene.Abstractions.Validation` · **Namespace:** `Benzene.Abstractions.Validation` ·
-**Target:** class or method
+**Target:** class (applied to the message handler type, not the request type)
 
-Overrides the result status returned when validation fails for the annotated request type or
-handler — use it to control how a validation failure is surfaced (e.g. a specific status code).
+Overrides the result status returned when validation fails for the annotated handler — use it to
+control how a validation failure is surfaced (e.g. a specific status code). Honoured by all three
+validation adapters (`Benzene.FluentValidation`, `Benzene.DataAnnotations`, `Benzene.JsonSchema`)
+via a shared `IValidationStatusMapper`, resolved from DI; absent a registered mapper, each adapter
+keeps its own default validation-error status.
 
 ```csharp
 public ValidationStatusAttribute(string status)
@@ -97,7 +100,7 @@ public ValidationStatusAttribute(string status)
 
 ```csharp
 [ValidationStatus("bad-request")]
-public class CreateOrderRequest { /* … */ }
+public class CreateOrderHandler : IMessageHandler<CreateOrderRequest, CreateOrderResponse> { /* … */ }
 ```
 
 See [Fluent Validation](../fluent-validation.md) and [Data Annotations](../data-annotations.md).

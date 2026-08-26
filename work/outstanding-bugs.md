@@ -909,6 +909,33 @@ parity (P8 — the alternate container must match the reference)".
   `MicrosoftServiceResolverFactory`.** Added; disposes the owned container asynchronously when the
   factory owns one (a non-owning factory's `DisposeAsync` is a no-op, matching its `Dispose`). See WP-Q.
 
+### Tracked findings round 10, WP-W — Validation status-mapping contract (done)
+Ruled in [`bug-fix-designs-round10-2026-08.md`](bug-fix-designs-round10-2026-08.md) §"WP-W —
+validation status-mapping contract".
+- **[RESOLVED] #99 — `ValidationStatusAttribute`/`IValidationStatusMapper` silently ignored by two
+  of the three validation adapters.** The mechanism lives in the shared `Benzene.Abstractions.Validation`
+  package (documented as the way to override a failed validation's result status) but only
+  `Benzene.FluentValidation`'s `DefaultValidationStatusMapper` read it; `Benzene.DataAnnotations`'s
+  and `Benzene.JsonSchema`'s middlewares hard-wired `IDefaultStatuses.ValidationError`/the built-in
+  literal directly and didn't reference the abstractions package at all. Wired an optional
+  `IValidationStatusMapper` into both (`ValidationMiddleware<TRequest,TResponse>.GetValidationStatus`
+  in `Benzene.DataAnnotations`; the `SetValidationErrorAsync` call site in `Benzene.JsonSchema`'s
+  `JsonSchemaMiddleware<TContext>`) - each now computes its failure status at exactly one call site,
+  delegating to a registered mapper (honouring `[ValidationStatus]` on the resolved handler type) and
+  falling back to today's behavior (`ValidationError`) when no mapper is registered. Added the
+  `Benzene.Abstractions.Validation` project reference both packages lacked. Neither package ships its
+  own `IValidationStatusMapper` implementation - only `Benzene.FluentValidation`'s
+  `DefaultValidationStatusMapper` does, so an app installs that (or a custom mapper) once and all
+  three adapters honour it identically.
+- **[RESOLVED] #102 — `ValidationStatusAttribute` allowed `AttributeTargets.Method` that no code
+  reads.** The sole reader (`DefaultValidationStatusMapper.GetStatus`, now also the two newly-wired
+  call sites) resolves the attribute via `handlerType.GetCustomAttribute<ValidationStatusAttribute>()`
+  - class-level only; a method-level attribute compiled but was silently dead. Dropped
+  `AttributeTargets.Method` from `[AttributeUsage]` (pre-1.0, source-breaking only for code that was
+  already silently broken). Grepped the repo for method-level usage first - none found (the one
+  existing usage, `EnhancedFluentValidationTest.SampleHandler`, is already class-level); the full
+  solution build after the change confirms nothing depended on the dropped target.
+
 ---
 
 ## Open — tracked findings, round 10 (2026-08-26) — ruled, not yet implemented

@@ -11,8 +11,11 @@ public class ValidationMiddlewareBuilder : IHandlerMiddlewareBuilder
     {
         // TryGetService: a replaced IDefaultStatuses customizes the validation status here exactly
         // as it does in the core pipeline; absent (unusual, AddBenzene registers it), the middleware
-        // falls back to the built-in validation-error status.
+        // falls back to the built-in validation-error status. IValidationStatusMapper is optional
+        // too - typically only registered when Benzene.FluentValidation's AddFluentValidation also
+        // ran - and, when present, wins so [ValidationStatus] on the handler is honoured here too.
         return new ValidationMiddleware<TRequest, TResponse>(
-            serviceResolver.TryGetService<Benzene.Core.MessageHandlers.IDefaultStatuses>());
+            serviceResolver.TryGetService<Benzene.Core.MessageHandlers.IDefaultStatuses>(),
+            serviceResolver.TryGetService<Benzene.Abstractions.Validation.IValidationStatusMapper>());
     }
 }
