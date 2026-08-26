@@ -24,10 +24,19 @@ assessment.
   `traceparent`/`tracestate` header values (trace ID, span ID, sampling flags) as defined by the
   [W3C Trace Context spec](https://www.w3.org/TR/trace-context/) — these are opaque identifiers, not
   application data, and the spec itself is designed not to carry PII.
-- **Logging:** `UsingBenzene(...)` wires up `ILogger<T>` but emits no framework log lines unless you
-  explicitly add `UseLogResult(...)`/`UseLogContext(...)` middleware (see below) or your own handler
-  code calls `_logger.Log*(...)`. There is no default request/response body logging anywhere in the
-  framework.
+- **Logging:** `UsingBenzene(...)` wires up `ILogger<T>` and `MessageRouter` emits a **baseline
+  `Warning`-level log line unconditionally, with no middleware wired at all** — for a missing/
+  unresolvable topic, no handler found for the topic, a handler whose type doesn't implement the
+  expected interface, and an unsuccessful handler result — see
+  [Diagnosing Failures — "What you get with nothing wired"](diagnosing-failures.md#what-you-get-with-nothing-wired)
+  for the full table. **The unsuccessful-result line interpolates handler-authored `result.Errors`
+  text into the log message** — if your handler puts something sensitive into an error message, that
+  content reaches this log line even with zero opt-in logging middleware added. Beyond this baseline,
+  Benzene emits no *further* framework log lines unless you explicitly add
+  `UseLogResult(...)`/`UseLogContext(...)` middleware (see below) or your own handler code calls
+  `_logger.Log*(...)`. There is no default request/response *body* logging anywhere in the framework —
+  the baseline warnings above carry a topic, a status, and (for the unsuccessful-result line) the
+  handler's own error text, never the request/response payload itself.
 
 ## Where you opt in to capturing more — and where the risk is
 

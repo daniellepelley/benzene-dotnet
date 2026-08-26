@@ -114,6 +114,32 @@ public class TimeoutMiddlewareTest
         Assert.Equal(rootToken, accessor.CancellationToken);
     }
 
+    // (d2) Nested UseTimeout, the OTHER direction from (d): the OUTER deadline is the one that fires
+    // while execution is inside an INNER wrap with a much longer deadline. Per §"timeout-vs-
+    // cancellation semantic line", this must still classify as a TimeoutException - not escape as a
+    // raw OperationCanceledException - even though the exception the inner layer's Task.Delay throws
+    // carries the INNER layer's token (the innermost live CancellationTokenSource), not the outer
+    // layer's own cts.Token. (#61.)
+    [Fact]
+    public async Task HandleAsync_NestedUseTimeout_OuterDeadlineFiresInsideInnerWrap_ClassifiesAsTimeoutException()
+    {
+        var accessor = new CancellationTokenAccessor();
+        var outer = new TimeoutMiddleware<object>(accessor, TimeSpan.FromMilliseconds(60));
+        var inner = new TimeoutMiddleware<object>(accessor, TimeSpan.FromSeconds(30));
+
+        var thrown = await Assert.ThrowsAsync<TimeoutException>(() => outer.HandleAsync(new object(), () =>
+            inner.HandleAsync(new object(), async () =>
+            {
+                // The ambient token here is the INNER layer's linked token - the exception this
+                // Task.Delay throws on cancellation carries that token, not the outer layer's cts.Token.
+                await Task.Delay(TimeSpan.FromSeconds(10), accessor.CancellationToken);
+            })));
+
+        Assert.IsAssignableFrom<OperationCanceledException>(thrown.InnerException);
+        // Both layers unwound cleanly despite the outer's timer being the one that actually fired.
+        Assert.Equal(CancellationToken.None, accessor.CancellationToken);
+    }
+
     // (e) No CancellationTokenSource/token leak on the success path: the linked CTS backing the
     // wrapped token must be disposed once HandleAsync returns, not only on an exception path.
     [Fact]

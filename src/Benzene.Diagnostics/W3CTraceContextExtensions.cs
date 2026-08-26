@@ -55,7 +55,22 @@ public static class W3CTraceContextExtensions
 
             using (activity)
             {
-                await next();
+                try
+                {
+                    await next();
+                }
+                catch (Exception ex)
+                {
+                    // Without this, a span that threw looks identical to one that succeeded in a trace
+                    // viewer (Jaeger/Tempo/App Insights) - no error flag, no exception. This is the
+                    // highest-visibility span in the pipeline (the one OTel backends key error-rate
+                    // metrics off), so mark it Error before rethrowing untouched - matches the same
+                    // pattern already used by UseTimer (Benzene.Diagnostics.Timers.Extensions) and the
+                    // sibling handler span (ActivityMiddlewareDecorator).
+                    activity?.AddException(ex);
+                    activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+                    throw;
+                }
             }
         });
     }

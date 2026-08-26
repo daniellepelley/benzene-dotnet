@@ -44,6 +44,14 @@ public class ActivityMiddlewareDecorator<TContext> : IMiddleware<TContext>
             // Only the topic-bearing span carries benzene.status, so a trace-backed mesh reader
             // (Benzene.Mesh.Fleet.*) can reconstruct MeshTraceEvent.Status from the same span it reads
             // the topic off - see work/otel-fleet-adapter-scope.md §6a.
+            //
+            // Note (WP-N/#54 ruling, low-confidence/unconfirmed): Tag() runs BEFORE the try/catch below,
+            // so an exception thrown from Tag() itself (a TryGetService call misbehaving, in practice
+            // never observed live) would propagate without this span being marked Error - unlike an
+            // exception from _inner.HandleAsync/next(), which the catch below does mark. Left as-is: Tag()
+            // is resolver lookups and tag stamping, not I/O, so this is a theoretical gap rather than a
+            // confirmed one; flagged here rather than restructured so a future pass can revisit if it
+            // ever proves reachable.
             var taggedTopic = Tag(activity, context);
 
             try

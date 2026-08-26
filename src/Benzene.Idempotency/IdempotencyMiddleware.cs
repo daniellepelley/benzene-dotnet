@@ -1,3 +1,4 @@
+using Benzene.Abstractions.DI;
 using Benzene.Abstractions.MessageHandlers;
 using Benzene.Abstractions.Middleware;
 using Benzene.Results;
@@ -27,6 +28,7 @@ public class IdempotencyMiddleware<TContext> : IMiddleware<TContext>
     private readonly IIdempotencyKeyStrategy<TContext> _keyStrategy;
     private readonly IdempotencyOptions _options;
     private readonly ILogger _logger;
+    private readonly ICancellationTokenAccessor? _cancellation;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="IdempotencyMiddleware{TContext}"/> class.
@@ -35,16 +37,19 @@ public class IdempotencyMiddleware<TContext> : IMiddleware<TContext>
     /// <param name="keyStrategy">Derives the idempotency key for each message.</param>
     /// <param name="options">De-duplication behaviour options.</param>
     /// <param name="logger">The logger used to record a reclaimed-claim warning. Defaults to <see cref="NullLogger.Instance"/>.</param>
+    /// <param name="cancellation">Supplies the ambient cancellation token to pass into the store calls; null observes no cancellation.</param>
     public IdempotencyMiddleware(
         IIdempotencyStore store,
         IIdempotencyKeyStrategy<TContext> keyStrategy,
         IdempotencyOptions options,
-        ILogger? logger = null)
+        ILogger? logger = null,
+        ICancellationTokenAccessor? cancellation = null)
     {
         _store = store;
         _keyStrategy = keyStrategy;
         _options = options;
         _logger = logger ?? NullLogger.Instance;
+        _cancellation = cancellation;
     }
 
     /// <inheritdoc />
@@ -61,7 +66,9 @@ public class IdempotencyMiddleware<TContext> : IMiddleware<TContext>
             return;
         }
 
-        var claim = await _store.TryClaimAsync(key);
+        // Read at the point of use (not captured earlier): the ambient token can be replaced by a
+        // wrapping middleware (e.g. a timeout) for the duration of an inner call.
+        var claim = await _store.TryClaimAsync(key, Token);
         if (!claim.Claimed)
         {
             HandleDuplicate(context, claim.ExistingRecord!);
@@ -83,7 +90,7 @@ public class IdempotencyMiddleware<TContext> : IMiddleware<TContext>
 
         if (WasSuccessful(context))
         {
-            var settled = await _store.CompleteAsync(key, claimToken, true);
+            var settled = await _store.CompleteAsync(key, claimToken, true, Token);
             if (!settled)
             {
                 // The claim was reclaimed by another worker before this attempt finished (it lapsed
@@ -103,7 +110,7 @@ public class IdempotencyMiddleware<TContext> : IMiddleware<TContext>
 
     private async Task ReleaseAsync(string key, string claimToken)
     {
-        var released = await _store.ReleaseAsync(key, claimToken);
+        var released = await _store.ReleaseAsync(key, claimToken, Token);
         if (!released)
         {
             _logger.LogWarning(
@@ -111,6 +118,10 @@ public class IdempotencyMiddleware<TContext> : IMiddleware<TContext>
                 "could release it; outcome recorded by the new holder.", key);
         }
     }
+
+    // Read at the point of use (not captured earlier): the ambient token can be replaced by a
+    // wrapping middleware (e.g. a timeout) for the duration of an inner call.
+    private CancellationToken Token => _cancellation?.CancellationToken ?? CancellationToken.None;
 
     private void HandleDuplicate(TContext context, IdempotencyRecord existing)
     {
