@@ -4,6 +4,10 @@ using Benzene.Mesh.Fleet.Aws.XRay;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
+// MeshTimeRange (not aliased) - both this namespace and Amazon.XRay.Model declare a TraceSummary, so a
+// blanket `using Benzene.Mesh.Collector;` would make every bare TraceSummary in this file ambiguous;
+// referencing MeshTimeRange by its full name avoids that without an extra alias.
+using MeshTimeRange = Benzene.Mesh.Collector.MeshTimeRange;
 
 namespace Benzene.Mesh.Test;
 
@@ -308,7 +312,11 @@ public class XRayTraceSourceTest
 
         var source = new XRayTraceSource(mock.Object);
 
-        var view = await source.GetCorrelationAsync(correlationId);
+        // An explicit narrow range keeps this test's mock (which counts/keys off calls, not the request's
+        // StartTime/EndTime) inside a single #76 window-chunk; the default 24h CorrelationLookback would
+        // now chunk into 4 sub-queries and quadruple the summaries this always-the-same-response mock hands
+        // back. The chunking behavior itself is covered separately (GetCorrelationAsync_ChunksAWideWindow...).
+        var view = await source.GetCorrelationAsync(correlationId, new MeshTimeRange { From = "now-1h", To = "now" });
 
         Assert.NotNull(view);
         Assert.Equal(correlationId, view!.CorrelationId);
@@ -357,7 +365,10 @@ public class XRayTraceSourceTest
 
         var source = new XRayTraceSource(mock.Object);
 
-        var view = await source.GetCorrelationAsync(correlationId);
+        // Narrow range: keeps this test inside a single #76 window-chunk so "2 calls" means exactly the
+        // NextToken page-follow this test targets, not chunk-count multiplication (see the comment on
+        // GetCorrelationAsync_FindsMatchingTraces_GroupedByTrace).
+        var view = await source.GetCorrelationAsync(correlationId, new MeshTimeRange { From = "now-1h", To = "now" });
 
         Assert.NotNull(view);
         Assert.Equal(2, view!.Traces.Count); // both pages' traces collected

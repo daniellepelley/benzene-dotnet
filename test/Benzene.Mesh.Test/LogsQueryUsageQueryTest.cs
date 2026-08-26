@@ -26,8 +26,9 @@ public class LogsQueryUsageQueryTest
         // early and let the rest of the value run as query syntax.
         var escaped = LogsQueryUsageQuery.EscapeKqlStringLiteral("topic\" | take 1000 //", "TopicDimension");
 
+        // The quote is backslash-escaped (stays inside the KQL string literal) rather than removed - the
+        // surrounding text is unavoidably still present as data, but it can no longer terminate the literal.
         Assert.Equal("topic\\\" | take 1000 //", escaped);
-        Assert.DoesNotContain("\" |", escaped); // the quote is escaped, not a live literal boundary
     }
 
     [Fact]
