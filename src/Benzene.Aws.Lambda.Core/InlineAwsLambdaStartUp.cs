@@ -48,13 +48,24 @@ public class InlineAwsLambdaStartUp : IAwsEntryPointBuilder
     /// Builds the Lambda entry point from the configured actions.
     /// </summary>
     /// <returns>The built <see cref="IAwsLambdaEntryPoint"/>, ready to handle invocations.</returns>
+    /// <remarks>
+    /// Deliberately runs <see cref="Benzene.Core.MessageHandlers.StartUpChecks.BenzeneStartUpCheckExtensions.RunStartUpChecks"/>
+    /// (a wiring bug is exactly what a test host should catch) but not <c>WarmUp()</c> — warm-up
+    /// exists to pay startup costs during Lambda's INIT phase before the first real invocation, which
+    /// has no equivalent in an inline test host that's about to invoke immediately.
+    /// </remarks>
     public IAwsLambdaEntryPoint Build()
     {
         var services = new ServiceCollection();
         var app = new MiddlewarePipelineBuilder<AwsEventStreamContext>(new MicrosoftBenzeneServiceContainer(services));
 
-        _appAction(app);
+        // Order matches AwsLambdaHost's production order (ConfigureServices, then Configure): both
+        // actions register services via TryAdd*, so whichever runs first wins a given service type.
+        // Running Configure first here would let a transport's own TryAdd* default (e.g. UseSqs's
+        // AddSqs) claim a registration before ConfigureServices got a chance to install its own
+        // override, silently losing overrides that work fine under the production host (#106).
         _servicesAction(services);
+        _appAction(app);
 
         var serviceResolverFactory = new MicrosoftServiceResolverFactory(services);
         var entryPoint = new AwsLambdaEntryPoint(app.Build(), serviceResolverFactory);

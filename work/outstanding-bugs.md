@@ -1009,6 +1009,46 @@ validation status-mapping contract".
   existing usage, `EnhancedFluentValidationTest.SampleHandler`, is already class-level); the full
   solution build after the change confirms nothing depended on the dropped target.
 
+### Tracked findings round 10, WP-Y — Host/entry-point seams (done)
+Ruled in [`bug-fix-designs-round10-2026-08.md`](bug-fix-designs-round10-2026-08.md) §"WP-Y — host/entry-point
+seams".
+- **[RESOLVED] #104 — ASP.NET hosts never forwarded `HttpContext.RequestAborted` into the
+  `SendAsync(event, cancellationToken)` overload**, unlike the Azure Functions and Google PubSub
+  hosts (`AzureFunctionApp.cs`, `GooglePubSubFunctionHost.cs`), which do. Both call sites
+  (`AspNetServerWorker.StartAsync`'s `app.Run` handler and `AspApplicationBuilder.Add`'s middleware)
+  now call the token-taking overload with `context.RequestAborted`. Regression coverage added at both
+  call sites directly (`AspNetCancellationForwardingTest`), isolated from the AspNetContext pipeline's
+  own independent `RequestAborted` seeding middleware so each call site's forwarding is provable on
+  its own. See WP-Y.
+- **[RESOLVED] #106 — `InlineAwsLambdaStartUp.Build()` ran `Configure` before `ConfigureServices`,
+  inverted vs. the production host (`AwsLambdaHost`'s constructor: `ConfigureServices` then
+  `Configure`).** Since transport `Use*` extensions self-register defaults via `TryAdd*` (first
+  registration wins), a user's `ConfigureServices` override of a framework default won in production
+  but silently lost under the inline test host. Swapped the two calls to match `AwsLambdaHost`'s
+  order. Added a red→green test registering a custom `IMessageHandlerResultSetter<SqsMessageContext>`
+  via `TryAddScoped` in `ConfigureServices`, ahead of `UseSqs`'s own `TryAdd` default — failed before
+  the fix (the default setter ran), passes after (`InlineAwsLambdaStartUpOrderingTest`). Also added an
+  XML-doc remark that `Build()` deliberately runs `RunStartUpChecks()` but not `WarmUp()` (warm-up
+  exists for Lambda's INIT phase, which an inline test host about to invoke immediately has no
+  equivalent of). See WP-Y.
+- **[RESOLVED] #107 — `AwsLambdaHost.FunctionHandlerAsync`'s `finally` block let a throw from the
+  `OnInvocationCompleteAsync()` override point (documented for telemetry flush, which can plausibly
+  throw — e.g. an exporter endpoint down) replace the invocation's real exception as the reported
+  Lambda function error.** The call is now wrapped in its own try/catch: the override's exception is
+  logged at `Error` via a logger resolved once at start-up, and the invocation's own outcome (success
+  or exception) is always what propagates/is reported. Red→green test: a pipeline that always throws
+  exception A, hosted under a subclass whose `OnInvocationCompleteAsync` override always throws
+  exception B — before the fix B replaced A as the reported exception; after the fix A propagates and
+  B is logged, not silently swallowed (`AwsLambdaHostInvocationCompleteTest`). Folded into the same
+  commit: `AwsLambdaMiddlewareRouter.MapResponse` null-checked `context.Response` *after* already
+  serializing into it — reordered to check first (dead/misleading rather than a live NRE today, since
+  `AwsEventStreamContext` always initializes `Response` in its constructor; no test added per the
+  ruling's "no test strictly required"). Also added an explicit remark on `IAwsHttpBridge` (XML doc)
+  and `Benzene.Aws.Lambda.HttpBridge/CLAUDE.md` that the bridge implementer owns exception-to-response
+  conversion — an exception from a hand-written bridge propagates as a raw Lambda function error (API
+  Gateway 502), unlike Benzene's own `UseApiGateway` binding, which produces an in-band HTTP error
+  response. See WP-Y.
+
 ---
 
 ## Open — tracked findings, round 10 (2026-08-26) — ruled, not yet implemented

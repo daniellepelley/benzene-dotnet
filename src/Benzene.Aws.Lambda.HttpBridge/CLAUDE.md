@@ -62,6 +62,12 @@ baseline in, whether you hand-compose or use `AddBenzeneAwsLambdaHosting`.
 - **Benzene.Aws.Lambda.Core** — the event-stream pipeline and router base.
 
 ## Important conventions
+- **The bridge owns exception-to-response conversion.** An exception that escapes
+  `IAwsHttpBridge.HandleAsync` is not caught here — it propagates out of the Lambda invocation as a
+  raw Lambda function error (API Gateway reports an opaque 502), unlike `Benzene.Aws.Lambda.ApiGateway`'s
+  `UseApiGateway`, which catches a handler exception in-pipeline and returns an in-band HTTP error
+  response. A bridge implementation that wants API Gateway-shaped error responses has to do its own
+  exception handling before returning, same as it would with any other HTTP stack's own middleware.
 - API Gateway detection reuses the rules of `ApiGatewayV2LambdaHandler`/`ApiGatewayLambdaHandler`,
   so bridging changes *who serves* an event, never *which events are served*.
 - **ALB's rule is derived, not inherited** — Benzene has no ALB binding to copy. It keys on

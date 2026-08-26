@@ -119,7 +119,7 @@ public class AspApplicationBuilder : IAspApplicationBuilder, IBenzeneApplication
 
         applicationBuilder.Use(async (context, next) =>
         {
-            await entryPoint.SendAsync(context);
+            await entryPoint.SendAsync(context, context.RequestAborted);
             if (!context.Response.HasStarted)
             {
                 await next();
