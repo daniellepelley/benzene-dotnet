@@ -54,4 +54,6 @@ public static class Constants
     public const string NamespaceDescription = "Overrides the generated namespace for 'build' (used exactly, with no magic suffix, across the client class, its interface and its DTOs). 'topic-client' still appends .{ClientName} per client below this root. Defaults when not given: today's derivation from --lambda-name/--service-name is unchanged.";
     public const string Topics = "topics";
     public const string TopicsDescription = "A comma-delimited topic include-list for 'build' (e.g. 'order:create,order:cancel'). Only these topics are generated; a named topic the document doesn't have fails the build. Defaults to every non-reserved topic in the document when not given.";
+    public const string HealthCheckFailOnDefault = "unhealthy";
+    public const string HealthCheckFailOnDescription = "The verdict that fails the command: 'unhealthy' (exits non-zero if the target's health check response reports isHealthy: false) or 'none' (report only, always exit 0)";
 }
