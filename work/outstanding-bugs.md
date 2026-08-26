@@ -931,6 +931,23 @@ seams".
   XML-doc remark that `Build()` deliberately runs `RunStartUpChecks()` but not `WarmUp()` (warm-up
   exists for Lambda's INIT phase, which an inline test host about to invoke immediately has no
   equivalent of). See WP-Y.
+- **[RESOLVED] #107 — `AwsLambdaHost.FunctionHandlerAsync`'s `finally` block let a throw from the
+  `OnInvocationCompleteAsync()` override point (documented for telemetry flush, which can plausibly
+  throw — e.g. an exporter endpoint down) replace the invocation's real exception as the reported
+  Lambda function error.** The call is now wrapped in its own try/catch: the override's exception is
+  logged at `Error` via a logger resolved once at start-up, and the invocation's own outcome (success
+  or exception) is always what propagates/is reported. Red→green test: a pipeline that always throws
+  exception A, hosted under a subclass whose `OnInvocationCompleteAsync` override always throws
+  exception B — before the fix B replaced A as the reported exception; after the fix A propagates and
+  B is logged, not silently swallowed (`AwsLambdaHostInvocationCompleteTest`). Folded into the same
+  commit: `AwsLambdaMiddlewareRouter.MapResponse` null-checked `context.Response` *after* already
+  serializing into it — reordered to check first (dead/misleading rather than a live NRE today, since
+  `AwsEventStreamContext` always initializes `Response` in its constructor; no test added per the
+  ruling's "no test strictly required"). Also added an explicit remark on `IAwsHttpBridge` (XML doc)
+  and `Benzene.Aws.Lambda.HttpBridge/CLAUDE.md` that the bridge implementer owns exception-to-response
+  conversion — an exception from a hand-written bridge propagates as a raw Lambda function error (API
+  Gateway 502), unlike Benzene's own `UseApiGateway` binding, which produces an in-band HTTP error
+  response. See WP-Y.
 
 ---
 

@@ -36,6 +36,17 @@ namespace Benzene.Aws.Lambda.HttpBridge;
 /// Nothing about the contract is ASP.NET-specific — an application can bridge to any HTTP stack, or
 /// to a hand-written handler, by implementing it.
 /// </para>
+/// <para>
+/// <b>Exception handling is part of "owns everything after that".</b> An exception this method lets
+/// escape is not caught and turned into an HTTP error response by anything in this package — it
+/// propagates out of the Lambda function invocation as a raw Lambda function error, which API Gateway
+/// reports to the caller as an opaque 502, not the caller's own error shape. This differs from
+/// Benzene's own HTTP binding (<c>Benzene.Aws.Lambda.ApiGateway</c>'s <c>UseApiGateway</c>), which
+/// catches a handler exception inside the pipeline and produces an in-band HTTP error response. An
+/// implementation that wants API Gateway-shaped error responses (a JSON body, a chosen status code)
+/// must catch and map its own exceptions before returning from <see cref="HandleAsync(TRequest, ILambdaContext)"/> — exactly as
+/// an ASP.NET Core application would with its own exception-handling middleware.
+/// </para>
 /// </remarks>
 public interface IAwsHttpBridge<TRequest, TResponse>
 {

@@ -73,9 +73,9 @@ public abstract class AwsLambdaMiddlewareRouter<TRequest> : MiddlewareRouter<TRe
     /// <param name="response">The response to serialize.</param>
     protected void MapResponse<TResponse>(AwsEventStreamContext context, TResponse response)
     {
-        JsonSerializer.Serialize(response, context.Response);
         if (context.Response != null)
         {
+            JsonSerializer.Serialize(response, context.Response);
             context.Response.Position = 0;
         }
 

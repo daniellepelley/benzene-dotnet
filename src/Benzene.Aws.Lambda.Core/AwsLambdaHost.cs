@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using System.Threading.Tasks;
 using Amazon.Lambda.Core;
@@ -7,6 +8,7 @@ using Benzene.Core.MessageHandlers.WarmUp;
 using Benzene.Core.Middleware;
 using Benzene.Microsoft.Dependencies;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Benzene.Aws.Lambda.Core;
 
@@ -18,6 +20,7 @@ namespace Benzene.Aws.Lambda.Core;
 public class AwsLambdaHost<TStartUp> : IAwsLambdaEntryPoint where TStartUp : BenzeneStartUp, new()
 {
     private readonly AwsLambdaEntryPoint _entryPoint;
+    private readonly ILogger<AwsLambdaHost<TStartUp>> _logger;
 
     /// <summary>
     /// Constructs <typeparamref name="TStartUp"/>, runs its configuration/service registration, and
@@ -37,6 +40,14 @@ public class AwsLambdaHost<TStartUp> : IAwsLambdaEntryPoint where TStartUp : Ben
 
         var serviceResolverFactory = new MicrosoftServiceResolverFactory(services);
         _entryPoint = new AwsLambdaEntryPoint(eventPipeline.Build(), serviceResolverFactory);
+
+        // Resolved once at start-up (ILogger<T> is registered singleton by AddLogging) rather than
+        // per-invocation, so FunctionHandlerAsync's finally block always has somewhere to log an
+        // OnInvocationCompleteAsync failure even though it runs outside any per-invocation scope.
+        using (var scope = serviceResolverFactory.CreateScope())
+        {
+            _logger = scope.GetService<ILogger<AwsLambdaHost<TStartUp>>>();
+        }
 
         // Lambda INIT phase: warm framework internals (serializer per request type, validators, ...) so
         // the first invocation isn't the one that pays for them. A no-op unless the StartUp opted in via
@@ -64,7 +75,19 @@ public class AwsLambdaHost<TStartUp> : IAwsLambdaEntryPoint where TStartUp : Ben
         }
         finally
         {
-            await OnInvocationCompleteAsync();
+            // A throw here (documented as plausible - most notably a telemetry flush hitting a down
+            // exporter endpoint) must never replace the invocation's real outcome: an exception thrown
+            // out of a finally block supersedes one already propagating from the try block, which
+            // would report this override point's failure as the Lambda function error instead of
+            // whatever the invocation itself did. Log it and move on.
+            try
+            {
+                await OnInvocationCompleteAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "OnInvocationCompleteAsync threw; the invocation's own result (success or exception) is unaffected.");
+            }
         }
     }
 
