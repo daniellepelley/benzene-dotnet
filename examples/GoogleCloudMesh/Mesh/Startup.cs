@@ -52,9 +52,41 @@ public class Startup : BenzeneStartUp
     {
         app.UseHttp(http => http
             .UseBenzeneEnrichment()
+            // #41 (WP-E): this endpoint had NO guard at all - an anonymous POST could trigger a full
+            // aggregation pass and a GCS write. Same package, same wiring as AzureMesh/AwsMesh: a
+            // required X-Benzene-Refresh header (CSRF) plus a manifest-age throttle. See README's
+            // "Security posture" for what this does and does not cover.
+            .UseMeshRefreshGuard(BuildRefreshGuardOptions())
             .UseMeshUi("/mesh-ui", "manifest.json")
             .UseMeshSpecUi("/mesh-spec-ui.html", "manifest.json")
             .UseMeshArtifacts(new CorsSettings { AllowedDomains = new[] { "https://studio.asyncapi.com" } })
             .UseMessageHandlers(typeof(Startup).Assembly));
+    }
+
+    /// <summary>
+    /// Builds the refresh endpoint's guard config. Only the throttle window is configurable (via
+    /// <c>MESH_REFRESH_MIN_INTERVAL_SECONDS</c>); the path and the <c>X-Benzene-Refresh</c> header name
+    /// are fixed contracts shared with the mesh UI, so they stay as the guard's own defaults. Mirrors
+    /// <c>examples/AzureMesh/Mesh/Startup.cs</c>'s <c>BuildRefreshGuardOptions</c>.
+    /// </summary>
+    private static MeshRefreshGuardOptions BuildRefreshGuardOptions()
+    {
+        // MeshRefreshGuardOptions.Topic defaults to MeshAggregatorTopics.Aggregate
+        // ("benzene:mesh:aggregate") - AwsMesh's MeshAggregateHandler's topic, but NOT this example's:
+        // MeshRefreshHandler here is "mesh:refresh" (matching the K8sMesh/AzureMesh/AzureFunctionsMesh
+        // siblings). The Path match alone already guards the endpoint, but a wrong Topic would leave
+        // the guard's second, route-alias-proof check inertly matching a topic nothing here ever uses -
+        // so it's corrected explicitly.
+        var options = new MeshRefreshGuardOptions { Topic = "mesh:refresh" };
+
+        // Parse leniently but reject nonsense: a negative value would disable the throttle by accident,
+        // so only a non-negative parse wins. 0 is honoured as an explicit "throttle off" escape hatch.
+        if (double.TryParse(Environment.GetEnvironmentVariable("MESH_REFRESH_MIN_INTERVAL_SECONDS"),
+                out var seconds) && seconds >= 0)
+        {
+            options.MinimumInterval = TimeSpan.FromSeconds(seconds);
+        }
+
+        return options;
     }
 }

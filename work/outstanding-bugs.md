@@ -248,6 +248,10 @@ deterministic schema, example posture".
   the mesh host itself — not just the polled services — is publicly reachable and unauthenticated,
   demo-only posture, matching the K8sMesh/GoogleCloudMesh/AzureFunctionsMesh siblings (P7). Full OIDC
   for this example stays out of scope. See WP-2(c).
+  **[CORRECTED 2026-08-26, WP-E/#41]:** the "matching the K8sMesh/GoogleCloudMesh/AzureFunctionsMesh
+  siblings" claim above was false when written — none of those three actually had `UseMeshRefreshGuard`
+  wired at the time. All three are now fixed to match (see the WP-E entry below); the claim is true as
+  of that fix, not as of this one.
 
 ### Tracked findings round 5–6, WP-6 — AWS clients: Lambda invocation semantics; Step Functions idempotent starts (done)
 Decisions, rationale, and the rejected alternative for #13 are ruled in
@@ -291,6 +295,77 @@ real".
   `true`. Wiring requires (and fails fast on, at setup - not first publish) a channel with publisher
   confirmations enabled, verified via `GetNextPublishSequenceNumberAsync()` (the only public-API-visible
   proxy for that setting in this client version). See WP-8.
+
+### Tracked findings round 7–10, WP-D — Mesh host & UI robustness (done)
+Ruled in [`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-D — Mesh
+host & UI robustness".
+- **[RESOLVED] #34 — `MeshTimeRangeResolver.ParseBound`'s `now ± span` threw `ArgumentOutOfRangeException`
+  (`DateTimeOffset` range) for a relative count that is perfectly valid as a `TimeSpan` but pushes the
+  result outside `DateTimeOffset`'s own representable window (e.g. `now-5000000d`) - a different overflow
+  path from the already-fixed `ParseDuration`/`TimeSpan` overflow (#22), crashing `mesh:query:fleet`/
+  `correlation` unconditionally on this input.** Live-verified (the crash reproduced, then stopped
+  reproducing after the fix). `now ± span` is now wrapped in the same "absent, never throw" contract
+  (P5): a caught `ArgumentOutOfRangeException` degrades to a null bound, exactly like an unparseable or
+  `TimeSpan`-overflowing one. See WP-D.
+- **[RESOLVED] #35 (security, P9) — `MeshDispatchGuardMiddleware`'s 128 KiB payload cap was enforced by
+  reading the `Content-Length` header alone, which returns 0 ("absent") for a chunked
+  `Transfer-Encoding` request - so an oversized chunked body on the bare-Kestrel `Benzene.Mesh.Host`
+  sailed straight past the guard's own threat model (a compromised session) into the dispatch handler.**
+  Live-verified (413 with `Content-Length` set over the cap vs. an unrefused chunked bypass before the
+  fix). The check now measures the request's ACTUAL buffered body size (`HttpRequestBodyBuffer`, already
+  populated ahead of every custom middleware by `BenzeneExtensions.UseHttp`'s
+  `BufferRequestBodyMiddleware`) rather than trusting the header, falling back to the header only on a
+  transport that never buffers (e.g. AWS API Gateway, where the whole body already arrives
+  pre-materialized and `Content-Length` is trustworthy). Kestrel's own `MaxRequestBodySize` is now also
+  set in `deploy/Mesh/Benzene.Mesh.Host/Program.cs`, tracking `MeshDispatchGuardOptions.
+  DefaultMaxRequestBytes`, as defence-in-depth against the buffering itself being unbounded. See WP-D.
+- **[RESOLVED] #36 — the mesh UI's sign-out `fetch` (`fetch(...).then(s=>s.json()).catch(()=>({}))`) had
+  no `response.ok`/status check, so a failed logout (network error, an unexpected 500) looked identical
+  to success and silently fell through to a page reload.** `src/Benzene.Mesh.Ui/mesh-ui.html`'s sign-out
+  button now checks `response.ok` before treating the result as success (matching the pattern the
+  refresh action `d0` in the same file already uses), and renders an inline error note
+  (`.bz-refresh-note[data-tone=bad]`, the same convention the refresh control's own note uses) instead of
+  reloading on a failure. See WP-D.
+- **[RESOLVED] #72 (worth-fixing) — `MeshArtifactMiddleware.HandleAsync` called `_store.TryReadAsync`
+  with no try/catch, but all three cloud artifact stores (S3/Blob/GCS) deliberately re-throw on a
+  non-404 failure (a documented, tested contract) - a transient hiccup crashed this middleware, the mesh
+  UI's primary read path, as a raw unhandled 500.** Live-verified. The read is now wrapped in try/catch;
+  a store failure answers a clean `503` with a generic, no-detail-leakage JSON body
+  (`{"error":"unavailable"}`, matching the convention `MeshRefreshGuardMiddleware.DenyAsync` already
+  uses in this package) and logs server-side. See WP-D.
+- **[RESOLVED] #37 (minor, P6) — `auth.dispatchRole` was accepted while `dispatch.enabled` stayed
+  false, silently inert: the role check only ever runs against `DispatchPath`, which isn't a reachable
+  endpoint at all when dispatch is disabled.** `MeshAuthGate.Validate` now rejects the combination at
+  startup, naming both keys - the same fail-fast treatment this method already gives every other
+  inert/unsatisfiable auth-config combination. See WP-D.
+
+### Tracked findings round 7–10, WP-E — Mesh example parity + resolved-note correction (done)
+Ruled in [`bug-fix-designs-round7-10-2026-08.md`](bug-fix-designs-round7-10-2026-08.md) §"WP-E — Mesh
+example parity + resolved-note correction".
+- **[RESOLVED] #41 — `examples/AzureFunctionsMesh`'s `POST /mesh/refresh` had no guard at all
+  (unauthenticated ARM discovery + a Blob write on an anonymous POST), CONTRADICTING this file's own
+  #21 resolved-note, which claimed AzureFunctionsMesh already "matched the guarded posture" alongside
+  K8sMesh/GoogleCloudMesh. Re-verifying the other two named siblings found the note was wrong about
+  THEM too: `examples/K8sMesh/Mesh/Startup.cs` and `examples/GoogleCloudMesh/Mesh/Startup.cs` also had
+  no `UseMeshRefreshGuard` wired at all - so the #21 note's claim was false for all three examples it
+  named, not just AzureFunctionsMesh.** `UseMeshRefreshGuard` (CSRF header + manifest-age throttle,
+  `Topic = "mesh:refresh"`) is now wired into all three, mirroring `AzureMesh`/`AwsMesh`'s existing
+  wiring; each README gained the same "Security posture" disclosure section AzureMesh's README already
+  had. **#21's resolved-note is corrected above** (see its `[CORRECTED 2026-08-26, WP-E/#41]` line):
+  its "K8sMesh/GoogleCloudMesh/AzureFunctionsMesh already match the guarded posture" claim was false at
+  the time it was written for all three named examples - none of the three had `UseMeshRefreshGuard`
+  wired until this fix. See WP-E, and `bug-fix-designs-round7-10-2026-08.md`'s WP-E section for why the
+  scope grew from "verify two examples" to "fix three".
+- **[RESOLVED] #73 — `examples/AwsMesh/Mesh/MeshAggregateHandler` is triggered BOTH by an EventBridge
+  schedule AND an on-demand `POST /mesh/refresh` HTTP endpoint on the same class, calling
+  `_aggregator.RunOnceAsync(registry)`/`_store.PublishAsync("registry.json", ...)` directly with no
+  gate - and because the two triggers run in SEPARATE Lambda execution environments (unlike the other
+  four mesh examples, which run as one long-lived process), no in-process semaphore could serialize
+  them.** `reserved_concurrent_executions = 1` is now set on the mesh Lambda in
+  `examples/AwsMesh/deploy/main.tf` as a cheap platform-level serializer (AWS Lambda queues/rejects a
+  concurrent invocation past the reservation rather than running two at once), paired with a documented
+  residual-risk comment on the resource (what this does and does not protect against - an S3
+  conditional-write/lease is named as the fuller fix if true single-flight is ever needed). See WP-E.
 
 ---
 

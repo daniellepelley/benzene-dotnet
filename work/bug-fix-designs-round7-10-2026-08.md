@@ -199,6 +199,18 @@ Tests: the round-7 leak probe (now permanent), a timeout test, a duplicate-id te
   resolution note *claims* AzureFunctionsMesh already matches the guarded posture. **Wire the guard,
   add the README disclosure, and correct the false resolved-note.** Re-verify K8sMesh/GoogleCloudMesh
   (the note names them too) in the same pass.
+  - **AMENDMENT (2026-08-26, WP-D/WP-E implementing agent):** the "re-verify" turned up more than
+    expected — `grep -n UseMeshRefreshGuard examples/K8sMesh/Mesh/Startup.cs
+    examples/GoogleCloudMesh/Mesh/Startup.cs` found **neither** actually had it wired either, despite
+    #21's note claiming both "already match the guarded posture." The #21 note was wrong about all
+    three named siblings, not just AzureFunctionsMesh. Scope widened accordingly: **all three**
+    (AzureFunctionsMesh, K8sMesh, GoogleCloudMesh) got `UseMeshRefreshGuard` wired (same package/CSRF
+    header/manifest-age-throttle shape as AzureMesh/AwsMesh, `Topic = "mesh:refresh"` matching each
+    one's own `MeshRefreshHandler`) plus a README "Security posture" section, and the #21 note in
+    `outstanding-bugs.md` was corrected in place (not silently rewritten — a `[CORRECTED ...]` line was
+    appended to it) rather than only noted here. This is the same P8 lesson ("a fix lands on every
+    sibling, not just the instance that surfaced it") applied to a *verification* step, not just a code
+    fix: "quickly check the other two" turned out to mean "fix the other two."
 - **#73 (AwsMesh cross-invocation race):** the one mesh example whose two aggregation drivers
   (EventBridge schedule + on-demand refresh) run in *separate Lambda execution environments*, so the
   in-process `SemaphoreSlim` the other four rely on can't serialize them, and `S3MeshArtifactStore`
