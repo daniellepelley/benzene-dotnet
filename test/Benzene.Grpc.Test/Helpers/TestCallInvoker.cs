@@ -18,6 +18,7 @@ public class TestCallInvoker : CallInvoker
     public Status Status { get; set; } = new(StatusCode.OK, string.Empty);
     public Metadata Trailers { get; set; } = new();
     public RpcException? RpcExceptionToThrow { get; set; }
+    public Exception? ExceptionToThrow { get; set; }
 
     public override TResponse BlockingUnaryCall<TRequest, TResponse>(Method<TRequest, TResponse> method, string? host, CallOptions options, TRequest request)
         => throw new NotSupportedException();
@@ -31,7 +32,9 @@ public class TestCallInvoker : CallInvoker
 
         var responseTask = RpcExceptionToThrow != null
             ? Task.FromException<TResponse>(RpcExceptionToThrow)
-            : Task.FromResult((TResponse)Response!);
+            : ExceptionToThrow != null
+                ? Task.FromException<TResponse>(ExceptionToThrow)
+                : Task.FromResult((TResponse)Response!);
 
         return new AsyncUnaryCall<TResponse>(
             responseTask,

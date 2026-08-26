@@ -77,3 +77,12 @@ a Benzene middleware pipeline over a `Grpc.Net.Client.GrpcChannel`. Mirrors the 
   those wire types on both the request and response side
 - The app owns and registers its own `GrpcChannel` (`AddGrpcClient` does not create one), matching how
   callers own their own `IProducer`/`HttpClient` for the other outbound clients
+- **No retry logic of our own.** Resilience for an unreachable channel is deliberately left to the
+  app-owned `GrpcChannel`'s own `ServiceConfig` retry policy (gRPC's standard retry mechanism,
+  configured where the channel is built) - `GrpcBenzeneMessageClient` adds no retry/backoff of its
+  own around `SendMessageAsync`
+- **Ambient cancellation is not logged as an error.** `SendMessageAsync` catches
+  `OperationCanceledException` (from `ICancellationTokenAccessor`'s ambient token firing mid-send)
+  separately from the general catch-all: no `LogError`, mirroring `GrpcMethodHandler`'s
+  server-side handling of the same case. It still resolves to `BenzeneResultStatus.ServiceUnavailable`,
+  matching how a mid-flight `RpcException(Cancelled)` already resolves via the reverse status mapper.

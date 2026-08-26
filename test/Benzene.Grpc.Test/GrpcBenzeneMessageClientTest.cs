@@ -10,6 +10,7 @@ using Benzene.Grpc.TestHelpers;
 using Benzene.Results;
 using Google.Protobuf;
 using Grpc.Core;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -46,6 +47,40 @@ public class GrpcBenzeneMessageClientTest
         Assert.False(result.IsSuccessful);
         Assert.Equal(BenzeneResultStatus.NotFound, result.Status);
         Assert.Contains(result.Errors, e => e.Message == "no such thing");
+    }
+
+    // Round-10 #109: ambient cancellation (e.g. the inbound call's deadline/cancel firing mid-send,
+    // seen here as a bare TaskCanceledException out of the call invoker rather than an RpcException)
+    // is a routine outcome, not an error worth Error-level noise.
+    [Fact]
+    public async Task SendMessageAsync_WhenAmbientCancellationFiresMidSend_DoesNotLogAtErrorLevel()
+    {
+        var invoker = new TestCallInvoker { ExceptionToThrow = new TaskCanceledException("The operation was canceled.") };
+        var logger = new RecordingLogger<GrpcBenzeneMessageClient>();
+        var client = BuildClient(invoker, out var registry, logger: logger);
+        registry.Add<EchoRequest, EchoReply>("echo-topic", "/benzene.test.TestService/Echo");
+
+        await client.SendMessageAsync<EchoRequest, EchoReply>(
+            new BenzeneClientRequest<EchoRequest>("echo-topic", new EchoRequest { Name = "world" }, new Dictionary<string, string>()));
+
+        Assert.DoesNotContain(LogLevel.Error, logger.Levels);
+        Assert.DoesNotContain(LogLevel.Critical, logger.Levels);
+    }
+
+    [Fact]
+    public async Task SendMessageAsync_WhenAmbientCancellationFiresMidSend_ReturnsACancellationFlavouredFailure()
+    {
+        var invoker = new TestCallInvoker { ExceptionToThrow = new TaskCanceledException("The operation was canceled.") };
+        var client = BuildClient(invoker, out var registry);
+        registry.Add<EchoRequest, EchoReply>("echo-topic", "/benzene.test.TestService/Echo");
+
+        var result = await client.SendMessageAsync<EchoRequest, EchoReply>(
+            new BenzeneClientRequest<EchoRequest>("echo-topic", new EchoRequest { Name = "world" }, new Dictionary<string, string>()));
+
+        Assert.False(result.IsSuccessful);
+        // Same classification a mid-flight RpcException(Cancelled) already resolves to via
+        // DefaultGrpcStatusReverseMapper - both cancellation surfaces agree.
+        Assert.Equal(BenzeneResultStatus.ServiceUnavailable, result.Status);
     }
 
     // Phase 5 of work/archive/problem-details-plan-2026-08.md: the reverse read of GrpcMethodHandler.AddRichErrorDetails'
@@ -139,7 +174,7 @@ public class GrpcBenzeneMessageClientTest
         Assert.Null(invoker.CapturedOptions.Deadline);
     }
 
-    private static GrpcBenzeneMessageClient BuildClient(TestCallInvoker invoker, out GrpcClientRouteRegistry registry, IServiceResolver? resolver = null)
+    private static GrpcBenzeneMessageClient BuildClient(TestCallInvoker invoker, out GrpcClientRouteRegistry registry, IServiceResolver? resolver = null, ILogger<GrpcBenzeneMessageClient>? logger = null)
     {
         registry = new GrpcClientRouteRegistry();
         var adapter = new ProtobufJsonGrpcMessageAdapter();
@@ -148,6 +183,6 @@ public class GrpcBenzeneMessageClientTest
             .UseGrpcClient(invoker, registry, adapter)
             .Build();
 
-        return new GrpcBenzeneMessageClient(pipeline, adapter, new DefaultGrpcStatusReverseMapper(), NullLogger<GrpcBenzeneMessageClient>.Instance, resolver ?? new NullServiceResolver());
+        return new GrpcBenzeneMessageClient(pipeline, adapter, new DefaultGrpcStatusReverseMapper(), logger ?? NullLogger<GrpcBenzeneMessageClient>.Instance, resolver ?? new NullServiceResolver());
     }
 }
