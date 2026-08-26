@@ -80,6 +80,40 @@ public class HttpPingHealthCheckTest
         Assert.Equal("HttpPing", healthCheck.Type);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_ReturnsFailed_WithUrlAndDependency_WhenTheEndpointDoesNotRespondAtAll()
+    {
+        // #112: connection-refused (HttpRequestException) used to escape uncaught into the generic
+        // ExceptionHandlingHealthCheck decorator, which builds a result with no Url and no dependency
+        // entry - the one failure mode where an operator with several HttpPingHealthChecks registered
+        // most needs to know WHICH endpoint is down.
+        var httpClient = new HttpClient(new ThrowingHttpMessageHandler(new HttpRequestException("Connection refused")));
+        var healthCheck = new HttpPingHealthCheck(httpClient, "https://example.test/ping");
+
+        var result = await healthCheck.ExecuteAsync(CancellationToken.None);
+
+        Assert.Equal(HealthCheckStatus.Failed, result.Status);
+        Assert.Equal("https://example.test/ping", result.Data["Url"]);
+        Assert.Equal("HttpRequestException", result.Data["Exception"]);
+        var dependency = Assert.Single(result.Dependencies);
+        Assert.Equal("Http", dependency.Kind);
+        Assert.Equal("https://example.test/ping", dependency.Name);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_PropagatesCancellation_RatherThanReportingItAsAPingFailure()
+    {
+        // A cancelled token must still propagate uncaught (not be caught by the new HttpRequestException
+        // handler added for #112) so ExceptionHandlingHealthCheck classifies it as the distinct
+        // "Cancelled" outcome.
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var httpClient = new HttpClient(new StubHttpMessageHandler(HttpStatusCode.OK));
+        var healthCheck = new HttpPingHealthCheck(httpClient, "https://example.test/ping");
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => healthCheck.ExecuteAsync(cts.Token));
+    }
+
     private class StubHttpMessageHandler : HttpMessageHandler
     {
         private readonly HttpStatusCode _statusCode;
@@ -93,6 +127,21 @@ public class HttpPingHealthCheckTest
         {
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(new HttpResponseMessage(_statusCode));
+        }
+    }
+
+    private class ThrowingHttpMessageHandler : HttpMessageHandler
+    {
+        private readonly Exception _exception;
+
+        public ThrowingHttpMessageHandler(Exception exception)
+        {
+            _exception = exception;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            throw _exception;
         }
     }
 }

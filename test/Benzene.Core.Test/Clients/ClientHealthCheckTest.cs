@@ -109,6 +109,18 @@ public class ClientHealthCheckTest
     }
 
     [Fact]
+    public async Task ExecuteAsync_PropagatesCancellation_RatherThanReportingItAsAReachabilityFailure()
+    {
+        // #114 scope extension: ClientHealthCheck had the same broad catch(Exception) shape as the EF
+        // checks, which would swallow an OperationCanceledException from the downstream call instead of
+        // letting ExceptionHandlingHealthCheck classify it as "Cancelled".
+        var check = new ClientHealthCheck(ServiceName,
+            new FakeClient(() => throw new OperationCanceledException()));
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => check.ExecuteAsync(CancellationToken.None));
+    }
+
+    [Fact]
     public async Task ReportsServiceDependencyMetadata()
     {
         var result = await CheckReturning(BenzeneResult.Ok(AnnotatedResponse("same", "same"))).ExecuteAsync(CancellationToken.None);

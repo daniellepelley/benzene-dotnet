@@ -64,6 +64,22 @@ public class DatabaseHealthCheckTest
     }
 
     [Fact]
+    public async Task ExecuteAsync_PropagatesCancellation_RatherThanReportingItAsAConnectionFailure()
+    {
+        // #114: an already-cancelled token must propagate for ExceptionHandlingHealthCheck's dedicated
+        // "Cancelled" classification, not be swallowed into an ordinary connection-failure result.
+        // TryConnect runs (and is awaited) before TryGetAppliedMigrationsAsync, so making CanConnectAsync
+        // throw OperationCanceledException (via the CancellingDbContext test double - see its comment for
+        // why the real InMemory provider can't reproduce this) exercises the same propagation path
+        // ExecuteAsync takes for a caller-driven cancellation.
+        using var context = new CancellingDbContext(new DbContextOptionsBuilder<TestDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        var healthCheck = new DatabaseHealthCheck<CancellingDbContext>(context, "20260101000000_Initial");
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => healthCheck.ExecuteAsync(CancellationToken.None));
+    }
+
+    [Fact]
     public void Type_IsDatabase()
     {
         using var context = CreateContext();

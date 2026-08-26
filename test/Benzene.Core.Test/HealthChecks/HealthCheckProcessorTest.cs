@@ -50,10 +50,83 @@ public class HealthCheckProcessorTest
         }
     }
 
+    // A check whose Timeout getter throws - simulates a buggy IHealthCheck implementation that breaks
+    // one of the member reads the processor performs OUTSIDE the check's own ExecuteAsync try/catch.
+    private sealed class ThrowingTimeoutCheck : IHealthCheck
+    {
+        public ThrowingTimeoutCheck(string type) { Type = type; }
+        public string Type { get; }
+        public TimeSpan? Timeout => throw new InvalidOperationException("Timeout getter is broken");
+        public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken) => Task.FromResult(HealthCheckResult.CreateInstance(true, Type));
+    }
+
+    // A check whose IsNonCritical getter throws. Returns a FAILED result from ExecuteAsync - the
+    // status-downgrade expression only reads IsNonCritical when the result is Failed (`&&`
+    // short-circuits otherwise), so a throwing IsNonCritical getter is only actually reachable off a
+    // failing check.
+    private sealed class ThrowingIsNonCriticalCheck : IHealthCheck
+    {
+        public ThrowingIsNonCriticalCheck(string type) { Type = type; }
+        public string Type { get; }
+        public bool IsNonCritical => throw new InvalidOperationException("IsNonCritical getter is broken");
+        public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken) => Task.FromResult(HealthCheckResult.CreateInstance(false, Type));
+    }
+
+    // A check whose Type getter throws.
+    private sealed class ThrowingTypeCheck : IHealthCheck
+    {
+        public string Type => throw new InvalidOperationException("Type getter is broken");
+        public Task<IHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken) => Task.FromResult(HealthCheckResult.CreateInstance(true, "n/a"));
+    }
+
     private static async Task<HealthCheckResponse> RunAsync(HealthCheckProcessor processor, params IHealthCheck[] checks)
     {
         var result = await processor.PerformHealthChecksAsync(checks);
         return (HealthCheckResponse)result.PayloadAsObject;
+    }
+
+    [Fact]
+    public async Task AThrowingTimeoutGetter_DoesNotCrashTheWholeBatch_AndOtherChecksStillReportTheirRealResult()
+    {
+        // #113: a throwing Timeout/IsNonCritical/Type getter used to propagate out of Task.WhenAll and
+        // lose every other, perfectly healthy, check's result with it.
+        var healthy1 = new StubCheck("healthy1", ok: true, isNonCritical: false);
+        var healthy2 = new StubCheck("healthy2", ok: true, isNonCritical: false);
+        var buggy = new ThrowingTimeoutCheck("buggy");
+
+        var response = await RunAsync(new HealthCheckProcessor(), healthy1, healthy2, buggy);
+
+        Assert.False(response.IsHealthy);
+        Assert.Equal(HealthCheckStatus.Ok, response.HealthChecks["healthy1"].Status);
+        Assert.Equal(HealthCheckStatus.Ok, response.HealthChecks["healthy2"].Status);
+        Assert.Equal(HealthCheckStatus.Failed, response.HealthChecks["buggy"].Status);
+        Assert.Equal("InvalidOperationException", response.HealthChecks["buggy"].Data["Exception"]);
+    }
+
+    [Fact]
+    public async Task AThrowingIsNonCriticalGetter_DoesNotCrashTheWholeBatch()
+    {
+        var healthy = new StubCheck("healthy", ok: true, isNonCritical: false);
+        var buggy = new ThrowingIsNonCriticalCheck("buggy");
+
+        var response = await RunAsync(new HealthCheckProcessor(), healthy, buggy);
+
+        Assert.Equal(HealthCheckStatus.Ok, response.HealthChecks["healthy"].Status);
+        Assert.Equal(HealthCheckStatus.Failed, response.HealthChecks["buggy"].Status);
+    }
+
+    [Fact]
+    public async Task AThrowingTypeGetter_DoesNotCrashTheWholeBatch_AndReportsUnderTheRuntimeTypeName()
+    {
+        var healthy = new StubCheck("healthy", ok: true, isNonCritical: false);
+        var buggy = new ThrowingTypeCheck();
+
+        var response = await RunAsync(new HealthCheckProcessor(), healthy, buggy);
+
+        Assert.Equal(HealthCheckStatus.Ok, response.HealthChecks["healthy"].Status);
+        // Type itself is unavailable - fall back to the runtime type name so the failure is still
+        // attributable to a specific check.
+        Assert.Equal(HealthCheckStatus.Failed, response.HealthChecks[nameof(ThrowingTypeCheck)].Status);
     }
 
     [Fact]

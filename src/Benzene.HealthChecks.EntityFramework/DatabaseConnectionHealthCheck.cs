@@ -47,6 +47,14 @@ public class DatabaseConnectionHealthCheck<TDbContext> : IHealthCheck where TDbC
         {
             return (await dbContext.Database.CanConnectAsync(cancellationToken), null);
         }
+        catch (OperationCanceledException)
+        {
+            // A caller-driven cancellation (ambient token / the processor's own per-check timeout) is not
+            // a connectivity failure - propagate uncaught so ExceptionHandlingHealthCheck (which every
+            // check runs under via HealthCheckProcessor) classifies it as the distinct "Cancelled" outcome
+            // instead of recording "the database is broken" for a graceful shutdown or timeout.
+            throw;
+        }
         catch(Exception ex)
         {
             return (false, ex);

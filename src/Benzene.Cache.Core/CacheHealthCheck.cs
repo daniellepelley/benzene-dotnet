@@ -31,6 +31,14 @@ public class CacheHealthCheck<TCacheService> : IHealthCheck where TCacheService 
                 { "CanConnect", canConnect },
             }, dependencies);
         }
+        catch (OperationCanceledException)
+        {
+            // A caller-driven cancellation (ambient token / the processor's own per-check timeout) is not
+            // a connectivity failure - propagate uncaught so ExceptionHandlingHealthCheck (which every
+            // check runs under via HealthCheckProcessor) classifies it as the distinct "Cancelled" outcome
+            // instead of an ordinary reachability failure.
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error occurred in cache health check");

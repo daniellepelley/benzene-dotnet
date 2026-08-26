@@ -51,6 +51,23 @@ public class DatabaseConnectionHealthCheckTest
     }
 
     [Fact]
+    public async Task ExecuteAsync_PropagatesCancellation_RatherThanReportingItAsAConnectionFailure()
+    {
+        // #114: an already-cancelled token used to be swallowed into an ordinary
+        // {Status=Failed, CanConnect=False, Error=OperationCanceledException} result instead of
+        // propagating for ExceptionHandlingHealthCheck's dedicated "Cancelled" classification. The EF
+        // Core InMemory provider does not itself observe cancellation on CanConnectAsync (confirmed: it
+        // completes normally even for an already-cancelled token), so a CancellingDbContext test double
+        // is used to make CanConnectAsync throw OperationCanceledException, the same as a caller-driven
+        // cancellation on a real relational provider would.
+        using var context = new CancellingDbContext(new DbContextOptionsBuilder<TestDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        var healthCheck = new DatabaseConnectionHealthCheck<CancellingDbContext>(context);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => healthCheck.ExecuteAsync(CancellationToken.None));
+    }
+
+    [Fact]
     public void Type_IsDatabaseConnection()
     {
         using var context = CreateContext();
