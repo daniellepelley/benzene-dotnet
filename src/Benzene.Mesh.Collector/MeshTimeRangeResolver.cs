@@ -14,9 +14,12 @@ namespace Benzene.Mesh.Collector;
 /// and a unit - <c>s</c> seconds, <c>m</c> minutes, <c>h</c> hours, <c>d</c> days, <c>w</c> weeks, <c>M</c>
 /// months (~30d), <c>y</c> years (~365d). A trailing <c>/unit</c> rounding suffix (e.g. <c>now-1d/d</c>) is
 /// accepted and ignored (the rounding is a UI nicety the read models don't need). Anything else is parsed as
-/// an ISO-8601 absolute instant; an unparseable OR unrepresentable bound (e.g. a relative count that
-/// would overflow <see cref="TimeSpan"/>, such as <c>now-100000000d</c>) is treated as absent - P5,
-/// see <c>Benzene.Mesh.Collector/CLAUDE.md</c>.
+/// an ISO-8601 absolute instant; an unparseable OR unrepresentable bound is treated as absent - P5, see
+/// <c>Benzene.Mesh.Collector/CLAUDE.md</c>. Two distinct overflow paths are covered: a relative count that
+/// would overflow <see cref="TimeSpan"/> itself (e.g. <c>now-100000000d</c>), and a count that is a valid
+/// <see cref="TimeSpan"/> but pushes <c>now ± span</c> outside <see cref="DateTimeOffset"/>'s own
+/// representable range (e.g. <c>now-100000d</c> against a <c>now</c> already close to
+/// <see cref="DateTimeOffset.MinValue"/>).
 /// </remarks>
 public static class MeshTimeRangeResolver
 {
@@ -83,7 +86,19 @@ public static class MeshTimeRangeResolver
                 return null;
             }
 
-            return sign == '-' ? now - span.Value : now + span.Value;
+            try
+            {
+                return sign == '-' ? now - span.Value : now + span.Value;
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                // A different overflow path from ParseDuration's: the count is perfectly valid as a
+                // TimeSpan (e.g. now-100000d, ~274 years - well inside TimeSpan's ~29,000-year range)
+                // but now ± that span pushes the result outside DateTimeOffset's own [MinValue,MaxValue]
+                // window. Same "absent, never throw" contract as ParseDuration's OverflowException catch
+                // above (P5) - see the class remarks and Benzene.Mesh.Collector/CLAUDE.md.
+                return null;
+            }
         }
 
         return DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture,

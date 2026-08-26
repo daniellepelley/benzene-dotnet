@@ -47,6 +47,8 @@ public class MeshTimeRangeTest
     [InlineData("")]                         // no lower bound
     [InlineData("garbage")]                  // unparseable lower bound
     [InlineData("now-100000000d")]           // count would overflow TimeSpan - unrepresentable, not unparseable
+    [InlineData("now-5000000d")]             // count fits TimeSpan, but now-span overflows DateTimeOffset (#34)
+    [InlineData("now+5000000d")]             // same overflow, the other direction
     public void Resolve_NoLowerBound_IsUnfiltered(string? from)
     {
         var range = from == null ? null : new MeshTimeRange { From = from };
@@ -64,6 +66,23 @@ public class MeshTimeRangeTest
 
         Assert.Null(exception);
         Assert.Null(MeshTimeRangeResolver.Resolve(new MeshTimeRange { From = "now-100000000d" }, Now));
+    }
+
+    [Theory]
+    [InlineData("now-5000000d")]
+    [InlineData("now+5000000d")]
+    public void Resolve_ValidDurationThatOverflowsDateTimeOffset_DegradesToAbsentBound_NeverThrows(string from)
+    {
+        // Regression for #34 (P5, a DIFFERENT overflow path from #22's): 5,000,000 days is well inside
+        // TimeSpan's own ~29,000-year range (ParseDuration succeeds), but "now ± that span" is pushed
+        // outside DateTimeOffset's [MinValue,MaxValue] window (~9999 years either side of year 1) - live
+        // confirmed to throw ArgumentOutOfRangeException before the fix, crashing mesh:query:fleet/
+        // correlation unconditionally on this input.
+        var exception = Record.Exception(() =>
+            MeshTimeRangeResolver.Resolve(new MeshTimeRange { From = from }, Now));
+
+        Assert.Null(exception);
+        Assert.Null(MeshTimeRangeResolver.Resolve(new MeshTimeRange { From = from }, Now));
     }
 
     private static MeshTraceEvent Event(string traceId, DateTimeOffset startedAt, string? correlationId = null) =>
