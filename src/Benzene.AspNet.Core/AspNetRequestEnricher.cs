@@ -44,6 +44,9 @@ public class AspNetRequestEnricher : IRequestEnricher<AspNetContext>
             return dictionary;
         }
 
+        // First-value-wins for a repeated query key (e.g. ?status=active&status=inactive). This is the
+        // policy the API Gateway v1/v2 enrichers' QueryStringFirstWinsMapper also follows, so a
+        // repeated query key binds identically across transports for the identical route/handler.
         DictionaryUtils.MapOnto(dictionary, context.HttpContext.Request.Query?.ToDictionary(x => x.Key, x => x.Value.First()));
         DictionaryUtils.MapOnto(dictionary, _headersToBodyGetter.GetHeaders(context));
         DictionaryUtils.MapOnto(dictionary, CleanUp(route.Parameters));
