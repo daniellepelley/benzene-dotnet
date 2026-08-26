@@ -61,7 +61,7 @@ public class AspNetServerWorker : IBenzeneWorker
 
         app.Run(async context =>
         {
-            await _entryPoint.SendAsync(context);
+            await _entryPoint.SendAsync(context, context.RequestAborted);
             if (!context.Response.HasStarted)
             {
                 // No "next" in this mode - there are no controllers or other middleware to fall

@@ -909,6 +909,18 @@ parity (P8 — the alternate container must match the reference)".
   `MicrosoftServiceResolverFactory`.** Added; disposes the owned container asynchronously when the
   factory owns one (a non-owning factory's `DisposeAsync` is a no-op, matching its `Dispose`). See WP-Q.
 
+### Tracked findings round 10, WP-Y — Host/entry-point seams (done)
+Ruled in [`bug-fix-designs-round10-2026-08.md`](bug-fix-designs-round10-2026-08.md) §"WP-Y — host/entry-point
+seams".
+- **[RESOLVED] #104 — ASP.NET hosts never forwarded `HttpContext.RequestAborted` into the
+  `SendAsync(event, cancellationToken)` overload**, unlike the Azure Functions and Google PubSub
+  hosts (`AzureFunctionApp.cs`, `GooglePubSubFunctionHost.cs`), which do. Both call sites
+  (`AspNetServerWorker.StartAsync`'s `app.Run` handler and `AspApplicationBuilder.Add`'s middleware)
+  now call the token-taking overload with `context.RequestAborted`. Regression coverage added at both
+  call sites directly (`AspNetCancellationForwardingTest`), isolated from the AspNetContext pipeline's
+  own independent `RequestAborted` seeding middleware so each call site's forwarding is provable on
+  its own. See WP-Y.
+
 ---
 
 ## Open — tracked findings, round 10 (2026-08-26) — ruled, not yet implemented
