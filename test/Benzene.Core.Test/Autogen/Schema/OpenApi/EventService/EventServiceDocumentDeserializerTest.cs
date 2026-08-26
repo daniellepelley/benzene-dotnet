@@ -65,10 +65,10 @@ public class EventServiceDocumentDeserializerTest
         var baseline = deserializer.Deserialize(baselineJson);
         var current = deserializer.Deserialize(currentJson);
 
-        Assert.True(baseline.Components.Schemas["Order"].Properties.ContainsKey("status"));
+        Assert.True(baseline.Components.Schemas["Order"].Properties.ContainsKey("Status"));
         // Before the fix: current's "Order" resolved to baseline's first-written definition and
-        // still carried "status".
-        Assert.False(current.Components.Schemas["Order"].Properties.ContainsKey("status"));
+        // still carried "Status".
+        Assert.False(current.Components.Schemas["Order"].Properties.ContainsKey("Status"));
     }
 
     [Fact]

@@ -93,7 +93,7 @@ public static class DictionaryUtils
     /// Keeps only the entries of <paramref name="source"/> whose key is in <paramref name="filter"/>,
     /// renaming each kept key to the value <paramref name="filter"/> maps it to.
     /// </summary>
-    /// <param name="source">The dictionary to filter and rename entries from.</param>
+    /// <param name="source">The dictionary to filter and rename entries from, or <c>null</c> (treated as empty).</param>
     /// <param name="filter">Maps source keys (case-insensitive) to the output key to rename them to.</param>
     /// <returns>A new dictionary containing only the renamed, filtered entries.</returns>
     public static IDictionary<string, string> FilterAndReplace(IDictionary<string, string> source,
@@ -102,6 +102,11 @@ public static class DictionaryUtils
         // Single pass with TryGetValue/TryAdd (first-wins), replacing a per-entry double lookup +
         // GroupBy/First/ToDictionary. Only entries whose key is in the filter are kept.
         var output = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        if (source == null)
+        {
+            return output;
+        }
 
         foreach (var entry in source)
         {

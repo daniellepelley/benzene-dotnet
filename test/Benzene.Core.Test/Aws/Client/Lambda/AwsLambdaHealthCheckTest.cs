@@ -63,7 +63,7 @@ public class AwsLambdaHealthCheckTest
         var mockLambdaClient = new Mock<IAmazonLambda>();
         mockLambdaClient
             .Setup(x => x.InvokeAsync(It.IsAny<InvokeRequest>(), default))
-            .ReturnsAsync(new InvokeResponse { Payload = ToPayloadStream("{\"status\":\"Ok\"}") });
+            .ReturnsAsync(new InvokeResponse { StatusCode = 202, Payload = ToPayloadStream("{\"status\":\"Ok\"}") });
 
         var healthCheck = new AwsLambdaHealthCheck("some-lambda", mockLambdaClient.Object, NullLogger<AwsLambdaHealthCheck>.Instance, HealthCheckMode.Active);
 

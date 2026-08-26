@@ -232,9 +232,14 @@ public class RabbitMqMandatoryPublishTest
         FieldInfo byMessageIdField = typeof(RabbitMqMandatoryPublishCoordinator)
             .GetField("_byMessageId", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
-        dynamic byTag = byTagField.GetValue(coordinator)!;
-        dynamic byMessageId = byMessageIdField.GetValue(coordinator)!;
-        return ((int)byTag.Count, (int)byMessageId.Count);
+        // Cast through the non-generic System.Collections.ICollection rather than `dynamic`: the
+        // dictionaries' TValue (PendingPublish) is a private nested type, so the constructed
+        // ConcurrentDictionary<,> type is inaccessible outside the declaring assembly and `dynamic`
+        // member binding on it throws RuntimeBinderException. The non-generic ICollection interface
+        // carries no such inaccessible type argument and is always bindable.
+        var byTag = (System.Collections.ICollection)byTagField.GetValue(coordinator)!;
+        var byMessageId = (System.Collections.ICollection)byMessageIdField.GetValue(coordinator)!;
+        return (byTag.Count, byMessageId.Count);
     }
 
     [Fact]
@@ -313,7 +318,16 @@ public class RabbitMqMandatoryPublishTest
         // a later Basic.Return naming that MessageId would then be misattributed to the wrong publish
         // (and the first publish's Tcs would never settle from a real broker return). It must instead be
         // rejected up front, clearly, at publish time.
-        var mockChannel = ConfirmsEnabledChannel(nextSequenceNumber: 1);
+        // The real IChannel.GetNextPublishSequenceNumberAsync increments on every call - a fresh
+        // delivery tag per publish - so simulate that here too, rather than a constant. A constant
+        // would give both publishes the SAME tag, so the second (rejected) call's own _byTag[tag] =
+        // pending write would clobber the first, still-legitimately-in-flight publish's entry before
+        // the duplicate is even detected - a test-mock artifact that can't happen against the real
+        // client, not a scenario this test means to exercise.
+        ulong nextTag = 0;
+        var mockChannel = ConfirmsEnabledChannel();
+        mockChannel.Setup(x => x.GetNextPublishSequenceNumberAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => ++nextTag);
         mockChannel
             .Setup(x => x.BasicPublishAsync(It.IsAny<string>(), It.IsAny<string>(), true,
                 It.IsAny<BasicProperties>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()))

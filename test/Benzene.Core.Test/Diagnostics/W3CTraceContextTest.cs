@@ -31,7 +31,14 @@ public class W3CTraceContextTest
         return (activities, listener);
     }
 
-    private static async Task<List<Activity>> RunPipeline(IDictionary<string, string> headers, Func<Task>? downstream = null)
+    // Returns both the activities the pipeline started (via the ActivityStarted listener callback,
+    // so they're captured regardless of outcome) and any exception the pipeline itself threw - a
+    // downstream throw must still leave the caller able to inspect the (by-then Error-marked) Root
+    // span, which a plain `return activities;` after an unguarded `await` can never do: the method
+    // would propagate the exception instead of reaching its return statement, leaving the caller with
+    // no activities at all.
+    private static async Task<(List<Activity> Activities, Exception? Thrown)> RunPipeline(
+        IDictionary<string, string> headers, Func<Task>? downstream = null)
     {
         var (activities, listener) = ListenToBenzeneActivities();
         using var _ = listener;
@@ -51,9 +58,9 @@ public class W3CTraceContextTest
         using var resolver = factory.CreateScope();
 
         var context = new BenzeneMessageContext(new BenzeneMessageRequest { Headers = headers });
-        await pipeline.HandleAsync(context, resolver);
+        var thrown = await Record.ExceptionAsync(() => pipeline.HandleAsync(context, resolver));
 
-        return activities;
+        return (activities, thrown);
     }
 
     [Fact]
@@ -61,11 +68,12 @@ public class W3CTraceContextTest
     {
         const string traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
         const string parentSpanId = "00f067aa0ba902b7";
-        var activities = await RunPipeline(new Dictionary<string, string>
+        var (activities, thrown) = await RunPipeline(new Dictionary<string, string>
         {
             { "traceparent", $"00-{traceId}-{parentSpanId}-01" }
         });
 
+        Assert.Null(thrown);
         var activity = Assert.Single(activities, a => a.OperationName == "W3CTraceContext.Root");
         Assert.Equal(traceId, activity.TraceId.ToHexString());
         Assert.Equal(parentSpanId, activity.ParentSpanId.ToHexString());
@@ -77,8 +85,9 @@ public class W3CTraceContextTest
     [Fact]
     public async Task MissingTraceparent_StartsANewTrace_WithoutThrowing()
     {
-        var activities = await RunPipeline(new Dictionary<string, string>());
+        var (activities, thrown) = await RunPipeline(new Dictionary<string, string>());
 
+        Assert.Null(thrown);
         var activity = Assert.Single(activities, a => a.OperationName == "W3CTraceContext.Root");
         Assert.NotEqual(default, activity.TraceId);
     }
@@ -86,8 +95,9 @@ public class W3CTraceContextTest
     [Fact]
     public async Task InvalidTraceparent_StartsANewTrace_WithoutThrowing()
     {
-        var activities = await RunPipeline(new Dictionary<string, string> { { "traceparent", "not-a-valid-traceparent" } });
+        var (activities, thrown) = await RunPipeline(new Dictionary<string, string> { { "traceparent", "not-a-valid-traceparent" } });
 
+        Assert.Null(thrown);
         var activity = Assert.Single(activities, a => a.OperationName == "W3CTraceContext.Root");
         Assert.NotEqual(default, activity.TraceId);
     }
@@ -98,10 +108,8 @@ public class W3CTraceContextTest
     [Fact]
     public async Task DownstreamThrows_MarksTheRootSpanError()
     {
-        List<Activity> activities = null!;
-        var thrown = await Record.ExceptionAsync(async () =>
-            activities = await RunPipeline(new Dictionary<string, string>(), downstream: () =>
-                throw new InvalidOperationException("handler blew up")));
+        var (activities, thrown) = await RunPipeline(new Dictionary<string, string>(), downstream: () =>
+            throw new InvalidOperationException("handler blew up"));
 
         Assert.IsType<InvalidOperationException>(thrown);
         var activity = Assert.Single(activities, a => a.OperationName == "W3CTraceContext.Root");

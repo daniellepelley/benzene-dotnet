@@ -87,7 +87,7 @@ public class TimeoutMiddleware<TContext> : IMiddleware<TContext>
             await next();
         }
         catch (OperationCanceledException ex)
-            when (ex.CancellationToken == cts.Token && !original.IsCancellationRequested)
+            when (!original.IsCancellationRequested)
         {
             // The timer fired, not the host: a service-side timeout, not a genuine cancellation.
             throw new TimeoutException($"Pipeline exceeded the configured timeout of {_timeout}.", ex);
