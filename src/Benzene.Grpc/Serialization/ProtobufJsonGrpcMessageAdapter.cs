@@ -69,6 +69,12 @@ public class ProtobufJsonGrpcMessageAdapter : IGrpcMessageAdapter
 
         if (payload == null)
         {
+            // Route through the same check the non-null branch below applies, for symmetry: a
+            // non-protobuf TResponse gets the same clear BenzeneException naming the offending type,
+            // instead of an opaque MissingMethodException from Activator.CreateInstance. Unreachable via
+            // generated code (protoc-emitted types always have a public parameterless constructor), but
+            // worth it for the error-message quality if TResponse is ever misconfigured.
+            GetDescriptor(typeof(TResponse));
             return Activator.CreateInstance<TResponse>();
         }
 

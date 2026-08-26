@@ -24,6 +24,17 @@ namespace Benzene.Clients.Aws.Lambda;
 /// (<c>lambda:GetFunctionConfiguration</c>) — not that an invoke would succeed
 /// (<c>lambda:InvokeFunction</c> is a different permission). Use <see cref="HealthCheckMode.Active"/> only
 /// when you need to exercise the invoke path, and keep it off a frequent poll and off liveness/readiness.
+/// <para>
+/// No internal timeout guard here (unlike an earlier version of this type): the reachability path
+/// forwards the <see cref="CancellationToken"/> it is given straight into the SDK call and relies purely
+/// on the processor's uniform per-check timeout wrap (<c>HealthCheckProcessor</c> via
+/// <c>TimeOutHealthCheck</c>), which genuinely cancels the in-flight call on timeout rather than merely
+/// abandoning the awaited task. Same shape as <c>SqsHealthCheck</c>/<c>SnsHealthCheck</c>/
+/// <c>EventBridgeHealthCheck</c>. The <see cref="HealthCheckMode.Active"/> ping (via
+/// <see cref="AwsLambdaBenzeneMessageClient"/>) is the one path here that still cannot forward the token
+/// into its own SDK call, unchanged from before — that client has no <see cref="CancellationToken"/>
+/// overload, out of this fix's scope.
+/// </para>
 /// </remarks>
 public class AwsLambdaHealthCheck : IHealthCheck
 {
@@ -31,7 +42,6 @@ public class AwsLambdaHealthCheck : IHealthCheck
     private readonly AwsLambdaBenzeneMessageClient _awsLambdaBenzeneMessageClient;
     private readonly string _lambdaName;
     private readonly HealthCheckMode _mode;
-    private const int TimeOut = 10000;
 
     /// <summary>Initializes a new instance of the <see cref="AwsLambdaHealthCheck"/> class.</summary>
     /// <param name="lambdaName">The name of the Lambda function to check.</param>
@@ -54,49 +64,42 @@ public class AwsLambdaHealthCheck : IHealthCheck
 
         // AwsLambdaBenzeneMessageClient.SendMessageAsync has no CancellationToken overload (a separate
         // client abstraction, out of WP-7's scope), so Active mode's ping cannot forward the token into
-        // the invoke itself; GetFunctionConfigurationAsync does accept one and gets it below.
+        // the invoke itself; GetFunctionConfigurationAsync does accept one and gets it below. No internal
+        // timeout guard here (unlike an earlier version of this type): the reachability path forwards its
+        // token straight into the SDK call and relies purely on the processor's uniform per-check timeout
+        // wrap (HealthCheckProcessor via TimeOutHealthCheck), matching SqsHealthCheck's current shape.
         return _mode == HealthCheckMode.Active
             ? RunAsync(_awsLambdaBenzeneMessageClient.SendMessageAsync<Void, Void>(Benzene.Abstractions.BenzeneTopic.Ping, null),
-                r => r.Status == BenzeneResultStatus.Accepted, r => ("Status", (object)r.Status), dependencies, cancellationToken)
+                r => r.Status == BenzeneResultStatus.Accepted, r => ("Status", (object)r.Status), dependencies)
             : RunAsync(_amazonLambda.GetFunctionConfigurationAsync(_lambdaName, cancellationToken),
-                r => r.HttpStatusCode == HttpStatusCode.OK, r => ("Status", (object)r.HttpStatusCode), dependencies, cancellationToken);
+                r => r.HttpStatusCode == HttpStatusCode.OK, r => ("Status", (object)r.HttpStatusCode), dependencies);
     }
 
     private async Task<IHealthCheckResult> RunAsync<T>(Task<T> call, Func<T, bool> isHealthy,
-        Func<T, (string Key, object Value)> failInfo, HealthCheckDependency[] dependencies, CancellationToken cancellationToken)
+        Func<T, (string Key, object Value)> failInfo, HealthCheckDependency[] dependencies)
     {
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var completed = await Task.WhenAny(call, Task.Delay(TimeOut, cts.Token));
-
-        if (completed != call)
+        try
         {
+            var result = await call;
+            if (isHealthy(result))
+            {
+                return HealthCheckResult.CreateInstance(true, Type, new Dictionary<string, object>(), dependencies);
+            }
+
+            var (key, value) = failInfo(result);
             return HealthCheckResult.CreateInstance(false, Type,
-                new Dictionary<string, object> { { "TimeOut", TimeOut } }, dependencies);
+                new Dictionary<string, object> { { key, value } }, dependencies);
         }
-
-        cts.Cancel();
-
-        // IsFaulted, not .Result on a faulted task: reading .Result would rethrow and lose the Lambda
-        // dependency to the outer exception wrapper. Classify via the shared policy: an authorization
-        // failure (401/403, or a known auth error code) is a persistent Failed, anything else a transient
-        // Failed, enriched with the SDK error code + status, never the exception message.
-        if (call.IsFaulted)
+        catch (Exception ex)
         {
-            var ex = (call.Exception?.InnerException ?? call.Exception)!;
+            // Expected failures (function missing, no connectivity, no permission) are a classified
+            // result, not a throw. Classify via the shared policy: an authorization failure (401/403, or
+            // a known auth error code) is a persistent Failed, anything else a transient Failed, enriched
+            // with the SDK error code + status, never the exception message.
             var (errorCode, statusCode) = AwsErrorDetails(ex);
             return HealthCheckError.Classify(Type, ex, dependencies, errorCode, statusCode,
                 requiredPermission: _mode == HealthCheckMode.Active ? "lambda:InvokeFunction" : "lambda:GetFunctionConfiguration");
         }
-
-        var result = call.Result;
-        if (isHealthy(result))
-        {
-            return HealthCheckResult.CreateInstance(true, Type, new Dictionary<string, object>(), dependencies);
-        }
-
-        var (key, value) = failInfo(result);
-        return HealthCheckResult.CreateInstance(false, Type,
-            new Dictionary<string, object> { { key, value } }, dependencies);
     }
 
     // Pulls the non-sensitive discriminators AWS already returns off an SDK exception; null for a

@@ -31,6 +31,19 @@ public class ProtobufJsonGrpcMessageAdapterTest
         public ColourPoco Colour { get; set; }
     }
 
+    // Deliberately has no public parameterless constructor (unlike a protoc-emitted message, or
+    // EchoReplyPoco above) so Activator.CreateInstance<TResponse>() would throw the opaque
+    // MissingMethodException the null-payload branch used to leak, absent the #48 fix.
+    private class NoParameterlessCtorPoco
+    {
+        public NoParameterlessCtorPoco(string required)
+        {
+            Required = required;
+        }
+
+        public string Required { get; }
+    }
+
     [Fact]
     public void ConvertRequest_WhenAlreadyTargetType_ReturnsSameInstance()
     {
@@ -134,5 +147,22 @@ public class ProtobufJsonGrpcMessageAdapterTest
         var adapter = new ProtobufJsonGrpcMessageAdapter();
 
         Assert.Throws<BenzeneException>(() => adapter.ConvertResponse<EchoReplyPoco>(new object()));
+    }
+
+    [Fact]
+    public void ConvertResponse_WhenPayloadIsNullAndTargetIsNotAProtobufMessage_ThrowsTheSameClearBenzeneExceptionAsTheNonNullBranch()
+    {
+        // #48: the null-payload branch must be routed through the same "is this a real protobuf
+        // message" check the non-null branch (above) already applies, and throw the SAME message shape -
+        // not an opaque MissingMethodException from Activator.CreateInstance.
+        var adapter = new ProtobufJsonGrpcMessageAdapter();
+
+        var nonNullBranchException = Assert.Throws<BenzeneException>(
+            () => adapter.ConvertResponse<NoParameterlessCtorPoco>(new object()));
+        var nullBranchException = Assert.Throws<BenzeneException>(
+            () => adapter.ConvertResponse<NoParameterlessCtorPoco>(null));
+
+        Assert.Equal(nonNullBranchException.Message, nullBranchException.Message);
+        Assert.Contains(nameof(NoParameterlessCtorPoco), nullBranchException.Message);
     }
 }

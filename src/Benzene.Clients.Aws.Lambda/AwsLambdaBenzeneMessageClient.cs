@@ -47,9 +47,11 @@ namespace Benzene.Clients.Aws.Lambda
         /// </typeparam>
         /// <param name="request">The client request to send.</param>
         /// <returns>
-        /// A task that resolves to an accepted result for fire-and-forget invocations, the mapped result of
-        /// the Lambda's response for request/response invocations, or a service-unavailable result if the
-        /// invocation threw.
+        /// A task that resolves to an accepted result for a fire-and-forget invocation whose
+        /// <c>InvokeResponse.StatusCode</c> was 2xx, the mapped result of the Lambda's response for
+        /// request/response invocations, or a service-unavailable result if the invocation threw
+        /// (including a non-2xx status code on a fire-and-forget invoke, or a
+        /// <c>FunctionError</c> on a request/response invoke).
         /// </returns>
         public async Task<IBenzeneResult<TResponse>> SendMessageAsync<TRequest, TResponse>(IBenzeneClientRequest<TRequest> request)
         {
