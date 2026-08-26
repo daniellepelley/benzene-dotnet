@@ -160,7 +160,10 @@ Functions ASP.NET, self-hosted HttpListener), which used to call `ReadToEndAsync
 ## Important conventions
 - HTTP endpoints marked with `[HttpEndpoint("GET", "/path")]` attribute
 - Route patterns support path parameters: `/users/{id}`
-- URL matching is case-insensitive by default
+- URL matching is case-insensitive by default (`RouteFinder`/`CompiledRoutePath`); `ReflectionHttpEndpointFinder`'s
+  startup duplicate-route check case-folds its `Method`/`Path` grouping key to match, so a
+  case-differing duplicate (`GET /Users` vs `get /USERS`) is caught at startup — a real runtime
+  collision, not two distinct routes — rather than the second becoming silently unreachable
 - CORS middleware should be added early in pipeline
 - Default status code mapping follows REST conventions
 - Endpoint discovery is cached for performance

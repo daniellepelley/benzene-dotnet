@@ -4,6 +4,7 @@ using Benzene.Microsoft.Dependencies;
 using Benzene.SelfHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Benzene.HostedService;
 
@@ -30,7 +31,10 @@ public static class HostBuilderExtensions
                 // Check the wiring before the worker starts consuming, so a registration mistake is a
                 // start-up failure rather than every message failing to route once the loop is live.
                 serviceResolverFactory.RunStartUpChecks();
-                return new BenzeneHostedServiceAdapter(builder.CreateWorker(serviceResolverFactory));
+                return new BenzeneHostedServiceAdapter(
+                    builder.CreateWorker(serviceResolverFactory),
+                    provider.GetService<ILogger<BenzeneHostedServiceAdapter>>(),
+                    provider.GetService<IHostApplicationLifetime>());
             });
         });
     }

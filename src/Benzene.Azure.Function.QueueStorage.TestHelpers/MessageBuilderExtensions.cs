@@ -32,14 +32,16 @@ public static class MessageBuilderExtensions
 
     /// <summary>
     /// Builds a <see cref="QueueStorageMessage"/> whose text is the Benzene message envelope, using the
-    /// supplied serializer.
+    /// supplied serializer for the envelope's <c>Body</c> only - the envelope itself is always JSON,
+    /// matching <see cref="BenzeneMessageQueueStorageHandler"/>, which always deserializes the envelope
+    /// with the DI-resolved default serializer regardless of the body's own format.
     /// </summary>
     /// <typeparam name="T">The message body type.</typeparam>
     /// <param name="source">The message builder.</param>
-    /// <param name="serializer">The serializer used for both the envelope and its body.</param>
+    /// <param name="serializer">The serializer used to render the envelope's <c>Body</c>.</param>
     /// <returns>The Queue Storage message.</returns>
     public static QueueStorageMessage AsQueueStorageBenzeneMessage<T>(this IMessageBuilder<T> source, ISerializer serializer)
     {
-        return new QueueStorageMessage(serializer.Serialize(source.AsBenzeneMessage(serializer)));
+        return new QueueStorageMessage(new JsonSerializer().Serialize(source.AsBenzeneMessage(serializer)));
     }
 }

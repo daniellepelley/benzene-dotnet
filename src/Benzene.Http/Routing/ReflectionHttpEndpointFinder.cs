@@ -37,8 +37,12 @@ public class ReflectionHttpEndpointFinder : IHttpEndpointFinder
             .SelectMany(MapHandlers)
             .ToArray();
 
+        // Case-fold the grouping key only (not the stored Method/Path) - RouteFinder/CompiledRoutePath
+        // match a route case-insensitively at runtime, so two handlers registering the "same" route
+        // with differing case (e.g. "GET"/"/Users" vs "get"/"/USERS") are a real runtime collision:
+        // the second becomes silently unreachable dead code unless this check catches it too.
         var duplicates = handlers
-            .GroupBy(x => new { x.Method, x.Path })
+            .GroupBy(x => new { Method = x.Method.ToLowerInvariant(), Path = x.Path.ToLowerInvariant() })
             .Where(x => x.Count() > 1)
             .ToArray();
 

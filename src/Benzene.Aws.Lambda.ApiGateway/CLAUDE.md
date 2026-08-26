@@ -21,7 +21,7 @@ is added to any HTTP-shaped pipeline via `Benzene.Http`'s CORS extension methods
 - `ApiGatewayContext` - Implements `IHttpContext`; wraps the raw `APIGatewayProxyRequest` and the
   `APIGatewayProxyResponse` being built (v1.0 payload format)
 - `ApiGatewayHttpRequestAdapter` - Maps the context onto a Benzene `HttpRequest` (path, method, and
-  the single-value `Headers` dictionary only — see "Important conventions")
+  the single-value `Headers` dictionary, lower-cased at the source — see "Important conventions")
 - `ApiGatewayResponseAdapter` - Writes status code, headers, content-type and body onto the
   `APIGatewayProxyResponse`
 
@@ -111,14 +111,23 @@ Parallel `ApiGatewayV2*` set mirroring the v1 adapters against `ApiGatewayV2Cont
   `UseApiGatewayV2` — see the v2 section above. `ApiGatewayLambdaHandler` claims an invocation only
   when the deserialized payload has a non-null `HttpMethod` (a v1.0-shaped field); the v2 handler
   claims on the v2-only discriminants, so the two never collide.
-- **Single-value headers and query strings only — multi-value entries are dropped.** Query-string
-  parameters, path parameters, and headers *are* surfaced onto the request object (by
-  `ApiGatewayRequestEnricher`, which reads `QueryStringParameters`/`PathParameters`/`Headers`), but only
-  their **single-value** forms: `MultiValueHeaders` and `MultiValueQueryStringParameters` are not read, so
-  a header or query key sent more than once collapses to the single value AWS puts in the single-value map
-  (the last value). `ApiGatewayHttpRequestAdapter` likewise maps path, method, and single-value `Headers`
-  only. Full multi-value support is a post-1.0 enhancement (it needs the multi-value maps threaded through
-  the single-value getter/enricher contracts).
+- **Single-value headers only — multi-value header entries are dropped.** Headers *are* surfaced onto
+  the request object (by `ApiGatewayRequestEnricher`/`ApiGatewayHttpRequestAdapter`, which read the
+  single-value `Headers` map), but `MultiValueHeaders` is not read, so a header sent more than once
+  collapses to the single value AWS puts in the single-value map (the last value). Full multi-value
+  header support is a post-1.0 enhancement (it needs `MultiValueHeaders` threaded through the
+  single-value getter/enricher contracts).
+- **Header names are lower-cased at the adapter, matching every sibling transport.**
+  `ApiGatewayHttpRequestAdapter.Map` lower-cases header keys (`AspNetHttpRequestAdapter`'s exact
+  pattern), so `authorization`/`origin`/`cookie` lookups by auth/CORS middleware (which read by
+  lowercase literal key) work on a raw `Map()` result without `HttpRequest.AsLowerCase()` — see
+  `docs/hosting.md`/round-7-10 finding #89.
+- **Repeated query-string keys resolve first-value-wins**, matching `AspNetRequestEnricher`. v1's
+  `ApiGatewayRequestEnricher` reads `MultiValueQueryStringParameters` (falling back to the single-value
+  `QueryStringParameters` map when the multi-value one is absent) via `QueryStringFirstWinsMapper.ForV1`;
+  v2's `ApiGatewayV2RequestEnricher` takes the first comma-separated segment of `QueryStringParameters`
+  via `QueryStringFirstWinsMapper.ForV2` (v2 has no multi-value map — AWS itself comma-joins repeated
+  values before Lambda sees the event). See round-7-10 finding #90.
 - **Base64-encoded request bodies are decoded.** When API Gateway sets `IsBase64Encoded` (binary media
   types, or any payload it can't treat as text), `ApiGatewayMessageBodyGetter` base64-decodes the body back
   to its real text (UTF-8) so the handler never sees base64; a normal text body is returned verbatim.

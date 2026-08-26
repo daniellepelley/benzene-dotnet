@@ -291,7 +291,10 @@ public static IHostBuilder UseBenzene<TStartUp>(this IHostBuilder hostBuilder)
         startUp.Configure(builder, configuration);
 
         services.AddSingleton<IHostedService>(provider =>
-            new BenzeneHostedServiceAdapter(builder.CreateWorker(new MicrosoftServiceResolverFactory(provider))));
+            new BenzeneHostedServiceAdapter(
+                builder.CreateWorker(new MicrosoftServiceResolverFactory(provider)),
+                provider.GetService<ILogger<BenzeneHostedServiceAdapter>>(),
+                provider.GetService<IHostApplicationLifetime>()));
     });
 }
 ```
@@ -304,6 +307,18 @@ host.Run();
 Use `UseWorker(w => w.Add(resolverFactory => new MyWorker()))` in `Configure` to register one or
 more `IBenzeneWorker`s (each with `StartAsync`/`StopAsync`) against the `WorkerApplicationBuilder`
 this host passes in.
+
+**A worker that faults is not silent.** `BenzeneHostedServiceAdapter` observes the wrapped worker's
+own task for an unhandled fault the moment it happens - not only when the host later gets around to
+stopping it - and (when the optional `ILogger`/`IHostApplicationLifetime` above are supplied, as
+`UseBenzene<TStartUp>()` does) logs the exception at `Critical` and calls
+`IHostApplicationLifetime.StopApplication()`, matching
+[`BackgroundService`'s modern default](https://learn.microsoft.com/dotnet/core/extensions/workers#backgroundserviceexceptionbehavior)
+of stopping the whole host on an unhandled worker fault, rather than leaving the process "up" with a
+dead worker and every other hosted service none the wiser. Both dependencies are optional
+constructor parameters - a construction path without a resolver (e.g.
+`BenzeneWorkerExtensions.BuildHostedService(this IBenzeneWorkerBuilder)`) still works, it just can't
+log or stop the host on a fault it never learns about.
 
 #### `BenzeneHost` — the one-line entry point
 

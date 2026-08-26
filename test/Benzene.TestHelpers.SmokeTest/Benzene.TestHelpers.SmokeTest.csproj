@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    #81 (worth-fixing, process/coverage gap): these seven *.TestHelpers packages were referenced
+    ONLY by templates/content/*/BenzeneStarter.Tests - not by Benzene.sln - so they had ZERO
+    coverage from this codebase's own `dotnet test` baseline against source. They were exercised
+    only against PUBLISHED NuGet packages, by a separate CI workflow, never against current `main`.
+    That blind spot is exactly what let #80 (AsQueueStorageBenzeneMessage's XML-serializer crash)
+    land unnoticed. This project's only job is to put all seven into Benzene.sln's build/test
+    graph with at least one basic exercised scenario each, so a future change to any of them is
+    caught by the standard baseline instead of only surfacing downstream, in a different repo's CI,
+    against a published package. See work/bug-fix-designs-round7-10-2026-08.md, WP-R.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.4.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.4.5">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The seven previously-uncovered TestHelpers packages (#81). -->
+    <ProjectReference Include="..\..\src\Benzene.Azure.EventHub.TestHelpers\Benzene.Azure.EventHub.TestHelpers.csproj" />
+    <ProjectReference Include="..\..\src\Benzene.Azure.ServiceBus.TestHelpers\Benzene.Azure.ServiceBus.TestHelpers.csproj" />
+    <ProjectReference Include="..\..\src\Benzene.Kafka.Core.TestHelpers\Benzene.Kafka.Core.TestHelpers.csproj" />
+    <ProjectReference Include="..\..\src\Benzene.RabbitMq.TestHelpers\Benzene.RabbitMq.TestHelpers.csproj" />
+    <ProjectReference Include="..\..\src\Benzene.Azure.Function.QueueStorage.TestHelpers\Benzene.Azure.Function.QueueStorage.TestHelpers.csproj" />
+    <ProjectReference Include="..\..\src\Benzene.Azure.Function.EventGrid.TestHelpers\Benzene.Azure.Function.EventGrid.TestHelpers.csproj" />
+    <ProjectReference Include="..\..\src\Benzene.GoogleCloud.Functions.Http.TestHelpers\Benzene.GoogleCloud.Functions.Http.TestHelpers.csproj" />
+
+    <!-- MessageBuilder (the shared IMessageBuilder<T> fixture every extension above consumes) and a
+         non-JSON serializer, so the #80 regression (a non-JSON serializer must only touch the
+         envelope's Body, never the envelope itself) is exercisable here. -->
+    <ProjectReference Include="..\..\src\Benzene.Testing\Benzene.Testing.csproj" />
+    <ProjectReference Include="..\..\src\Benzene.Xml\Benzene.Xml.csproj" />
+  </ItemGroup>
+
+</Project>
