@@ -91,8 +91,10 @@ What remains, and why it is live:
 - `inprocess-modular-monolith-scope.md` — standing scope document for the in-process story.
 - `new-mesh-sources-design-2026-08.md` — current design work (dated in its name by convention).
 - `otel-fleet-adapter-scope.md` — standing scope document.
-- `settlement-default-alignment-proposal.md` — Tier A is done, but **Tier B** (the cross-transport
-  null/unrouted `!= true` vs `== false` policy) is an undecided maintainer call and **Tier C** is an
-  outstanding docs task. It stays live for those two; the settled contract it builds on lives in
-  `docs/capability-matrix.md` (the migration record is archived).
+- `settlement-consistency-fix-plan.md` — ACTIVE; decided the null/unrouted-outcome policy
+  `settlement-default-alignment-proposal.md`'s Tier B left open (maintainer, 2026-08-25) and drove its
+  implementation (now landed) and Tier C's docs clarification. The live home of both settlement axes —
+  the failure-result axis inherited from the archived `settlement-contract-1.0-2026-07.md`, and the
+  null axis this document itself decided. `settlement-default-alignment-proposal.md` is archived now
+  that all three of its tiers are done.
 - `testing-tooling-investigation.md` — open investigation (two spikes + recommendation still owed).

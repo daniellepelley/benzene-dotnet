@@ -1,8 +1,15 @@
 # Settlement default alignment — proposal for review (1.0)
 
-> **Ask.** Align how every inbound transport settles a message under its **default** config, so
-> "a handler that fails does not silently lose the message" holds uniformly. Ordered by value; each item
-> states the change, the breaking-ness, and the effort.
+> **ARCHIVED 2026-08-27 — superseded, do not cite for status.** All three tiers are now done: **Tier
+> A** (below) shipped 2026-08-20; **Tier B** (the cross-transport `!= true` vs `== false` null/unrouted
+> policy) was **DECIDED by the maintainer on 2026-08-25** and implemented; **Tier C** (the fan-in
+> documentation clarification) landed the same pass. The decided policy, its full per-adapter table,
+> and the implementation record now live in
+> [`work/settlement-consistency-fix-plan.md`](../settlement-consistency-fix-plan.md) — that document,
+> not this one, is the live home of both settlement axes (the failure-result axis this proposal
+> inherited from `work/archive/settlement-contract-1.0-2026-07.md`, and the null axis Tier B decided).
+> This file is kept for the Tier B/C reasoning and options considered; per
+> [`work/archive/README.md`](README.md), nothing here is current.
 >
 > **Status (2026-08-20): Tier A is done; Tier B and Tier C are still live.** **A1** (the Kafka
 > self-hosted worker) shipped as `BenzeneKafkaConfig.RaiseOnFailureStatus` (default `true`), covered by

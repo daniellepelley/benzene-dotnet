@@ -85,8 +85,8 @@ producer support. This is one of the "self-hosted worker" startup modes document
   - **`RaiseOnFailureStatus`** (default `true`, 2026-08) - settles a handler that returned an
     unsuccessful `IBenzeneResult` **without throwing** on the same path as one that threw. Before this,
     `StoreOffset` was called straight after `HandleAsync` with no `IsSuccessful` check, so a throw was
-    protected but a *returned* failure was committed and the record lost (`work/settlement-default-
-    alignment-proposal.md` item A1 - the last silent-loss default in the repo). The worker now runs every
+    protected but a *returned* failure was committed and the record lost (`work/archive/settlement-default-
+    alignment-proposal-2026-08.md` item A1 - the last silent-loss default in the repo). The worker now runs every
     record through `HandleRecordAsync`, which throws `KafkaMessageProcessingException` (carrying
     topic/partition/offset/status) on a failure result, so: dead-lettering retries then re-produces it
     (`x-dlt-reason: KafkaMessageProcessingException`); `CommitOnlyOnSuccess` withholds `StoreOffset` and
@@ -94,8 +94,8 @@ producer support. This is one of the "self-hosted worker" startup modes document
     config - where librdkafka already stored the offset before the handler ran, so nothing can hold the
     record back - **logs a warning** instead of escalating something no one can act on. A `null` result
     (unrouted record) is deliberately *not* escalated: Kafka has no per-record DLQ, so retaining an
-    unrouted record would replay the partition forever (the documented carve-out in
-    `work/settlement-default-alignment-proposal.md` Tier B). Tests:
+    unrouted record would replay the partition forever (the documented carve-out, decided 2026-08-25 -
+    see `work/settlement-consistency-fix-plan.md` row 16). Tests:
     `KafkaWorkerFailureResultSettlementTest` (all three settlement configurations, plus the
     `RaiseOnFailureStatus = false` opt-out and the default).
   - **`DrainOnRevoke`** (`bool?`, 2026-07-20) - on a consumer-group rebalance, drains in-flight

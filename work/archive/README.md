@@ -184,3 +184,17 @@ it had one, otherwise 2026-08).
   `deploy/Mesh/Benzene.Mesh.Host.Test` 150/150; `Benzene.Examples.sln` 0 errors); the per-finding
   summaries live in [`../outstanding-bugs.md`](../outstanding-bugs.md)'s Resolved section (search
   "Tracked findings round 11"), each pointing back here for the full record.
+
+## Settlement Tier B/C resolved, proposal archived (2026-08-27)
+
+- `settlement-default-alignment-proposal-2026-08.md` — all three tiers are now done: Tier A shipped
+  2026-08-20, Tier B (the cross-transport null/unrouted `!= true` vs `== false` policy) was decided by
+  the maintainer on 2026-08-25 and implemented, and Tier C (the fan-in documentation clarification)
+  landed in the same pass. The decided policy, its full per-adapter table, and the implementation
+  record now live in [`../settlement-consistency-fix-plan.md`](../settlement-consistency-fix-plan.md)
+  — that document, not this archived one, is the live home of both settlement axes (the failure-result
+  axis inherited from `settlement-contract-1.0-2026-07.md` above, and the null axis Tier B decided).
+  This file is kept for the Tier B/C reasoning and options considered. `SettlementContractDefaultsTest`
+  guards the null axis against drift the same way it already guarded the failure-result axis; the
+  per-finding summary lives in [`../outstanding-bugs.md`](../outstanding-bugs.md)'s Resolved section
+  ("Tier B/C null/unrouted-outcome policy").

@@ -115,6 +115,35 @@ public class SettlementContractDefaultsTest
     public void CapabilityMatrix_MarksStreamWorkerAtMostOnceByDefault(string packageId) =>
         AssertMatrixRow(packageId, "At-most-once by default");
 
+    // Guards docs/capability-matrix.md's description of the null/unrouted axis (Batch 4 of
+    // work/settlement-consistency-fix-plan.md) - every adapter row in the "Retry-on-handler-failure-result"
+    // breakdown table must say something about the null-outcome behaviour, not just the failure-result
+    // axis, so the doc can't silently fall behind NullOutcomePolicy_MatchesTheDecidedTable below again.
+    [Theory]
+    [InlineData("Benzene.Aws.Lambda.Sqs")]
+    // Benzene.Aws.Lambda.DynamoDb deliberately excluded: its row's own backtick token is unambiguous,
+    // but a second, unrelated `Benzene.Aws.Lambda.DynamoDb` mention inside the Event Sourcing area row
+    // (a "how to solve the rest" pointer, not a settlement row) makes the single-row-match assumption
+    // AssertMatrixRowContains relies on false for this one package id. Covered directly by
+    // NullOutcomePolicy_MatchesTheDecidedTable's source-scan instead.
+    [InlineData("Benzene.Aws.Lambda.Sns")]
+    [InlineData("Benzene.Aws.Lambda.EventBridge")]
+    [InlineData("Benzene.Aws.Lambda.Kafka")]
+    [InlineData("Benzene.Aws.Lambda.S3")]
+    [InlineData("Benzene.Aws.Sqs")]
+    [InlineData("Benzene.RabbitMq")]
+    [InlineData("Benzene.Azure.Function.ServiceBus")]
+    [InlineData("Benzene.Azure.ServiceBus")]
+    [InlineData("Benzene.Azure.Function.Kafka")]
+    [InlineData("Benzene.Azure.Function.EventGrid")]
+    [InlineData("Benzene.Azure.Function.EventHub")]
+    [InlineData("Benzene.Azure.Function.QueueStorage")]
+    [InlineData("Benzene.GoogleCloud.Functions.PubSub")]
+    [InlineData("Benzene.Kafka.Core")]
+    [InlineData("Benzene.Azure.EventHub")]
+    public void CapabilityMatrix_DescribesNullOutcomeBehavior(string packageId) =>
+        AssertMatrixRowContains(packageId, "null/unrouted outcome");
+
     // Guards the null/unrouted axis of work/settlement-consistency-fix-plan.md §1 (rows 1-18) - a
     // separate axis from the failure-result axis pinned above. Decided policy (maintainer, 2026-08-25):
     // retain/redeliver a null/unestablished outcome wherever a redelivery backstop exists to catch it;
@@ -275,6 +304,24 @@ public class SettlementContractDefaultsTest
         Assert.True(rows[0].Contains(expectedMarker),
             $"The capability-matrix.md row for {token} must say \"{expectedMarker}\" - it has drifted " +
             $"from the code default the settlement contract guarantees. Row:\n{rows[0]}");
+    }
+
+    private static void AssertMatrixRowContains(string packageId, string expectedSubstring)
+    {
+        var matrixPath = FindRepoFile(Path.Combine("docs", "capability-matrix.md"));
+        var token = $"`{packageId}`";
+
+        var rows = File.ReadLines(matrixPath)
+            .Where(line => line.TrimStart().StartsWith("|") && line.Contains(token))
+            .ToList();
+
+        Assert.True(rows.Count == 1,
+            $"Expected exactly one capability-matrix.md table row mentioning {token}, found {rows.Count}. " +
+            "Add/deduplicate its row (see work/settlement-consistency-fix-plan.md).");
+        Assert.True(rows[0].Contains(expectedSubstring),
+            $"The capability-matrix.md row for {token} must mention \"{expectedSubstring}\" - it has " +
+            $"drifted from the null-outcome policy work/settlement-consistency-fix-plan.md §1 decides. " +
+            $"Row:\n{rows[0]}");
     }
 
     private static string FindRepoFile(string relativePath)
