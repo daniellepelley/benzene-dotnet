@@ -94,13 +94,13 @@ deliberately, and the maintainer should veto any they disagree with before Batch
   RabbitMQ has a DLX and a bounded single requeue, so it meets the test. Because this overturns a
   written decision rather than filling a gap, it carries its own line in §5's decision register.
 - **Service Bus Functions (8)** — not in the proposal, and the strongest case of the three: it
-  contradicts itself today. Its **Explicit**-ack path (`ServiceBusApplication.cs:131`) uses `!= true`
+  contradicts itself today. Its **Explicit**-ack path (`ServiceBusApplication.cs:136`) uses `!= true`
   with the comment *"matching the SQS reference so an unestablished outcome errs toward redelivery,
   not silent completion/loss"*, while its **AutoComplete** escalation path — now inherited from
   `AzureFunctionBatchApplicationBase:172` — uses `== false`. The same transport answers the same
   question two different ways depending on ack mode, and the worker (12) agrees with the Explicit
   path. Giving Service Bus the escalate-on-null policy makes it internally consistent; its existing
-  `ShouldEscalateFailure` override (`ServiceBusApplication.cs:150`) already stops the two ack modes
+  `ShouldEscalateFailure` override (`ServiceBusApplication.cs:157`) already stops the two ack modes
   double-settling.
 
 **Where each policy is enforced.** Five of these adapters no longer hold their own guard — SNS/S3/
