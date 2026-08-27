@@ -122,9 +122,19 @@ isolation (round 9/10's #74–#79 fixes). This WP is P8: extend it to the two si
   round-trips byte-exact through the real getter; assert `Encode`/`Decode` are inverses
   property-style over the reserved set. *Rejected:* encoding inline in the TestHelper — leaves the
   two halves free to drift, which is this bug.
-- **#192 (null-logger throw in the failure path):** the hazard is family-wide — ten
+- **#192 (null-logger throw in the failure path):** the hazard is family-wide — nine
   `*BenzeneMessageClient` classes share the shape (`ServiceBusBenzeneMessageClient.cs:90` et al).
-  **Decision: P8 sweep, one mechanical change in all ten:** constructor stores
+  **Amendment (2026-08-27, at WP-3's implementation — count corrected, scope note added):** the
+  scoping grep in this section originally said "ten"; it in fact matches ten *files* under
+  `src/Benzene.Clients.*/`, but one (`Benzene.Clients.Aws.Lambda/BenzeneMessageClientRequest.cs`)
+  is a data-envelope class the regex incidentally matches, not a message client — so **nine** real
+  classes were in scope and fixed. Separately, an unscoped repo-wide grep turns up three more
+  classes sharing the same shape *outside* `src/Benzene.Clients.*/` — `Benzene.RabbitMq/
+  RabbitMqSendMessage/RabbitMqBenzeneMessageClient.cs`, `Benzene.Kafka.Core/Kafka/
+  KafkaBenzeneMessageClient.cs`, `Benzene.Grpc.Client/GrpcBenzeneMessageClient.cs` — not verified
+  to share the hazard (only the shape), and deliberately left **out of WP-3's scope**: a follow-up
+  finding, not silently folded into this WP after the fact. **Decision: P8 sweep, one mechanical
+  change across the nine in-scope classes:** constructor stores
   `logger ?? NullLogger<T>.Instance` (Microsoft.Extensions.Logging.Abstractions — already a
   transitive dependency; verify, don't add). No signature change, no behaviour change under DI.
   *Rejected:* per-call `_logger?.` — silences the symptom at one call site and leaves the next
@@ -249,7 +259,7 @@ never disagree.
 | #189 | WP-2 | Jaeger: per-service isolation in the call-site lambda, not in `BoundedFanOut` |
 | #190 | WP-2 | `CorrelationSearchLimit` option + at-limit warning (X-Ray #77 pattern) |
 | #191 | WP-3 | Add `S3ObjectKeyCodec.Encode`; `AsS3` uses it; inverse-pair test |
-| #192 | WP-3 | `NullLogger` fallback in all ten `*BenzeneMessageClient` constructors (P8) |
+| #192 | WP-3 | `NullLogger` fallback in the nine in-scope `*BenzeneMessageClient` constructors (P8); 3 siblings outside `src/Benzene.Clients.*/` left for a follow-up finding |
 | #193 | WP-4 | Cqrs + K8sTransports join `Benzene.Examples.sln` (solution edit approved here) |
 | #194 | WP-4 | `@cloudflare/containers` → current release; dry-run is the acceptance test |
 | #195 | WP-4 | `wrangler.toml` modernised to match the getting-started guide |
