@@ -1,6 +1,6 @@
 # Round 12 review findings (2026-08)
 
-**Status: ACTIVE — findings only, not yet fix-designed or implemented.** This round was scoped
+**Status: ACTIVE — findings only; fix designs now ruled in [`bug-fix-rulings-round12-13-2026-08.md`](bug-fix-rulings-round12-13-2026-08.md) (#185–#196) — not yet implemented.** This round was scoped
 review-only, continuing the round-11 pattern into the last genuinely fresh corners of the codebase:
 4 parallel review agents, each in an isolated worktree detached at `c4086e8` (the head of `main`
 after round 11's fix round fully landed and was archived), with a ~50-minute budget each. Findings

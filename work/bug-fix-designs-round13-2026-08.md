@@ -1,6 +1,6 @@
 # Round 13 — blind re-audit experiment (2026-08)
 
-**Status: ACTIVE — findings only, not yet fixed.** This round is different in kind from rounds 1–12:
+**Status: ACTIVE — findings only; fix designs now ruled in [`bug-fix-rulings-round12-13-2026-08.md`](bug-fix-rulings-round12-13-2026-08.md) (#198–#202) — not yet implemented.** This round is different in kind from rounds 1–12:
 it is not new-ground coverage. It is a controlled experiment answering a specific question the user
 asked after round 12: *if we're genuinely fixing bugs, shouldn't the find-rate decline when we
 re-review the same code?* Task board **#198–#202** (3 worth-fixing, 2 minor), plus round-summary
