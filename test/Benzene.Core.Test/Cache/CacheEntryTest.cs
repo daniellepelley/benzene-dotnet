@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using Benzene.Abstractions.Results;
 using Benzene.Cache.Core;
@@ -17,23 +18,34 @@ public class CacheEntryTest
     {
         private readonly Dictionary<string, string> _store;
         private readonly string _key;
+        private readonly ILogger _logger;
 
         public bool ThrowOnGet;
+        public bool ThrowOnGetOperationCanceled;
+        public bool ThrowOnSet;
+        public bool ThrowOnInvalidate;
+        public bool FailInvalidate;
+        public TimeSpan? LastExpireIn;
 
-        public FakeCacheEntry(Dictionary<string, string> store, string key = "the-key")
+        public FakeCacheEntry(Dictionary<string, string> store, string key = "the-key", ILogger? logger = null)
         {
             _store = store;
             _key = key;
+            _logger = logger ?? NullLogger.Instance;
         }
 
-        protected override ILogger Logger => NullLogger.Instance;
+        protected override ILogger Logger => _logger;
 
         protected override IProcessTimerFactory ProcessTimerFactory => new DebugTimerFactory();
 
         protected override string KeyDescription => _key;
 
-        protected override Task<string?> GetEntryValueAsync()
+        protected override Task<string?> GetEntryValueAsync(CancellationToken cancellationToken)
         {
+            if (ThrowOnGetOperationCanceled)
+            {
+                throw new OperationCanceledException();
+            }
             if (ThrowOnGet)
             {
                 throw new InvalidOperationException("cache read failed");
@@ -41,15 +53,57 @@ public class CacheEntryTest
             return Task.FromResult(_store.TryGetValue(_key, out var value) ? value : null);
         }
 
-        protected override Task<bool> SetEntryValueAsync(string value, TimeSpan? expireIn)
+        protected override Task<bool> SetEntryValueAsync(string value, TimeSpan? expireIn, CancellationToken cancellationToken)
         {
+            LastExpireIn = expireIn;
+            if (ThrowOnSet)
+            {
+                throw new InvalidOperationException("cache write failed");
+            }
             _store[_key] = value;
             return Task.FromResult(true);
         }
 
-        protected override Task<bool> InvalidateEntryAsync()
+        protected override Task<bool> InvalidateEntryAsync(CancellationToken cancellationToken)
         {
+            if (ThrowOnInvalidate)
+            {
+                throw new InvalidOperationException("cache invalidate failed");
+            }
+            if (FailInvalidate)
+            {
+                return Task.FromResult(false);
+            }
             return Task.FromResult(_store.Remove(_key));
+        }
+    }
+
+    /// <summary>
+    /// Captures <see cref="LogLevel.Warning"/> messages so a test can assert a cache-sync failure was
+    /// logged (#139) without depending on any particular logging provider.
+    /// </summary>
+    private class CapturingLogger : ILogger
+    {
+        public List<string> Warnings { get; } = new();
+
+        public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == LogLevel.Warning)
+            {
+                Warnings.Add(formatter(state, exception));
+            }
+        }
+
+        private class NullScope : IDisposable
+        {
+            public static readonly NullScope Instance = new();
+            public void Dispose()
+            {
+            }
         }
     }
 
@@ -277,5 +331,105 @@ public class CacheEntryTest
         await entry.WriteThroughInvalidateAsync(() => Task.FromResult(BenzeneResult.NotFound()));
 
         Assert.True(store.ContainsKey("the-key"));
+    }
+
+    [Fact]
+    public async Task LazyLoadAsync_ReferenceType_ExplicitlyCachedNull_IsAHitWithoutCallingDb()
+    {
+        // #140: negative caching. An explicit SetValueAsync(default) - a caller deciding a null result
+        // is itself cacheable - must be a real, repeatable hit, not a permanent miss that re-runs
+        // databaseReadFunc on every single call (the cache-penetration amplification #140 described).
+        var store = new Dictionary<string, string>();
+        var entry = new FakeCacheEntry<string>(store);
+        await entry.SetValueAsync(null!);
+        var databaseFuncCalled = false;
+
+        var result = await entry.LazyLoadAsync(() =>
+        {
+            databaseFuncCalled = true;
+            return Task.FromResult(BenzeneResult.Ok("from-database"));
+        });
+
+        Assert.False(databaseFuncCalled);
+        Assert.True(result.IsSuccessful);
+        Assert.Null(result.Payload);
+    }
+
+    [Fact]
+    public async Task LazyLoadAsync_CacheMiss_PassesExpireInThroughToTheCacheWrite()
+    {
+        // #144: per-call TTL was previously unreachable through LazyLoadAsync - it always used
+        // whatever the provider's SetEntryValueAsync did with a null expireIn.
+        var store = new Dictionary<string, string>();
+        var entry = new FakeCacheEntry<string>(store);
+        var expireIn = TimeSpan.FromSeconds(42);
+
+        await entry.LazyLoadAsync(() => Task.FromResult(BenzeneResult.Ok("from-database")), expireIn);
+
+        Assert.Equal(expireIn, entry.LastExpireIn);
+    }
+
+    [Fact]
+    public async Task WriteThroughAsync_SetAction_PassesExpireInThroughToTheCacheWrite()
+    {
+        var store = new Dictionary<string, string>();
+        var entry = new FakeCacheEntry<string>(store);
+        var expireIn = TimeSpan.FromSeconds(7);
+
+        await entry.WriteThroughAsync(() => Task.FromResult(BenzeneResult.Ok("new-value")), expireIn);
+
+        Assert.Equal(expireIn, entry.LastExpireIn);
+    }
+
+    [Fact]
+    public async Task WriteThroughAsync_SetAction_CacheWriteThrows_StillReturnsTheSuccessfulDatabaseResult()
+    {
+        // #139: a cache-side exception AFTER the database write already committed must not surface as
+        // this operation's own failure and invite a caller to retry an already-successful write.
+        var store = new Dictionary<string, string>();
+        var entry = new FakeCacheEntry<string>(store) { ThrowOnSet = true };
+
+        var result = await entry.WriteThroughAsync(() => Task.FromResult(BenzeneResult.Ok("new-value")));
+
+        Assert.True(result.IsSuccessful);
+        Assert.Equal("new-value", result.Payload);
+    }
+
+    [Fact]
+    public async Task WriteThroughAsync_InvalidateAction_CacheInvalidateThrows_StillReturnsTheSuccessfulDatabaseResult()
+    {
+        var store = new Dictionary<string, string>();
+        var entry = new FakeCacheEntry<string>(store) { ThrowOnInvalidate = true };
+
+        var result = await entry.WriteThroughAsync(() => Task.FromResult(BenzeneResult.Deleted<string>()));
+
+        Assert.True(result.IsSuccessful);
+        Assert.Equal(BenzeneResultStatus.Deleted, result.Status);
+    }
+
+    [Fact]
+    public async Task WriteThroughInvalidateAsync_CacheInvalidateReturnsFalse_StillReturnsTheSuccessfulDatabaseResult_AndLogsAWarning()
+    {
+        // #139: InvalidateAsync's bool return used to be discarded here - a failed invalidate was
+        // silently indistinguishable from a successful one at this layer.
+        var store = new Dictionary<string, string>();
+        var logger = new CapturingLogger();
+        var entry = new FakeCacheEntry<string>(store, logger: logger) { FailInvalidate = true };
+
+        var result = await entry.WriteThroughInvalidateAsync(() => Task.FromResult(BenzeneResult.Ok()));
+
+        Assert.True(result.IsSuccessful);
+        Assert.Contains(logger.Warnings, w => w.Contains("invalidate", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task GetValueAsync_UnderlyingReadThrowsOperationCanceled_PropagatesRatherThanBeingSwallowedAsAMiss()
+    {
+        // #141: a caller-driven cancellation is not a cache failure to degrade to a miss - it must
+        // propagate like any other ambient cancellation, the same convention already established for
+        // health checks.
+        var entry = new FakeCacheEntry<string>(new Dictionary<string, string>()) { ThrowOnGetOperationCanceled = true };
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => entry.GetValueAsync());
     }
 }

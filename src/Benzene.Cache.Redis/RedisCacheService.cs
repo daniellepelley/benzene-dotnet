@@ -1,5 +1,6 @@
 ﻿using System.Text;
 using Microsoft.Extensions.Logging;
+using Benzene.Abstractions.Serialization;
 using Benzene.Cache.Core;
 using Benzene.Diagnostics.Timers;
 using StackExchange.Redis;
@@ -11,17 +12,33 @@ public abstract class RedisCacheService : ICacheService, IAsyncDisposable
     public ILogger Logger { get; }
     public IProcessTimerFactory ProcessTimerFactory { get; }
 
+    /// <summary>
+    /// The <see cref="ISerializer"/> shared by every <see cref="CacheEntry{T}"/>/<see cref="CacheWriteActions{T}"/>
+    /// this service creates (<see cref="CreateCacheEntry{T}"/>, <see cref="CreateMultiKeyActions{T}"/>) - the
+    /// constructor-injected value if one was supplied, otherwise a shared default (#145).
+    /// </summary>
+    public ISerializer Serializer { get; }
+
     private readonly IRedisConnectionFactory _connectionFactory;
     private readonly object _connectionLock = new();
     private Task<IConnectionMultiplexer>? _redisConnectionTask;
+    private bool _disposed;
 
     public virtual TimeSpan DefaultCacheLifespan => TimeSpan.FromMinutes(5);
 
-    protected RedisCacheService(ILogger<RedisCacheService> logger, IProcessTimerFactory processTimerFactory, IRedisConnectionFactory connectionFactory)
+    /// <param name="serializer">
+    /// The <see cref="ISerializer"/> to use for values this service's cache entries store - pass the
+    /// DI-registered <see cref="ISerializer"/> (resolved automatically by DI when your subclass is
+    /// constructed through it) to honor a non-default serialization format. Optional - a shared
+    /// <c>System.Text.Json</c>-backed default is used when omitted or when nothing registers
+    /// <see cref="ISerializer"/> (#145).
+    /// </param>
+    protected RedisCacheService(ILogger<RedisCacheService> logger, IProcessTimerFactory processTimerFactory, IRedisConnectionFactory connectionFactory, ISerializer? serializer = null)
     {
         Logger = logger;
         ProcessTimerFactory = processTimerFactory;
         _connectionFactory = connectionFactory;
+        Serializer = serializer ?? CacheSerializerDefaults.Serializer;
     }
 
     protected abstract Task<ConfigurationOptions> GetConfigurationOptionsAsync();
@@ -38,6 +55,8 @@ public abstract class RedisCacheService : ICacheService, IAsyncDisposable
     {
         lock (_connectionLock)
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
             if (_redisConnectionTask is null || _redisConnectionTask.IsFaulted || _redisConnectionTask.IsCanceled)
             {
                 _redisConnectionTask = Task.Run(async () =>
@@ -57,16 +76,23 @@ public abstract class RedisCacheService : ICacheService, IAsyncDisposable
         _ = GetConnectionTask();
     }
 
-    internal async Task<IDatabase> RedisSetup()
+    // The shared connect task above is intentionally NOT tied to any one caller's token - it's memoized
+    // and awaited by every concurrent caller, so cancelling it for caller A would break caller B's
+    // in-flight wait too. Instead each caller bounds only its OWN wait with its own token via
+    // WaitAsync: a hung Redis connect (or a caller that disconnects/shuts down) no longer blocks this
+    // call past its own ambient cancellation, even though the underlying connect attempt keeps running
+    // in the background for whoever else is (or later becomes) awaiting it (#141 - previously there was
+    // no deadline of any kind here, internal or caller-supplied).
+    internal async Task<IDatabase> RedisSetup(CancellationToken cancellationToken = default)
     {
-        var multiplexer = await GetConnectionTask();
+        var multiplexer = await GetConnectionTask().WaitAsync(cancellationToken);
         return multiplexer.GetDatabase();
     }
 
-    public async Task<bool> CanConnectAsync()
+    public async Task<bool> CanConnectAsync(CancellationToken cancellationToken = default)
     {
-        var redisDatabase = await RedisSetup();
-        await redisDatabase.PingAsync();
+        var redisDatabase = await RedisSetup(cancellationToken);
+        await redisDatabase.PingAsync().WaitAsync(cancellationToken);
         return true;
     }
 
@@ -114,13 +140,23 @@ public abstract class RedisCacheService : ICacheService, IAsyncDisposable
     /// <summary>
     /// Disposes the underlying <see cref="IConnectionMultiplexer"/> this service connected and
     /// cached, if a connect was ever started. Best-effort: a connect that never completed, or that
-    /// faulted, has no multiplexer to dispose and is simply dropped.
+    /// faulted, has no multiplexer to dispose and is simply dropped. Idempotent - a second (or
+    /// concurrent) call is a no-op. After this returns, <see cref="GetConnectionTask"/> (and so
+    /// <see cref="RedisSetup"/>/<see cref="CanConnectAsync"/>/every cache operation) throws
+    /// <see cref="ObjectDisposedException"/> instead of silently opening and leaking a brand new
+    /// <see cref="IConnectionMultiplexer"/> that nothing will ever dispose (#146).
     /// </summary>
     public async ValueTask DisposeAsync()
     {
         Task<IConnectionMultiplexer>? connectionTask;
         lock (_connectionLock)
         {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
             connectionTask = _redisConnectionTask;
             _redisConnectionTask = null;
         }

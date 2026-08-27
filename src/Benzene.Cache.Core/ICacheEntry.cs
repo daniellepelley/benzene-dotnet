@@ -1,4 +1,4 @@
-﻿using Benzene.Abstractions.Results;
+using Benzene.Abstractions.Results;
 
 namespace Benzene.Cache.Core;
 
@@ -6,9 +6,9 @@ namespace Benzene.Cache.Core;
 
 public interface ICacheEntry<T> : ICacheWriteActions<T>
 {
-    Task<T?> GetValueAsync();
+    Task<T?> GetValueAsync(CancellationToken cancellationToken = default);
 
-    Task<IBenzeneResult<T>> LazyLoadAsync(Func<Task<IBenzeneResult<T>>> databaseReadFunc);
+    Task<IBenzeneResult<T>> LazyLoadAsync(Func<Task<IBenzeneResult<T>>> databaseReadFunc, TimeSpan? expireIn = null, CancellationToken cancellationToken = default);
 
-    Task<TResult> LazyLoadAsync<TResult>(Func<Task<TResult>> databaseReadFunc, Func<T, TResult> createResult) where TResult : IBenzeneResult<T>;
+    Task<TResult> LazyLoadAsync<TResult>(Func<Task<TResult>> databaseReadFunc, Func<T, TResult> createResult, TimeSpan? expireIn = null, CancellationToken cancellationToken = default) where TResult : IBenzeneResult<T>;
 }

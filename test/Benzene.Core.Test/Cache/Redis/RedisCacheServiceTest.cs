@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Benzene.Abstractions.Serialization;
 using Benzene.Cache.Core;
 using Benzene.Cache.Redis;
 using Benzene.Diagnostics.Timers;
@@ -244,7 +245,9 @@ public class RedisCacheServiceTest
     public async Task CacheMultipleEntriesTest()
     {
         var connectionFactory = new MockConnectionFactory();
-        connectionFactory.DataBaseMock.Setup(x => x.KeyDeleteAsync(It.IsAny<RedisKey>(), CommandFlags.None)).ReturnsAsync(true);
+        // #147: InvalidateEntryAsync now issues a single atomic multi-key DEL rather than a per-key
+        // loop - see CacheMultipleEntries_InvalidateAsync_UsesASingleAtomicMultiKeyDelete below.
+        connectionFactory.DataBaseMock.Setup(x => x.KeyDeleteAsync(It.IsAny<RedisKey[]>(), CommandFlags.None)).ReturnsAsync(2);
         connectionFactory.DataBaseMock.Setup(x => x.StringSetAsync(It.IsAny<RedisKey>(), It.IsAny<RedisValue>(), It.IsAny<TimeSpan>(), It.IsAny<bool>(), When.Always, CommandFlags.None)).ReturnsAsync(true);
 
         var service = new TestRedisCacheService(NullLogger<RedisCacheService>.Instance, new DebugTimerFactory(), connectionFactory);
@@ -253,6 +256,64 @@ public class RedisCacheServiceTest
         Assert.True(await actions.SetValueAsync(new TestDataType { Id = 42, Name = "Test" }));
 
         Assert.True(await actions.InvalidateAsync());
+    }
+
+    [Fact]
+    public async Task CacheMultipleEntries_SetValueAsync_OneKeyThrows_TheOtherIsStillAttempted_AndResultReflectsPartialSuccess()
+    {
+        // #147: the old sequential loop aborted on the first exception, leaving later keys entirely
+        // untouched while still reporting overall success purely because an earlier key had already
+        // succeeded before the throw. Every key must always be attempted, concurrently and
+        // independently of the others' outcome.
+        var connectionFactory = new MockConnectionFactory();
+        connectionFactory.DataBaseMock
+            .Setup(x => x.StringSetAsync(new RedisKey("TEST_23"), It.IsAny<RedisValue>(), It.IsAny<TimeSpan>(), It.IsAny<bool>(), When.Always, CommandFlags.None))
+            .ThrowsAsync(new Exception(TEST_ERROR_MESSAGE));
+        connectionFactory.DataBaseMock
+            .Setup(x => x.StringSetAsync(new RedisKey("TEST_45"), It.IsAny<RedisValue>(), It.IsAny<TimeSpan>(), It.IsAny<bool>(), When.Always, CommandFlags.None))
+            .ReturnsAsync(true)
+            .Verifiable();
+
+        var service = new TestRedisCacheService(NullLogger<RedisCacheService>.Instance, new DebugTimerFactory(), connectionFactory);
+        var actions = service.GetTestMultipleEntries(23, 45);
+
+        var result = await actions.SetValueAsync(new TestDataType { Id = 42, Name = "Test" });
+
+        Assert.True(result); // "any key succeeded" contract, unchanged - but now honestly earned.
+        connectionFactory.DataBaseMock.Verify();
+    }
+
+    [Fact]
+    public async Task CacheMultipleEntries_SetValueAsync_EveryKeyThrows_ReturnsFalse()
+    {
+        var connectionFactory = new MockConnectionFactory();
+        connectionFactory.DataBaseMock
+            .Setup(x => x.StringSetAsync(It.IsAny<RedisKey>(), It.IsAny<RedisValue>(), It.IsAny<TimeSpan>(), It.IsAny<bool>(), When.Always, CommandFlags.None))
+            .ThrowsAsync(new Exception(TEST_ERROR_MESSAGE));
+
+        var service = new TestRedisCacheService(NullLogger<RedisCacheService>.Instance, new DebugTimerFactory(), connectionFactory);
+        var actions = service.GetTestMultipleEntries(23, 45);
+
+        Assert.False(await actions.SetValueAsync(new TestDataType { Id = 42, Name = "Test" }));
+    }
+
+    [Fact]
+    public async Task CacheMultipleEntries_InvalidateAsync_UsesASingleAtomicMultiKeyDeleteCommand()
+    {
+        // #147: one DEL <key1> <key2> Redis command rather than a sequential per-key loop - removes
+        // the partial-failure hazard for this path entirely (there's only one command to succeed or
+        // fail as a whole).
+        var connectionFactory = new MockConnectionFactory();
+        connectionFactory.DataBaseMock
+            .Setup(x => x.KeyDeleteAsync(It.Is<RedisKey[]>(keys => keys.Length == 2), CommandFlags.None))
+            .ReturnsAsync(2)
+            .Verifiable();
+
+        var service = new TestRedisCacheService(NullLogger<RedisCacheService>.Instance, new DebugTimerFactory(), connectionFactory);
+        var actions = service.GetTestMultipleEntries(23, 45);
+
+        Assert.True(await actions.InvalidateAsync());
+        connectionFactory.DataBaseMock.Verify();
     }
 
     [Fact]
@@ -345,6 +406,74 @@ public class RedisCacheServiceTest
         var actions = service.GetTestWildcardActions();
 
         Assert.False(await actions.InvalidateAsync());
+    }
+
+    [Fact]
+    public async Task DisposeAsync_ThenCanConnectAsync_ThrowsObjectDisposedException_RatherThanLeakingANewConnection()
+    {
+        // #146: a late call after disposal used to silently open (and leak) a brand new
+        // IConnectionMultiplexer that DisposeAsync would never be asked to dispose again.
+        var connectionFactory = new MockConnectionFactory();
+        var service = new TestRedisCacheService(NullLogger<RedisCacheService>.Instance, new DebugTimerFactory(), connectionFactory);
+        await service.CanConnectAsync();
+
+        await service.DisposeAsync();
+
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => service.CanConnectAsync());
+        // Only the one connect from before disposal ever happened - no second multiplexer was created.
+        Assert.Equal(1, connectionFactory.ConnectCallCount);
+    }
+
+    [Fact]
+    public async Task CanConnectAsync_ConnectNeverCompletes_CallersOwnCancellationTokenUnblocksTheWait()
+    {
+        // #141: previously there was no deadline of any kind (internal or caller-supplied) on the
+        // connect - a hung Redis connect held the caller forever, past client disconnect/shutdown.
+        var connectionFactory = new NeverConnectingConnectionFactory();
+        var service = new TestRedisCacheService(NullLogger<RedisCacheService>.Instance, new DebugTimerFactory(), connectionFactory);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+
+        // ThrowsAnyAsync, not ThrowsAsync: Task.WaitAsync(cancellationToken) throws the derived
+        // TaskCanceledException, not a bare OperationCanceledException - both are correct/expected
+        // for a caller-driven cancellation (the production `catch (OperationCanceledException)`
+        // guards already handle this polymorphically), but xUnit's ThrowsAsync<T> requires an exact
+        // type match rather than "is a".
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.CanConnectAsync(cts.Token));
+    }
+
+    [Fact]
+    public async Task Serializer_CustomSerializerConstructorInjected_IsUsedInsteadOfTheDefault()
+    {
+        // #145: the cache layer used to hard-wire System.Text.Json in CacheWriteActions()'s
+        // constructor regardless of what ISerializer DI had registered.
+        var customSerializer = new Mock<ISerializer>();
+        customSerializer.Setup(s => s.Serialize(It.IsAny<TestDataType>())).Returns("custom-payload");
+
+        var connectionFactory = new MockConnectionFactory();
+        connectionFactory.DataBaseMock
+            .Setup(x => x.StringSetAsync(It.IsAny<RedisKey>(), new RedisValue("custom-payload"), It.IsAny<TimeSpan>(), It.IsAny<bool>(), When.Always, CommandFlags.None))
+            .ReturnsAsync(true)
+            .Verifiable();
+
+        var service = new TestRedisCacheService(NullLogger<RedisCacheService>.Instance, new DebugTimerFactory(), connectionFactory, customSerializer.Object);
+        var entry = service.GetTestCacheEntry(42);
+
+        var result = await entry.SetValueAsync(new TestDataType { Id = 42, Name = "Test" });
+
+        Assert.True(result);
+        connectionFactory.DataBaseMock.Verify();
+    }
+
+    /// <summary>
+    /// A <see cref="IRedisConnectionFactory"/> whose <see cref="IRedisConnectionFactory.ConnectAsync"/>
+    /// never completes - used to prove a caller's own <see cref="CancellationToken"/> unblocks the wait
+    /// (#141) rather than hanging on the connect forever.
+    /// </summary>
+    private sealed class NeverConnectingConnectionFactory : IRedisConnectionFactory
+    {
+        public Task<IConnectionMultiplexer> ConnectAsync(ConfigurationOptions options) =>
+            new TaskCompletionSource<IConnectionMultiplexer>().Task;
     }
 
     /// <summary>

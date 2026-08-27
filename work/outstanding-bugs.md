@@ -1597,6 +1597,112 @@ transports".
   written and added one clarifying sentence about why `GetHeader` is still the recommended lookup even
   so (a custom `IMessageHeadersGetter<TContext>` has no obligation to follow suit). Regression tests
   added to each transport's existing getter test file.
+### Tracked findings round 11, WP-4 — Cache write-through/cancellation/serializer hardening (done)
+Ruled in [`bug-fix-designs-round11-2026-08.md`](bug-fix-designs-round11-2026-08.md) §3 "Cache" half
+(`Benzene.Cache.Core`/`Benzene.Cache.Redis`).
+- **[RESOLVED] #139 — write-through failure handling was backwards.** A cache-side exception thrown
+  *after* the database write had already committed (e.g. `Serializer.Serialize` failing inside
+  `SetValueAsync`, called from `WriteThroughAsync`'s `Set` branch) propagated uncaught out of
+  `WriteThroughAsync`/`WriteThroughInvalidateAsync`, surfacing an already-successful write as the
+  overall operation's *failure* and inviting a caller to retry a write that had, in fact, succeeded.
+  Separately, `InvalidateAsync()`'s `bool` return was discarded at both of its `WriteThroughAsync`/
+  `WriteThroughInvalidateAsync` call sites, so a cache provider honestly reporting a failed invalidate
+  (Redis already did this correctly - catches its own exceptions, logs a `Warning`, returns `false`)
+  had that signal silently thrown away one layer up, with no correlation back to which write's cache
+  sync had failed. Fixed with one new `CacheInvalidateActions.SyncCacheAfterWriteAsync` helper used by
+  both `WriteThroughAsync`'s `Set`/`Invalidate` branches and `WriteThroughInvalidateAsync`: it runs the
+  cache-side action, and either an exception or a `false` result is logged (`Warning`, with the key and
+  which action) and swallowed - the already-successful database result is still returned. A caller-
+  driven `OperationCanceledException` is the one exception that still propagates (that's not a cache
+  failure to log past). No new result type / interface redesign - `SetValueAsync`/`InvalidateAsync`
+  themselves are unchanged for direct callers outside write-through, where an exception is still the
+  primary requested action's own failure, not a second phase after a committed success.
+- **[RESOLVED] #140 — see the replaced `[DECISION]` entry above** (cached-null negative caching).
+- **[RESOLVED] #141 — the entire cache surface (`ICacheService`/`ICacheInvalidateActions`/
+  `ICacheWriteActions<T>`/`ICacheEntry<T>`, 10/10 members) was uncancellable, and `RedisCacheService`'s
+  connect had no deadline of any kind - internal or caller-supplied - so a hung Redis connect held
+  every in-flight request past client disconnect and host shutdown.** Every interface member now takes
+  an optional trailing `CancellationToken cancellationToken = default` (source-compatible; binary-
+  breaking, acceptable pre-1.0 per `version.txt` `0.0.3`/no git tag - see
+  `work/benzene-result-errors-ruling.md` §3.5/§4.1 for the standing precedent on this repo's freeze
+  policy). The token flows into the `protected abstract` primitives (`GetEntryValueAsync`/
+  `SetEntryValueAsync`/`InvalidateEntryAsync`) and from there into every Redis call via
+  `Task.WaitAsync(cancellationToken)` (StackExchange.Redis's `IDatabase` methods don't accept a
+  `CancellationToken` themselves, so this is the standard wrap-a-non-cancelable-task idiom - it bounds
+  *this caller's* wait; the underlying Redis operation keeps running in the background, same as
+  `UseTimeout`'s documented "only interrupts cooperative work" caveat elsewhere in the repo).
+  `RedisCacheService.RedisSetup` now applies the same `WaitAsync(cancellationToken)` to the shared,
+  memoized connect task - deliberately NOT by cancelling the shared task itself (that's awaited by
+  every concurrent caller; cancelling it for caller A would break caller B's unrelated in-flight wait
+  too), but by bounding each caller's own wait on it. `CacheHealthCheck<TCacheService>` now forwards
+  its own `cancellationToken` into `CanConnectAsync` (previously documented as "out of WP-7's scope" -
+  that scope note is removed, it's in scope now). Every Redis-layer catch block also gained an explicit
+  `catch (OperationCanceledException) { throw; }` guard ahead of its catch-all, so a caller-driven
+  cancellation is never misreported as an ordinary cache miss/failure - the same pattern already
+  established for health checks. **Scoped out:** the caller-supplied `Func<Task<TResult>>`
+  `modifyDatabaseFunc`/`databaseReadFunc` delegates on `WriteThroughAsync`/`WriteThroughInvalidateAsync`/
+  `LazyLoadAsync` are unchanged (still zero-arg) - the token is threaded through the *cache's own* I/O
+  only, not into arbitrary caller-supplied database delegates, which is what the finding's "entire cache
+  surface" scoped as broken. Retrofitting a `CancellationToken` parameter onto those delegates too would
+  be a much larger, independently-justified API change; nothing in this WP needed it. See the new
+  `[DECISION]` entry below recording this as the intentional residual scope boundary.
+- **[RESOLVED] #144 — per-call TTL was unreachable through `LazyLoadAsync`/`WriteThroughAsync`**, even
+  though `SetValueAsync` always exposed `expireIn`. Both now take an optional `TimeSpan? expireIn = null`
+  that flows through to the underlying `SetValueAsync` call (`LazyLoadAsync`'s cache-aside write-back,
+  `WriteThroughAsync`'s `Set` branch); `null` still means "use `DefaultCacheLifespan`", unchanged.
+- **[RESOLVED] #145 — the cache layer hard-wired `System.Text.Json` in `CacheWriteActions()`'s
+  constructor** (`new Benzene.Core.MessageHandlers.Serialization.JsonSerializer()`, ignoring whatever
+  `ISerializer` DI had registered, reallocated fresh per cache-entry instance - one per
+  `CreateCacheEntry<T>`/`CreateMultiKeyActions<T>` call). `CacheWriteActions<T>`/`CacheEntry<T>` now
+  take an optional constructor `ISerializer? serializer`; `RedisCacheService`'s constructor takes the
+  same (optional, resolved automatically by DI when a subclass is constructed through it, since
+  `Benzene.Core.MessageHandlers` already `TryAddSingleton<ISerializer, JsonSerializer>()`s one) and
+  passes its own `Serializer` into every `RedisCacheEntry<T>`/`RedisMultiKeyActions<T>` it creates, so
+  every cache entry from the same service instance shares one serializer. When nothing is supplied
+  anywhere, a single new `CacheSerializerDefaults.Serializer` static (`Benzene.Cache.Core`) is shared
+  process-wide instead of allocating fresh per instance.
+- **[RESOLVED] #146 — `RedisCacheService.DisposeAsync` had no disposed flag**, so a `RedisSetup()`/
+  `StartConnection()` call arriving after disposal silently opened and cached a brand-new
+  `IConnectionMultiplexer` that `DisposeAsync` had already returned and would never be asked to dispose
+  again - a leak. A `_disposed` flag (guarded by the same `_connectionLock` already serializing connect/
+  dispose) now makes `GetConnectionTask()` throw `ObjectDisposedException` once disposed, and makes
+  `DisposeAsync` itself idempotent by that same flag (previously it happened to be idempotent only as a
+  side effect of the connection-task field being nulled on first call).
+- **[RESOLVED] #147 — `RedisMultiKeyActions.SetEntryValueAsync` wrote its N keys in a sequential
+  `foreach`, so an exception on key 2 of 3 aborted the loop (key 3 never attempted) while key 1's
+  already-recorded success still made the method report overall success** - a partial write silently
+  reported as if every key had been considered. Redis has no native multi-key `SET`-with-per-key-TTL
+  primitive (`MSET` has no expiry support at all - a genuine transaction was considered and rejected:
+  `Benzene.Cache.Redis`'s own CLAUDE.md already documents "No atomic / conditional operations" as a
+  deliberate boundary of this package, so a `MULTI`/`EXEC` transaction here would have contradicted a
+  stated non-goal), so each key is still its own `StringSetAsync` call - but now issued **concurrently**
+  via `Task.WhenAll`, with each key's outcome (success, a provider-reported `false`, or a thrown
+  exception) captured **independently** rather than accumulated by a loop a throw could abandon midway.
+  Every key is always attempted; the aggregate `bool` (`any succeeded`, unchanged contract) reflects
+  what actually happened to all of them, not just the ones reached before an early abort.
+  `InvalidateEntryAsync` on the same type had the identical sequential-loop shape for `KeyDeleteAsync` -
+  replaced with a single atomic multi-key `DEL` (`KeyDeleteAsync(RedisKey[])`), reusing the exact
+  batched pattern `RedisWildcardActions` already uses for its own (pattern-based) invalidate path, which
+  removes the partial-failure hazard entirely for that path (one Redis command, not N).
+- **[DECISION] #141 residual scope: caller-supplied write-through/lazy-load delegates stay
+  uncancellable.** `WriteThroughAsync`/`WriteThroughInvalidateAsync`/`LazyLoadAsync`'s
+  `modifyDatabaseFunc`/`databaseReadFunc` parameters remain `Func<Task<TResult>>` - the new
+  `cancellationToken` parameter is threaded through the cache's own read/write/invalidate I/O only,
+  never into these caller-supplied closures. Changing that delegate shape to
+  `Func<CancellationToken, Task<TResult>>` would be a second, independently-justified breaking change
+  to how every existing caller writes their database/service call, and #141 as filed is specifically
+  about the *cache* surface being uncancellable, not about retrofitting cancellation onto arbitrary
+  caller code the cache layer merely invokes. A caller that needs its own database call cancelled
+  observes the ambient token itself, the same way it would today calling that database directly outside
+  `LazyLoadAsync`/`WriteThroughAsync`.
+
+Tests: `test/Benzene.Core.Test/Cache/CacheEntryTest.cs` (negative-caching hit via `SetValueAsync(null)`
+then `LazyLoadAsync`; per-call `expireIn` threading), `test/Benzene.Core.Test/Cache/Redis/RedisCacheServiceTest.cs`
+(write-through cache-side-failure-doesn't-fail-the-database-result cases for both `SetValueAsync` and
+`InvalidateAsync`; `DisposeAsync` then a further call throws `ObjectDisposedException`; multi-key
+partial-failure - one key throws, the others still get attempted and the result still reflects an
+overall success/failure correctly; cancellation is observed rather than silently ignored). Full solution
+build + `Benzene.Core.Test` re-verified green after this WP.
 
 ## Open — maintainer decisions (the real remaining backlog)
 
@@ -1662,10 +1768,24 @@ None of these is a clean self-contained bug; each changes behaviour, a public AP
   deleted outright and settlement rerouted through `IBenzeneResult`** (`6424cde9`, touching
   `IHasMessageResult` + every transport context). The three-way overlap is gone; the library now
   represents a message outcome one way. (proposal items 1b + 2b)
-- **[DECISION] Cache null-payload negative-caching & version unknown-version passthrough** — a null
-  deserialized value is a cache miss and a null payload is still written back (`CacheEntry.cs:64-83`);
-  an unknown requested version silently falls back to the max version (`VersionSelector.cs:21-29`).
-  Both are documented per-policy behaviours.
+- **[RESOLVED] Cache null-payload negative caching (#140)** — superseded the stale entry this replaces
+  (which described pre-WP-X behavior: "a null payload is still written back" - WP-X/#100 already made
+  `LazyLoadAsync` skip writing a null `Payload` back to the cache, so that half was already wrong by
+  the time this was written). The real remaining bug: `LazyLoadAsync` decided a cache hit with
+  `found && cacheValue is not null` (`CacheEntry.cs`), so a reference-type `T` that a caller had
+  explicitly cached as `null` (via `SetValueAsync(default)` - a genuine negative-cache entry) was
+  treated as a permanent miss forever, re-running `databaseReadFunc` on every single call and defeating
+  the entire point of negative-caching a known-absent value (cache-penetration amplification). Fixed by
+  deciding the hit purely on `found` (presence of a stored value) — the same signal that already fixed
+  the value-type miss-as-hit hazard — since JSON-serializing `null` always produces the 4-character
+  string `"null"`, never an empty stored value, so "present" and "present but deserializes to null" are
+  never confused with genuinely absent. `LazyLoadAsync` itself is still conservative by default: a
+  successful database read whose `Payload` is `null` is still not written back automatically (avoids
+  surprising every existing caller with new cache writes); a caller that wants a known-null result
+  negative-cached calls `SetValueAsync(default, ...)` itself once it decides the null is cacheable.
+  (`CacheEntry.cs`, `test/Benzene.Core.Test/Cache/CacheEntryTest.cs`.)
+- **[DECISION] Version unknown-version passthrough** — an unknown requested version silently falls
+  back to the max version (`VersionSelector.cs:21-29`). A documented per-policy behaviour.
 
 ### Health / convergence / lower-impact
 - **[DECISION] `DynamoDbHealthCheck` ignores `TableStatus`** — verdict is HTTP-200 only; `TableStatus`

@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using Benzene.Cache.Core;
 using Benzene.Diagnostics.Timers;
 
@@ -9,7 +9,7 @@ internal class RedisCacheEntry<T> : CacheEntry<T>
     private readonly RedisCacheService _service;
     private readonly string _key;
 
-    public RedisCacheEntry(RedisCacheService redisCacheService, string key)
+    public RedisCacheEntry(RedisCacheService redisCacheService, string key) : base(redisCacheService.Serializer)
     {
         _service = redisCacheService;
         _key = key;
@@ -22,12 +22,16 @@ internal class RedisCacheEntry<T> : CacheEntry<T>
     protected override string KeyDescription => _key;
 
 
-    protected override async Task<string?> GetEntryValueAsync()
+    protected override async Task<string?> GetEntryValueAsync(CancellationToken cancellationToken)
     {
         try
         {
-            var redisDatabase = await _service.RedisSetup();
-            return await redisDatabase.StringGetAsync(_key);
+            var redisDatabase = await _service.RedisSetup(cancellationToken);
+            return await redisDatabase.StringGetAsync(_key).WaitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -36,12 +40,16 @@ internal class RedisCacheEntry<T> : CacheEntry<T>
         }
     }
 
-    protected override async Task<bool> SetEntryValueAsync(string value, TimeSpan? expireIn)
+    protected override async Task<bool> SetEntryValueAsync(string value, TimeSpan? expireIn, CancellationToken cancellationToken)
     {
         try
         {
-            var redisDatabase = await _service.RedisSetup();
-            return await redisDatabase.StringSetAsync(_key, value, expireIn ?? _service.DefaultCacheLifespan);
+            var redisDatabase = await _service.RedisSetup(cancellationToken);
+            return await redisDatabase.StringSetAsync(_key, value, expireIn ?? _service.DefaultCacheLifespan).WaitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -50,12 +58,16 @@ internal class RedisCacheEntry<T> : CacheEntry<T>
         }
     }
 
-    protected override async Task<bool> InvalidateEntryAsync()
+    protected override async Task<bool> InvalidateEntryAsync(CancellationToken cancellationToken)
     {
         try
         {
-            var redisDatabase = await _service.RedisSetup();
-            return await redisDatabase.KeyDeleteAsync(_key);
+            var redisDatabase = await _service.RedisSetup(cancellationToken);
+            return await redisDatabase.KeyDeleteAsync(_key).WaitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {

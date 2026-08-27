@@ -1,5 +1,6 @@
 ﻿using System.Linq;
 using System.Threading.Tasks;
+using Benzene.Abstractions.Serialization;
 using Benzene.Cache.Core;
 using Benzene.Cache.Redis;
 using Benzene.Diagnostics.Timers;
@@ -10,7 +11,7 @@ namespace Benzene.Test.Cache.Redis.Instance;
 
 internal class TestRedisCacheService : RedisCacheService
 {
-    public TestRedisCacheService(ILogger<RedisCacheService> logger, IProcessTimerFactory processTimerFactory, IRedisConnectionFactory connectionFactory) : base(logger, processTimerFactory, connectionFactory)
+    public TestRedisCacheService(ILogger<RedisCacheService> logger, IProcessTimerFactory processTimerFactory, IRedisConnectionFactory connectionFactory, ISerializer? serializer = null) : base(logger, processTimerFactory, connectionFactory, serializer)
     {
         StartConnection();
     }

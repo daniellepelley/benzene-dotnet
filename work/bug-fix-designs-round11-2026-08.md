@@ -141,6 +141,19 @@ entirely), #144 (per-call TTL unreachable through the documented cache-aside/wri
 (same shape as #111, fixed elsewhere), but the caveat is absent from user-facing `docs/caching.md` and
 the capability matrix, unlike every other row there.
 
+**Amendment (WP-4, cache fixes landed 2026-08-26):** #139–#141 and #144–#147 fixed per this section.
+One scope note on #141: "the entire cache surface is uncancellable" was fixed by adding an optional
+trailing `CancellationToken` to all 10 interface members, threaded into the concrete provider's own
+I/O (Redis calls via `Task.WaitAsync`, since StackExchange.Redis has no native per-call cancellation)
+and into `RedisCacheService`'s previously-deadline-free connect. It was **not** threaded into the
+caller-supplied `Func<Task<TResult>>` `modifyDatabaseFunc`/`databaseReadFunc` parameters on
+`WriteThroughAsync`/`WriteThroughInvalidateAsync`/`LazyLoadAsync` — those stay zero-arg. Changing that
+delegate shape to `Func<CancellationToken, Task<TResult>>` would be a second, independently-justified
+breaking change to how every caller writes their database/service call, and the filed finding was
+specifically about the cache's own I/O being uncancellable, not about retrofitting cancellation onto
+arbitrary caller code the cache layer merely invokes. Recorded as a `[DECISION]` in
+`work/outstanding-bugs.md`, not a deferred gap.
+
 ---
 
 ## §4 Mesh discovery + catalog pipeline — #148–#157
