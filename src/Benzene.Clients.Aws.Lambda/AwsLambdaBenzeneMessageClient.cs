@@ -7,6 +7,7 @@ using Benzene.Abstractions.Serialization;
 using Benzene.Clients.Common;
 using Benzene.Results;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Benzene.Clients.Aws.Lambda
 {
@@ -32,7 +33,10 @@ namespace Benzene.Clients.Aws.Lambda
         {
             _awsLambdaClient = new AwsLambdaClient(amazonLambda);
             _lambdaName = lambdaName;
-            _logger = logger;
+            // #192: a null logger must not make the catch block's own LogError throw and mask the
+            // real failure - fall back to a no-op logger. This class's field is the non-generic
+            // ILogger (not ILogger<T>), so the non-generic NullLogger.Instance is the right fallback.
+            _logger = logger ?? NullLogger.Instance;
             _serializer = new JsonSerializer();
         }
 

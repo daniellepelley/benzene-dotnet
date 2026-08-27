@@ -8,6 +8,9 @@ of `Benzene.Azure.Function.QueueStorage` (release plan Tier 2.2, §5.2). This pa
 
 ## Key types
 - `QueueStorageBenzeneMessageClient` — `IBenzeneMessageClient`; sends via a caller-supplied `QueueClient`.
+  Both constructors fall back to `NullLogger<QueueStorageBenzeneMessageClient>.Instance` when `logger`
+  is null, so a null-logger construction can't make the `catch` block's own `LogError` call throw and
+  mask the real send failure (#192, a P8 sweep across all nine `Benzene.Clients.*` message clients).
 - `QueueStorageClientMiddleware` / `QueueStorageSendMessageContext` — terminal send middleware and its
   context (a plain string body — this transport has no properties/attributes bag).
 - `QueueStorageContextConverter<T>` — `IBenzeneClientContext<T, Void>` → send context.

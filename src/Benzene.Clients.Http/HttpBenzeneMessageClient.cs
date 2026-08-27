@@ -11,6 +11,7 @@ using Benzene.Clients;
 using Benzene.Clients.Common;
 using Benzene.Results;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using JsonSerializer = Benzene.Clients.JsonSerializer;
 using Void = Benzene.Abstractions.Results.Void;
 
@@ -49,7 +50,7 @@ public class HttpBenzeneMessageClient : IBenzeneMessageClient
 {
     private readonly HttpClient _httpClient;
     private readonly string _url;
-    private readonly ILogger? _logger;
+    private readonly ILogger _logger;
     private readonly ISerializer _serializer;
     private readonly ICancellationTokenAccessor? _cancellation;
 
@@ -62,7 +63,11 @@ public class HttpBenzeneMessageClient : IBenzeneMessageClient
     {
         _httpClient = httpClient;
         _url = url;
-        _logger = logger;
+        // #192: family-wide fix (P8) even though this class already guarded its LogError calls with
+        // `?.` - a NullLogger fallback means a future call site that forgets the `?.` (as the other
+        // nine BenzeneMessageClient classes' unguarded LogError calls did) can't reintroduce the
+        // null-logger throw here either.
+        _logger = logger ?? NullLogger.Instance;
         _serializer = new JsonSerializer();
         _cancellation = cancellation;
     }
@@ -99,7 +104,7 @@ public class HttpBenzeneMessageClient : IBenzeneMessageClient
             if (clientResponse == null)
             {
                 // An empty/blank body is not a BenzeneMessage envelope - the target returned nothing to map.
-                _logger?.LogError("Message {receiverTopic} to {receiver} returned an empty response body", request.Topic, _url);
+                _logger.LogError("Message {receiverTopic} to {receiver} returned an empty response body", request.Topic, _url);
                 return BenzeneResult.ServiceUnavailable<TResponse>($"Empty response from {_url}");
             }
 
@@ -110,14 +115,14 @@ public class HttpBenzeneMessageClient : IBenzeneMessageClient
                 ? new BenzeneMessageClientResponse(clientResponse.StatusCode, null!, clientResponse.Headers, clientResponse.IsSuccessful).AsBenzeneResult<TResponse>(_serializer)
                 : clientResponse.AsBenzeneResult<TResponse>(_serializer);
 
-            _logger?.LogInformation("Message {receiverTopic} sent to {receiver} with status {receiverStatus}",
+            _logger.LogInformation("Message {receiverTopic} sent to {receiver} with status {receiverStatus}",
                 request.Topic, _url, result.Status);
 
             return result;
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Sending message {receiverTopic} to {receiver} failed", request.Topic, _url);
+            _logger.LogError(ex, "Sending message {receiverTopic} to {receiver} failed", request.Topic, _url);
             return BenzeneResult.ServiceUnavailable<TResponse>(ex.Message);
         }
     }

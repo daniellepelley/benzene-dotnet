@@ -100,6 +100,21 @@ public class HttpBenzeneMessageClientTest
     }
 
     [Fact]
+    public async Task SendMessageAsync_ReturnsServiceUnavailable_WhenTheTransportThrows_AndTheLoggerIsNull()
+    {
+        // #192: HttpBenzeneMessageClient's logger parameter is optional (null already meant "no
+        // logging" via its own `?.` calls), but the constructor now normalizes a null logger to
+        // NullLogger.Instance too, for consistency with the other nine BenzeneMessageClient classes
+        // (P8) - confirm the failure path still returns cleanly rather than throwing.
+        var client = new HttpBenzeneMessageClient(new HttpClient(new ThrowingHandler()), Url, logger: null);
+
+        var result = await client.SendMessageAsync<string, string>(
+            new BenzeneClientRequest<string>("t", "m", new Dictionary<string, string>()));
+
+        Assert.Equal(BenzeneResultStatus.ServiceUnavailable, result.Status);
+    }
+
+    [Fact]
     public async Task SendMessageAsync_ReturnsServiceUnavailable_OnAnEmptyResponseBody()
     {
         var handler = new CapturingHandler(HttpStatusCode.OK, "");

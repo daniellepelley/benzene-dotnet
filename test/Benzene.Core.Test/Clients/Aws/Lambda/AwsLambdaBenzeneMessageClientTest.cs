@@ -97,4 +97,22 @@ public class AwsLambdaBenzeneMessageClientTest
         Assert.NotNull(result);
         Assert.Equal(BenzeneResultStatus.ServiceUnavailable, result.Status);
     }
+
+    [Fact]
+    public async Task Failure_ConstructedWithANullLogger_DoesNotThrow()
+    {
+        // #192: the catch block's own LogError call must not itself throw a NullReferenceException
+        // when the client was constructed with a null logger - the constructor now falls back to
+        // NullLogger.Instance instead of storing the null reference verbatim.
+        var mockInnerAwsLambdaClient = new Mock<IAmazonLambda>();
+        mockInnerAwsLambdaClient.Setup(x =>
+                x.InvokeAsync(It.IsAny<InvokeRequest>(), It.IsAny<CancellationToken>()))
+            .Throws(new Exception());
+
+        var client = new AwsLambdaBenzeneMessageClient(Defaults.LambdaName, mockInnerAwsLambdaClient.Object, null!);
+        var result = await client.SendMessageAsync<ExamplePayload, ExamplePayload>("some-topic", new ExamplePayload());
+
+        Assert.NotNull(result);
+        Assert.Equal(BenzeneResultStatus.ServiceUnavailable, result.Status);
+    }
 }
