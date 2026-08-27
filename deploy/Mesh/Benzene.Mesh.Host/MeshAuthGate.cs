@@ -407,10 +407,12 @@ public class MeshAuthGate
         }
 
         var peer = context.Connection.RemoteIpAddress;
-        var isTrusted = peer != null && _config.Proxy.TrustedProxies.Any(p => IPAddress.TryParse(p, out var trusted) && trusted.Equals(peer));
+        var normalizedPeer = peer != null ? NormalizeForComparison(peer) : null;
+        var isTrusted = normalizedPeer != null && _config.Proxy.TrustedProxies.Any(p =>
+            IPAddress.TryParse(p, out var trusted) && NormalizeForComparison(trusted).Equals(normalizedPeer));
         if (!isTrusted)
         {
-            await WriteUnauthorizedAsync(context, "Untrusted proxy");
+            await WriteUnauthorizedAsync(context, $"Untrusted proxy (peer: {peer?.ToString() ?? "unknown"})");
             return null;
         }
 
@@ -430,6 +432,23 @@ public class MeshAuthGate
 
         return new ClaimsPrincipal(identity);
     }
+
+    /// <summary>
+    /// Normalizes <paramref name="address"/> to its plain-IPv4 form when it is one (an IPv4-mapped
+    /// IPv6 address collapses to the IPv4 it represents; a genuine IPv4 address is already there),
+    /// leaving a real IPv6 address untouched. Without this, an IPv4-mapped IPv6 peer
+    /// (<c>::ffff:10.0.0.5</c> - what <c>Connection.RemoteIpAddress</c> reports for an IPv4 peer on a
+    /// dual-stack listener, e.g. Kestrel bound to <c>[::]</c>, the container default) never compares
+    /// equal to the plain-IPv4 form operators write in <c>auth.proxy.trustedProxies</c>
+    /// (<c>10.0.0.5</c>) - <see cref="IPAddress.Equals"/> treats them as different addresses (different
+    /// <see cref="IPAddress.AddressFamily"/>). Applied to both the peer and every trusted-proxy entry
+    /// before comparing, so either written form matches the other. This was a fail-closed operability
+    /// gap, not a bypass - <c>auth.mode: proxy</c> rejected every peer on a dual-stack listener
+    /// regardless of a correct <c>trustedProxies</c> entry - but one that invites operators to widen
+    /// the allowlist to "fix" it.
+    /// </summary>
+    private static IPAddress NormalizeForComparison(IPAddress address)
+        => address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
 
     private async Task<ClaimsPrincipal?> AuthenticateBasicAsync(HttpContext context)
     {
@@ -485,8 +504,7 @@ public class MeshAuthGate
     {
         if (_config.AllowedEmailDomains.Length > 0)
         {
-            var email = principal.FindFirst(ClaimTypes.Email)?.Value;
-            var domain = email != null && email.Contains('@') ? email[(email.IndexOf('@') + 1)..] : null;
+            var domain = ExtractDomain(principal.FindFirst(ClaimTypes.Email)?.Value);
             if (domain == null || !_config.AllowedEmailDomains.Any(d => string.Equals(d, domain, StringComparison.OrdinalIgnoreCase)))
             {
                 return false;
@@ -502,19 +520,58 @@ public class MeshAuthGate
     }
 
     /// <summary>
-    /// Whether <paramref name="principal"/> holds at least one of <paramref name="anyOfRoles"/>, read
-    /// from a <c>groups</c> claim or the common role claim types (<see cref="ClaimTypes.Role"/>,
-    /// <c>role</c>, <c>roles</c>) as well as <see cref="ClaimsPrincipal.IsInRole"/>. Shared by
-    /// <see cref="IsPermitted"/> (<see cref="MeshAuthConfig.RequiredGroups"/>) and the
-    /// <see cref="MeshAuthConfig.DispatchRole"/> gate in <see cref="InvokeAsync"/> - both are "does this
-    /// caller hold role X", just against a different config value.
+    /// Extracts the domain half of an email-claim value for <see cref="IsPermitted"/>'s
+    /// <see cref="MeshAuthConfig.AllowedEmailDomains"/> check.
     /// </summary>
+    /// <remarks>
+    /// #181: this used to split on the first <c>@</c> with no trimming at all, which was asymmetric in
+    /// practice - leading whitespace on the value sits in the local part before the split point, so it
+    /// never touched the extracted domain, while trailing whitespace lands inside the extracted domain
+    /// and silently defeated the <see cref="string.Equals"/> match against a clean
+    /// <c>allowedEmailDomains</c> entry. It also never checked for a non-empty local part, so
+    /// <c>"@example.com"</c> - not a deliverable address - extracted <c>"example.com"</c> and passed
+    /// the domain check like any real mailbox would. <c>Trim()</c>-then-split, matching
+    /// <see cref="Benzene.Mesh.Auth.Oidc.EmailAllowlist.IsAllowed"/>'s existing discipline, and
+    /// requiring the <c>@</c> to not be the first character, fix both - matching the
+    /// <c>Benzene.Mesh.Auth.Oidc</c> package's <c>EmailAllowlist.IsAllowed</c>'s existing discipline
+    /// there (a different mesh-auth surface with the identical email-comparison concern).
+    /// </remarks>
+    private static string? ExtractDomain(string? email)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            return null;
+        }
+
+        var trimmed = email.Trim();
+        var at = trimmed.IndexOf('@');
+        return at > 0 ? trimmed[(at + 1)..] : null;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="principal"/> holds at least one of <paramref name="anyOfRoles"/>, read
+    /// from a <c>groups</c> claim plus everything <see cref="RoleClaims.IsInAnyRole"/> already reads
+    /// (<see cref="ClaimsPrincipal.IsInRole"/> and the common role claim types -
+    /// <see cref="ClaimTypes.Role"/>, <c>role</c>, <c>roles</c> - the last also expanded when it
+    /// arrives as a JSON array, Azure AD's app-roles shape). Shared by <see cref="IsPermitted"/>
+    /// (<see cref="MeshAuthConfig.RequiredGroups"/>) and the <see cref="MeshAuthConfig.DispatchRole"/>
+    /// gate in <see cref="InvokeAsync"/> - both are "does this caller hold role X", just against a
+    /// different config value.
+    /// </summary>
+    /// <remarks>
+    /// #182: this used to reimplement the role-claim-type union itself, reading each claim value
+    /// ordinally with no JSON-array expansion - so a caller whose IdP put its roles in a <c>roles</c>
+    /// claim as a JSON array (exactly the shape <see cref="RoleClaims"/> exists to normalize)
+    /// disagreed with <c>Benzene.Auth.Core.AuthorizationExtensions.RequireRole</c>'s answer for the
+    /// identical principal - one reader granted a role the other refused. Delegating to
+    /// <see cref="RoleClaims.IsInAnyRole"/> for everything except <c>groups</c> (a claim type
+    /// <see cref="RoleClaims"/> does not cover - it's this host's own proxy/OIDC-groups convention,
+    /// not a general role claim) makes the two readers agree.
+    /// </remarks>
     private static bool HasAnyRole(ClaimsPrincipal principal, IReadOnlyCollection<string> anyOfRoles)
     {
-        var granted = principal.FindAll("groups").Concat(principal.FindAll(ClaimTypes.Role))
-            .Concat(principal.FindAll("role")).Concat(principal.FindAll("roles"))
-            .Select(c => c.Value);
-        return anyOfRoles.Any(r => granted.Contains(r, StringComparer.Ordinal)) || anyOfRoles.Any(principal.IsInRole);
+        var groups = principal.FindAll("groups").Select(c => c.Value);
+        return anyOfRoles.Any(r => groups.Contains(r, StringComparer.Ordinal)) || RoleClaims.IsInAnyRole(principal, anyOfRoles);
     }
 
     /// <summary>

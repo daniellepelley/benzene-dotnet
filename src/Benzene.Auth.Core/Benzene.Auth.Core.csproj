@@ -17,4 +17,12 @@
     <ProjectReference Include="..\Benzene.Results\Benzene.Results.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- #182: Benzene.Mesh.Host's MeshAuthGate delegates its own role-claim reading to RoleClaims
+         (internal) rather than reimplementing a weaker version that disagrees on JSON-array "roles"
+         claim expansion - see MeshAuthGate.HasAnyRole. Same InternalsVisibleTo-for-a-real-dependency
+         precedent as Benzene.Results -> Benzene.Clients. -->
+    <InternalsVisibleTo Include="Benzene.Mesh.Host" />
+  </ItemGroup>
+
 </Project>

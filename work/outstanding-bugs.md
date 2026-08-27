@@ -1334,6 +1334,82 @@ already-completed work runs under `CancellationToken.None`, never the run/stop t
   cancelled token → still completes; failure + cancelled token → still abandons; handler throws +
   abandon also throws → original exception still propagates, both logged).
 
+### Tracked findings round 11, §7 Auth adapters (partial - auth-core work package)
+Ruled in [`bug-fix-designs-round11-2026-08.md`](bug-fix-designs-round11-2026-08.md) §"§7 Auth
+adapters". This covers task board #174, #176, #179, #181, #182 (`Benzene.Auth.OAuth2`,
+`Benzene.Auth.Core`, `deploy/Mesh/Benzene.Mesh.Host/MeshAuthGate.cs`); the remaining §7 findings
+(#172, #173, #175, #177, #178, #180) are a different work package's scope.
+- **[RESOLVED] #174 — `OAuth2BearerOptions.Validate()` had the same bug class as round 1's #20
+  (a non-https `Authority`/`JwksUri` with `RequireHttpsMetadata` true reached the JWKS-fetching
+  configuration manager unvalidated), plus several length-only allowlist gaps.** Fixed all in
+  `Validate()`: (1) an `http://` `Authority`/`JwksUri` is now rejected unless
+  `RequireHttpsMetadata` is explicitly `false` - mirrors `MeshAuthGate.Validate`'s existing
+  `auth.oidc.authority` check; (2) `ValidIssuers`/`ValidAudiences` now reject
+  null/whitespace/`"*"` entries (a `"*"` looked like a wildcard but `TokenValidationParameters`
+  has no such concept - it would only ever match a token whose issuer/audience claim was
+  literally `"*"`); (3) `ValidAlgorithms` now rejects `"none"` explicitly (named separately from
+  the next check, since it's RFC 8725 §3.1's canonical algorithm-confusion attack) and validates
+  every entry against a curated allowlist of the real JWS signing algorithms
+  `Microsoft.IdentityModel.Tokens.SecurityAlgorithms` defines (HS256/384/512, RS256/384/512,
+  ES256/384/512, PS256/384/512) - deliberately narrower than every string constant that class
+  exposes, since most of them (XML-dsig URIs, key-wrap, content-encryption algorithm names) are
+  never a legitimate JWT `alg` value; (4) `ClockSkew` is now capped at a new
+  `OAuth2BearerOptions.MaxClockSkew` (15 minutes) - generous enough for real multi-region NTP
+  drift, far too small to meaningfully weaken `exp`/`nbf` enforcement, unlike the unbounded value
+  before (a 10-year `ClockSkew` was previously accepted outright). Adversarial tests drive real
+  tokens through the real `UseOAuth2Bearer` entry point (not the internal `Validate()` directly) -
+  `OAuth2BearerOptionsValidationTest`, 21 new cases covering each rejection and its boundary.
+- **[RESOLVED] #176 — `MeshAuthGate`'s proxy-trust check (`trusted.Equals(peer)`) rejected
+  IPv4-mapped IPv6 peers** (`::ffff:10.0.0.5` was never treated as equal to `10.0.0.5`),
+  breaking `auth.mode: proxy` entirely on any dual-stack listener (Kestrel bound to `[::]`, the
+  container default) - fail-closed, not a bypass, but a real operability gap. Fixed by
+  normalizing both the peer and each `trustedProxies` entry through a new
+  `NormalizeForComparison` helper (`MapToIPv4()` when `IsIPv4MappedToIPv6`, else left as-is)
+  before comparing, so either written form (`10.0.0.5` or `::ffff:10.0.0.5`) matches the other.
+  Also improved the refusal message to include the observed peer address (`"Untrusted proxy
+  (peer: ...)"` - it previously named none), for production diagnosability. Adversarial tests in
+  `MeshAuthGateTest`: a peer reported as `::ffff:10.0.0.5` against a `trustedProxies` list
+  containing `10.0.0.5` is now admitted (and the mirror image); a mapped peer whose underlying
+  IPv4 genuinely isn't trusted is still refused (confirms the fix doesn't widen trust); the
+  refusal body now names the observed peer.
+- **[RESOLVED] #179 — `AuthorizationExtensions.RequirePolicy(policyName)` resolved its
+  `IAuthorizationPolicy` (a DI `GetServices<>()` + `FirstOrDefault` scan by `Name`, throwing if
+  none matched) inside the per-request middleware factory instead of once**, so a misconfigured
+  policy name surfaced only as a 500 on the first real request, and paid the DI/LINQ cost on
+  every request thereafter. The pipeline-builder architecture has no built `IServiceResolver`
+  available at the point `RequirePolicy` itself runs (unlike `UseOAuth2Bearer`, which validates
+  synchronously at that same call site because its config needs no DI resolution) - so the fix is
+  the documented fallback: the resolved policy (or the "not registered" failure) is cached in a
+  closure-scoped field after the first lookup, via double-checked locking, and reused on every
+  later invocation. A missing policy still throws every time (not cached), so the wiring error
+  keeps surfacing consistently rather than "succeeding" after the first failure. Test
+  (`AuthorizationTest.RequirePolicy_ByName_ResolvesRegisteredPolicyOnceAndReusesIt`) drives the
+  real pipeline (in-process, via `MiddlewarePipelineBuilder`/`MicrosoftServiceResolverFactory` -
+  no Kestrel host needed to observe this) through three policy-satisfying invocations and asserts
+  the by-name lookup ran exactly once.
+- **[RESOLVED] #181 — `MeshAuthGate.IsPermitted` admitted a syntactically-invalid email with an
+  empty local part (`"@example.com"`) and trimmed asymmetrically** (leading whitespace on the
+  claim value sat in the local part and never touched the extracted domain, so it was tolerated;
+  trailing whitespace landed inside the extracted domain and silently defeated the
+  `AllowedEmailDomains` match, so it wasn't). Fixed via a new `ExtractDomain` helper: `Trim()`s
+  the whole email value first (matching `Benzene.Mesh.Auth.Oidc.EmailAllowlist.IsAllowed`'s
+  existing discipline), and requires the `@` to not be the first character (a non-empty local
+  part). Adversarial tests in `MeshAuthGateTest`: `"@example.com"` is now `Forbidden`;
+  `"alice@example.com "` (trailing space) now still matches a clean `"example.com"`
+  `allowedEmailDomains` entry.
+- **[RESOLVED] #182 — two role-claim readers in the repo disagreed**:
+  `MeshAuthGate.HasAnyRole` read raw claim values ordinally with no JSON-array expansion, while
+  `Benzene.Auth.Core.RoleClaims.IsInAnyRole` (used by `AuthorizationExtensions.RequireRole`)
+  already expanded a JSON-array `roles` claim (the Azure AD app-roles shape) correctly - the same
+  principal could hold a required role by one reader's answer and not the other's.
+  `MeshAuthGate.HasAnyRole` now delegates to `RoleClaims.IsInAnyRole` for everything except the
+  `groups` claim (this host's own proxy/OIDC-groups convention, which `RoleClaims` doesn't cover
+  and isn't a general role claim), instead of reimplementing a weaker version. Required adding
+  `InternalsVisibleTo("Benzene.Mesh.Host")` to `Benzene.Auth.Core.csproj` (`RoleClaims` is
+  internal) - same production-dependency precedent as `Benzene.Results` → `Benzene.Clients`.
+  Adversarial tests in `MeshAuthGateTest`: a JSON-array `roles` claim now satisfies both
+  `RequiredGroups` and `DispatchRole` gates identically to how `RequireRole` already treated it.
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.
