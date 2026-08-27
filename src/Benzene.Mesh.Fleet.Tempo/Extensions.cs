@@ -1,5 +1,6 @@
 using Benzene.Abstractions.DI;
 using Benzene.Mesh.Collector;
+using Microsoft.Extensions.Logging;
 
 namespace Benzene.Mesh.Fleet.Tempo;
 
@@ -33,7 +34,10 @@ public static class Extensions
     {
         services.AddSingleton(options);
         services.TryAddSingleton<HttpClient>();
-        services.AddSingleton<IMeshTraceSource, TempoTraceSource>();
+        services.AddSingleton<IMeshTraceSource>(resolver => new TempoTraceSource(
+            resolver.GetService<HttpClient>(),
+            resolver.GetService<TempoTraceSourceOptions>(),
+            resolver.TryGetService<ILogger<TempoTraceSource>>()));
         services.AddSingleton<IMeshFleetReadModel, CompositeMeshFleetReadModel>();
         return services;
     }

@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Benzene.Mesh.Fleet.Tempo;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace Benzene.Mesh.Test;
@@ -217,5 +218,215 @@ public class TempoTraceSourceTest
         var flows = await source.GetRecentFlowsAsync(2);
 
         Assert.Equal(2, flows.Count);
+    }
+
+    // #188: a per-trace fetch that throws (a genuine connection-level failure - GetStringOrNullAsync only
+    // swallows a reachable-but-unsuccessful *response*) must not propagate out of GetCorrelationAsync and
+    // discard every already-fetched result. Only the throwing trace is dropped.
+    private sealed class ThrowingForOneTraceHandler : HttpMessageHandler
+    {
+        private readonly string _throwingTraceId;
+        private readonly Func<string, (HttpStatusCode, string)> _route;
+
+        public ThrowingForOneTraceHandler(string throwingTraceId, Func<string, (HttpStatusCode, string)> route)
+        {
+            _throwingTraceId = throwingTraceId;
+            _route = route;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri!.PathAndQuery;
+            if (path.StartsWith($"/api/traces/{_throwingTraceId}"))
+            {
+                // A genuine connection-level failure (timeout, DNS, refused) - not a reachable-but-
+                // unsuccessful response - so this must propagate up to the per-trace fetch exactly like a
+                // real Tempo hiccup would, for #188's isolation to matter.
+                throw new HttpRequestException("simulated Tempo connection failure");
+            }
+
+            var (status, body) = _route(path);
+            return Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent(body) });
+        }
+    }
+
+    [Fact]
+    public async Task GetCorrelationAsync_IsolatesAPerTraceFetchFailure_AndKeepsTheRest()
+    {
+        // #188: 3 matched traces, the middle one's per-trace fetch throws. The old sequential foreach had
+        // no try/catch, so this exception would propagate out of GetCorrelationAsync entirely and the
+        // composite's own fetch-isolation would degrade the WHOLE correlation to null - losing t-a and
+        // t-c's already-fetched results too. Per-trace isolation must return the other 2 (N-1), not 0.
+        const string correlationId = "ticket-42";
+        var search = """
+        { "traces": [
+            { "traceID": "t-a", "startTimeUnixNano": "1500000000000000000" },
+            { "traceID": "t-b", "startTimeUnixNano": "1500000050000000000" },
+            { "traceID": "t-c", "startTimeUnixNano": "1500000100000000000" }
+        ] }
+        """;
+        var handler = new ThrowingForOneTraceHandler("t-b", path =>
+        {
+            if (path.StartsWith("/api/search"))
+            {
+                return (HttpStatusCode.OK, search);
+            }
+
+            var isA = path.Contains("t-a");
+            return (HttpStatusCode.OK, TraceBody(
+                isA ? "orders:create" : "billing:charge",
+                "ok",
+                isA ? "orders-api" : "billing-api",
+                correlationId));
+        });
+        var source = new TempoTraceSource(new HttpClient(handler), new TempoTraceSourceOptions(TempoUrl));
+
+        var view = await source.GetCorrelationAsync(correlationId);
+
+        Assert.NotNull(view);
+        Assert.Equal(2, view!.Traces.Count); // t-b dropped, t-a and t-c kept - not zero
+        Assert.DoesNotContain(view.Traces, t => t.TraceId == "t-b");
+        Assert.Contains(view.Traces, t => t.TraceId == "t-a");
+        Assert.Contains(view.Traces, t => t.TraceId == "t-c");
+    }
+
+    [Fact]
+    public async Task GetCorrelationAsync_LogsAWarning_WhenAPerTraceFetchFails()
+    {
+        const string correlationId = "ticket-42";
+        var search = """{ "traces": [ { "traceID": "t-a" }, { "traceID": "t-b" } ] }""";
+        var handler = new ThrowingForOneTraceHandler("t-b", path => path.StartsWith("/api/search")
+            ? (HttpStatusCode.OK, search)
+            : (HttpStatusCode.OK, TraceBody("orders:create", "ok", "orders-api", correlationId)));
+        var logger = new RecordingLogger();
+        var source = new TempoTraceSource(new HttpClient(handler), new TempoTraceSourceOptions(TempoUrl), logger);
+
+        await source.GetCorrelationAsync(correlationId);
+
+        Assert.Contains(logger.Messages, m => m.Contains("t-b", StringComparison.Ordinal));
+    }
+
+    // #188: every per-trace fetch blocks until ALL of them have arrived, then all unblock together. This
+    // is only satisfiable if the correlation fetch fans the requests out concurrently (BoundedFanOut) - a
+    // sequential `foreach await` would issue the second fetch only after the first completes, which never
+    // happens here, so a regression to sequential deadlocks this test instead of passing it. The outer
+    // Task.WhenAny/Delay is a deadlock guard, not a timing assertion.
+    private sealed class GatedConcurrencyHandler : HttpMessageHandler
+    {
+        private readonly string _searchBody;
+        private readonly int _expectedConcurrentRequests;
+        private int _arrived;
+        private readonly TaskCompletionSource _allArrived = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public GatedConcurrencyHandler(string searchBody, int expectedConcurrentRequests)
+        {
+            _searchBody = searchBody;
+            _expectedConcurrentRequests = expectedConcurrentRequests;
+        }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri!.PathAndQuery;
+            if (path.StartsWith("/api/search"))
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(_searchBody) };
+            }
+
+            if (Interlocked.Increment(ref _arrived) == _expectedConcurrentRequests)
+            {
+                _allArrived.TrySetResult();
+            }
+
+            await _allArrived.Task; // only resolves once every expected fetch has arrived
+
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{ "batches": [] }""") };
+        }
+    }
+
+    [Fact]
+    public async Task GetCorrelationAsync_FetchesMatchedTracesConcurrently_NotSequentially()
+    {
+        var search = """{ "traces": [ { "traceID": "t-a" }, { "traceID": "t-b" }, { "traceID": "t-c" } ] }""";
+        var handler = new GatedConcurrencyHandler(search, expectedConcurrentRequests: 3);
+        var options = new TempoTraceSourceOptions(TempoUrl); // SearchConcurrency default (8) >= 3
+        var source = new TempoTraceSource(new HttpClient(handler), options);
+
+        var task = source.GetCorrelationAsync("ticket-1");
+        var completed = await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(5)));
+
+        Assert.Same(task, completed); // did not deadlock - all 3 fetches were in flight together
+    }
+
+    [Fact]
+    public async Task GetCorrelationAsync_UsesTheConfiguredCorrelationSearchLimit()
+    {
+        // #190: the search's `limit` query param comes from options, not a hardcoded 100.
+        var handler = new RoutingHandler(path =>
+        {
+            if (path.StartsWith("/api/search"))
+            {
+                Assert.Contains("&limit=42", path);
+            }
+
+            return (HttpStatusCode.OK, """{ "traces": [] }""");
+        });
+        var options = new TempoTraceSourceOptions(TempoUrl) { CorrelationSearchLimit = 42 };
+        var source = new TempoTraceSource(new HttpClient(handler), options);
+
+        await source.GetCorrelationAsync("ticket-1");
+    }
+
+    [Fact]
+    public async Task GetCorrelationAsync_LogsAWarning_WhenTheSearchReturnsExactlyTheConfiguredLimit()
+    {
+        // #190: exactly CorrelationSearchLimit matches means Tempo's /api/search - which has no further
+        // paging - may have more matches beyond the limit that were never returned. Logged, not silent
+        // (X-Ray's #77 at-limit warning, same rationale).
+        var search = """{ "traces": [ { "traceID": "t-a" }, { "traceID": "t-b" } ] }""";
+        var handler = new RoutingHandler(path => path.StartsWith("/api/search")
+            ? (HttpStatusCode.OK, search)
+            : (HttpStatusCode.OK, TraceBody("orders:create", "ok", "orders-api")));
+        var options = new TempoTraceSourceOptions(TempoUrl) { CorrelationSearchLimit = 2 };
+        var logger = new RecordingLogger();
+        var source = new TempoTraceSource(new HttpClient(handler), options, logger);
+
+        await source.GetCorrelationAsync("ticket-1");
+
+        Assert.Contains(logger.Messages, m => m.Contains("CorrelationSearchLimit", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task GetCorrelationAsync_DoesNotWarn_WhenBelowTheConfiguredLimit()
+    {
+        var search = """{ "traces": [ { "traceID": "t-a" } ] }""";
+        var handler = new RoutingHandler(path => path.StartsWith("/api/search")
+            ? (HttpStatusCode.OK, search)
+            : (HttpStatusCode.OK, TraceBody("orders:create", "ok", "orders-api")));
+        var options = new TempoTraceSourceOptions(TempoUrl) { CorrelationSearchLimit = 100 };
+        var logger = new RecordingLogger();
+        var source = new TempoTraceSource(new HttpClient(handler), options, logger);
+
+        await source.GetCorrelationAsync("ticket-1");
+
+        Assert.Empty(logger.Messages);
+    }
+
+    // A minimal ILogger that records formatted messages, for asserting on warning logs without pulling in
+    // a mocking framework's extension-method plumbing for ILogger (mirrors XRayTraceSourceTest).
+    private sealed class RecordingLogger : ILogger
+    {
+        public List<string> Messages { get; } = new();
+
+        public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
+
+        private sealed class NullScope : IDisposable
+        {
+            public static readonly NullScope Instance = new();
+            public void Dispose() { }
+        }
     }
 }

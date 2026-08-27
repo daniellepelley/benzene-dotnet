@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Benzene.Mesh.Fleet.Jaeger;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace Benzene.Mesh.Test;
@@ -237,5 +238,94 @@ public class JaegerTraceSourceTest
 
         Assert.Same(task, completed); // did not deadlock - all 3 requests were in flight together
         Assert.Empty(await task);
+    }
+
+    // #189: a per-service search that throws (a genuine connection-level failure, not merely a reachable-
+    // but-unsuccessful response) must not fault the whole BoundedFanOut call and discard the other
+    // services' already-fetched traces. Isolation lives in the call-site lambda (SearchAcrossServicesAsync),
+    // not in BoundedFanOut itself, per the ruling's rejected-alternative.
+    private sealed class ThrowingForOneServiceHandler : HttpMessageHandler
+    {
+        private readonly string _throwingService;
+        private readonly Func<string, (HttpStatusCode, string)> _route;
+
+        public ThrowingForOneServiceHandler(string throwingService, Func<string, (HttpStatusCode, string)> route)
+        {
+            _throwingService = throwingService;
+            _route = route;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri!.PathAndQuery;
+            if (ServiceOf(path) == _throwingService)
+            {
+                // A genuine connection-level failure (timeout, DNS, refused) - not a reachable-but-
+                // unsuccessful response - so this must propagate out of the per-service GET exactly like a
+                // real Jaeger hiccup would, for #189's isolation to matter.
+                throw new HttpRequestException("simulated Jaeger connection failure");
+            }
+
+            var (status, body) = _route(path);
+            return Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent(body) });
+        }
+    }
+
+    [Fact]
+    public async Task GetRecentFlowsAsync_IsolatesAPerServiceSearchFailure_AndKeepsTheRest()
+    {
+        // 3 services, the middle one's search throws. Task.WhenAll semantics would otherwise fault the
+        // whole fan-out and lose orders-api's and shipping-api's already-fetched traces too - isolation
+        // must return the other 2 services' traces (N-1), not zero.
+        var threeServices = new[] { "orders-api", "billing-api", "shipping-api" };
+        var handler = new ThrowingForOneServiceHandler("billing-api", path => ServiceOf(path) switch
+        {
+            "orders-api" => (HttpStatusCode.OK, Data(Trace("t-a", "orders-api", "orders:create", "ok"))),
+            "shipping-api" => (HttpStatusCode.OK, Data(Trace("t-c", "shipping-api", "shipping:dispatch", "ok"))),
+            _ => (HttpStatusCode.OK, Data())
+        });
+        var options = new JaegerTraceSourceOptions(JaegerUrl) { Services = threeServices };
+        var source = new JaegerTraceSource(new HttpClient(handler), options);
+
+        var flows = await source.GetRecentFlowsAsync(20);
+
+        Assert.Equal(2, flows.Count); // billing-api's search failed and was dropped, not the whole list
+        Assert.Contains(flows, t => t.TraceId == "t-a");
+        Assert.Contains(flows, t => t.TraceId == "t-c");
+    }
+
+    [Fact]
+    public async Task GetRecentFlowsAsync_LogsAWarning_WhenAPerServiceSearchFails()
+    {
+        var services = new[] { "orders-api", "billing-api" };
+        var handler = new ThrowingForOneServiceHandler("billing-api", path => ServiceOf(path) == "orders-api"
+            ? (HttpStatusCode.OK, Data(Trace("t-a", "orders-api", "orders:create", "ok")))
+            : (HttpStatusCode.OK, Data()));
+        var options = new JaegerTraceSourceOptions(JaegerUrl) { Services = services };
+        var logger = new RecordingLogger();
+        var source = new JaegerTraceSource(new HttpClient(handler), options, logger);
+
+        await source.GetRecentFlowsAsync(20);
+
+        Assert.Contains(logger.Messages, m => m.Contains("billing-api", StringComparison.Ordinal));
+    }
+
+    // A minimal ILogger that records formatted messages, for asserting on warning logs without pulling in
+    // a mocking framework's extension-method plumbing for ILogger (mirrors XRayTraceSourceTest).
+    private sealed class RecordingLogger : ILogger
+    {
+        public List<string> Messages { get; } = new();
+
+        public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
+
+        private sealed class NullScope : IDisposable
+        {
+            public static readonly NullScope Instance = new();
+            public void Dispose() { }
+        }
     }
 }
