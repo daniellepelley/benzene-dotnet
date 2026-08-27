@@ -14,7 +14,9 @@ defense-in-depth for endpoints that would otherwise ship with no protection at a
 ### Integration with Benzene
 Add it to the pipeline **before** whatever it should protect. A message the limiter rejects
 short-circuits with a `TooManyRequests` result — HTTP 429 through the standard status mapping —
-including the limiter's retry-after hint when available.
+including the limiter's retry-after hint (both in the error message and as a standard
+`Retry-After` response header) when available, and a logged warning when an `ILogger` is
+registered.
 
 ```csharp
 app.UseBenzeneMessage(x => x
@@ -38,5 +40,19 @@ optional per-message permit cost:
 
 ```csharp
 .UseRateLimiting(new SlidingWindowRateLimiter(new SlidingWindowRateLimiterOptions { ... }))
-.UseRateLimiting(myPartitionedLimiter, (resolver, context) => CostOf(context))
+.UseRateLimiting(myLimiter, (resolver, context) => CostOf(context))
 ```
+
+By default every entry point above shares **one limiter across every caller** — one abusive caller
+can exhaust the whole budget for everyone else. Give each caller its own share with a
+`PartitionedRateLimiter` instead:
+
+```csharp
+var perCaller = PartitionedRateLimiter.Create<TContext, string>(context =>
+    RateLimitPartition.GetTokenBucketLimiter(KeyOf(context), _ => new TokenBucketRateLimiterOptions { ... }));
+
+.UsePartitionedRateLimiting(perCaller, context => KeyOf(context))
+```
+
+A caller-supplied partition key (an API key, an unauthenticated claim) is spoofable, but strictly
+better than one shared limiter — see the full docs site for the full trade-off.

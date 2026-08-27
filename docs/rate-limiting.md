@@ -32,7 +32,9 @@ app.UseBenzeneMessage(x => x
 
 A message over the limit never reaches the protected middleware: it short-circuits with a
 `too-many-requests` result, which the standard status mapping serves as **HTTP 429**, with the
-limiter's retry-after hint in the error message when the limiter provides one:
+limiter's retry-after hint in both the error message and a standard `Retry-After` response header
+when the limiter provides one (not every limiter does — `SlidingWindowRateLimiter` never supplies
+it):
 
 ```json
 { "status": "too-many-requests", "errors": ["Rate limit exceeded; retry after 42s"] }
@@ -40,6 +42,38 @@ limiter's retry-after hint in the error message when the limiter provides one:
 
 Nothing is ever queued — a protective limiter that queues requests just moves the resource
 exhaustion into memory — so rejection is immediate.
+
+A rejection is also logged (a structured warning naming the limiter and the message's cost) when
+an `ILogger` is available in the pipeline's DI container — there is nothing else to configure.
+
+### One shared limiter — or one per caller
+
+Every entry point above shares **one limiter across every caller**: an accidental retry storm (or a
+deliberate abuser) from a single caller can exhaust the whole budget and start rejecting every other
+caller too. `UsePartitionedRateLimiting` gives each caller its own share instead, keyed however you
+derive it from the message — an IP, an API key, a tenant claim:
+
+```csharp
+var perCaller = PartitionedRateLimiter.Create<BenzeneMessageContext, string>(context =>
+    RateLimitPartition.GetTokenBucketLimiter(
+        ApiKeyOf(context),
+        _ => new TokenBucketRateLimiterOptions
+        {
+            TokenLimit = 100,
+            TokensPerPeriod = 100,
+            ReplenishmentPeriod = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+            AutoReplenishment = true,
+        }));
+
+app.UsePartitionedRateLimiting(perCaller, context => ApiKeyOf(context)); // second arg: for log lines only
+```
+
+**Honesty note:** a caller-supplied key (an API key header, an unauthenticated claim) is spoofable —
+a caller who can vary it can always get a fresh share. It is still strictly better than the
+one-shared-limiter default: defeating it costs an attacker active effort, where the default costs
+them nothing. A key derived from something the caller can't freely choose (an authenticated
+identity, the peer IP a trusted proxy set) isn't spoofable this way at all.
 
 ## Limiting by payload size
 
@@ -55,13 +89,27 @@ body's size in UTF-8 bytes** (a bodyless message costs 1) — a bytes-per-second
     replenishmentPeriod: TimeSpan.FromSeconds(1))
 ```
 
-A single payload larger than `maxBurstBytes` can never be granted and is always rejected.
+A single payload larger than `maxBurstBytes` can never be granted and is always rejected. When the
+transport reports a `Content-Length` header already over `maxBurstBytes`, that declared size is
+used as the cost directly, rejecting without reading/measuring the (already-buffered) body.
+
+> **This is a rate bound, not a memory bound.** On ASP.NET Core hosts, Benzene reads the whole
+> request body into memory **before** any message-pipeline middleware runs (`UseBufferedRequestBody`
+> is unconditional) — so by the time this middleware's cost delegate sees the body, the allocation
+> it exists to bound has already happened. The `Content-Length` pre-check above is a real but
+> partial mitigation: it saves a full-body byte count on this middleware's own side for a well-behaved
+> oversized request, but it does **not** stop the earlier buffering, and does nothing for a
+> `Content-Length`-less streamed body. What this middleware actually bounds is the *rate* of
+> oversized/many payloads reaching the handler and further downstream work — not the peak memory a
+> single oversized request costs the process. If payload size is a real memory-exhaustion concern for
+> an endpoint, put a host-level cap in front of it as well (Kestrel's `MaxRequestBodySize`, or a
+> gateway body-size limit) — this middleware alone does not provide one.
 
 ## Bring your own limiter
 
 Every built-in above is sugar over the same seam: any `System.Threading.RateLimiting.RateLimiter`
-plugs in — sliding window, concurrency, a `PartitionedRateLimiter` wrapped to a single partition,
-or your own subclass — with an optional per-message permit cost:
+plugs in — sliding window, concurrency, or your own subclass — with an optional per-message permit
+cost:
 
 ```csharp
 .UseRateLimiting(new SlidingWindowRateLimiter(new SlidingWindowRateLimiterOptions
@@ -89,3 +137,4 @@ across the rest of the pipeline and released when the message completes.
 | `UsePayloadSizeRateLimiting(maxBurstBytes, bytesPerPeriod, replenishmentPeriod)` | `TokenBucketRateLimiter` | payload bytes |
 | `UseRateLimiting(rateLimiter)` | bring your own | 1 permit per message |
 | `UseRateLimiting(rateLimiter, permitCost)` | bring your own | bring your own |
+| `UsePartitionedRateLimiting(partitionedLimiter, ...)` | bring your own `PartitionedRateLimiter<TContext>` | one share per partition key, bring your own cost |

@@ -1334,6 +1334,111 @@ already-completed work runs under `CancellationToken.None`, never the run/stop t
   cancelled token → still completes; failure + cancelled token → still abandons; handler throws +
   abandon also throws → original exception still propagates, both logged).
 
+### Round 11, `Benzene.RateLimiting` hardening (#133–#138, #142, #143) — done
+Design/rationale in [`bug-fix-designs-round11-2026-08.md`](bug-fix-designs-round11-2026-08.md)
+§"§3 Rate Limiting + Cache" (rate-limiting half). All eight findings landed in one work package;
+`RateLimitingMiddlewareBase<TContext>` now holds the shared cost-validation/rejection/logging logic
+for both `RateLimitingMiddleware<TContext>` and the new `PartitionedRateLimitingMiddleware<TContext>`.
+- **[RESOLVED] #133** — the three convenience `UseFixedWindowRateLimiting`/`UseTokenBucketRateLimiting`/
+  `UsePayloadSizeRateLimiting` entry points created an `AutoReplenishment = true` limiter (a live
+  `Timer`) that nothing ever disposed — a leak per pipeline build. A middleware-level `ownsLimiter`
+  flag alone cannot fix this: a fresh `RateLimitingMiddleware<TContext>` wrapper is constructed per
+  message (see `MiddlewarePipeline<TContext>`'s own remarks), so whichever per-message instance
+  disposed the *shared* underlying `RateLimiter` first would break every later message. The actual
+  fix (`Extensions.UseInternallyOwnedRateLimiting`, private) registers the limiter with the DI
+  container via a **factory** registration (`x.AddSingleton<RateLimiter>(_ => rateLimiter)`, never a
+  pre-built instance) — the same convention this codebase already relies on for other
+  container-created disposables (`RabbitMqConnectionProvider`, `MeshAnnouncer`): a compliant
+  container disposes a singleton it constructed itself when the container is disposed, but never an
+  externally-supplied instance. `RateLimitingMiddleware<TContext>` still carries the `ownsLimiter`
+  flag and implements `IAsyncDisposable` (disposing only when it's `true`) so a caller managing a
+  middleware instance's lifetime directly gets correct semantics too, and so ownership is explicit
+  at the type level — but the DI registration is what actually closes the leak in the pipeline's
+  normal, unmodified lifecycle. Stacking two internally-created limiters on one pipeline is not
+  supported (both would silently collide on the same `RateLimiter` DI key) — this now fails fast
+  with `InvalidOperationException` instead of letting the second shadow the first; combine limits
+  into one `RateLimiter` and use `UseRateLimiting`, or use `UsePartitionedRateLimiting`. Test:
+  `RateLimitingPipelineTest.InternallyCreatedLimiter_IsDisposedWhenTheContainerIsDisposed` (drives one
+  message through, then disposes the container-owning `MicrosoftServiceResolverFactory` and asserts
+  the resolved `RateLimiter` now throws `ObjectDisposedException`) and
+  `StackingTwoInternallyCreatedLimiters_OnOnePipeline_FailsFast`.
+- **[RESOLVED] #134** — a caller-disposed BYO limiter turned every subsequent message into an
+  unhandled `ObjectDisposedException`. `RateLimitingMiddlewareBase<TContext>.HandleAsync` now catches
+  `ObjectDisposedException` alongside the existing `ArgumentOutOfRangeException`, failing **CLOSED**
+  with the same `TooManyRequests` rejection every other denial gets (never silently failing open —
+  documented as the deliberate choice in the base class's XML doc). Test:
+  `BringYourOwnLimiter_AlreadyDisposed_FailsClosedInsteadOfCrashing`.
+- **[RESOLVED] #135** — `UsePayloadSizeRateLimiting` cannot bound memory: the cost delegate runs
+  after ASP.NET Core's `UseBufferedRequestBody()` has already buffered the whole body, unconditionally
+  and before any message-pipeline middleware runs. **Partial fix, scope deliberately narrowed** — see
+  the amended finding text in `bug-fix-designs-round11-2026-08.md` and the `[DECISION]` below for the
+  residual gap this leaves open. Shipped: (1) a `Content-Length` pre-check — when the transport
+  reports one (via `IMessageHeadersGetter<TContext>`) and it already exceeds `maxBurstBytes`, the
+  cost delegate rejects on the declared size directly, without reading/measuring the
+  already-buffered body; (2) the XML doc on `UsePayloadSizeRateLimiting`, `docs/rate-limiting.md`,
+  and the capability matrix now say plainly that this is a rate bound, not a memory bound, and name
+  the residual gap (no `Content-Length` means no protection at all, and the buffering itself is
+  never prevented). Test: `PayloadSizeLimiting_DeclaredContentLengthOverTheBucket_RejectsWithoutReadingTheBody`.
+- **[RESOLVED] #136** — partitioned-limiter support was documented in four places, didn't compile
+  (`PartitionedRateLimiter<T>` cannot convert to `RateLimiter`), and didn't exist. Implemented for
+  real rather than striking the docs: `PartitionedRateLimitingMiddleware<TContext>` +
+  `UsePartitionedRateLimiting` over a caller-supplied `PartitionedRateLimiter<TContext>` (the
+  partition-key selector is baked into the limiter by the caller via
+  `PartitionedRateLimiter.Create<TContext,TKey>`; this middleware just calls
+  `AttemptAcquire(context, cost)`, letting the partitioner read whatever it needs off the message).
+  Always BYO — there is no built-in convenience entry point, since the partition key is inherently
+  caller-specific — so its disposal defaults to caller-owned, matching `UseRateLimiting`. Documented,
+  everywhere the capability is claimed, that a client-supplied key is spoofable but still strictly
+  better than the single shared limiter every other entry point defaults to (an attacker must expend
+  active effort to defeat it, versus zero effort to exhaust a shared limiter today). Test:
+  `PartitionedLimiter_OneAbusivePartition_DoesNotStarveTheOther` (an "abuser" partition is throttled
+  after 1 message while a "victim" partition keyed differently sails through).
+- **[RESOLVED] #137** — 429 responses never carried `Retry-After` despite the limiter supplying
+  `RETRY_AFTER` lease metadata on the non-queuing path. `RateLimitingMiddlewareBase<TContext>` now
+  reads the metadata and sets the standard `Retry-After` response header via
+  `IBenzeneResponseAdapter<TContext>` (best-effort — resolved via `TryGetService`, so a transport
+  with no response-header concept simply skips it), matching the pattern already used in
+  `MeshRefreshGuardMiddleware`/`MeshDispatchGuardMiddleware`. `SlidingWindowRateLimiter` never
+  supplies the metadata, so it never gets the header — documented, not a bug. Test:
+  `OverTheLimit_SetsRetryAfterHeaderFromTheLease`.
+- **[RESOLVED] #138** — rate-limit rejections were completely unobservable. `RateLimitingMiddlewareBase<TContext>`
+  now takes an optional `ILogger` (resolved via `TryGetService` in `Extensions.cs`, so it's a no-op
+  when nothing is registered) and logs a structured warning on every rejection, naming the limiter
+  type (or `"partitioned, partition=<key>"` when a partition-key-for-logging selector was supplied)
+  and the rejection detail (which now also carries the cost/disposal distinction from #142/#134).
+- **[RESOLVED] #142** — the oversized-payload rejection (the `ArgumentOutOfRangeException` path)
+  gave a bare `"Rate limit exceeded"`, indistinguishable from a normal throttle. It now reads
+  `"Rate limit exceeded: the message's cost is invalid, or exceeds the limiter's capacity and can
+  never be granted"`. Test: `PayloadSizeLimiting_RejectsAPayloadLargerThanTheBucket` (asserts the
+  distinguishing substring).
+- **[RESOLVED] #143** — `Math.Max(0, cost)` silently clamped a negative cost to 0 (always granting
+  it, hiding a caller bug in the cost delegate), and the cost delegate ran outside the `try` block so
+  a throwing delegate escaped unhandled and bypassed the limiter entirely. Fixed:
+  `RateLimitingMiddlewareBase<TContext>` now validates `cost >= 0` explicitly, throwing
+  `ArgumentOutOfRangeException` for a negative cost (routed through the same #142 rejection path as
+  any other invalid cost, rather than a second bespoke path) instead of clamping; the cost delegate
+  invocation moved inside the same `try` as the acquire call, so a delegate that throws for any other
+  reason still propagates unhandled (a genuine bug, not a rate-limit decision — it must reach the
+  app's own exception handling, not be silently swallowed into a 429). Tests:
+  `BringYourOwnCost_NegativeCost_IsRejectedRatherThanSilentlyGranted`,
+  `BringYourOwnCost_ThrowingDelegate_PropagatesRatherThanBypassingTheLimiter`.
+
+**[DECISION] #135 residual gap — payload-size limiting still cannot prevent the upstream buffering.**
+The Content-Length pre-check above is a genuine, shipped improvement, but it runs inside
+`Benzene.RateLimiting`'s own middleware, which is structurally downstream of `Benzene.AspNet.Core`'s
+`BenzeneExtensions.cs` calling `pipeline.UseBufferedRequestBody()` unconditionally before any
+caller-supplied middleware runs. No change inside `Benzene.RateLimiting` can run earlier than that.
+Closing this fully needs one of: (a) an async, stream-aware cost delegate evaluated before
+buffering — a larger redesign of this middleware's synchronous `Func<IServiceResolver, TContext,
+int>` cost shape, or (b) making `UseBufferedRequestBody()`'s placement conditional in
+`Benzene.AspNet.Core` (a different package, out of this work package's scope and file footprint —
+touching it risked colliding with sibling round-11 work packages editing other files in the same
+build). Until one of those lands, the honest position (now documented in the XML doc,
+`docs/rate-limiting.md`, and the capability matrix) is: this middleware bounds the *rate* of
+oversized payloads reaching the handler, not the peak memory a single request costs the process: a
+genuine memory bound for a payload-size-sensitive endpoint still needs a host-level cap in front of
+Benzene entirely (Kestrel's `MaxRequestBodySize`, a gateway body-size limit).
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.
