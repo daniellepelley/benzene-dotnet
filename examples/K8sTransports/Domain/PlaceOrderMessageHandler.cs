@@ -21,8 +21,7 @@ public record OrderPlaced(string OrderId, string Status);
 /// That's deliberate - it's what "write the handler once, reach it from whichever transport carries
 /// the traffic you actually have, without standing up a separate service per transport" means in
 /// practice, not just as a slogan. See <c>docs/getting-started-kubernetes.md</c> for the full
-/// walkthrough, and <c>App/HttpStartup.cs</c> / <c>App/WorkerStartup.cs</c> for how one process hosts
-/// all three.
+/// walkthrough, and <c>App/Startup.cs</c> for how one process hosts all three.
 /// </summary>
 [Message("order-place")]
 [HttpEndpoint("POST", "/orders")]

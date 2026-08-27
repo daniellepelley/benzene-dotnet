@@ -63,6 +63,44 @@ first). **[PERF]** performance hygiene, not a correctness bug. **[RESOLVED]** ve
 > archived, stamped with the landing commits and the re-verified baseline); consult it before touching
 > any of this code again so a decision made here doesn't get silently re-litigated.
 
+> **Tracked findings rounds 12–13 (WP-4 — Examples truth, #193–#196) — fixed.** Design decisions,
+> rationale, and rejected alternatives are ruled in
+> [`bug-fix-rulings-round12-13-2026-08.md`](bug-fix-rulings-round12-13-2026-08.md) §2 WP-4; consult it
+> before touching this code again. The companion work packages (WP-1/2/3/5) covering the rest of
+> rounds 12–13 land separately.
+> - **[RESOLVED] Examples solution membership (#193)** — `examples/Cqrs/**` and
+>   `examples/K8sTransports/**` were never members of `Benzene.Examples.sln`, so a compile break in
+>   either was invisible to anyone building the examples solution. Added both (`Benzene.Example.Cqrs`,
+>   `Benzene.Examples.K8sTransports.App`, `Benzene.Examples.K8sTransports.Domain`) as proper solution
+>   items, mirroring the `Cloudflare` folder's structure (solution folder + project GUID +
+>   `ProjectConfigurationPlatforms` + `NestedProjects` entries). Explicit `AGENTS.md` solution-edit
+>   approval is the ruling doc itself.
+> - **[RESOLVED] Broken Cloudflare worker dependency (#194)** — `examples/Cloudflare/worker/package.json`
+>   pinned `@cloudflare/containers` to `^0.0.15`, a version whose published tarball ships no `dist/`
+>   while its own `package.json` `exports` points at `./dist/index.js`. Bumped to `^0.3.7` (current
+>   `latest` on the npm registry at fix time, checked via `npm view @cloudflare/containers versions`);
+>   confirmed the shipped tarball contains `dist/` and that its exported `Container`/`getContainer` API
+>   is unchanged from what `src/index.ts` uses. `npm install` and
+>   `npx wrangler deploy --dry-run --containers-rollout=none` (the `--containers-rollout=none` flag
+>   only skips the Docker-build step this sandbox can't run; the Worker bundling/config-parsing/binding
+>   resolution wrangler normally does on a real dry-run all completed cleanly) both verified locally.
+> - **[RESOLVED] `wrangler.toml` schema drift (#195)** — the deprecated `[containers.configuration]` /
+>   `instance_type` block (current wrangler warns `"containers.configuration" is deprecated` and
+>   rejects `instance_type` as an unexpected field, confirmed by re-adding the block to a scratch copy
+>   and re-running the dry-run) also diverged from `docs/getting-started-cloudflare.md`'s worked
+>   example, which has no such block. Removed the block so the example matches the guide (the guide is
+>   the reference). `npx wrangler deploy --dry-run --containers-rollout=none` now completes with no
+>   deprecation warning.
+> - **[RESOLVED] Phantom files in doc comment (#196)** —
+>   `examples/K8sTransports/Domain/PlaceOrderMessageHandler.cs`'s doc comment pointed a reader at
+>   `App/HttpStartup.cs` and `App/WorkerStartup.cs`, neither of which exists (only `App/Startup.cs`
+>   does). Fixed the doc comment to point at the real file.
+> - **[RESOLVED] Dead CQRS request types** — `CreateTenantRequest`/`CreateUserRequest`
+>   (`examples/Cqrs/Benzene.Example.Cqrs/Domain/Commands.cs`) were never dispatched anywhere (grep
+>   confirmed the only references were their own declarations) and confusing precisely because this is
+>   a CQRS example meant to be copied; the write side calls `Tenants.Add`/`Users.Add` directly instead.
+>   Deleted the file.
+
 ---
 
 ## Resolved since the prior triage (verified in current source)
