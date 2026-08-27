@@ -313,7 +313,8 @@ application that owns the invocation:
 |---|---|---|
 | AWS Lambda SQS (`SqsApplication`) | catch per record → batch-item-failure | **Yes** — `Error` "Processing SQS message {id} failed" |
 | AWS Lambda SNS (`SnsApplication`) | catch when `CatchExceptions` | **Yes** — `Error` (when catching) |
-| AWS Lambda DynamoDb / Kinesis | catch → checkpoint/stop | **Yes** — `Error` per record |
+| AWS Lambda DynamoDb | catch → checkpoint/stop | **Yes** — `Error` per record |
+| AWS Lambda Kinesis (fan-in — no per-record `MessageResult`, see [Kinesis](getting-started-aws.md#kinesis-streaming)) | catch → checkpoint/stop | **Yes** — `Error` for the batch |
 | AWS Lambda S3 / EventBridge / Kafka | **no catch** — propagates to the Lambda host | Only the Lambda runtime's raw error (no Benzene context; whole invocation fails) |
 | Self-hosted SQS / Kafka / RabbitMQ / Event Hub / Cosmos / HTTP workers | catch per message → ack/nack | **Yes** — `Error` per message |
 | Self-hosted Azure Service Bus (`BenzeneServiceBusWorker`) | catch → abandon + rethrow | **Yes** — `Error` per message with the message id, plus the receive-side error handler |

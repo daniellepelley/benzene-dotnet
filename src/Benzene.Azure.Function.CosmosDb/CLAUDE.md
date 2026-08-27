@@ -54,6 +54,21 @@ app.UseCosmosDbChangeFeed<OrderDocument>(feed => feed
     }));
 ```
 
+## Settlement: no null/failure-result axis here — signal failure by throwing
+Unlike every fan-**out** transport in `work/settlement-consistency-fix-plan.md` §1 (rows 1-18), this
+package has no per-document `MessageResult`/failure-result axis to have a settlement policy about: the
+whole batch is handed to one handler as a `StreamContext<TDocument>`, and nothing inspects a
+per-document result. **Returning a `BenzeneResult` failure from inside a stream handler does nothing**
+— there is no result setter reading it and nothing that escalates it. The only way to signal a failure
+here is to **throw** — the exception propagates (no catch-and-continue, no partial-checkpoint response
+shape the way Kinesis's `ReportBatchItemFailures` has), so the trigger's lease stays put and the
+runtime redelivers the whole batch. There is no per-document resume token to withhold, unlike Kinesis's
+checkpointer (see "No checkpointer type" above) — a batch either checkpoints as a whole on success or
+doesn't checkpoint at all.
+
+This is a documentation clarification, not a behavior change (Batch 3 of
+`work/settlement-consistency-fix-plan.md` — see row 20 of its §1 table).
+
 ## Declared triggers (source-generated)
 Instead of hand-writing the `[Function]`/`[…Trigger]` class, declare the trigger and let
 Benzene's source generator (shipped in `Benzene.Azure.Function.Core`) emit it:
