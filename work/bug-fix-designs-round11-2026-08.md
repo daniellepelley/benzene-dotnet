@@ -107,11 +107,25 @@ capabilities (Idempotency/Outbox/Claim Check) each having one.
   the ASP.NET host has already buffered the whole body (`UseBufferedRequestBody()` is unconditional and
   runs before the caller's pipeline), so the limiter throttles only after the allocation it exists to
   prevent.
+  **[Fix-round scope, recorded 2026-08-26]** Shipped as a deliberately partial fix: a `Content-Length`
+  pre-check (reject on the declared size, without reading/measuring the already-buffered body, when
+  the transport reports the header) plus documentation everywhere the capability is claimed making
+  clear this is a rate bound, not a memory bound. Preventing the upstream buffering itself would
+  require either an async/stream-aware cost delegate (a larger redesign of this middleware) or making
+  `Benzene.AspNet.Core`'s `UseBufferedRequestBody()` placement conditional (a different package,
+  out of `Benzene.RateLimiting`'s file footprint and this work package's scope — risked colliding
+  with sibling round-11 work packages editing other files in the same build). Residual gap recorded
+  as a `[DECISION]` in `work/outstanding-bugs.md`.
 - **#136** — partitioned-limiter support is documented in four places (README, CLAUDE.md,
   `docs/rate-limiting.md`, capability matrix), doesn't compile (verified — `PartitionedRateLimiter<T>`
   cannot convert to `RateLimiter`), and doesn't exist: there is no partition key anywhere, so one
   limiter is shared by every caller. One abusive client denies every legitimate one — the opposite of
   the component's purpose.
+  **[Fix-round scope, recorded 2026-08-26]** Implemented for real (the preferred option): a new
+  `PartitionedRateLimitingMiddleware<TContext>` + `UsePartitionedRateLimiting` over a caller-supplied
+  `PartitionedRateLimiter<TContext>` (the caller bakes their own partition-key selector into the
+  limiter via `PartitionedRateLimiter.Create<TContext,TKey>`). All four docs corrected/fulfilled
+  rather than struck. See `work/outstanding-bugs.md` for the full writeup.
 - **#137** — 429 responses never carry `Retry-After`, even though the limiters supply the metadata
   (two sibling mesh middlewares already do this correctly).
 - **#138** — rate-limit rejections are completely unobservable (no logger, no metric on the deny path).

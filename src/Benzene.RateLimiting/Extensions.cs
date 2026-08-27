@@ -3,6 +3,7 @@ using System.Threading.RateLimiting;
 using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Messages.Mappers;
 using Benzene.Abstractions.Middleware;
+using Microsoft.Extensions.Logging;
 
 namespace Benzene.RateLimiting;
 
@@ -21,7 +22,7 @@ public static class Extensions
     /// </summary>
     /// <typeparam name="TContext">The pipeline's context type.</typeparam>
     /// <param name="app">The pipeline builder.</param>
-    /// <param name="rateLimiter">Any limiter: fixed/sliding window, token bucket, concurrency, partitioned, or custom.</param>
+    /// <param name="rateLimiter">Any limiter: fixed/sliding window, token bucket, concurrency, or custom.</param>
     /// <returns>The same builder, for chaining.</returns>
     public static IMiddlewarePipelineBuilder<TContext> UseRateLimiting<TContext>(
         this IMiddlewarePipelineBuilder<TContext> app, RateLimiter rateLimiter)
@@ -44,7 +45,57 @@ public static class Extensions
         Func<IServiceResolver, TContext, int> permitCost)
         where TContext : class
     {
-        return app.Use(resolver => new RateLimitingMiddleware<TContext>(rateLimiter, permitCost, resolver));
+        return app.Use(resolver => new RateLimitingMiddleware<TContext>(rateLimiter, permitCost, resolver,
+            ownsLimiter: false,
+            logger: resolver.TryGetService<ILogger<RateLimitingMiddleware<TContext>>>()));
+    }
+
+    /// <summary>
+    /// Rate-limits the pipeline <b>per partition</b> — each caller draws from its own share of
+    /// permits instead of every caller sharing one limiter (see
+    /// <see cref="PartitionedRateLimitingMiddleware{TContext}"/> for the full trade-off, including
+    /// the "a client-supplied key is spoofable" honesty note) — costing one permit per message.
+    /// The partition key is whatever <paramref name="partitionedLimiter"/>'s own partitioner
+    /// derives from the message's <typeparamref name="TContext"/>; the limiter instance is shared
+    /// for the pipeline's lifetime and its disposal is owned by the caller.
+    /// </summary>
+    /// <typeparam name="TContext">The pipeline's context type, also the limiter's partition resource type.</typeparam>
+    /// <param name="app">The pipeline builder.</param>
+    /// <param name="partitionedLimiter">
+    /// A limiter built via <see cref="PartitionedRateLimiter.Create{TResource,TKey}"/> with
+    /// <typeparamref name="TContext"/> as the resource type, e.g.
+    /// <c>PartitionedRateLimiter.Create&lt;TContext, string&gt;(context =&gt;
+    /// RateLimitPartition.GetTokenBucketLimiter(KeyOf(context), _ =&gt; new TokenBucketRateLimiterOptions { ... }))</c>.
+    /// </param>
+    /// <param name="partitionKeyForLogging">Optional; see the middleware's constructor for why this is separate from the limiter itself.</param>
+    /// <returns>The same builder, for chaining.</returns>
+    public static IMiddlewarePipelineBuilder<TContext> UsePartitionedRateLimiting<TContext>(
+        this IMiddlewarePipelineBuilder<TContext> app, PartitionedRateLimiter<TContext> partitionedLimiter,
+        Func<TContext, string?>? partitionKeyForLogging = null)
+        where TContext : class
+    {
+        return app.UsePartitionedRateLimiting(partitionedLimiter, (_, _) => 1, partitionKeyForLogging);
+    }
+
+    /// <summary>
+    /// Rate-limits the pipeline <b>per partition</b> with a caller-supplied per-message permit cost.
+    /// See the single-cost overload and <see cref="PartitionedRateLimitingMiddleware{TContext}"/>.
+    /// </summary>
+    /// <typeparam name="TContext">The pipeline's context type, also the limiter's partition resource type.</typeparam>
+    /// <param name="app">The pipeline builder.</param>
+    /// <param name="partitionedLimiter">A limiter built via <see cref="PartitionedRateLimiter.Create{TResource,TKey}"/> with <typeparamref name="TContext"/> as the resource type.</param>
+    /// <param name="permitCost">Computes the current message's permit cost from the message scope and context.</param>
+    /// <param name="partitionKeyForLogging">Optional; see the middleware's constructor for why this is separate from the limiter itself.</param>
+    /// <returns>The same builder, for chaining.</returns>
+    public static IMiddlewarePipelineBuilder<TContext> UsePartitionedRateLimiting<TContext>(
+        this IMiddlewarePipelineBuilder<TContext> app, PartitionedRateLimiter<TContext> partitionedLimiter,
+        Func<IServiceResolver, TContext, int> permitCost, Func<TContext, string?>? partitionKeyForLogging = null)
+        where TContext : class
+    {
+        return app.Use(resolver => new PartitionedRateLimitingMiddleware<TContext>(
+            partitionedLimiter, permitCost, resolver, partitionKeyForLogging,
+            ownsLimiter: false,
+            logger: resolver.TryGetService<ILogger<PartitionedRateLimitingMiddleware<TContext>>>()));
     }
 
     /// <summary>
@@ -61,13 +112,13 @@ public static class Extensions
         this IMiddlewarePipelineBuilder<TContext> app, int permitLimit, TimeSpan window)
         where TContext : class
     {
-        return app.UseRateLimiting(new FixedWindowRateLimiter(new FixedWindowRateLimiterOptions
+        return app.UseInternallyOwnedRateLimiting(new FixedWindowRateLimiter(new FixedWindowRateLimiterOptions
         {
             PermitLimit = permitLimit,
             Window = window,
             QueueLimit = 0,
             AutoReplenishment = true,
-        }));
+        }), static (_, _) => 1);
     }
 
     /// <summary>
@@ -86,7 +137,8 @@ public static class Extensions
         TimeSpan replenishmentPeriod)
         where TContext : class
     {
-        return app.UseRateLimiting(CreateTokenBucket(tokenLimit, tokensPerPeriod, replenishmentPeriod));
+        return app.UseInternallyOwnedRateLimiting(
+            CreateTokenBucket(tokenLimit, tokensPerPeriod, replenishmentPeriod), static (_, _) => 1);
     }
 
     /// <summary>
@@ -96,6 +148,36 @@ public static class Extensions
     /// bursts up to <paramref name="maxBurstBytes"/>. A single payload larger than
     /// <paramref name="maxBurstBytes"/> is always rejected.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This is a rate bound, not a memory bound — read this before relying on it to cap memory.</b>
+    /// On ASP.NET Core hosts, Benzene's own <c>UseBufferedRequestBody()</c> reads the request body
+    /// into memory unconditionally, before any message-pipeline middleware (this one included) runs
+    /// — so by the time this middleware's cost delegate sees the body, the allocation this middleware
+    /// exists to bound has already happened. What this middleware bounds is the <em>rate</em> of
+    /// oversized/many payloads reaching the handler and further downstream work, not the peak memory
+    /// a single oversized request costs the process.
+    /// </para>
+    /// <para>
+    /// This does include one cheap mitigation: when the transport exposes a <c>Content-Length</c>
+    /// header (via <see cref="IMessageHeadersGetter{TContext}"/>) and it already exceeds
+    /// <paramref name="maxBurstBytes"/>, the cost delegate rejects on that declared size directly,
+    /// without reading/measuring the (already-buffered) body at all. That is strictly a CPU saving
+    /// (skips the full-body UTF-8 byte count) on this middleware's own side of the pipeline, not a
+    /// memory saving — and it does nothing for a request with no <c>Content-Length</c> (chunked
+    /// transfer, or a transport that doesn't set one), which still gets fully buffered upstream
+    /// before this middleware ever runs.
+    /// </para>
+    /// <para>
+    /// A genuine memory bound needs either an async, stream-aware cost delegate evaluated
+    /// <em>before</em> buffering (a larger redesign of this middleware and of
+    /// <c>UseBufferedRequestBody</c>'s unconditional placement, out of scope for this fix), or a
+    /// host-level cap upstream of Benzene entirely (e.g. Kestrel's own
+    /// <c>MaxRequestBodySize</c>/<c>IHttpMaxRequestBodySizeFeature</c>, or a gateway body-size limit)
+    /// — put one of those in front of any endpoint where payload size is a real memory-exhaustion
+    /// concern. See #135 in <c>work/outstanding-bugs.md</c> for the full trade-off discussion.
+    /// </para>
+    /// </remarks>
     /// <typeparam name="TContext">The pipeline's context type.</typeparam>
     /// <param name="app">The pipeline builder.</param>
     /// <param name="maxBurstBytes">The bucket size — the most bytes admissible at once.</param>
@@ -107,13 +189,93 @@ public static class Extensions
         TimeSpan replenishmentPeriod)
         where TContext : class
     {
-        return app.UseRateLimiting(
+        return app.UseInternallyOwnedRateLimiting(
             CreateTokenBucket(maxBurstBytes, bytesPerPeriod, replenishmentPeriod),
-            static (resolver, context) =>
+            (resolver, context) =>
             {
+                var declaredLength = TryGetDeclaredContentLength(resolver, context);
+                if (declaredLength.HasValue && declaredLength.Value > maxBurstBytes)
+                {
+                    return declaredLength.Value;
+                }
+
                 var body = resolver.TryGetService<IMessageBodyGetter<TContext>>()?.GetBody(context);
                 return string.IsNullOrEmpty(body) ? 1 : Encoding.UTF8.GetByteCount(body);
             });
+    }
+
+    /// <summary>
+    /// Reads a <c>Content-Length</c> header via <see cref="IMessageHeadersGetter{TContext}"/>, when
+    /// the transport registers one and the request carries the header. Best-effort and read-only —
+    /// see <see cref="UsePayloadSizeRateLimiting{TContext}"/>'s remarks for what this can and can't
+    /// protect against.
+    /// </summary>
+    private static int? TryGetDeclaredContentLength<TContext>(IServiceResolver resolver, TContext context)
+    {
+        var headers = resolver.TryGetService<IMessageHeadersGetter<TContext>>()?.GetHeaders(context);
+        if (headers == null)
+        {
+            return null;
+        }
+
+        foreach (var header in headers)
+        {
+            if (string.Equals(header.Key, "Content-Length", StringComparison.OrdinalIgnoreCase) &&
+                int.TryParse(header.Value, out var length))
+            {
+                return length;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Wires an internally-created limiter (one of the <c>UseXRateLimiting</c> convenience entry
+    /// points, never a caller-supplied BYO one) so the DI container owns its disposal.
+    /// </summary>
+    /// <remarks>
+    /// The limiter is registered with the container via a <em>factory</em> registration (not a
+    /// pre-built instance) — the same convention this codebase already relies on for other
+    /// container-created disposables (e.g. <c>RabbitMqConnectionProvider</c>, <c>MeshAnnouncer</c>):
+    /// a compliant DI container disposes a singleton <em>it</em> constructed (via a type or factory
+    /// registration) when the container itself is disposed, but never disposes a pre-built instance
+    /// handed to it — that convention is exactly the caller-owns-BYO / container-owns-internal split
+    /// this fixes #133 with. The registered limiter is then resolved (not re-created — it's a
+    /// singleton) once per message, which is what makes the container actually construct-and-track
+    /// it for disposal the first time any message flows through.
+    /// <para>
+    /// Only ONE internally-created limiter is supported per pipeline: stacking two
+    /// <c>UseXRateLimiting</c> calls on the same pipeline builder would otherwise silently let the
+    /// second shadow the first under the shared <see cref="RateLimiter"/> DI key, so this fails fast
+    /// with a clear exception instead. A caller needing more than one layer of protection should
+    /// combine the limits into one <see cref="RateLimiter"/> and use <c>UseRateLimiting</c>, or use
+    /// <c>UsePartitionedRateLimiting</c>.
+    /// </para>
+    /// </remarks>
+    private static IMiddlewarePipelineBuilder<TContext> UseInternallyOwnedRateLimiting<TContext>(
+        this IMiddlewarePipelineBuilder<TContext> app, RateLimiter rateLimiter,
+        Func<IServiceResolver, TContext, int> permitCost)
+        where TContext : class
+    {
+        app.Register(x =>
+        {
+            if (x.IsTypeRegistered<RateLimiter>())
+            {
+                throw new InvalidOperationException(
+                    "Only one internally-created rate limiter (UseFixedWindowRateLimiting / " +
+                    "UseTokenBucketRateLimiting / UsePayloadSizeRateLimiting) is supported per pipeline. " +
+                    "Combine your limits into one RateLimiter and call UseRateLimiting(RateLimiter, ...) " +
+                    "instead, or use UsePartitionedRateLimiting.");
+            }
+
+            x.AddSingleton<RateLimiter>(_ => rateLimiter);
+        });
+
+        return app.Use(resolver => new RateLimitingMiddleware<TContext>(
+            resolver.GetService<RateLimiter>(), permitCost, resolver,
+            ownsLimiter: true,
+            logger: resolver.TryGetService<ILogger<RateLimitingMiddleware<TContext>>>()));
     }
 
     private static TokenBucketRateLimiter CreateTokenBucket(int tokenLimit, int tokensPerPeriod,
