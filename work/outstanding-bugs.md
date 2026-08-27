@@ -2150,6 +2150,47 @@ to its two siblings that missed it.
   build/test-verified — this environment has no .NET SDK; verify via CI**
   (`.github/workflows/build-benzene.yml`) before merge.
 
+### Tracked findings rounds 12–13, WP-3 — TestHelpers fidelity + client-family guard (#191–#192, done)
+Ruling, rationale, and rejected alternatives are in
+[`bug-fix-rulings-round12-13-2026-08.md`](bug-fix-rulings-round12-13-2026-08.md) §2 WP-3. Findings
+themselves are in `bug-fix-designs-round12-2026-08.md`/`bug-fix-designs-round13-2026-08.md`.
+- **[RESOLVED] #191 — `AsS3` never URL-encoded the key it was given**, so a test-constructed key
+  containing a reserved character (`+`, `%`, a space) was corrupted once the real getter
+  (`S3MessageBodyGetter`/`S3MessageHeadersGetter`) ran it through `S3ObjectKeyCodec.Decode` on every
+  read (#158) — e.g. `"invoice+2024-08-27.pdf"` came back as `"invoice 2024-08-27.pdf"`. Fixed by
+  adding `S3ObjectKeyCodec.Encode` — the exact inverse of `Decode` (both are thin wrappers around
+  `System.Net.WebUtility`'s Url(De|En)code, documented BCL mirrors of one another, so space ↔ `+` and
+  percent-encoding round-trip byte-exact) — and having `AsS3` (`Benzene.Aws.Lambda.S3.TestHelpers`)
+  call it on the key before putting it on the fake record. One codec now owns both directions, so the
+  test helper and the real getter can't drift apart again. Regression tests:
+  `S3ObjectKeyCodecTest` (property-style inverse assertions over `+`, `%`, spaces, and non-ASCII
+  Unicode, plus the exact `"invoice+2024-08-27.pdf"` repro) and
+  `S3TestHelpersTest.AsS3_KeyWithReservedCharacters_RoundTripsThroughTheRealGetter` (end-to-end
+  through the real `S3MessageBodyGetter`).
+- **[RESOLVED] #192 — a null `ILogger` passed to a `*BenzeneMessageClient` constructor made the
+  failure-path `catch` block's own `LogError` call throw**, replacing the real send/publish failure
+  with a `NullReferenceException`. Fixed with a P8 family sweep: every constructor now stores
+  `logger ?? NullLogger<T>.Instance` (or the non-generic `NullLogger.Instance` where the class holds a
+  plain `ILogger`) instead of the raw parameter — no public signature change. **Scope note (amendment
+  — see the ruling doc's own §2 WP-3 for the full correction): the ruling's "ten" count was off.** The
+  task's own scoping grep (`grep -rln "class.*BenzeneMessageClient" src/Benzene.Clients.*/`) returns
+  ten *files*, but one (`Benzene.Clients.Aws.Lambda/BenzeneMessageClientRequest.cs`) is a data-envelope
+  class the regex incidentally matches, not a message client — so exactly **nine** real classes were in
+  scope and fixed: `EventBridgeBenzeneMessageClient`, `AwsLambdaBenzeneMessageClient`,
+  `SnsBenzeneMessageClient`, `SqsBenzeneMessageClient`, `EventGridBenzeneMessageClient`,
+  `EventHubBenzeneMessageClient`, `QueueStorageBenzeneMessageClient`,
+  `ServiceBusBenzeneMessageClient`, `HttpBenzeneMessageClient`. A repo-wide (unscoped) grep also turns
+  up three more `*BenzeneMessageClient` classes the family shape extends to but which sit outside
+  `src/Benzene.Clients.*/` and were out of this work package's assigned scope:
+  `Benzene.RabbitMq/RabbitMqSendMessage/RabbitMqBenzeneMessageClient.cs`,
+  `Benzene.Kafka.Core/Kafka/KafkaBenzeneMessageClient.cs`, and
+  `Benzene.Grpc.Client/GrpcBenzeneMessageClient.cs` — left for a follow-up finding/round to audit and
+  fix (not verified here whether they share the same hazard, only that they share the class shape).
+  Regression tests (representative, per the ruling's "2-3 clients" instruction):
+  `AwsLambdaBenzeneMessageClientTest.Failure_ConstructedWithANullLogger_DoesNotThrow`,
+  `SnsBenzeneMessageClientTest.SendMessageAsync_ThrowingClient_ConstructedWithANullLogger_DoesNotThrow`,
+  `HttpBenzeneMessageClientTest.SendMessageAsync_ReturnsServiceUnavailable_WhenTheTransportThrows_AndTheLoggerIsNull`.
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.

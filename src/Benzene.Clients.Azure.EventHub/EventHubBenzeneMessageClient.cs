@@ -9,6 +9,7 @@ using Benzene.Clients.Common;
 using Benzene.Core.Middleware;
 using Benzene.Results;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Void = Benzene.Abstractions.Results.Void;
 
 namespace Benzene.Clients.Azure.EventHub;
@@ -38,7 +39,9 @@ public class EventHubBenzeneMessageClient : IBenzeneMessageClient
     public EventHubBenzeneMessageClient(EventHubProducerClient producerClient, ILogger<EventHubBenzeneMessageClient> logger, IServiceResolver serviceResolver, string topicPropertyKey = EventHubContextConverter<object>.DefaultTopicProperty)
     {
         _serviceResolver = serviceResolver;
-        _logger = logger;
+        // #192: a null logger must not make the catch block's own LogError throw and mask the real
+        // failure - fall back to a no-op logger.
+        _logger = logger ?? NullLogger<EventHubBenzeneMessageClient>.Instance;
         _topicPropertyKey = topicPropertyKey;
 
         var benzeneServiceContainer = new NullBenzeneServiceContainer();
@@ -60,7 +63,7 @@ public class EventHubBenzeneMessageClient : IBenzeneMessageClient
     {
         _serviceResolver = serviceResolver;
         _middlewarePipeline = middlewarePipeline;
-        _logger = logger;
+        _logger = logger ?? NullLogger<EventHubBenzeneMessageClient>.Instance;
         _topicPropertyKey = topicPropertyKey;
     }
 

@@ -49,7 +49,13 @@ row for the `IHttpClientFactory`/lifetime story (yours to own on both paths).
   ambient cancellation token via `ICancellationTokenAccessor`. `url` is used verbatim as the request URI
   (absolute, or relative to the client's `BaseAddress`). The envelope wire shape is a small internal
   `BenzeneMessageEnvelope` (defined here so the package keeps **no** dependency on `Benzene.Clients.Aws.Lambda`,
-  where the identically-shaped invoke-path `BenzeneMessageClientRequest` happens to live).
+  where the identically-shaped invoke-path `BenzeneMessageClientRequest` happens to live). The constructor
+  falls back to `NullLogger.Instance` (non-generic - this class stores a plain `ILogger`, not `ILogger<T>`)
+  when `logger` is null - the parameter stays optional/nullable (`null` still means "no logging" from the
+  caller's point of view), but the field itself is never null, so every `LogError`/`LogInformation` call
+  site is a plain (unconditional) call rather than `?.` (#192, a P8 sweep across all nine `Benzene.Clients.*`
+  message clients - this class already guarded its calls with `?.`, but the fallback closes the gap for any
+  future call site that forgets to).
 - `HttpBenzeneMessageHealthCheck` - `IHealthCheck`; non-destructive reachability that POSTs a
   `healthcheck`-topic envelope and treats a 2xx envelope response as healthy. Follows the shared §3.9 policy
   (reversed): a 401/403 permission response → a **persistent `Failed`** (surfaces as unhealthy even for the

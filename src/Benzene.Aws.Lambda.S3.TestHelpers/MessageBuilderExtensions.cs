@@ -17,6 +17,7 @@ public static class MessageBuilderExtensions
     /// bucket/key are set from <paramref name="bucketName"/>/<paramref name="key"/>.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Unlike SQS/SNS/DynamoDB/EventBridge, an S3 event notification carries no arbitrary payload -
     /// <c>S3MessageBodyGetter</c> always builds the body from the record's own bucket/key/event
     /// metadata (an <c>S3Notification</c>), not from a message a producer chose to send. So
@@ -24,10 +25,22 @@ public static class MessageBuilderExtensions
     /// event name a handler routes on) is meaningful. Use <paramref name="bucketName"/>/
     /// <paramref name="key"/> to control what <c>S3Notification</c> a handler observing this event
     /// actually receives.
+    /// </para>
+    /// <para>
+    /// A real S3 event notification carries the object key URL-encoded (S3ObjectKeyCodec's
+    /// scheme - space becomes <c>+</c>, other reserved/non-ASCII bytes are percent-encoded), and
+    /// <c>S3MessageBodyGetter</c>/<c>S3MessageHeadersGetter</c> decode it back on every read (#158).
+    /// So this helper URL-encodes <paramref name="key"/> with <c>S3ObjectKeyCodec.Encode</c> before
+    /// putting it on the record - the exact inverse of that decode - so a key containing a reserved
+    /// character (e.g. <c>"invoice+2024-08-27.pdf"</c>) round-trips back to the plain key that was
+    /// passed in, rather than being corrupted by the real getter's decode (#191).
+    /// </para>
     /// </remarks>
     /// <param name="source">The message builder to read the topic (S3 event name) from.</param>
     /// <param name="bucketName">The S3 bucket name to report on the record.</param>
-    /// <param name="key">The S3 object key to report on the record.</param>
+    /// <param name="key">
+    /// The S3 object key to report on the record, in its plain (decoded) form - not pre-encoded.
+    /// </param>
     /// <returns>The built S3 event notification batch.</returns>
     public static S3Event AsS3<T>(this IMessageBuilder<T> source, string bucketName = "benzene-test-bucket", string key = "benzene-test-object")
     {
@@ -43,7 +56,7 @@ public static class MessageBuilderExtensions
                     S3 = new S3Event.S3Entity
                     {
                         Bucket = new S3Event.S3BucketEntity { Name = bucketName },
-                        Object = new S3Event.S3ObjectEntity { Key = key }
+                        Object = new S3Event.S3ObjectEntity { Key = S3ObjectKeyCodec.Encode(key) }
                     },
                     ResponseElements = new S3Event.ResponseElementsEntity { XAmzRequestId = Guid.NewGuid().ToString() }
                 }

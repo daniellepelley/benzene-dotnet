@@ -30,6 +30,12 @@ Benzene's Event Grid ingress (`EventGridMessageTopicGetter`) routes on the event
 subject or source: the CloudEvent `Type` / classic-schema `EventType`. This package sets exactly that
 field to the Benzene topic on both paths.
 
+## Null-logger safety (#192)
+Both `EventGridBenzeneMessageClient` constructors fall back to
+`NullLogger<EventGridBenzeneMessageClient>.Instance` when `logger` is null, so a null-logger
+construction can't make the `catch` block's own `LogError` call throw and mask the real publish
+failure. A P8 sweep across all nine `Benzene.Clients.*` message clients.
+
 ## Headers — honestly scoped, do not assume parity with Service Bus/Event Hubs
 - **CloudEvents path**: `ExtensionAttributes` is the CloudEvents-spec mechanism for custom metadata,
   and `EventGridContextConverter<T>` forwards headers there. **However, Benzene's Event Grid ingress

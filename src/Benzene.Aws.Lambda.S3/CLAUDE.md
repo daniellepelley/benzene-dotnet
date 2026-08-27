@@ -84,3 +84,12 @@ the object key then a generated id) - no application code changes needed. Mirror
   bucket/key are settable parameters. Unlike SQS/SNS/DynamoDB/EventBridge, S3's body is always an
   `S3Notification` built from the record's own metadata (see `S3MessageBodyGetter`), not an
   arbitrary payload - so the message builder's `Message` isn't used by this helper, only its `Topic`.
+- **`S3ObjectKeyCodec` owns both directions of the key encoding (#191).** `Decode` (used by
+  `S3MessageBodyGetter`/`S3MessageHeadersGetter` on every real read, since #158) and `Encode` (used
+  by `AsS3` before it puts a key on the fake record) are exact inverses - both are thin wrappers
+  around `System.Net.WebUtility`'s Url(De|En)code, which - unlike `Uri.(Un)EscapeDataString` - treats
+  `+` as a space, matching S3's own URL-encoding scheme. `AsS3`'s `key` parameter is the **plain**
+  (decoded) key; it encodes internally, so a key containing a reserved character (e.g.
+  `"invoice+2024-08-27.pdf"`) reaches a handler through the real getter unchanged instead of being
+  corrupted. Keep both directions in `S3ObjectKeyCodec` rather than duplicating the encoding inline
+  in the test helper - that duplication is exactly what let the two drift apart in the first place.
