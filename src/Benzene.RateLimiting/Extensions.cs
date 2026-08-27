@@ -232,25 +232,34 @@ public static class Extensions
 
     /// <summary>
     /// Wires an internally-created limiter (one of the <c>UseXRateLimiting</c> convenience entry
-    /// points, never a caller-supplied BYO one) so the DI container owns its disposal.
+    /// points, never a caller-supplied BYO one) with the middleware owning its disposal directly.
     /// </summary>
     /// <remarks>
-    /// The limiter is registered with the container via a <em>factory</em> registration (not a
-    /// pre-built instance) — the same convention this codebase already relies on for other
-    /// container-created disposables (e.g. <c>RabbitMqConnectionProvider</c>, <c>MeshAnnouncer</c>):
-    /// a compliant DI container disposes a singleton <em>it</em> constructed (via a type or factory
-    /// registration) when the container itself is disposed, but never disposes a pre-built instance
-    /// handed to it — that convention is exactly the caller-owns-BYO / container-owns-internal split
-    /// this fixes #133 with. The registered limiter is then resolved (not re-created — it's a
-    /// singleton) once per message, which is what makes the container actually construct-and-track
-    /// it for disposal the first time any message flows through.
+    /// #200: this used to register the limiter as a DI singleton keyed on the abstract
+    /// <see cref="RateLimiter"/> type, relying on the container's own disposal to dispose it
+    /// (#133's original fix). But <see cref="IBenzeneServiceContainer"/> registrations are shared by
+    /// every sibling pipeline built off the same container - a supported, ordinary pattern in this
+    /// framework (several transport pipelines sharing one container) - so two independent
+    /// <c>UseXRateLimiting</c> calls, even on entirely different pipelines, silently collided under
+    /// that one shared DI key: whichever call registered last "won" resolution for every message on
+    /// every affected pipeline, so an earlier pipeline's messages ended up throttled by a later
+    /// pipeline's limiter instead of its own. The guard this method used to carry (throwing when a
+    /// second internal limiter was registered) only detected the collision - it didn't fix the
+    /// architecture that caused it, and it rejected the legitimate multi-pipeline case along with
+    /// the genuine mistake.
     /// <para>
-    /// Only ONE internally-created limiter is supported per pipeline: stacking two
-    /// <c>UseXRateLimiting</c> calls on the same pipeline builder would otherwise silently let the
-    /// second shadow the first under the shared <see cref="RateLimiter"/> DI key, so this fails fast
-    /// with a clear exception instead. A caller needing more than one layer of protection should
-    /// combine the limits into one <see cref="RateLimiter"/> and use <c>UseRateLimiting</c>, or use
-    /// <c>UsePartitionedRateLimiting</c>.
+    /// The fix is the same one the BYO <c>UseRateLimiting(RateLimiter, ...)</c> overload above
+    /// already uses: capture <paramref name="rateLimiter"/> directly in the middleware factory's
+    /// closure (<c>ownsLimiter: true</c> here, vs. <c>false</c> there) instead of resolving it from
+    /// DI. Nothing is registered with the container, so the collision is now structurally
+    /// impossible - each middleware instance only ever sees the exact limiter its own
+    /// <c>UseXRateLimiting</c> call created. Stacking multiple internally-created limiters, on one
+    /// pipeline or across siblings sharing a container, is fully supported. Disposal ownership -
+    /// #133's actual point - now lives on the middleware itself (<see cref="RateLimitingMiddleware{TContext}.DisposeAsync"/>,
+    /// <c>ownsLimiter: true</c>) rather than being borrowed from the DI container's singleton
+    /// disposal; a caller that wants the limiter's <c>Timer</c> torn down calls that directly (or manages
+    /// the middleware's lifetime itself), the same as any other <see cref="IAsyncDisposable"/> a
+    /// caller constructs.
     /// </para>
     /// </remarks>
     private static IMiddlewarePipelineBuilder<TContext> UseInternallyOwnedRateLimiting<TContext>(
@@ -258,22 +267,8 @@ public static class Extensions
         Func<IServiceResolver, TContext, int> permitCost)
         where TContext : class
     {
-        app.Register(x =>
-        {
-            if (x.IsTypeRegistered<RateLimiter>())
-            {
-                throw new InvalidOperationException(
-                    "Only one internally-created rate limiter (UseFixedWindowRateLimiting / " +
-                    "UseTokenBucketRateLimiting / UsePayloadSizeRateLimiting) is supported per pipeline. " +
-                    "Combine your limits into one RateLimiter and call UseRateLimiting(RateLimiter, ...) " +
-                    "instead, or use UsePartitionedRateLimiting.");
-            }
-
-            x.AddSingleton<RateLimiter>(_ => rateLimiter);
-        });
-
         return app.Use(resolver => new RateLimitingMiddleware<TContext>(
-            resolver.GetService<RateLimiter>(), permitCost, resolver,
+            rateLimiter, permitCost, resolver,
             ownsLimiter: true,
             logger: resolver.TryGetService<ILogger<RateLimitingMiddleware<TContext>>>()));
     }

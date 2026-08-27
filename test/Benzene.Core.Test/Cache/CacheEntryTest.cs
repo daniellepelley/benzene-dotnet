@@ -79,8 +79,11 @@ public class CacheEntryTest
     }
 
     /// <summary>
-    /// Captures <see cref="LogLevel.Warning"/> messages so a test can assert a cache-sync failure was
-    /// logged (#139) without depending on any particular logging provider.
+    /// Captures <see cref="LogLevel.Warning"/> and <see cref="LogLevel.Error"/> messages (both land
+    /// in <see cref="Warnings"/> - the name predates #199's <c>LogError</c> calls and existing tests
+    /// already assert against it, so it's kept rather than churning every call site) so a test can
+    /// assert a cache-sync failure (#139) or a throwing mapping delegate (#199) was logged, without
+    /// depending on any particular logging provider.
     /// </summary>
     private class CapturingLogger : ILogger
     {
@@ -92,7 +95,7 @@ public class CacheEntryTest
 
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
         {
-            if (logLevel == LogLevel.Warning)
+            if (logLevel is LogLevel.Warning or LogLevel.Error)
             {
                 Warnings.Add(formatter(state, exception));
             }
@@ -393,6 +396,62 @@ public class CacheEntryTest
 
         Assert.True(result.IsSuccessful);
         Assert.Equal("new-value", result.Payload);
+    }
+
+    [Fact]
+    public async Task WriteThroughAsync_ThreeArgOverload_GetCacheActionThrows_StillReturnsTheSuccessfulDatabaseResult_AndLogsAnError()
+    {
+        // #199: getCacheAction runs AFTER the database write commits but, before this fix, OUTSIDE
+        // #139's protection - a throwing mapping delegate propagated straight out of
+        // WriteThroughAsync, turning an already-successful write into a thrown exception instead of
+        // the same log-and-return-the-result outcome every other cache-side failure gets.
+        var store = new Dictionary<string, string>();
+        var logger = new CapturingLogger();
+        var entry = new FakeCacheEntry<string>(store, logger: logger);
+
+        var result = await entry.WriteThroughAsync(
+            () => Task.FromResult(BenzeneResult.Ok("new-value")),
+            r => r.Payload,
+            _ => throw new InvalidOperationException("cache-action mapping bug"));
+
+        Assert.True(result.IsSuccessful);
+        Assert.Equal("new-value", result.Payload);
+        Assert.False(store.ContainsKey("the-key"));
+        Assert.Contains(logger.Warnings, w => w.Contains("mapping delegate", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task WriteThroughAsync_ThreeArgOverload_GetCacheValueThrows_StillReturnsTheSuccessfulDatabaseResult_AndLogsAnError()
+    {
+        // #199: same protection extended to getCacheValue - only reachable once getCacheAction has
+        // already resolved to Set, so this proves the second delegate is independently guarded too.
+        var store = new Dictionary<string, string>();
+        var logger = new CapturingLogger();
+        var entry = new FakeCacheEntry<string>(store, logger: logger);
+
+        var result = await entry.WriteThroughAsync(
+            () => Task.FromResult(BenzeneResult.Ok("new-value")),
+            _ => throw new InvalidOperationException("cache-value mapping bug"),
+            _ => CacheUpdateAction.Set);
+
+        Assert.True(result.IsSuccessful);
+        Assert.Equal("new-value", result.Payload);
+        Assert.False(store.ContainsKey("the-key"));
+        Assert.Contains(logger.Warnings, w => w.Contains("mapping delegate", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task WriteThroughAsync_ThreeArgOverload_GetCacheActionThrowsOperationCanceled_Propagates()
+    {
+        // #199 does not touch #141's cancellation carve-out: a caller-driven cancellation from the
+        // mapping delegate must still propagate, not be logged and swallowed like an ordinary bug.
+        var store = new Dictionary<string, string>();
+        var entry = new FakeCacheEntry<string>(store);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => entry.WriteThroughAsync(
+            () => Task.FromResult(BenzeneResult.Ok("new-value")),
+            r => r.Payload,
+            _ => throw new OperationCanceledException()));
     }
 
     [Fact]

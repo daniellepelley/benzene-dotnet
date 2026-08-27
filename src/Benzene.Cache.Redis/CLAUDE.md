@@ -14,9 +14,15 @@ distributed caching shared across instances.
   multiplexer (a no-op if a connect was never started or never completed) - register your subclass so
   its container disposes it on shutdown; after it runs, any further `RedisSetup`/`StartConnection`/
   connect-driven call throws `ObjectDisposedException` rather than silently opening (and leaking) a
-  new multiplexer. Factory methods build the concrete entry/action types below.
+  new multiplexer. Factory methods build the concrete entry/action types below. `CreatePrefixActions(prefix)`
+  throws `ArgumentException` on a null/empty/whitespace `prefix` (#198) - unescaped, that would
+  otherwise silently become the pattern `"*"` and invalidate every key in the database; the
+  deliberate route for that is `CreateWildcardActions("*")`, named in the exception message.
 - `RedisCacheEntry<T>` (internal) - `CacheEntry<T>` over a single key. `Get`/`Set`/`Invalidate` map
-  to `StringGetAsync` / `StringSetAsync` (with TTL) / `KeyDeleteAsync`.
+  to `StringGetAsync` / `StringSetAsync` (with TTL) / `KeyDeleteAsync`. A Redis error on the read path
+  degrades to `null` (a genuine miss), never `""` (#201) - `CacheEntry<T>`'s presence check is
+  `cacheValue is not null`, so returning `""` here would have masqueraded a failed read as a hit of
+  an empty cached value.
 - `RedisMultiKeyActions<T>` (internal) - write/invalidate the same value across several keys.
   `SetEntryValueAsync` issues each key's `StringSetAsync` concurrently, with each key's outcome
   (success / `false` / a thrown exception) captured independently so one key's failure never stops the
@@ -63,3 +69,14 @@ distributed caching shared across instances.
 - **Benzene.Cache.Core** - the cache abstractions and base-class layering
 - **Benzene.Diagnostics** - `IProcessTimerFactory`
 - **StackExchange.Redis** - the Redis client
+
+## Tests
+- `test/Benzene.Core.Test/Cache/Redis/RedisCacheServiceTest.cs` - health check, cache-entry
+  lazy-load hit/miss, all `WriteThroughAsync`/`WriteThroughInvalidateAsync` shapes, multi-key set/
+  invalidate (including one key throwing not stopping the others - #147), prefix/wildcard
+  invalidation (including glob-metacharacter escaping - and, since #198, `CreatePrefixActions`
+  throwing `ArgumentException` on a null/empty/whitespace prefix rather than silently invalidating
+  everything), connect/disconnect/dispose lifecycle (including the `ObjectDisposedException`-after-
+  dispose guard - #146 - and cancellation unblocking a hung connect - #141), constructor-injected
+  `ISerializer` override (#145), and (#201) a Redis read error degrading to a genuine miss (not a
+  false hit of `""`) alongside a stored empty string round-tripping as a real hit.

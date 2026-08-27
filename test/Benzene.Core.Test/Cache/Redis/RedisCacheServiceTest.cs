@@ -357,6 +357,105 @@ public class RedisCacheServiceTest
     }
 
     [Fact]
+    public void CreatePrefixActions_NullPrefix_ThrowsArgumentExceptionNamingTheDeliberateWildcardRoute()
+    {
+        // #198: a null prefix used to escape+append into the bare pattern "*" - every key in the
+        // logical database. Refuse to guess that was intentional; point at the explicit route.
+        var connectionFactory = new MockConnectionFactory();
+        var service = new TestRedisCacheService(NullLogger<RedisCacheService>.Instance, new DebugTimerFactory(), connectionFactory);
+
+        var ex = Assert.Throws<ArgumentException>(() => service.GetTestPrefixActions(null!));
+
+        Assert.Contains("CreateWildcardActions", ex.Message);
+    }
+
+    [Fact]
+    public void CreatePrefixActions_EmptyPrefix_ThrowsArgumentExceptionNamingTheDeliberateWildcardRoute()
+    {
+        var connectionFactory = new MockConnectionFactory();
+        var service = new TestRedisCacheService(NullLogger<RedisCacheService>.Instance, new DebugTimerFactory(), connectionFactory);
+
+        var ex = Assert.Throws<ArgumentException>(() => service.GetTestPrefixActions(""));
+
+        Assert.Contains("CreateWildcardActions", ex.Message);
+    }
+
+    [Fact]
+    public void CreatePrefixActions_WhitespacePrefix_ThrowsArgumentExceptionNamingTheDeliberateWildcardRoute()
+    {
+        // Whitespace-only, not just empty - "   " would also escape+append to "*", the same
+        // invalidate-everything bug an empty prefix produces.
+        var connectionFactory = new MockConnectionFactory();
+        var service = new TestRedisCacheService(NullLogger<RedisCacheService>.Instance, new DebugTimerFactory(), connectionFactory);
+
+        var ex = Assert.Throws<ArgumentException>(() => service.GetTestPrefixActions("   "));
+
+        Assert.Contains("CreateWildcardActions", ex.Message);
+    }
+
+    [Fact]
+    public async Task GetValueAsync_RedisThrows_DegradesToAGenuineMiss_NotAFalseHitOfAnEmptyValue()
+    {
+        // #201: the error path used to return "" (impersonating an empty stored value) instead of
+        // null (the real "nothing cached" marker). A custom serializer that can legitimately
+        // deserialize "" (unlike the default JSON serializer, which would throw on invalid JSON and
+        // coincidentally still degrade to a miss via the outer catch - masking a half-fixed state)
+        // proves this is a genuine miss decided by the RIGHT signal (null), not by luck: if the error
+        // path still returned "", this would misread as a hit of the sentinel value below instead of
+        // running the database read.
+        var customSerializer = new Mock<ISerializer>();
+        customSerializer.Setup(s => s.Deserialize<TestDataType>(string.Empty))
+            .Returns(new TestDataType { Id = 1, Name = "should-never-be-returned" });
+
+        var connectionFactory = new MockConnectionFactory();
+        connectionFactory.DataBaseMock.Setup(x => x.StringGetAsync(It.IsAny<RedisKey>(), CommandFlags.None))
+            .ThrowsAsync(new Exception(TEST_ERROR_MESSAGE));
+
+        var service = new TestRedisCacheService(NullLogger<RedisCacheService>.Instance, new DebugTimerFactory(), connectionFactory, customSerializer.Object);
+        var entry = service.GetTestCacheEntry(42);
+        var databaseFuncCalled = false;
+
+        var result = await entry.LazyLoadAsync(() =>
+        {
+            databaseFuncCalled = true;
+            return Task.FromResult(BenzeneResult.Ok(new TestDataType { Id = 42, Name = "from-database" }));
+        });
+
+        Assert.True(databaseFuncCalled);
+        Assert.Equal(BenzeneResultStatus.Ok, result.Status);
+        Assert.Equal("from-database", result.Payload?.Name);
+    }
+
+    [Fact]
+    public async Task GetValueAsync_StoredEmptyString_RoundTripsAsAHit_NotMistakenForAMiss()
+    {
+        // #201: a stored empty string is a legitimate serialized representation for SOME
+        // ISerializer implementations (stubbed here) and must round-trip as a real cache hit - only
+        // a null stored value (never returned by StackExchange.Redis for a genuine key hit) is a miss.
+        var customSerializer = new Mock<ISerializer>();
+        customSerializer.Setup(s => s.Deserialize<TestDataType>(string.Empty))
+            .Returns(new TestDataType { Id = 42, Name = "empty-is-valid" });
+
+        var connectionFactory = new MockConnectionFactory();
+        connectionFactory.DataBaseMock.Setup(x => x.StringGetAsync(It.IsAny<RedisKey>(), CommandFlags.None))
+            .ReturnsAsync(new RedisValue(string.Empty));
+
+        var service = new TestRedisCacheService(NullLogger<RedisCacheService>.Instance, new DebugTimerFactory(), connectionFactory, customSerializer.Object);
+        var entry = service.GetTestCacheEntry(42);
+        var databaseFuncCalled = false;
+
+        var result = await entry.LazyLoadAsync(() =>
+        {
+            databaseFuncCalled = true;
+            return Task.FromResult(BenzeneResult.ServiceUnavailable<TestDataType>());
+        });
+
+        Assert.False(databaseFuncCalled);
+        Assert.Equal(BenzeneResultStatus.Ok, result.Status);
+        Assert.Equal("empty-is-valid", result.Payload?.Name);
+    }
+
+    [Fact]
     public async Task DisposeAsync_AfterConnecting_DisposesTheMultiplexer()
     {
         var connectionFactory = new MockConnectionFactory();

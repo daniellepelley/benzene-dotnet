@@ -235,12 +235,62 @@ public class RateLimitingPipelineTest
     }
 
     [Fact]
-    public async Task InternallyCreatedLimiter_IsDisposedWhenTheContainerIsDisposed()
+    public async Task BringYourOwnLimiter_AlreadyDisposed_MessageNamesTheLimiterNotTheCostDelegate()
     {
-        // #133: UseFixedWindowRateLimiting/UseTokenBucketRateLimiting/UsePayloadSizeRateLimiting
-        // create a limiter with a live auto-replenish timer that nothing used to ever dispose. It
-        // is now registered with the DI container, which disposes it (like any other
-        // container-created singleton) when the container itself is disposed.
+        // #202: before this fix, the SAME message ("the rate limiter has already been disposed")
+        // covered both this case (the limiter itself is disposed) and a disposed dependency the cost
+        // delegate itself relies on (below) - the two are diagnostically different and must not read
+        // the same in a log/response.
+        var limiter = new ConcurrencyLimiter(new ConcurrencyLimiterOptions
+        {
+            PermitLimit = 1,
+            QueueLimit = 0,
+        });
+        var (app, resolver) = CreateApp(p => p.UseRateLimiting(limiter));
+        limiter.Dispose();
+
+        var response = await app.HandleAsync(CreateRequest(), resolver);
+
+        Assert.Equal(BenzeneResultStatus.TooManyRequests, response.StatusCode);
+        Assert.Contains("the rate limiter has already been disposed", response.Body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("permit-cost delegate", response.Body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task BringYourOwnCost_DelegateThrowsObjectDisposedException_MessageNamesTheCostDelegateNotTheLimiter()
+    {
+        // #202: the mirror case - a dependency the cost delegate itself depends on (e.g. a scoped
+        // resource resolved earlier in the pipeline) being disposed is NOT the same failure as the
+        // limiter's own disposal (previous test), and the rejection message must say so, distinctly,
+        // rather than misattributing the disposal to the limiter.
+        var (app, resolver) = CreateApp(p => p.UseRateLimiting(
+            new FixedWindowRateLimiter(new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 100,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true,
+            }),
+            (Func<Benzene.Abstractions.DI.IServiceResolver, BenzeneMessageContext, int>)((_, _) =>
+                throw new ObjectDisposedException(nameof(RateLimitingPipelineTest)))));
+
+        var response = await app.HandleAsync(CreateRequest(), resolver);
+
+        Assert.Equal(BenzeneResultStatus.TooManyRequests, response.StatusCode);
+        Assert.Contains("permit-cost delegate", response.Body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("the rate limiter has already been disposed", response.Body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task InternallyCreatedLimiter_DisposingTheMiddlewareInstance_DisposesTheLimiter()
+    {
+        // #200: the internally-created limiter is no longer registered with the DI container - that
+        // registration is exactly what collided across sibling pipelines sharing one container (see
+        // Extensions.cs's UseInternallyOwnedRateLimiting for the full story), so it was removed.
+        // Disposal ownership now lives on the middleware itself (ownsLimiter: true) - proven here by
+        // disposing the middleware instance directly (the same thing a caller managing its own
+        // lifetime would do) and observing the next message fail CLOSED with the disposed-limiter
+        // message (#202), exactly like a caller-disposed BYO limiter already does.
         var serviceCollection = ServiceResolverMother.CreateServiceCollection();
         serviceCollection.UsingBenzene(x => x.AddBenzeneMessage());
 
@@ -249,40 +299,115 @@ public class RateLimitingPipelineTest
         pipeline.UseFixedWindowRateLimiting(10, TimeSpan.FromMinutes(1));
         pipeline.UseMessageHandlers();
         var app = new BenzeneMessageApplication(pipeline.Build());
+        var resolverFactory = new MicrosoftServiceResolverFactory(serviceCollection.BuildServiceProvider());
 
-        // Owns the provider it builds (unlike the IServiceProvider-accepting overload CreateApp uses),
-        // so Dispose() below actually disposes the container's singletons.
-        var resolverFactory = new MicrosoftServiceResolverFactory(serviceCollection);
+        var first = await app.HandleAsync(CreateRequest(), resolverFactory);
+        Assert.Equal(BenzeneResultStatus.Ok, first.StatusCode);
 
-        // Drive one message through so the singleton is actually resolved (and so captured for
-        // disposal by the container) - an unregistered/never-resolved factory is never constructed.
-        await app.HandleAsync(CreateRequest(), resolverFactory);
-
-        RateLimiter limiter;
+        // The rate-limiting middleware is the first item the pipeline builder holds - construct the
+        // exact same instance the pipeline would for a message, and dispose it directly, the way a
+        // caller managing a RateLimitingMiddleware<TContext> instance's own lifetime would.
         using (var scope = resolverFactory.CreateScope())
         {
-            limiter = scope.GetService<RateLimiter>();
+            var middlewareFactory = pipeline.GetItems()[0];
+            var middleware = Assert.IsType<RateLimitingMiddleware<BenzeneMessageContext>>(middlewareFactory(scope));
+            await middleware.DisposeAsync();
         }
 
-        resolverFactory.Dispose();
+        var second = await app.HandleAsync(CreateRequest(), resolverFactory);
 
-        Assert.Throws<ObjectDisposedException>(() => limiter.AttemptAcquire(1));
+        Assert.Equal(BenzeneResultStatus.TooManyRequests, second.StatusCode);
+        Assert.Contains("the rate limiter has already been disposed", second.Body, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void StackingTwoInternallyCreatedLimiters_OnOnePipeline_FailsFast()
+    public async Task BringYourOwnLimiter_DisposingTheMiddlewareInstance_LeavesTheCallerSuppliedLimiterUntouched()
     {
-        // Two UseXRateLimiting calls on the same pipeline would otherwise silently let the second
-        // shadow the first under the shared RateLimiter DI registration - fail fast instead.
+        // #200's mirror case: a BYO limiter is never owned by the middleware (ownsLimiter: false),
+        // so disposing the middleware instance must be a no-op for it - the caller's limiter keeps
+        // working, and later messages on the pipeline are unaffected.
+        using var limiter = new FixedWindowRateLimiter(new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 10,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+            AutoReplenishment = true,
+        });
+        var (app, resolver) = CreateApp(p => p.UseRateLimiting(limiter));
+
+        var first = await app.HandleAsync(CreateRequest(), resolver);
+        Assert.Equal(BenzeneResultStatus.Ok, first.StatusCode);
+
+        using (var scope = resolver.CreateScope())
+        {
+            var middleware = new RateLimitingMiddleware<BenzeneMessageContext>(
+                limiter, (_, _) => 1, scope, ownsLimiter: false);
+            await middleware.DisposeAsync();
+        }
+
+        // Still usable - the middleware never disposed it - and the pipeline still enforces the
+        // caller's own limit normally.
+        var lease = limiter.AttemptAcquire(1);
+        Assert.True(lease.IsAcquired);
+        lease.Dispose();
+
+        var second = await app.HandleAsync(CreateRequest(), resolver);
+        Assert.Equal(BenzeneResultStatus.Ok, second.StatusCode);
+    }
+
+    [Fact]
+    public async Task StackingTwoInternallyCreatedLimiters_OnOnePipeline_IsNowLegalAndEachEnforcesItsOwnBudget()
+    {
+        // #200: two UseXRateLimiting calls on the same pipeline used to fail fast, because both
+        // resolved the SAME shared RateLimiter DI registration - the second silently shadowed the
+        // first for every message. Direct closure capture makes that structurally impossible: each
+        // middleware instance only ever sees the exact limiter its own call created, so stacking is
+        // legal, and each limiter enforces its own independent budget.
+        var (app, resolver) = CreateApp(p =>
+        {
+            p.UseFixedWindowRateLimiting(1, TimeSpan.FromMinutes(1)); // outer: 1 message per window
+            p.UseTokenBucketRateLimiting(100, 100, TimeSpan.FromMinutes(1)); // inner: generous
+        });
+
+        var first = await app.HandleAsync(CreateRequest(), resolver);
+        var second = await app.HandleAsync(CreateRequest(), resolver);
+
+        Assert.Equal(BenzeneResultStatus.Ok, first.StatusCode);
+        // Rejected by the FIRST (fixed-window, limit 1) limiter, not shadowed by the second.
+        Assert.Equal(BenzeneResultStatus.TooManyRequests, second.StatusCode);
+    }
+
+    [Fact]
+    public async Task SiblingPipelinesSharingOneContainer_CanEachCallUseFixedWindowRateLimiting_Independently()
+    {
+        // #200: two sibling pipelines built off the SAME IBenzeneServiceContainer (this framework's
+        // supported multi-transport pattern - several transport pipelines sharing one container) used
+        // to collide under the old DI-registration-keyed-on-RateLimiter approach, even though they
+        // are two entirely separate pipelines with no reason to share a budget. Proven here: each
+        // gets its own independent limiter, so exhausting one's budget never affects the other's.
         var serviceCollection = ServiceResolverMother.CreateServiceCollection();
         serviceCollection.UsingBenzene(x => x.AddBenzeneMessage());
-        var pipeline = new MiddlewarePipelineBuilder<BenzeneMessageContext>(
-            new MicrosoftBenzeneServiceContainer(serviceCollection));
+        var container = new MicrosoftBenzeneServiceContainer(serviceCollection);
 
-        pipeline.UseFixedWindowRateLimiting(10, TimeSpan.FromMinutes(1));
+        var pipelineA = new MiddlewarePipelineBuilder<BenzeneMessageContext>(container);
+        pipelineA.UseFixedWindowRateLimiting(1, TimeSpan.FromMinutes(1));
+        pipelineA.UseMessageHandlers();
+        var appA = new BenzeneMessageApplication(pipelineA.Build());
 
-        Assert.Throws<InvalidOperationException>(
-            () => pipeline.UseTokenBucketRateLimiting(10, 10, TimeSpan.FromMinutes(1)));
+        var pipelineB = pipelineA.Create<BenzeneMessageContext>();
+        pipelineB.UseFixedWindowRateLimiting(1, TimeSpan.FromMinutes(1));
+        pipelineB.UseMessageHandlers();
+        var appB = new BenzeneMessageApplication(pipelineB.Build());
+
+        var resolverFactory = new MicrosoftServiceResolverFactory(serviceCollection.BuildServiceProvider());
+
+        var firstA = await appA.HandleAsync(CreateRequest(), resolverFactory);
+        var secondA = await appA.HandleAsync(CreateRequest(), resolverFactory);
+        var firstB = await appB.HandleAsync(CreateRequest(), resolverFactory);
+
+        Assert.Equal(BenzeneResultStatus.Ok, firstA.StatusCode);
+        Assert.Equal(BenzeneResultStatus.TooManyRequests, secondA.StatusCode); // A's own budget exhausted
+        Assert.Equal(BenzeneResultStatus.Ok, firstB.StatusCode); // B has its own, unaffected budget
     }
 
     [Fact]
