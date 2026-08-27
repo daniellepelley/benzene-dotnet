@@ -37,10 +37,18 @@ public class OpenApiValidationSchemaBuilder : ISchemaBuilder
         {
             foreach (var validationSchema in validationSchemas)
             {
+                // #169: schema.Properties is now keyed camelCase (SchemaBuilder matches the wire), but
+                // validationSchema.Key is the validator's own reflected member name - raw PascalCase
+                // C# property name. Without camelCasing it here first, every lookup below missed
+                // (silently, via the JsonIgnore/non-property skip immediately following) and validation
+                // facets - Required, MinLength, Pattern, etc. - stopped being applied to any schema at
+                // all, not just a documentation/test-fixture mismatch.
+                var propertyKey = System.Text.Json.JsonNamingPolicy.CamelCase.ConvertName(validationSchema.Key);
+
                 // A validation rule can target a member that isn't a serialized schema property - a
                 // [JsonIgnore] property, or a rule keyed on a non-property member. Skip it rather than
                 // throwing KeyNotFoundException, which would fail the entire spec build.
-                if (!schema.Properties.TryGetValue(validationSchema.Key, out var property))
+                if (!schema.Properties.TryGetValue(propertyKey, out var property))
                 {
                     continue;
                 }
@@ -50,7 +58,7 @@ public class OpenApiValidationSchemaBuilder : ISchemaBuilder
                 var notEmpty = validationSchema.Value.FirstOrDefault(x => x.Name == ValidationConstants.NotEmpty || x.Name == ValidationConstants.NotNull);
                 if (notEmpty != null)
                 {
-                    schema.Required.Add(validationSchema.Key);
+                    schema.Required.Add(propertyKey);
                 }
 
                 foreach (var mapping in _mappings)

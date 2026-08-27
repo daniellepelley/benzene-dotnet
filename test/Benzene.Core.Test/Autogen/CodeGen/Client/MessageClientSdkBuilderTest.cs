@@ -167,6 +167,32 @@ public class MessageClientSdkBuilderTest
     }
 
     [Fact]
+    public void Topics_NarrowsGeneratedSchemas_ToOnlyTheSurvivingTopicsReachableTypes()
+    {
+        // #170: unlike AtomicClientSdkBuilder (which narrows via SchemaClosure.Reachable),
+        // MessageClientSdkBuilder used to emit DTOs for the entire service catalogue regardless of
+        // -topics - a topic-scoped client still shipped (and hashed) every other topic's schemas too.
+        var dictionary = new Dictionary<string, (Type, Type, Type)>
+        {
+            { "user:get", (typeof(GetUserMessage), typeof(GetUserMessage), typeof(UserDto)) },
+            { "tenant:get", (typeof(GetTenantMessage), typeof(GetTenantMessage), typeof(TenantDto)) },
+        };
+
+        var options = new ClientSdkOptions
+        {
+            ServiceName = UserServiceName,
+            Namespace = $"{BaseNameSpace}.{UserServiceName}",
+            Topics = new[] { "user:get" },
+        };
+
+        var result = new MessageClientSdkBuilder(options).Build(dictionary.ToEventServiceDocument());
+
+        Assert.True(result.ContainsKey("UserDto.cs"));
+        Assert.False(result.ContainsKey("TenantDto.cs"));
+        Assert.False(result.ContainsKey("GetTenantMessage.cs"));
+    }
+
+    [Fact]
     public void Topics_UnknownTopic_Throws_NamingTheDocumentsValidTopics()
     {
         var options = new ClientSdkOptions

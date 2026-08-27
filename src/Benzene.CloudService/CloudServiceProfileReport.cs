@@ -67,7 +67,14 @@ public sealed class CloudServiceProfileReport
         };
     }
 
-    internal static CloudServiceProfileReport Evaluate(CloudServiceBuilder builder)
+    /// <summary>
+    /// Evaluates the profile. <paramref name="traceExporter"/> must be the exact value
+    /// <c>UseBenzeneCloudService</c> resolves and wires <c>UseMeshTrace</c> with (or null when it
+    /// wires nothing) - R8 reads that same value rather than re-deriving mesh/collector wiring
+    /// itself, so the report can never claim trace propagation the pipeline didn't actually wire
+    /// (see Extensions.cs, where the two share this one resolved value).
+    /// </summary>
+    internal static CloudServiceProfileReport Evaluate(CloudServiceBuilder builder, IMeshTraceExporter? traceExporter)
     {
         var mesh = builder.MeshEnabled;
         var collector = builder.CollectorEnvelopeUrl != null;
@@ -90,8 +97,10 @@ public sealed class CloudServiceProfileReport
                     : null),
             new CloudServiceRequirement("R7", "Default service standard paths", builder.UsesDefaultPaths,
                 builder.UsesDefaultPaths ? null : "one or more surfaces relocated from their /benzene/ defaults; fleet tooling assumes the defaults"),
-            new CloudServiceRequirement("R8", "Trace context join and propagation", mesh,
-                mesh ? null : "mesh declined via WithoutMesh(): the trace middleware that joins traceparent is not wired")
+            new CloudServiceRequirement("R8", "Trace context join and propagation", mesh && traceExporter != null,
+                !mesh ? "mesh declined via WithoutMesh(): the trace middleware that joins traceparent is not wired"
+                    : traceExporter == null ? "no trace exporter configured (WithTraceExporter) and no collector URL: UseMeshTrace is not wired"
+                    : null)
         });
     }
 }

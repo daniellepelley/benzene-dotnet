@@ -64,19 +64,25 @@ public static class Extensions
         configure?.Invoke(builder);
 
         var info = builder.BuildServiceInfo();
-        var report = CloudServiceProfileReport.Evaluate(builder);
+
+        // Resolved once, here, and reused both to wire UseMeshTrace below and to evaluate the R8
+        // self-report - a single source of truth for "is trace propagation actually wired", so the
+        // two can never disagree (#167: the report used to claim R8 satisfied whenever mesh was
+        // enabled, even with no collector/exporter, while UseMeshTrace itself requires one).
+        var traceExporter = builder.MeshEnabled
+            ? builder.TraceExporter ?? (builder.CollectorEnvelopeUrl == null
+                ? null
+                : new HttpMeshTraceExporter(new HttpClient(), builder.CollectorEnvelopeUrl,
+                    batchSize: 16, flushInterval: TimeSpan.FromSeconds(1)))
+            : null;
+
+        var report = CloudServiceProfileReport.Evaluate(builder, traceExporter);
         builder.ProfileReportCallback?.Invoke(report);
         var descriptorSource = new CloudServiceDescriptorSource(info, report, builder.HandlerTypes, builder.OutboundRegistry);
         var healthChecks = builder.HealthChecks.ToArray();
 
         var announcer = builder.MeshEnabled && builder.CollectorEnvelopeUrl != null
             ? new MeshAnnouncer(info, descriptorSource, builder.CollectorEnvelopeUrl, healthChecks)
-            : null;
-        var traceExporter = builder.MeshEnabled
-            ? builder.TraceExporter ?? (builder.CollectorEnvelopeUrl == null
-                ? null
-                : new HttpMeshTraceExporter(new HttpClient(), builder.CollectorEnvelopeUrl,
-                    batchSize: 16, flushInterval: TimeSpan.FromSeconds(1)))
             : null;
 
         app.Register(x =>

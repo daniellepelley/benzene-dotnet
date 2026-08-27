@@ -184,6 +184,24 @@ public class SchemaCompatibilityComparer
             changes.Add(Change(SchemaChangeKind.TypeChanged, direction, topic, $"{path}[]", description));
         }
 
+        // #168: additionalProperties (a Dictionary<string, T>-shaped schema) used to never be walked
+        // at all, so a breaking change entirely inside a map's value schema (a type change, a new
+        // required property) passed `benzene diff` undetected. Mirror the Items branch immediately
+        // above: recurse when both sides have a value schema, and treat one side having none as the
+        // map's value contract appearing/disappearing entirely.
+        if (baseline.AdditionalProperties != null && current.AdditionalProperties != null)
+        {
+            CompareSchemas(Resolve(baseline.AdditionalProperties, baselineDoc), Resolve(current.AdditionalProperties, currentDoc),
+                baselineDoc, currentDoc, direction, topic, $"{path}{{}}", changes, depth + 1);
+        }
+        else if (baseline.Type == "object" && (baseline.AdditionalProperties != null || current.AdditionalProperties != null))
+        {
+            var description = baseline.AdditionalProperties != null
+                ? "Map value schema was removed"
+                : "Map value schema was added";
+            changes.Add(Change(SchemaChangeKind.TypeChanged, direction, topic, $"{path}{{}}", description));
+        }
+
         CompareUnionMembers(baseline, current, baselineDoc, currentDoc, direction, topic, path, changes, depth,
             "oneOf", baseline.OneOf, current.OneOf);
         CompareUnionMembers(baseline, current, baselineDoc, currentDoc, direction, topic, path, changes, depth,

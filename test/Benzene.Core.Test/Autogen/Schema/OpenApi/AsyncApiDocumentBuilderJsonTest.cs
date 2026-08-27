@@ -4,6 +4,7 @@ using Benzene.Schema.OpenApi.AsyncApi;
 using ByteBard.AsyncAPI;
 using ByteBard.AsyncAPI.Models;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Serialization;
 using Xunit;
 
 namespace Benzene.Test.Autogen.Schema.OpenApi;
@@ -14,6 +15,10 @@ public class AsyncApiDocumentBuilderJsonTest
     private const string Topic = "tenant:created";
     private const string Topic2 = "tenant:updated";
 
+    // #169: SchemaBuilder's reflection path now camelCases property names to match the wire.
+    // AddJsonEvent infers its schema straight off the literal JSON's own keys, so that literal must
+    // be camelCased the same way a real event body would be.
+    private static readonly JsonSerializerSettings CamelCase = new() { ContractResolver = new CamelCasePropertyNamesContractResolver() };
 
     [Fact]
     public void Json_SimpleType()
@@ -25,7 +30,7 @@ public class AsyncApiDocumentBuilderJsonTest
             Title = "some-title",
             Value = 42,
             Date = new System.DateTime(2023, 1, 1)
-        });
+        }, CamelCase);
 
         var doc = CreateBuilder()
             .AddBroadcastEventDefinitions(new[] { responseEventDefinition })
@@ -59,14 +64,14 @@ public class AsyncApiDocumentBuilderJsonTest
                     Date  = new System.DateTime(2023, 1, 1)
                 }
             }
-        });
+        }, CamelCase);
 
         var json2 = JsonConvert.SerializeObject(new Inner
         {
             Title = "some-title",
             Value = 42,
             Date = new System.DateTime(2023, 1, 1)
-        });
+        }, CamelCase);
 
         var doc = CreateBuilder()
             .AddBroadcastEventDefinition(responseEventDefinition1)

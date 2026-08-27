@@ -61,8 +61,10 @@ public class OpenApiValidationSchemaBuilderTest
         builder.AddSchema(typeof(Benzene.Test.Autogen.CodeGen.Model.MessageWrapper<Benzene.Test.Autogen.CodeGen.Model.GetUserMessage>));
         var schema = builder.Build()["GetUserMessageMessageWrapper"];
 
-        Assert.Contains("Message", schema.Required);
-        Assert.Equal("required", schema.Properties["Message"].Description);
+        // #169: schema property keys (and so Required) are camelCase, matching the wire - the
+        // validator's own reflected key ("Message", simulated above) is camelCased before the lookup.
+        Assert.Contains("message", schema.Required);
+        Assert.Equal("required", schema.Properties["message"].Description);
     }
 
     [Fact]
@@ -78,8 +80,9 @@ public class OpenApiValidationSchemaBuilderTest
         builder.AddSchema(typeof(ExampleRequestPayload));
         var schema = builder.Build()["ExampleRequestPayload"];
 
-        Assert.Contains("Name", schema.Required);
-        Assert.Equal("required", schema.Properties["Name"].Description);
+        // #169: schema property keys (and so Required) are camelCase, matching the wire.
+        Assert.Contains("name", schema.Required);
+        Assert.Equal("required", schema.Properties["name"].Description);
     }
 
     [Fact]
@@ -95,7 +98,8 @@ public class OpenApiValidationSchemaBuilderTest
         builder.AddSchema(typeof(ExampleRequestPayload));
         var schema = builder.Build()["ExampleRequestPayload"];
 
-        Assert.Contains("Name", schema.Required);
+        // #169: schema property keys (and so Required) are camelCase, matching the wire.
+        Assert.Contains("name", schema.Required);
         Assert.DoesNotContain("GhostProperty", schema.Required);
     }
 }

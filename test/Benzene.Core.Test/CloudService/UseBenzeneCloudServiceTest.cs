@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading.Tasks;
@@ -10,6 +11,7 @@ using Benzene.Aws.Lambda.Core;
 using Benzene.CloudService;
 using Benzene.Core.Messages.BenzeneMessage;
 using Benzene.Core.Middleware;
+using Benzene.Mesh.Wire;
 using Benzene.Test.Examples;
 using Benzene.Testing;
 using Benzene.Aws.Lambda.Core.TestHelpers;
@@ -227,7 +229,11 @@ public class UseBenzeneCloudServiceTest
 
         var noCollector = BuildReport(null);
         Assert.False(noCollector.IsConformant);
-        Assert.Equal(new[] { "R6" }, noCollector.Missing);
+        // #167: mesh is on by default but UseMeshTrace is only wired when a collector/exporter is
+        // also configured - R8 must be Missing here too, not just R6. Before the fix this asserted
+        // `{ "R6" }` only, which is exactly the false "R8 satisfied" claim the round-11 finding caught
+        // (MeshSpan.Current was genuinely null with this wiring).
+        Assert.Equal(new[] { "R6", "R8" }, noCollector.Missing);
 
         var withoutMesh = BuildReport(cloud => cloud.WithoutMesh());
         Assert.Equal(new[] { "R6", "R8" }, withoutMesh.Missing);
@@ -236,6 +242,38 @@ public class UseBenzeneCloudServiceTest
             .WithCollector("http://collector/benzene/invoke")
             .WithSpecPath("/spec"));
         Assert.Equal(new[] { "R7" }, relocated.Missing);
+    }
+
+    [Fact]
+    public void ProfileReport_MeshEnabledWithNoCollectorOrExporter_R8IsNotSatisfied()
+    {
+        // #167: the default wiring (mesh on, no collector/exporter configured) used to have R8
+        // report satisfied just because MeshEnabled was true - but Extensions.cs only wires
+        // UseMeshTrace when a traceExporter/CollectorEnvelopeUrl is also configured, so
+        // MeshSpan.Current is genuinely null under this exact wiring. R8 must say so.
+        var report = BuildReport(null);
+
+        var r8 = report.Requirements.Single(x => x.Id == "R8");
+        Assert.False(r8.Satisfied);
+        Assert.Contains(r8.Id, report.Missing);
+    }
+
+    [Fact]
+    public void ProfileReport_MeshEnabledWithAnExplicitTraceExporter_R8IsSatisfied_EvenWithNoCollector()
+    {
+        // The other half of the same condition Extensions.cs wires UseMeshTrace with:
+        // WithTraceExporter alone (no collector URL) is enough to actually wire trace propagation,
+        // so R8 must be satisfied here - it must track the resolved exporter, not CollectorEnvelopeUrl.
+        var report = BuildReport(cloud => cloud.WithTraceExporter(new NoOpMeshTraceExporter()));
+
+        var r8 = report.Requirements.Single(x => x.Id == "R8");
+        Assert.True(r8.Satisfied);
+        Assert.DoesNotContain(r8.Id, report.Missing);
+    }
+
+    private sealed class NoOpMeshTraceExporter : IMeshTraceExporter
+    {
+        public void Export(MeshTraceEvent traceEvent) { }
     }
 
     private static CloudServiceProfileReport BuildReport(Action<ICloudServiceBuilder>? configure)

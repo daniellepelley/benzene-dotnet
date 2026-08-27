@@ -365,6 +365,72 @@ public class SchemaCompatibilityComparerTest
         Assert.Equal(ChangeCompatibility.Breaking, change.Compatibility);
     }
 
+    // #168: CompareSchemas never recursed into additionalProperties, so a breaking change entirely
+    // inside a Dictionary<string, T>-shaped schema's value type passed `benzene diff` as "No changes".
+
+    [Fact]
+    public void AdditionalPropertiesValueSchema_BreakingChangeInside_IsDetected()
+    {
+        var baselineComponents = new OpenApiComponents
+        {
+            Schemas = new Dictionary<string, OpenApiSchema>
+            {
+                ["Address"] = WithProp("street", "string")
+            }
+        };
+        var currentComponents = new OpenApiComponents
+        {
+            Schemas = new Dictionary<string, OpenApiSchema>
+            {
+                // Both a type change ("street": string -> integer) and a new required property
+                // ("city") inside the map's value schema - either alone is breaking.
+                ["Address"] = new OpenApiSchema
+                {
+                    Type = "object",
+                    Properties = new Dictionary<string, OpenApiSchema>
+                    {
+                        ["street"] = new OpenApiSchema { Type = "integer" },
+                        ["city"] = new OpenApiSchema { Type = "string" }
+                    },
+                    Required = new HashSet<string> { "city" }
+                }
+            }
+        };
+
+        var baseline = DocOf(baselineComponents, Req(Topic, Obj(("id", false)), MapOf(RefTo("Address"))));
+        var current = DocOf(currentComponents, Req(Topic, Obj(("id", false)), MapOf(RefTo("Address"))));
+
+        var report = new SchemaCompatibilityComparer().Compare(baseline, current);
+
+        Assert.Equal(ChangeCompatibility.Breaking, report.Overall);
+        Assert.Contains(report.Changes, c => c.Kind == SchemaChangeKind.TypeChanged && c.Path.EndsWith("street"));
+        Assert.Contains(report.Changes, c => c.Kind == SchemaChangeKind.RequiredPropertyAdded && c.Path.EndsWith("city"));
+    }
+
+    [Fact]
+    public void AdditionalPropertiesAppearsOnOneSide_Request_IsBreakingTypeChange()
+    {
+        var baseline = DocOf(Req(Topic, MapOf(null), Obj(("id", false))));
+        var current = DocOf(Req(Topic, MapOf(new OpenApiSchema { Type = "string" }), Obj(("id", false))));
+
+        var report = new SchemaCompatibilityComparer().Compare(baseline, current);
+
+        var change = Assert.Single(report.Changes);
+        Assert.Equal(SchemaChangeKind.TypeChanged, change.Kind);
+        Assert.Equal(SchemaDirection.Request, change.Direction);
+        Assert.Equal(ChangeCompatibility.Breaking, change.Compatibility);
+    }
+
+    [Fact]
+    public void AdditionalPropertiesUnchanged_NoChangesReported()
+    {
+        var doc = DocOf(Req(Topic, Obj(("id", false)), MapOf(new OpenApiSchema { Type = "string" })));
+
+        var report = new SchemaCompatibilityComparer().Compare(doc, doc);
+
+        Assert.Empty(report.Changes);
+    }
+
     // ---- helpers ----
 
     private static EventServiceDocument DocOf(params RequestResponse[] requests) =>
@@ -382,6 +448,9 @@ public class SchemaCompatibilityComparerTest
         new RequestResponse { Topic = topic, Version = "", Request = request, Response = response };
 
     private static OpenApiSchema ArrayOf(OpenApiSchema? items) => new OpenApiSchema { Type = "array", Items = items };
+
+    private static OpenApiSchema MapOf(OpenApiSchema? valueSchema) =>
+        new OpenApiSchema { Type = "object", AdditionalProperties = valueSchema };
 
     private static OpenApiSchema RefTo(string name) =>
         new OpenApiSchema { Reference = new OpenApiReference { Type = ReferenceType.Schema, Id = name } };

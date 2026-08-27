@@ -21,8 +21,19 @@ public class SchemaBuilder : ISchemaBuilder
     /// <param name="options">The generation options, or <c>null</c> for defaults.</param>
     public SchemaBuilder(SchemaGenerationOptions? options)
     {
+        // #169: the derived spec's schema property names were PascalCase (Swashbuckle's own default
+        // when the resolver's JsonSerializerOptions carries no naming policy) while the wire, the
+        // spec's own `example` block (ExamplePayloadBuilder.CamelCase), and the sibling
+        // .service.json from the same build (MeshSchemaGenerator) are all camelCase - one
+        // benzene-descriptor --emit both run produced self-contradictory casing. Benzene's default
+        // JSON serializer camelCases (Benzene.Core.MessageHandlers.Serialization.JsonSerializer), so
+        // the schema generator must match it at the root rather than leaving downstream consumers to
+        // patch around a PascalCase schema.
         _schemaGenerator = new SchemaGenerator(CreateGeneratorOptions(options),
-            new JsonSerializerDataContractResolver(new System.Text.Json.JsonSerializerOptions()));
+            new JsonSerializerDataContractResolver(new System.Text.Json.JsonSerializerOptions
+            {
+                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
+            }));
     }
 
     public Dictionary<string, OpenApiSchema> Build()
