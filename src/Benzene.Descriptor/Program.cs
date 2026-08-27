@@ -24,7 +24,7 @@ if (opts is null)
 // descriptor, never VersionScheme. Carrying the scheme onto the wire descriptor is a spec-adjacent
 // change (docs/specification/mesh.md's ServiceDescriptor shape, its conformance fixtures, and every
 // language port's descriptor type) and was judged out of scope for this fix round - see
-// work/outstanding-bugs.md and work/bug-fix-designs-round11-2026-08.md §6 for the full record.
+// work/outstanding-bugs.md and work/archive/bug-fix-designs-round11-2026-08.md §6 for the full record.
 var versionError = opts.ValidateVersion();
 if (versionError is not null)
 {

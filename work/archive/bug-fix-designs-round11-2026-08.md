@@ -1,3 +1,25 @@
+> ARCHIVED 2026-08-27: actioned. All 62 findings (task board #121-#182) from this review, grouped
+> into eight work packages, landed and were pushed to `main` via 8 merge commits, in landing order:
+> `4d45ff8` (WP-EventSourcing, #121-132), `9134847` (WP-MeshDiscovery, #148-157), `e1da603`
+> (WP-Transports, #158-165), `072b4e6` (WP-Cache, #139-141,144-147), `796fee3` (WP-AuthCore,
+> #174,176,179,181,182), `73f4a16` (WP-RateLimiting, #133-138,142,143), `0d51c1b` (WP-AuthOidc,
+> #172,173,175,177,178,180), `c4086e8` (WP-CodeGenSchema, #166-171). Full baseline re-verified after
+> the last merge: `dotnet build Benzene.sln -c Release` 0 errors; `test/Benzene.Core.Test` 3178
+> passed / 0 failed / 2 skipped; `test/Benzene.Mesh.Test` 556/556; `deploy/Mesh/Benzene.Mesh.Host.Test`
+> 150/150; `Benzene.Examples.sln` build 0 errors.
+>
+> Three deliberate scope-downs from this round's rulings, recorded as `[DECISION]` entries in
+> `work/outstanding-bugs.md` rather than fully closed: **#135** (payload-size rate limiting still
+> cannot prevent ASP.NET Core's upstream request-body buffering — shipped a `Content-Length`
+> pre-check instead of the larger redesign that would be needed to run ahead of it); **#141** (cache
+> cancellation now reaches the cache's own I/O, but not the caller-supplied write-through/lazy-load
+> delegates, which stay a separate, independently-justified breaking change); **#171**
+> (`--version-scheme` is validated at build time but never carried onto the emitted wire descriptor —
+> a spec-adjacent change to `docs/specification/mesh.md`'s `ServiceDescriptor` shape judged too large
+> for this fix round). Per-finding evidence and the per-work-package `[RESOLVED]` writeups are in
+> [`../outstanding-bugs.md`](../outstanding-bugs.md) (search "Tracked findings round 11"), each
+> pointing back here for the full ruling; see `work/archive/README.md` for the index entry.
+
 # Round 11 review findings (2026-08)
 
 **Status: ACTIVE — findings only, not yet fix-designed or implemented.** This round was explicitly

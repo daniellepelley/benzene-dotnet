@@ -51,6 +51,18 @@ first). **[PERF]** performance hygiene, not a correctness bug. **[RESOLVED]** ve
 > archived, stamped with the landing commits); consult it before touching any of this code again so a
 > decision made here doesn't get silently re-litigated.
 
+> **Tracked findings, 2026-08-26/27 (round 11) — all 62 fixed.** The round-11 review pass (task board
+> #121–#183: six parallel agents over event sourcing, rate limiting/cache, mesh discovery, less-common
+> AWS/GCP transports, the spec/descriptor/CloudService pipeline, and the auth adapters) produced 62
+> evidence-backed findings (tasks #121–#182). All eight work packages (WP-EventSourcing,
+> WP-MeshDiscovery, WP-Transports, WP-Cache, WP-AuthCore, WP-RateLimiting, WP-AuthOidc,
+> WP-CodeGenSchema) landed and were pushed to `main` via 8 merge commits. Their design decisions,
+> rationale, and the three deliberate scope-downs (#135, #141, #171 — each recorded as its own
+> `[DECISION]` below) remain ruled in
+> **[`bug-fix-designs-round11-2026-08.md`](archive/bug-fix-designs-round11-2026-08.md)** (now
+> archived, stamped with the landing commits and the re-verified baseline); consult it before touching
+> any of this code again so a decision made here doesn't get silently re-litigated.
+
 ---
 
 ## Resolved since the prior triage (verified in current source)
@@ -1338,9 +1350,10 @@ already-completed work runs under `CancellationToken.None`, never the run/stop t
 > pass's event-sourcing section (`Benzene.EventSourcing` + `Benzene.EventSourcing.DynamoDb`) produced
 > 12 evidence-backed findings (tasks #121–#132). All landed in one pass. Full evidence and fix
 > rationale remain in
-> **[`bug-fix-designs-round11-2026-08.md`](bug-fix-designs-round11-2026-08.md)** §2 (not yet archived
-> at time of writing — other round-11 sections were still in flight); consult it before touching this
-> code again so a decision made here doesn't get silently re-litigated.
+> **[`bug-fix-designs-round11-2026-08.md`](archive/bug-fix-designs-round11-2026-08.md)** §2 (now
+> archived, stamped with the round's 8 landing commits — see the top-of-file summary blockquote
+> above); consult it before touching this code again so a decision made here doesn't get silently
+> re-litigated.
 
 - **[RESOLVED] #121 — `DynamoDbEventStore.AppendAsync` never verified the stream was actually AT
   `expectedVersion`, only that the target Put slots were free.** An `expectedVersion` ahead of the
@@ -1435,7 +1448,7 @@ already-completed work runs under `CancellationToken.None`, never the run/stop t
 
 ### Tracked findings round 11, WP — Mesh discovery + catalog pipeline (done)
 Decisions, rationale, and the residual scope note are ruled in
-[`bug-fix-designs-round11-2026-08.md`](bug-fix-designs-round11-2026-08.md) §"§4 Mesh discovery +
+[`bug-fix-designs-round11-2026-08.md`](archive/bug-fix-designs-round11-2026-08.md) §"§4 Mesh discovery +
 catalog pipeline".
 - **[RESOLVED] #148 — `MeshDiscoveryRunner`'s `foreach` over providers had no try/catch; one provider
   throwing lost every other provider's results, and the discovery host wrote no registry document at
@@ -1506,7 +1519,7 @@ catalog pipeline".
 
 ### Tracked findings round 11, §5 — less-common AWS/GCP transports (#158–#165, done)
 Ruling, rationale, and scope decisions are in
-[`bug-fix-designs-round11-2026-08.md`](bug-fix-designs-round11-2026-08.md) §5 "Less-common AWS/GCP
+[`bug-fix-designs-round11-2026-08.md`](archive/bug-fix-designs-round11-2026-08.md) §5 "Less-common AWS/GCP
 transports".
 - **[RESOLVED] #158 — S3 object keys were never URL-decoded** (`S3MessageBodyGetter.cs`,
   `S3MessageHeadersGetter.cs`): S3 URL-encodes an object key on the event notification record (space
@@ -1598,7 +1611,7 @@ transports".
   so (a custom `IMessageHeadersGetter<TContext>` has no obligation to follow suit). Regression tests
   added to each transport's existing getter test file.
 ### Tracked findings round 11, WP-4 — Cache write-through/cancellation/serializer hardening (done)
-Ruled in [`bug-fix-designs-round11-2026-08.md`](bug-fix-designs-round11-2026-08.md) §3 "Cache" half
+Ruled in [`bug-fix-designs-round11-2026-08.md`](archive/bug-fix-designs-round11-2026-08.md) §3 "Cache" half
 (`Benzene.Cache.Core`/`Benzene.Cache.Redis`).
 - **[RESOLVED] #139 — write-through failure handling was backwards.** A cache-side exception thrown
   *after* the database write had already committed (e.g. `Serializer.Serialize` failing inside
@@ -1704,7 +1717,7 @@ partial-failure - one key throws, the others still get attempted and the result 
 overall success/failure correctly; cancellation is observed rather than silently ignored). Full solution
 build + `Benzene.Core.Test` re-verified green after this WP.
 ### Tracked findings round 11, §7 Auth adapters (partial - auth-core work package)
-Ruled in [`bug-fix-designs-round11-2026-08.md`](bug-fix-designs-round11-2026-08.md) §"§7 Auth
+Ruled in [`bug-fix-designs-round11-2026-08.md`](archive/bug-fix-designs-round11-2026-08.md) §"§7 Auth
 adapters". This covers task board #174, #176, #179, #181, #182 (`Benzene.Auth.OAuth2`,
 `Benzene.Auth.Core`, `deploy/Mesh/Benzene.Mesh.Host/MeshAuthGate.cs`); the remaining §7 findings
 (#172, #173, #175, #177, #178, #180) are a different work package's scope.
@@ -1779,7 +1792,7 @@ adapters". This covers task board #174, #176, #179, #181, #182 (`Benzene.Auth.OA
   Adversarial tests in `MeshAuthGateTest`: a JSON-array `roles` claim now satisfies both
   `RequiredGroups` and `DispatchRole` gates identically to how `RequireRole` already treated it.
 ### Round 11, `Benzene.RateLimiting` hardening (#133–#138, #142, #143) — done
-Design/rationale in [`bug-fix-designs-round11-2026-08.md`](bug-fix-designs-round11-2026-08.md)
+Design/rationale in [`bug-fix-designs-round11-2026-08.md`](archive/bug-fix-designs-round11-2026-08.md)
 §"§3 Rate Limiting + Cache" (rate-limiting half). All eight findings landed in one work package;
 `RateLimitingMiddlewareBase<TContext>` now holds the shared cost-validation/rejection/logging logic
 for both `RateLimitingMiddleware<TContext>` and the new `PartitionedRateLimitingMiddleware<TContext>`.
@@ -1815,7 +1828,7 @@ for both `RateLimitingMiddleware<TContext>` and the new `PartitionedRateLimiting
 - **[RESOLVED] #135** — `UsePayloadSizeRateLimiting` cannot bound memory: the cost delegate runs
   after ASP.NET Core's `UseBufferedRequestBody()` has already buffered the whole body, unconditionally
   and before any message-pipeline middleware runs. **Partial fix, scope deliberately narrowed** — see
-  the amended finding text in `bug-fix-designs-round11-2026-08.md` and the `[DECISION]` below for the
+  the amended finding text in `archive/bug-fix-designs-round11-2026-08.md` and the `[DECISION]` below for the
   residual gap this leaves open. Shipped: (1) a `Content-Length` pre-check — when the transport
   reports one (via `IMessageHeadersGetter<TContext>`) and it already exceeds `maxBurstBytes`, the
   cost delegate rejects on the declared size directly, without reading/measuring the
@@ -1883,7 +1896,7 @@ oversized payloads reaching the handler, not the peak memory a single request co
 genuine memory bound for a payload-size-sensitive endpoint still needs a host-level cap in front of
 Benzene entirely (Kestrel's `MaxRequestBodySize`, a gateway body-size limit).
 ### Tracked findings round 11 — Benzene.Mesh.Auth.Oidc DI-lifetime/CSRF/fail-fast fixes (done)
-Task board #172, #173, #175, #177, #178, #180 (see `work/bug-fix-designs-round11-2026-08.md` §7). All
+Task board #172, #173, #175, #177, #178, #180 (see `work/archive/bug-fix-designs-round11-2026-08.md` §7). All
 five worth-fixing items plus the one minor item assigned to this package are landed; full design
 rationale and cross-references to round 1's #4/#20 rulings are in that doc.
 
@@ -1956,16 +1969,17 @@ rationale and cross-references to round 1's #4/#20 rulings are in that doc.
   accept) keep using the lowercased copy. New test:
   `OidcSessionGateMiddlewareTest.NoSessionCookie_HtmlRequest_RedirectsToLogin_PreservingOriginalPathCasing`.
 
-`[DECISION]` (recorded, not deferred — see `work/bug-fix-designs-round11-2026-08.md`'s scope note for
+`[DECISION]` (recorded, not deferred — see `work/archive/bug-fix-designs-round11-2026-08.md`'s scope note for
 this round): `MeshOidcOptions.SessionDuration` is NOT given an enforced upper bound. A hard cap (e.g. 30
 days) would reduce the blast radius of a leaked cookie further, but risks breaking a deployment that
 genuinely wants a longer "remember me" duration, and this package has no way to know what's genuinely
 needed for a given deployment. Documented instead (property remarks + `CLAUDE.md`) so the tradeoff is
 explicit rather than silent; revisit if a real deployment's incident shows the uncapped default causing
 harm in practice.
-### Tracked findings round 11, §6 — spec/descriptor/CloudService/Probe pipeline (task board #166–#171, this pass)
-Ruled in [`bug-fix-designs-round11-2026-08.md`](bug-fix-designs-round11-2026-08.md) §6 (working doc — other
-round-11 work packages, #121–#165 and #172–#183, are tracked separately and may still be open).
+### Tracked findings round 11, §6 — spec/descriptor/CloudService/Probe pipeline (task board #166–#171, done)
+Ruled in [`bug-fix-designs-round11-2026-08.md`](archive/bug-fix-designs-round11-2026-08.md) §6 (now
+archived; every other round-11 work package, #121–#165 and #172–#182, has also landed — see the
+top-of-file summary blockquote).
 
 - **[RESOLVED] #166 — generated typed clients turned every enum property into an empty C# class with
   no members**, so a real generated client sent `"status":{}` on the wire and got HTTP 400 even with

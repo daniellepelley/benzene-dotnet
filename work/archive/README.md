@@ -159,3 +159,28 @@ it had one, otherwise 2026-08).
   `Benzene.Examples.sln` 0 errors); the per-finding summaries live in
   [`../outstanding-bugs.md`](../outstanding-bugs.md)'s Resolved section (search "Tracked findings
   round 10"), each pointing back here for the full record.
+
+## Dated review and fix-design record (2026-08-26/27, round 11)
+
+- `bug-fix-designs-round11-2026-08.md` — the round-11 review record (task board #121–#183: six
+  parallel review agents over event sourcing, rate limiting/cache, the mesh discovery/catalog
+  pipeline, less-common AWS/GCP transports, the spec/descriptor/CloudService pipeline, and the auth
+  adapters), successor to the round-10 ruling above, plus the per-work-package fix amendments
+  appended to each section as the round's 62 worth-fixing findings (task board #121–#182) were
+  actioned. All eight work packages (WP-EventSourcing, WP-MeshDiscovery, WP-Transports, WP-Cache,
+  WP-AuthCore, WP-RateLimiting, WP-AuthOidc, WP-CodeGenSchema) landed and pushed to `main` via 8
+  merge commits, in landing order: `4d45ff8` (WP-EventSourcing, #121-132), `9134847`
+  (WP-MeshDiscovery, #148-157), `e1da603` (WP-Transports, #158-165), `072b4e6` (WP-Cache,
+  #139-141,144-147), `796fee3` (WP-AuthCore, #174,176,179,181,182), `73f4a16` (WP-RateLimiting,
+  #133-138,142,143), `0d51c1b` (WP-AuthOidc, #172,173,175,177,178,180), `c4086e8`
+  (WP-CodeGenSchema, #166-171). Three deliberate scope-downs, recorded as `[DECISION]` entries rather
+  than fully closed: #135 (payload-size rate limiting still can't prevent ASP.NET Core's upstream
+  body buffering — a `Content-Length` pre-check shipped instead), #141 (cache cancellation reaches
+  the cache's own I/O only, not the caller-supplied write-through/lazy-load delegates), #171
+  (`--version-scheme` validated at build time but not carried onto the wire descriptor — a
+  spec-adjacent change judged out of scope). Archived 2026-08-27 after independent re-verification of
+  the build/test baseline (`dotnet build Benzene.sln -c Release` 0 errors; `test/Benzene.Core.Test`
+  3178 passed/2 skipped/0 failed; `test/Benzene.Mesh.Test` 556/556;
+  `deploy/Mesh/Benzene.Mesh.Host.Test` 150/150; `Benzene.Examples.sln` 0 errors); the per-finding
+  summaries live in [`../outstanding-bugs.md`](../outstanding-bugs.md)'s Resolved section (search
+  "Tracked findings round 11"), each pointing back here for the full record.
