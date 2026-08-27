@@ -27,6 +27,13 @@ namespace Benzene.Mesh.Dispatch;
 /// </remarks>
 public class MeshDispatchRateLimiter
 {
+    // #187b: the threshold that makes TryAcquire self-prune (below). Only the sibling
+    // Benzene.Mesh.Artifacts guard middleware calls Prune() today, on its own schedule - a limiter used
+    // without that guard (e.g. UseMeshDispatch() alone, or a caller that constructs its own) would
+    // otherwise keep one window per distinct key forever. 512 is comfortably above what a single warm
+    // instance sees in normal use, so this rarely fires on the hot path.
+    private const int PruneThreshold = 512;
+
     private readonly ConcurrentDictionary<string, Window> _windows = new(StringComparer.OrdinalIgnoreCase);
     private readonly Func<DateTimeOffset> _clock;
 
@@ -51,6 +58,13 @@ public class MeshDispatchRateLimiter
         if (limit <= 0)
         {
             return true;
+        }
+
+        // Opportunistic self-prune (#187b) - runs before growing the map further, so a shared singleton
+        // stays leak-safe even in a configuration with no guard middleware calling Prune() on its own.
+        if (_windows.Count > PruneThreshold)
+        {
+            Prune();
         }
 
         var now = _clock();

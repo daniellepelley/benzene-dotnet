@@ -37,13 +37,38 @@ own publishes). So it is off by two independent gates:
     (`AddMeshLambdaDispatcher()`), reusing that package's `IAwsLambdaClient` / `lambda:InvokeFunction`
     grant — the AWS SDK stays out of this core package.
 - `MeshDispatchRequest { Service, Topic, Headers?, Body? }` — the `mesh:dispatch` body.
-- `MeshDispatchMessageHandler` — gate → resolve the target from the injected `MeshServiceRegistry` by
-  name → pick the dispatcher by `entry.Source` → dispatch → return the service's `{ statusCode, headers,
-  body }`. Distinct statuses per failure: `Forbidden` (gated off), `BadRequest` (no service/topic),
-  `NotFound` (unknown service), `NotImplemented` (no dispatcher for that source).
+- `MeshDispatchMessageHandler` — gate → **resolve the target from the registry before charging the
+  per-target rate limit** (#187a) → charge the limit → pick the dispatcher by `entry.Source` → dispatch
+  → return the service's `{ statusCode, headers, body }`. Distinct statuses per failure: `Forbidden`
+  (gated off), `BadRequest` (no service/topic), `NotFound` (unknown service — costs the limiter
+  nothing), `TooManyRequests` (per-target limit), `NotImplemented` (no dispatcher for that source).
+  - **Cancellation (#185):** the dispatch call passes the ambient token from an optional
+    `ICancellationTokenAccessor` constructor parameter — the same idiom `HttpBenzeneMessageClient`
+    uses (`src/Benzene.Clients.Http`) — falling back to `CancellationToken.None` only when nothing is
+    registered/seeded. Wrap the pipeline in `.UseTimeout(...)` (`Benzene.Resilience`) to bound a stuck
+    dispatch; without it, dispatch behaves exactly as before (no accessor resolved → no cancellation).
+  - **Audit on throw (#186):** the dispatch call is wrapped in try/catch. On exception, `Audit(
+    "dispatch-failed", …, exceptionType: ex.GetType().Name)` runs and the exception is **rethrown
+    unchanged** — the audit record is the fix, propagation semantics do not change. Every other exit
+    path already audited before this fix; this closes the one path that didn't, so the package's
+    "leaves a record" claim holds even when the dispatch itself throws (see
+    `MeshDispatchMessageHandlerTest.DispatchThrows_AuditsDispatchFailedWithExceptionType_ThenRethrows`).
+  - **Rate-limit ordering (#187a):** the not-found check runs before `MeshDispatchRateLimiter.TryAcquire`
+    (it used to run after), so a caller cannot pin a rate-limit window against a service name that was
+    never registered.
+- `MeshDispatchRateLimiter` — besides `TryAcquire`/`Prune()`, `TryAcquire` now **self-prunes
+  opportunistically** (#187b) once `_windows.Count` exceeds a small threshold (512), so a shared
+  singleton stays bounded even in a configuration with no guard middleware calling `Prune()` on its
+  own schedule (only `Benzene.Mesh.Artifacts`'s guard middleware calls it directly today).
+- `HttpMeshServiceDispatcher` also caps the target's response (`MaxResponseBytes`, noted gap promoted
+  into WP-1): defaults to `MeshDispatchGuardOptions.DefaultMaxRequestBytes` (the same bound the
+  request side has always had), enforced while reading the response stream. An oversized response is
+  **truncated with an audit-visible `TruncatedMarker` appended to the body, not thrown** — the target
+  DID respond, and that response (truncated) is still the record of what happened.
 - `Extensions.UseMeshDispatch<TContext>(options?)` — opt-in registration (registers the handler on
   `mesh:dispatch`, the options/gate, and the HTTP dispatcher). Requires a `MeshServiceRegistry` in DI
-  (the dispatchable set) and, for AWS-Lambda services, `AddMeshLambdaDispatcher()`.
+  (the dispatchable set) and, for AWS-Lambda services, `AddMeshLambdaDispatcher()`. `ICancellationTokenAccessor`
+  is resolved from DI like the handler's other optional collaborators — nothing extra to wire for #185.
 
 ## When to use
 Only when you deliberately want the mesh to *send* live test messages to services (a dev/staging
@@ -62,6 +87,21 @@ transports (which stay compose+copy only), you don't need this package at all �
 `test/Benzene.Mesh.Test/MeshDispatchTest.cs` — the gate truth table, the handler's gate/not-found/
 bad-request/no-dispatcher/happy paths (with a recording fake dispatcher, asserting a blocked dispatch
 never reaches the dispatcher), and the AWS dispatcher's invoke mapping (mocked `IAwsLambdaClient`).
+Also, one test class each for the four round-12/13 (WP-1) behaviours:
+- `MeshDispatchMessageHandlerTest.UnknownService_RepeatedCalls_NeverChargeTheRateLimiter` (#187a).
+- `MeshDispatchMessageHandlerTest.DispatchThrows_AuditsDispatchFailedWithExceptionType_ThenRethrows`
+  (#186) — the test that makes the package's "a scoped, attributable call that leaves a record" claim
+  provably true under a failing dispatcher, not just an assertion in a comment: a thrown dispatch is
+  asserted to both audit AND still propagate the same exception instance.
+- `MeshDispatchMessageHandlerTest.WrappedInUseTimeout_PassesTheAmbientCancellationToken_NotHardcodedNone`
+  (#185) — wraps the handler in a real `Benzene.Resilience.TimeoutMiddleware<TContext>` (the type
+  `.UseTimeout(...)` wires up) and asserts the dispatcher's received token is the wrapped/cancellable
+  one, not `CancellationToken.None`.
+- `MeshDispatchRateLimiterTest.TryAcquire_SelfPrunesPastThreshold_KeepsTheWindowMapBounded` (#187b) —
+  pushes the limiter's internal map past the self-prune threshold and asserts it collapses back down
+  on the next `TryAcquire`, with nothing calling `Prune()` directly.
+- `HttpMeshServiceDispatcherTest` (response cap noted gap) — within-cap passthrough, over-cap
+  truncation + marker, and the default matching `MeshDispatchGuardOptions.DefaultMaxRequestBytes`.
 
 ## Follow-ups (not in this package yet)
 - The mesh UI **send leg**: wiring the F3a composer's existing envelope + a "Send" button to POST

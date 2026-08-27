@@ -63,6 +63,37 @@ first). **[PERF]** performance hygiene, not a correctness bug. **[RESOLVED]** ve
 > archived, stamped with the landing commits and the re-verified baseline); consult it before touching
 > any of this code again so a decision made here doesn't get silently re-litigated.
 
+> **Tracked findings rounds 12–13 — WP-1 (Mesh.Dispatch hardening) fixed.** The round-12/13 ruling
+> (**[`bug-fix-rulings-round12-13-2026-08.md`](bug-fix-rulings-round12-13-2026-08.md)**, §2 WP-1) covers
+> task board #185–#187 plus a noted response-buffering gap promoted into the same work package, all in
+> `src/Benzene.Mesh.Dispatch`. WP-1 has landed; WP-2 through WP-5 (Fleet trace-source isolation,
+> TestHelpers/client-family fixes, examples truth, Cache/RateLimiting second-order fixes) are tracked
+> separately in that same ruling doc and are **not** covered by this entry.
+> - **[RESOLVED] #185** — `MeshDispatchMessageHandler` hardcoded `CancellationToken.None` into the
+>   `IMeshServiceDispatcher.DispatchAsync` call. Now resolves an optional `ICancellationTokenAccessor`
+>   (the `HttpBenzeneMessageClient` idiom) and passes its token, falling back to `CancellationToken.None`
+>   only when nothing is registered/seeded — so a dispatch wrapped in `.UseTimeout(...)` is actually
+>   interruptible.
+> - **[RESOLVED] #186** — a thrown dispatch previously produced no audit record (every other exit path
+>   audited first; this one didn't). The dispatch call is now wrapped in try/catch: on exception,
+>   `Audit("dispatch-failed", …, exceptionType: …)` runs, then the exception is rethrown unchanged —
+>   propagation semantics are unaffected, only the missing audit line is added.
+> - **[RESOLVED] #187** — two parts. (a) `MeshDispatchRateLimiter.TryAcquire` was charged BEFORE the
+>   registry not-found check, letting a nonexistent service name pin a permanent rate-limit window; the
+>   not-found check now runs first, so a not-found dispatch costs the limiter nothing. (b)
+>   `MeshDispatchRateLimiter.Prune()` existed but nothing in the package called it; `TryAcquire` now
+>   self-prunes opportunistically once its internal window map exceeds a small threshold (512), so the
+>   limiter stays leak-safe even without the sibling `Benzene.Mesh.Artifacts` guard middleware.
+> - **[RESOLVED] noted gap** — `HttpMeshServiceDispatcher.DispatchAsync` buffered the entire target HTTP
+>   response with no size cap, asymmetric with the existing request-side `MaxRequestBytes`. Added
+>   `MaxResponseBytes` (default = `MeshDispatchGuardOptions.DefaultMaxRequestBytes`), enforced while
+>   reading the response stream; an oversized response is truncated with an audit-visible
+>   `HttpMeshServiceDispatcher.TruncatedMarker` appended to the body rather than the dispatch throwing.
+>
+> Tests: `test/Benzene.Mesh.Test/MeshDispatchTest.cs` — see `src/Benzene.Mesh.Dispatch/CLAUDE.md`'s
+> Tests section for the specific test names per fix, including the failing-dispatcher test that makes
+> the package's "leaves a record" claim provably true.
+
 > **Tracked findings rounds 12–13 (WP-4 — Examples truth, #193–#196) — fixed.** Design decisions,
 > rationale, and rejected alternatives are ruled in
 > [`bug-fix-rulings-round12-13-2026-08.md`](bug-fix-rulings-round12-13-2026-08.md) §2 WP-4; consult it

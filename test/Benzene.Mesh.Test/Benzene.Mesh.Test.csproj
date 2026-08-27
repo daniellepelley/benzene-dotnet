@@ -59,6 +59,10 @@
     <ProjectReference Include="..\..\src\Benzene.Core.MessageHandlers\Benzene.Core.MessageHandlers.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Core.Messages\Benzene.Core.Messages.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Microsoft.Dependencies\Benzene.Microsoft.Dependencies.csproj" />
+    <!-- #185 (Benzene.Mesh.Dispatch): MeshDispatchMessageHandlerTest wraps a dispatch in UseTimeout(...)
+         to prove the handler observes ambient cancellation, the same TimeoutMiddleware<TContext> the
+         Benzene.Core.Test suite exercises directly (test/Benzene.Core.Test/Resilience/TimeoutMiddlewareTest.cs). -->
+    <ProjectReference Include="..\..\src\Benzene.Resilience\Benzene.Resilience.csproj" />
   </ItemGroup>
 
 </Project>
