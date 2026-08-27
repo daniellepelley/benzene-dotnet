@@ -2,23 +2,38 @@ using System;
 
 namespace Benzene.Mesh.Auth.Oidc;
 
-/// <summary>The session cookie's payload: the verified <c>email</c> (already lowercased) and an
-/// expiry. Deliberately just these two fields - not secret (the mesh already shows the email is
-/// allowlisted; this only proves the browser presenting the cookie logged in as it once), so signing
+/// <summary>The session cookie's payload: the verified <c>email</c> (already lowercased), an expiry,
+/// and a per-session <c>Jti</c>. Email/Exp are not secret (the mesh already shows the email is
+/// allowlisted; this only proves the browser presenting the cookie logged in once), so signing
 /// (tamper-evidence) rather than encrypting is the right property - see this package's
 /// <c>CLAUDE.md</c>.</summary>
-internal sealed record OidcSessionPayload(string Email, long Exp);
+/// <param name="Email">The verified, already-lowercased <c>email</c> claim.</param>
+/// <param name="Exp">Unix-seconds expiry.</param>
+/// <param name="Jti">
+/// #178: a random, per-issuance identifier - present so a FUTURE server-side deny-list could revoke one
+/// specific session without breaking the cookie's wire shape, not because anything reads or checks it
+/// today. Today's logout is client-side only (it only ever clears the CALLER's own cookie - see this
+/// package's <c>CLAUDE.md</c> "Stateless logout" section), so a copy of a session cookie that has
+/// already left the original holder's browser stays valid, unrevocable, until its own <c>Exp</c> -
+/// this field alone does not change that; it only makes closing that gap possible later without a
+/// cookie-format break. Defaults to <c>""</c> (rather than being required) so a pre-existing serialized
+/// payload - or a test that only cares about <c>Email</c>/<c>Exp</c> - still deserializes/constructs
+/// cleanly.
+/// </param>
+internal sealed record OidcSessionPayload(string Email, long Exp, string Jti = "");
 
 /// <summary>Mints and validates the session cookie as a signed, expiring token (see
 /// <see cref="SignedToken"/>).</summary>
 internal static class OidcSessionToken
 {
     /// <summary>Creates a new signed session token for <paramref name="email"/>, valid for
-    /// <paramref name="duration"/> from now.</summary>
+    /// <paramref name="duration"/> from now. Carries a fresh random <c>Jti</c> - see
+    /// <see cref="OidcSessionPayload"/>'s remarks.</summary>
     public static string Create(byte[] key, string email, TimeSpan duration)
     {
         var exp = DateTimeOffset.UtcNow.Add(duration).ToUnixTimeSeconds();
-        return SignedToken.Create(key, new OidcSessionPayload(email, exp));
+        var jti = Guid.NewGuid().ToString("N");
+        return SignedToken.Create(key, new OidcSessionPayload(email, exp, jti));
     }
 
     /// <summary>

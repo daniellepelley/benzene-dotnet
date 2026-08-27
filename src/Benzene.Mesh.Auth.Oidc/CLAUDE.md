@@ -31,35 +31,56 @@ using the client secret. The secret and the ID token both stay server-side for t
 
 ## Key types
 - `MeshOidcOptions` - `Issuer`/`ClientId`/`ClientSecret`/`SigningKey` (all required, `Validate()` throws
-  `ArgumentException` at wire-up time if any is missing or `SigningKey` is under 32 bytes - never a
-  silently-weak default), `BasePath` (default `/mesh/auth`), `AllowedEmails` (empty = deny everyone, not
-  an error), `Scope` (default `openid email`), `SessionDuration` (default 24h), `ValidAlgorithms`
-  (default `["RS256"]`, algorithm-confusion protection per RFC 8725 §3.1 - same reasoning as
-  `Benzene.Auth.OAuth2.OAuth2BearerOptions.ValidAlgorithms`), `RequireHttpsMetadata` (default `true`,
-  test-only escape hatch), `PublicBaseUrl` (optional override for deriving the absolute `redirect_uri`).
+  `ArgumentException` at wire-up time if any is missing, `Issuer` is non-https while
+  `RequireHttpsMetadata` is true, `SigningKey` is under 32 bytes, or `SigningKey` has too few distinct
+  byte values to plausibly be a generated secret - see `Validate()`'s own remarks for the entropy floor's
+  exact shape and limits - never a silently-weak default), `BasePath` (default `/mesh/auth`),
+  `AllowedEmails` (empty = deny everyone, not an error), `Scope` (default `openid email`),
+  `SessionDuration` (default 24h, deliberately uncapped - see "Stateless logout" below for why that
+  matters more here than usual), `ValidAlgorithms` (default `["RS256"]`, algorithm-confusion protection
+  per RFC 8725 §3.1 - same reasoning as `Benzene.Auth.OAuth2.OAuth2BearerOptions.ValidAlgorithms`),
+  `RequireHttpsMetadata` (default `true`, test-only escape hatch), `PublicBaseUrl` (optional override for
+  deriving the absolute `redirect_uri`).
 - `Extensions.UseMeshOidcAuth<TContext>(options)` - validates options, builds the shared long-lived
   `ConfigurationManager<OpenIdConnectConfiguration>` / `JsonWebTokenHandler` / `TokenValidationParameters`
-  / `HttpClient` once at wire-up time, and registers four middlewares in order:
+  / `HttpClient` once at wire-up time, and registers four middlewares in order. Only
+  `OidcSessionGateMiddleware<TContext>` is registered `AddScoped`; the other three are `AddSingleton` -
+  see its own bullet below for why that split matters and isn't arbitrary.
   1. `OidcLoginMiddleware<TContext>` - `GET {BasePath}/login`. Redirects (302) to the discovered
      authorization endpoint with `client_id`/`redirect_uri`/`response_type=code`/`scope`/`state`, and
      sets the `state` value as a short-lived (10 min), `HttpOnly`/`Secure`/`SameSite=Lax` cookie scoped
      to `BasePath`. `?returnTo=` is validated (`ReturnToValidator.IsSafe`) and embedded in the signed
-     state token so a successful login lands the user back where they started.
+     state token so a successful login lands the user back where they started. A discovery failure here
+     (unreachable/misconfigured issuer, transient IdP outage) denies with `OidcDiscoveryFailureResponse`
+     (`503`, generic body) rather than an unhandled `500`.
   2. `OidcCallbackMiddleware<TContext>` - `GET {BasePath}/callback`. Validates `state` (below), exchanges
      `code` for an ID token (`OidcTokenExchangeClient`), verifies it (`OidcIdTokenValidator`), checks the
      verified email against `AllowedEmails`, and only then issues a session cookie and redirects to the
      validated `returnTo`. Any failure at any step: no session issued, a generic "access denied" HTML
      response (401), the real reason logged server-side only via `ILogger` - never echoed to the browser.
-  3. `OidcLogoutMiddleware<TContext>` - `GET {BasePath}/logout`. Clears the session cookie, redirects to
-     `/`.
+     A discovery failure (same cases as `/login`'s) gets the same `OidcDiscoveryFailureResponse` (`503`)
+     instead, kept in its own `try`/`catch` distinct from the token-exchange one - it is not a statement
+     about this caller's credentials, so it shouldn't look like one.
+  3. `OidcLogoutMiddleware<TContext>` - `POST {BasePath}/logout`, requiring the `X-Benzene-Logout`
+     header (see "Logout is POST + a CSRF header, not a bare GET" below). Clears the session cookie and
+     answers `{"redirect":null}` (200, JSON) - this package resolves no IdP `end_session_endpoint`, so
+     the redirect is always `null` ("local sign-out only, caller should reload"). A GET, or a POST
+     missing the header, is refused (`405`/`403`) rather than silently signing anyone out.
   4. `OidcSessionGateMiddleware<TContext>` - registered last, so it never sees a request to the three
      routes above (they've already short-circuited). Requires a valid session cookie whose email is
      **currently** allowlisted (re-checked against live `MeshOidcOptions.AllowedEmails` every request,
      never just trusted from the cookie - removing an email takes effect on the very next request even
      for an existing session). Missing/invalid/expired session: `Accept: text/html` → redirect to
-     `{BasePath}/login?returnTo=<original path+query>`; anything else (fetch/XHR/POST) → `401` with a
-     minimal JSON body, never a redirect. Not `ITerminalMiddleware` - it calls `next()` on success like
-     any decorator, only short-circuiting on failure.
+     `{BasePath}/login?returnTo=<original path+query, in its ORIGINAL casing>`; anything else
+     (fetch/XHR/POST) → `401` with a minimal JSON body, never a redirect. Not `ITerminalMiddleware` - it
+     calls `next()` on success like any decorator, only short-circuiting on failure. Registered
+     `AddScoped`, not `AddSingleton` like its three siblings: it takes an optional *scoped*
+     `IOidcSessionSink` through its constructor (see that interface's remarks), and a singleton
+     registration would resolve that scoped dependency exactly once, at the first request's scope, then
+     hold that one instance for the rest of the container's life - every later request's identity would
+     silently attribute to whatever the first request captured. This was a real, shipped bug until it was
+     fixed; `Benzene.Auth.Basic.BasicAuthMiddleware`/`Benzene.Auth.OAuth2.OAuth2BearerMiddleware` are
+     registered scoped for the identical reason.
 - `IOidcQueryStringReader<TContext>` - the one abstraction this package had to invent: Benzene's
   transport-agnostic `HttpRequest.Path` deliberately excludes the query string (see its own remarks), and
   no existing Benzene abstraction exposes it generically. A transport binding supplies its own
@@ -100,14 +121,45 @@ using the client secret. The secret and the ID token both stay server-side for t
   no new HTTP client library.
 
 ## Session cookie: signed, not encrypted (deliberate)
-The session cookie's payload is `{email, exp}` - not secret (an authorized user's own email, which the
-mesh UI would show them anyway), so the property that actually matters is tamper-evidence: a browser (or
-anyone who can read the cookie jar) must not be able to forge or extend a session by editing it.
+The session cookie's payload is `{Email, Exp, Jti}` - not secret (an authorized user's own email, which
+the mesh UI would show them anyway), so the property that actually matters is tamper-evidence: a browser
+(or anyone who can read the cookie jar) must not be able to forge or extend a session by editing it.
 HMAC-SHA256 signing (`SignedToken`) gives exactly that, verified with a constant-time comparison. This is
 a deliberate choice, not an oversight - encrypting a non-secret payload would add complexity (key
 management for a second purpose, IV handling) without adding a real security property. If a future
 payload needs to carry something actually secret, that decision should be revisited then, not
-speculatively built in now.
+speculatively built in now. `Jti` is a random per-issuance identifier that nothing reads today - see
+"Stateless logout (deliberate) - and its consequence" below for why it's there anyway.
+
+## Logout is POST + a CSRF header, not a bare GET (deliberate, and a fixed regression)
+`OidcLogoutMiddleware` used to accept a bare `GET {BasePath}/logout` and sign the caller out directly.
+That is a CSRF hazard in its own right: `SameSite=Lax` (the flag this package's own cookies already
+carry) still sends a cookie along on a top-level GET navigation, so a cross-site page needs nothing more
+than `<img src="{BasePath}/logout">` to sign out a visiting victim - no script execution, no user
+interaction, just the image tag rendering. This directly contradicted a ruling already made and shipped
+elsewhere in this codebase for the identical hazard: `deploy/Mesh/Benzene.Mesh.Host/MeshAuthGate
+.HandleLogoutAsync` requires `POST` (`405` on anything else) plus a custom `X-Benzene-Logout` header
+(`403` if absent) - a cross-site `<form method="post">` cannot set a custom header at all, and a
+cross-origin `fetch()` that tries to triggers a CORS preflight this pipeline never approves, so only a
+genuine same-origin caller can ever supply it. `OidcLogoutMiddleware` now mirrors that exactly (same
+header name, same status codes), and its response is JSON (`{"redirect":...}`) rather than a redirect, to
+match `Benzene.Mesh.Ui`'s shared Sign-out control - already written against `MeshAuthGate`'s contract
+first, since it renders for both this package's hosts and `MeshAuthGate`-gated ones - which `fetch()`es
+this endpoint expecting exactly that shape. This package resolves no IdP `end_session_endpoint` the way
+`MeshAuthGate` does, so its `redirect` is always `null` ("local sign-out only, caller should reload").
+
+## Stateless logout (deliberate) - and its consequence
+Logout here is entirely client-side: it clears the caller's own session cookie and nothing else. There is
+no server-side session store and no deny-list, so there is nothing to revoke a cookie's validity FOR -
+revocation isn't just unimplemented, it's currently unexpressible. The direct consequence: a session
+cookie that has already left its original holder's browser (stolen, leaked in a log, copied by malware)
+stays fully valid, for anyone holding it, until its own `Exp` claim - a legitimate logout by the original
+user does not touch that copy at all. `OidcSessionPayload.Jti` (a random per-issuance identifier) exists
+so a FUTURE deny-list could revoke one specific session without a cookie wire-format break, but nothing
+reads or checks it today - adding that store is a real feature, not a follow-up bullet, and is
+deliberately not built speculatively ahead of an actual need. Until then, `MeshOidcOptions.SessionDuration`
+is the only lever that bounds how long a leaked cookie stays dangerous (see its own remarks) - keep it as
+short as your users can tolerate re-authenticating at.
 
 ## One `Set-Cookie` per response (a real transport constraint, not a style choice)
 `IBenzeneResponseAdapter<TContext>.SetResponseHeader` is a single-value-per-key contract, and at least
@@ -152,9 +204,13 @@ ID token verification against a real loopback fake OIDC provider (`FakeOidcProvi
 `.well-known/openid-configuration` and a JWKS, signs real RS256 tokens with crafted claims) covering
 signature/issuer/audience/expiry/`email_verified`/algorithm-confusion, the allowlist check
 (case-insensitivity, exact-match, empty-allowlist-denies-everyone), the session cookie sign/verify
-round-trip and tamper detection (a flipped byte fails), the gate's redirect-vs-401 split, and the
-`returnTo` open-redirect guard. `FakeOidcProvider` additionally proves discovery is genuinely read from
-the document (not hardcoded) by using non-Google-shaped endpoint paths.
+round-trip and tamper detection (a flipped byte fails), the gate's redirect-vs-401 split, the gate's
+`returnTo` open-redirect guard AND original-casing preservation, the logout route's method/CSRF-header
+gate (`GET` → 405, missing header → 403, `POST` + header → clears the cookie), `MeshOidcOptions.Validate`'s
+full fail-fast matrix (non-https issuer, short/low-entropy signing key, etc.), and the session gate
+resolving a fresh `IOidcSessionSink` from each of two separate DI scopes. `FakeOidcProvider` additionally
+proves discovery is genuinely read from the document (not hardcoded) by using non-Google-shaped endpoint
+paths.
 
 ## No OIDC `nonce` claim echo (deliberate, given Authorization Code flow only)
 This package does not send a `nonce` authorization-request parameter or verify a matching `nonce`
@@ -176,7 +232,8 @@ ever grows an implicit/hybrid mode - it should not for Authorization Code alone.
 - Cookie names (`benzene_mesh_oidc_state`, `benzene_mesh_session`) and the state token TTL (10 minutes)
   are constants, not configuration - fine for a single mesh deployment per origin; revisit if that stops
   being true.
-- No CSRF protection on `/logout` (a GET, deliberately - "or similar" per the brief) beyond it being
-  idempotent and harmless (it can only ever clear the caller's own session).
+- ~~No CSRF protection on `/logout`~~ - superseded: `/logout` now requires `POST` + the
+  `X-Benzene-Logout` header, matching `MeshAuthGate`'s ruling for the identical hazard. See "Logout is
+  POST + a CSRF header, not a bare GET" above.
 - Dispatch (`Benzene.Mesh.Dispatch`) isn't wired into `examples/AwsMesh` yet; when it is, it inherits this
   gate automatically as long as it's registered after `UseMeshOidcAuth` on the same pipeline.

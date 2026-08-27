@@ -22,6 +22,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Benzene.Mesh.Auth.Oidc\Benzene.Mesh.Auth.Oidc.csproj" />
+    <!-- Only for OidcSessionGateMiddlewareDiScopeTest: a concrete IBenzeneServiceContainer (backed by a
+         real Microsoft.Extensions.DependencyInjection ServiceCollection) is the only way to exercise
+         Extensions.UseMeshOidcAuth's actual scoped-vs-singleton registrations across real DI scopes -
+         every other test in this project constructs middleware directly and needs no container at all. -->
+    <ProjectReference Include="..\..\src\Benzene.Microsoft.Dependencies\Benzene.Microsoft.Dependencies.csproj" />
   </ItemGroup>
 
 </Project>

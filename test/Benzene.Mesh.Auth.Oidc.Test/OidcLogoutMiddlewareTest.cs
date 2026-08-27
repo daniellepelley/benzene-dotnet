@@ -29,39 +29,94 @@ public class OidcLogoutMiddlewareTest
         Assert.True(nextCalled);
     }
 
+    /// <summary>
+    /// #175 / round 1's #4: a bare GET used to sign the caller out directly - a cross-site
+    /// <c>&lt;img src="{BasePath}/logout"&gt;</c> is all that took, since <c>SameSite=Lax</c> still
+    /// sends the session cookie along on a top-level GET navigation. Now a terminal 405, matching
+    /// <c>MeshAuthGate.HandleLogoutAsync</c>'s identical ruling exactly - GET on the logout path is
+    /// refused, never silently allowed through as a sign-out.
+    /// </summary>
     [Fact]
-    public async Task MatchingPath_ClearsSessionCookieAndRedirectsHome()
+    public async Task MatchingPath_Get_IsRejectedWith405()
     {
         var middleware = new OidcLogoutMiddleware<FakeHttpContext>(Options(), new FakeHttpRequestAdapter(), new FakeResponseAdapter());
         var context = new FakeHttpContext { Method = "GET", Path = "/mesh/auth/logout" };
 
+        var nextCalled = false;
+        await middleware.HandleAsync(context, () => { nextCalled = true; return Task.CompletedTask; });
+
+        Assert.False(nextCalled);
+        Assert.Equal(405, context.StatusCode);
+        Assert.Empty(context.SetCookies);
+    }
+
+    [Fact]
+    public async Task MatchingPath_PostWithoutCsrfHeader_IsRejectedWith403()
+    {
+        var middleware = new OidcLogoutMiddleware<FakeHttpContext>(Options(), new FakeHttpRequestAdapter(), new FakeResponseAdapter());
+        var context = new FakeHttpContext { Method = "POST", Path = "/mesh/auth/logout" };
+
+        var nextCalled = false;
+        await middleware.HandleAsync(context, () => { nextCalled = true; return Task.CompletedTask; });
+
+        Assert.False(nextCalled);
+        Assert.Equal(403, context.StatusCode);
+        Assert.Empty(context.SetCookies);
+    }
+
+    [Fact]
+    public async Task MatchingPath_PostWithCsrfHeader_ClearsSessionCookieAndReturnsJson()
+    {
+        var middleware = new OidcLogoutMiddleware<FakeHttpContext>(Options(), new FakeHttpRequestAdapter(), new FakeResponseAdapter());
+        var context = new FakeHttpContext
+        {
+            Method = "POST",
+            Path = "/mesh/auth/logout",
+            Headers = { ["x-benzene-logout"] = "1" },
+        };
+
         await middleware.HandleAsync(context, () => Task.CompletedTask);
 
-        Assert.Equal(302, context.StatusCode);
-        Assert.Equal("/", context.Location); // HomePath's default
+        Assert.Equal(200, context.StatusCode);
+        Assert.Equal("{\"redirect\":null}", context.Body);
         var setCookie = Assert.Single(context.SetCookies);
         Assert.StartsWith("benzene_mesh_session=;", setCookie);
         Assert.Contains("Max-Age=0", setCookie);
     }
 
     /// <summary>
-    /// Regression: logout used to redirect to a hardcoded <c>/</c>. On a host that serves nothing
-    /// there - e.g. <c>examples/AwsMesh</c>, whose UI is at <c>/mesh-ui</c> - that produced a silent
-    /// loop rather than an error: the gate bounced <c>/</c> to login, the provider re-authenticated
-    /// the still-signed-in user, and the callback returned them to <c>/</c> again, rendering a bare
-    /// not-found problem document with no indication they had been signed out (they had).
+    /// Case-insensitive header NAME lookup (values are compared as-is elsewhere, but the header name
+    /// itself must not require the caller to send it in exactly the documented casing).
     /// </summary>
     [Fact]
-    public async Task MatchingPath_RedirectsToTheConfiguredHomePath_NotAHardcodedRoot()
+    public async Task CsrfHeader_IsCaseInsensitiveByName()
     {
-        var options = Options();
-        options.HomePath = "/mesh-ui";
-        var middleware = new OidcLogoutMiddleware<FakeHttpContext>(options, new FakeHttpRequestAdapter(), new FakeResponseAdapter());
-        var context = new FakeHttpContext { Method = "GET", Path = "/mesh/auth/logout" };
+        var middleware = new OidcLogoutMiddleware<FakeHttpContext>(Options(), new FakeHttpRequestAdapter(), new FakeResponseAdapter());
+        var context = new FakeHttpContext
+        {
+            Method = "POST",
+            Path = "/mesh/auth/logout",
+            Headers = { ["X-Benzene-Logout"] = "1" },
+        };
 
         await middleware.HandleAsync(context, () => Task.CompletedTask);
 
-        Assert.Equal(302, context.StatusCode);
-        Assert.Equal("/mesh-ui", context.Location);
+        Assert.Equal(200, context.StatusCode);
+    }
+
+    [Fact]
+    public async Task MatchingPath_PostWithEmptyCsrfHeader_IsRejectedWith403()
+    {
+        var middleware = new OidcLogoutMiddleware<FakeHttpContext>(Options(), new FakeHttpRequestAdapter(), new FakeResponseAdapter());
+        var context = new FakeHttpContext
+        {
+            Method = "POST",
+            Path = "/mesh/auth/logout",
+            Headers = { ["x-benzene-logout"] = "   " },
+        };
+
+        await middleware.HandleAsync(context, () => Task.CompletedTask);
+
+        Assert.Equal(403, context.StatusCode);
     }
 }

@@ -30,8 +30,10 @@ public class MeshOidcOptions
     /// <summary>
     /// The HMAC-SHA256 key used to sign the CSRF state token and the session cookie. A real secret -
     /// must come from environment/DI configuration (e.g. a Terraform-generated <c>random_password</c>),
-    /// never hand-typed or committed. <see cref="Validate"/> fails fast if this is missing or too short
-    /// to be a genuine secret, rather than silently signing with a weak/guessable key.
+    /// never hand-typed or committed. <see cref="Validate"/> fails fast if this is missing, too short
+    /// (under 32 bytes), or too low in distinct-byte entropy (e.g. a repeated character) to be a genuine
+    /// secret, rather than silently signing with a weak/guessable key - see <see cref="Validate"/>'s
+    /// remarks for exactly what that floor does and does not catch.
     /// </summary>
     public string SigningKey { get; set; } = string.Empty;
 
@@ -70,7 +72,22 @@ public class MeshOidcOptions
     /// allowlist-only gate.</summary>
     public string Scope { get; set; } = "openid email";
 
-    /// <summary>How long an issued session cookie remains valid. Defaults to 24 hours.</summary>
+    /// <summary>
+    /// How long an issued session cookie remains valid. Defaults to 24 hours.
+    /// </summary>
+    /// <remarks>
+    /// #178: deliberately unbounded (not capped by <see cref="Validate"/>) - but that is a real
+    /// tradeoff, not an oversight, and it matters more here than it would elsewhere: logout in this
+    /// package is client-side only (it expires the cookie; see <c>OidcLogoutMiddleware</c> and this
+    /// package's <c>CLAUDE.md</c> "Stateless logout" section), so there is no server-side revocation list
+    /// at all - a stolen/leaked cookie's <c>exp</c> claim is the ONLY thing that ever ends its validity;
+    /// a legitimate logout only clears the ORIGINAL holder's own cookie, it does nothing to a copy
+    /// already in an attacker's hands (see <see cref="OidcSessionPayload"/>'s <c>Jti</c> for what a
+    /// future deny-list would need to close that gap). A very long <see cref="SessionDuration"/> (this
+    /// package will happily accept a literal 10 years) directly extends how long such a leaked cookie
+    /// stays valid, with nothing anywhere able to shorten that after the fact. Set this to the shortest
+    /// duration your users can tolerate re-authenticating at, not a "just in case" long value.
+    /// </remarks>
     public System.TimeSpan SessionDuration { get; set; } = System.TimeSpan.FromHours(24);
 
     /// <summary>
@@ -129,6 +146,27 @@ public class MeshOidcOptions
             throw new System.ArgumentException($"{nameof(Issuer)} is required.", nameof(Issuer));
         }
 
+        // #173 / round 1's #20: a non-https Issuer used to reach OIDC discovery unvalidated and crash
+        // with an unhandled 500 the first time discovery metadata was actually fetched - mid-request,
+        // not at startup. Mirrors deploy/Mesh/Benzene.Mesh.Host/MeshAuthGate.Validate's identical check
+        // for the identical gap (see its remarks for the full rationale); that fix landed only in the
+        // Mesh Host and was never carried into this package until now. RequireHttpsMetadata false is
+        // this package's own documented test-only escape hatch (see its own remarks) - honoured here
+        // too, so a loopback fake-provider test never has to flip a second knob to stay valid.
+        if (RequireHttpsMetadata &&
+            System.Uri.TryCreate(Issuer, System.UriKind.Absolute, out var issuerUri) &&
+            string.Equals(issuerUri.Scheme, "http", System.StringComparison.OrdinalIgnoreCase))
+        {
+            throw new System.ArgumentException(
+                $"{nameof(Issuer)} ('{Issuer}') is not https, and {nameof(RequireHttpsMetadata)} is " +
+                "true (the default) - fetching OIDC discovery/JWKS metadata over plain HTTP is a man-" +
+                "in-the-middle risk with nothing to detect a spoofed issuer. This is allowed ONLY for a " +
+                "loopback provider you run yourself with no TLS (e.g. in tests): set " +
+                $"{nameof(RequireHttpsMetadata)} to false explicitly if that's genuinely the case here - " +
+                "never in production.",
+                nameof(Issuer));
+        }
+
         if (string.IsNullOrWhiteSpace(ClientId))
         {
             throw new System.ArgumentException($"{nameof(ClientId)} is required.", nameof(ClientId));
@@ -144,12 +182,36 @@ public class MeshOidcOptions
         // 32 bytes (256 bits) is the minimum a genuine HMAC-SHA256 secret should be - short enough
         // that an accidental placeholder ("changeme", a short guessable string) is rejected, without
         // this package trying to be a general-purpose secret-strength auditor.
-        if (string.IsNullOrWhiteSpace(SigningKey) || System.Text.Encoding.UTF8.GetByteCount(SigningKey) < 32)
+        var signingKeyBytes = string.IsNullOrEmpty(SigningKey) ? System.Array.Empty<byte>() : System.Text.Encoding.UTF8.GetBytes(SigningKey);
+        if (string.IsNullOrWhiteSpace(SigningKey) || signingKeyBytes.Length < 32)
         {
             throw new System.ArgumentException(
                 $"{nameof(SigningKey)} is required and must be at least 32 bytes - a real, " +
                 "randomly-generated secret (e.g. Terraform's random_password), never a hardcoded or " +
                 "guessable default. This signs the CSRF state token and the session cookie.",
+                nameof(SigningKey));
+        }
+
+        // #177: byte-length alone lets a 32-character REPEATED character ("kkkk...k") straight
+        // through - and this key signs not just the CSRF state token but a session cookie that is a
+        // deterministic function of {Email, Exp} with zero randomness of its own, so a low-entropy key
+        // is a complete session-forgery vector, not just weak-secret hygiene. This is deliberately NOT a
+        // real entropy estimator (it would not catch a guessable dictionary phrase that happens to use
+        // many distinct characters) - it is a cheap floor on the distinct byte values actually used for
+        // signing (see Extensions.UseMeshOidcAuth: the raw UTF-8 bytes of this string, exactly as
+        // written - never decoded from hex/base64), pragmatic enough to catch the obvious placeholder
+        // shapes (a single repeated character, or too few distinct values overall) without pretending to
+        // certify genuine randomness. A real generated secret - typed as hex, base64, or a mixed-case/
+        // digit/symbol passphrase - clears this by a wide margin.
+        if (DistinctByteCount(signingKeyBytes) < MinimumDistinctSigningKeyBytes)
+        {
+            throw new System.ArgumentException(
+                $"{nameof(SigningKey)} does not look like a real, randomly-generated secret - it has " +
+                $"fewer than {MinimumDistinctSigningKeyBytes} distinct byte values across its whole " +
+                "length. A repeated or near-constant string (e.g. \"kkkk...k\") is a full session-forgery " +
+                "vector: this key signs a session cookie that is otherwise a deterministic function of " +
+                "{Email, Exp}. Use a real generated secret (e.g. Terraform's random_password, " +
+                "`openssl rand -base64 32`), never a hand-typed placeholder.",
                 nameof(SigningKey));
         }
 
@@ -176,5 +238,26 @@ public class MeshOidcOptions
                 "an empty list would trust whatever \"alg\" the ID token itself claims (RFC 8725 §3.1 algorithm confusion).",
                 nameof(ValidAlgorithms));
         }
+    }
+
+    /// <summary>
+    /// #177's pragmatic entropy floor: the minimum number of DISTINCT byte values a
+    /// <see cref="SigningKey"/> must contain, regardless of its total length. Not derived from any real
+    /// entropy calculation - just low enough that a genuinely random 32+ byte secret in any common
+    /// shape (raw ASCII passphrase, hex, base64) clears it by a wide margin, and high enough to reject
+    /// the degenerate placeholder shapes this exists to catch (a single repeated character, or a short
+    /// alternating pattern stretched to meet the length check).
+    /// </summary>
+    private const int MinimumDistinctSigningKeyBytes = 8;
+
+    private static int DistinctByteCount(byte[] bytes)
+    {
+        var seen = new System.Collections.Generic.HashSet<byte>();
+        foreach (var b in bytes)
+        {
+            seen.Add(b);
+        }
+
+        return seen.Count;
     }
 }

@@ -14,7 +14,16 @@ namespace Benzene.Examples.AwsMesh.Mesh;
 /// and this is what that job looks like when neither side is bent to fit the other.
 /// </para>
 /// <para>
-/// Both sides are scoped, so this writes the identity for exactly the request the gate validated.
+/// Both sides are scoped (this sink is registered <c>AddScoped</c> in <c>Startup.cs</c>, and
+/// <c>OidcSessionGateMiddleware</c> is itself registered scoped in <c>Extensions.cs</c>), so this
+/// writes the identity for exactly the request the gate validated - not some other request's. That
+/// second half was a genuine bug until Benzene.Mesh.Auth.Oidc's #172 fix: the gate used to be
+/// registered as a SINGLETON despite taking this (correctly scoped) sink through its constructor,
+/// which meant the container resolved this sink exactly once, at the very first request's scope, and
+/// held that one instance - and the <see cref="MeshDispatchIdentity"/> it wraps - for the rest of the
+/// container's lifetime. Every later request's <see cref="Authenticated"/> call was silently
+/// overwriting the FIRST request's identity object, not its own; nothing here needed to change to fix
+/// it, since this class was never the broken half.
 /// </para>
 /// </remarks>
 public class OidcDispatchIdentitySink : IOidcSessionSink
