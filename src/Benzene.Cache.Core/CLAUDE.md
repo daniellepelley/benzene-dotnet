@@ -51,13 +51,25 @@ when none is supplied anywhere.
   `LazyLoadAsync` treats an explicitly-cached `null` (`SetValueAsync(default)`) as a real, repeatable
   hit - negative caching - rather than a permanent miss that re-runs `databaseReadFunc` forever. It
   still never writes a `null` `Payload` back automatically on a cache miss; a caller opts a null result
-  into the cache itself.
+  into the cache itself. Presence itself is `cacheValue is not null` (#201) - `null` ALONE is the miss
+  marker every `ICacheEntry<T>` provider produces on a genuine miss; a stored empty string (`""`) is a
+  legitimate serialized representation some `ISerializer` implementations can produce and must
+  round-trip as a real hit, not be mistaken for a miss (the pre-#201 `!string.IsNullOrEmpty` check
+  conflated the two, re-opening #140's cache-penetration scenario for exactly that serializer). See
+  the `Serializer` property's XML doc on `CacheWriteActions<T>` for the `ISerializer`-seam contract
+  this implies. A concrete provider's read path must honor this too - see `Benzene.Cache.Redis`'s
+  `CLAUDE.md` for how `RedisCacheEntry<T>`'s error path was audited under this rule.
 - Write-through's cache-sync step (`Set`/`Invalidate`, run *after* `modifyDatabaseFunc` has already
   committed) never turns an already-successful database write into this operation's own failure: an
   exception or a provider honestly returning `false` is logged (`Warning`) and swallowed by
   `CacheInvalidateActions.SyncCacheAfterWriteAsync`, and the database's own successful result is still
   returned. `SetValueAsync`/`InvalidateAsync` themselves are unchanged for a caller invoking them
   directly (outside write-through) - there, an exception is the primary requested action's own failure.
+  The three-arg `WriteThroughAsync` overload's `getCacheAction`/`getCacheValue` mapping delegates get
+  the same protection (#199, extending #139): each runs in its own try/catch, and a throw is logged
+  (`Error`) and falls through to the same no-op-and-return-the-result outcome as
+  `CacheUpdateAction.None` - a buggy mapping delegate can no longer turn an already-successful
+  database write into a thrown exception from `WriteThroughAsync` itself.
 - `CacheHealthCheck<TCacheService>` - an `IHealthCheck` verifying `ICacheService.CanConnectAsync(cancellationToken)`;
   result `Data` includes `CanConnect` and `Error` (the exception's type name, not its message - not a
   connection string or other secret); result `Dependencies` includes one
@@ -90,6 +102,9 @@ when none is supplied anywhere.
   case (negative caching), and per-call `expireIn` threading; all three `WriteThroughAsync` overloads
   (default `BenzeneResultStatus`-derived action mapping for `Ok`/`Deleted`/`NotFound`, a custom
   cache-value mapping, a custom cache-action mapping, per-call `expireIn` threading, and a cache-side
-  exception on the `Set`/`Invalidate` step not failing the already-successful database result); and
+  exception on the `Set`/`Invalidate` step not failing the already-successful database result); the
+  three-arg overload's `getCacheAction`/`getCacheValue` delegates each throwing (#199 - still returns
+  the successful database result and logs, and the `getCacheAction`-throws case propagates a caller's
+  own `OperationCanceledException` rather than swallowing it, per #141's carve-out); and
   `WriteThroughInvalidateAsync`'s successful-vs-unsuccessful-result branches plus a cache-side `false`
   result being logged rather than silently discarded.

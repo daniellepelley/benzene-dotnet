@@ -128,6 +128,49 @@ lock-in; retry `Task.Delay` overflow; RabbitMq failed-startup lane leak; mesh pa
 SSRF/URL-restructuring; codegen NRE + int64 truncation + non-incremental generator; CORS
 wildcard+credentials and full Fetch-spec preflight compliance; spec-output caching.
 
+### Tracked findings rounds 12–13, WP-5 — Cache + RateLimiting second-order fixes (done)
+Decisions, rationale, and rejected alternatives for all five are ruled in
+[`bug-fix-rulings-round12-13-2026-08.md`](bug-fix-rulings-round12-13-2026-08.md) §"WP-5 — Cache +
+RateLimiting second-order fixes (#198, #199, #200, #201, #202)". Round 13's findings are residue of
+round 11's own fixes; each item below names the fix it extends. (WP-1 through WP-4 of rounds 12–13
+are tracked separately as their own agents land; this section covers WP-5 only.)
+- **[RESOLVED] #198 — `RedisCacheService.CreatePrefixActions` turned a null/empty/whitespace prefix
+  into the pattern `"*"`, silently invalidating every key in the database.** Now throws
+  `ArgumentException`, naming `CreateWildcardActions("*")` as the deliberate route for an
+  intentional invalidate-everything. See WP-5.
+- **[RESOLVED] #199 — the three-arg `CacheWriteActions<T>.WriteThroughAsync`'s `getCacheAction`/
+  `getCacheValue` mapping delegates ran after the database write committed but outside #139's
+  cache-sync protection, so a throwing delegate turned an already-successful write into a thrown
+  exception.** Each delegate now runs in its own try/catch; a throw is logged (`Error`) and falls
+  through to the same no-op-and-return-the-result outcome as `CacheUpdateAction.None`. Extends #139
+  to the delegates that feed it; #141's cancellation carve-out is untouched. See WP-5.
+- **[RESOLVED] #200 — the #133 "one internally-owned rate limiter per pipeline" guard
+  (`Extensions.cs`'s `UseInternallyOwnedRateLimiting`) broke the framework's supported multi-transport
+  pattern: it registered the limiter as a DI singleton keyed on the abstract `RateLimiter` type, which
+  every sibling pipeline sharing one `IBenzeneServiceContainer` also shares, so two independent
+  `UseXRateLimiting` calls silently collided under that one key regardless of which pipeline made
+  them.** The registration and the guard are both removed; the created limiter is now captured
+  directly in its own middleware's closure (`ownsLimiter: true`), the same pattern the BYO
+  `UseRateLimiting(RateLimiter, ...)` overload already used (`ownsLimiter: false`). Stacking multiple
+  internally-created limiters — on one pipeline or across siblings — is now fully supported; disposal
+  ownership (#133's actual point) lives on `RateLimitingMiddleware<TContext>.DisposeAsync` itself, not
+  a DI container registration. See WP-5.
+- **[RESOLVED] #201 — cache-miss presence detection (`CacheEntry<T>.TryReadEntryAsync`) used
+  `!string.IsNullOrEmpty(cacheValue)`, conflating "no entry" with "a stored empty string" - a
+  legitimate serialized representation for some `ISerializer` implementations - and re-opening #140's
+  cache-penetration scenario for that serializer.** Presence is now `cacheValue is not null` alone;
+  `RedisCacheEntry<T>`'s own error path (which used to return `""` on a Redis failure) was audited
+  and now returns `null`, a genuine miss. Documented on the `ISerializer` seam
+  (`CacheWriteActions<T>.Serializer`'s XML doc) that an empty string is a valid cached representation.
+  See WP-5.
+- **[RESOLVED] #202 — `RateLimitingMiddlewareBase<TContext>.HandleAsync` caught
+  `ObjectDisposedException` from the permit-cost delegate and from `Acquire()` in one shared catch,
+  so a disposed dependency the delegate itself relied on produced the exact same "the rate limiter
+  has already been disposed" message as the limiter's own disposal.** Split into two catches with
+  source-accurate messages ("a dependency used by the permit-cost delegate has already been
+  disposed" vs. "the rate limiter has already been disposed"); both still fail CLOSED (#143/#134's
+  decision is not reopened - diagnostic accuracy only). See WP-5.
+
 ### Tracked findings round 7–10, WP-B — DynamoDB idempotency phantom win + fencing consistency (done)
 Decisions, rationale, and the rejected "won-but-unverified" alternative are ruled in
 [`bug-fix-designs-round7-10-2026-08.md`](archive/bug-fix-designs-round7-10-2026-08.md) §"WP-B — DynamoDB

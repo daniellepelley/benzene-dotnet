@@ -108,6 +108,21 @@ public abstract class RedisCacheService : ICacheService, IAsyncDisposable
 
     protected ICacheInvalidateActions CreatePrefixActions(string prefix)
     {
+        // #198: a null/empty/whitespace prefix used to escape+append into the bare pattern "*" -
+        // every key in the logical database, deleted in batches. That is almost certainly a
+        // caller-side bug (e.g. an empty tenant id interpolated into the prefix), and it is exactly
+        // the kind of mistake that must fail loudly rather than silently wiping the cache (P9/P10).
+        // If invalidate-everything is genuinely intended, there is now an explicit, unambiguous
+        // route for it - CreateWildcardActions("*") - so this refuses to guess which one was meant.
+        if (string.IsNullOrWhiteSpace(prefix))
+        {
+            throw new ArgumentException(
+                "A null/empty/whitespace prefix would invalidate every key (the pattern \"*\"). " +
+                "If invalidating everything is genuinely what you want, call " +
+                "CreateWildcardActions(\"*\") instead, which makes that intent explicit.",
+                nameof(prefix));
+        }
+
         // Escape glob metacharacters in the LITERAL prefix before appending the wildcard. Redis KEYS
         // treats * ? [ ] \ as glob syntax, so a prefix derived from data (tenant id, email, ...) that
         // contains one would otherwise match the wrong keys - under-invalidating (an unterminated "["

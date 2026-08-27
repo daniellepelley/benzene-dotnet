@@ -36,7 +36,11 @@ internal class RedisCacheEntry<T> : CacheEntry<T>
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "Error getting value from cache");
-            return "";
+            // #201: null, never "", is the miss marker CacheEntry<T> reads (cacheValue is not null).
+            // A stored empty string is a legitimate cached value for some ISerializer implementations
+            // - returning it here on a Redis error would masquerade a failed read as a real hit of an
+            // empty value, deserializing "" instead of degrading to a genuine miss.
+            return null;
         }
     }
 

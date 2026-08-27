@@ -28,12 +28,14 @@ package documents that loudly (`docs/rate-limiting.md`); never present it as a h
   limiter's permits release correctly (a no-op for window/bucket limiters). A cost the limiter could
   never grant (`ArgumentOutOfRangeException`, e.g. a payload bigger than the whole bucket) is a
   rejection with a distinguishing message, not a bare "Rate limit exceeded" (#142); an
-  `ObjectDisposedException` from an already-disposed BYO limiter is likewise a rejection, not an
-  unhandled crash (#134 — fails CLOSED, documented as the deliberate choice). Carries an
+  `ObjectDisposedException` is likewise a rejection, not an unhandled crash (#134 — fails CLOSED,
+  documented as the deliberate choice) - and, since #202, the cost delegate and `Acquire()` each have
+  their own catch with a source-accurate message ("a dependency used by the permit-cost delegate has
+  already been disposed" vs. "the rate limiter has already been disposed"), so a disposed scoped
+  resource the cost delegate closed over is never misattributed to the limiter itself. Carries an
   `ownsLimiter` flag: `true` only for the three internally-created convenience limiters below, whose
-  disposal this middleware type is capable of (via `DisposeAsync`) — though in practice the DI
-  registration in `Extensions.cs` is what actually disposes them (see below); `false` (the default)
-  for every BYO limiter, which this middleware never disposes.
+  disposal this middleware type performs directly (via `DisposeAsync`, `ownsLimiter: true` - see
+  #200 below); `false` (the default) for every BYO limiter, which this middleware never disposes.
 - `PartitionedRateLimitingMiddleware<TContext> : RateLimitingMiddlewareBase<TContext>,
   IAsyncDisposable` (Name `"PartitionedRateLimiting"`) - the same behaviour over a caller-supplied
   `PartitionedRateLimiter<TContext>` (#136): calls `AttemptAcquire(context, cost)`, letting the
@@ -64,23 +66,35 @@ package documents that loudly (`docs/rate-limiting.md`); never present it as a h
     as the cost directly (skips reading/measuring the body) — a CPU saving on this middleware's own
     side, **not** a memory bound: see #135 below and the type's XML doc for the full trade-off.
 
-### #133 — who disposes the three internally-created limiters
+### #133/#200 — who disposes the three internally-created limiters
 `UseFixedWindowRateLimiting`/`UseTokenBucketRateLimiting`/`UsePayloadSizeRateLimiting` each create a
-`RateLimiter` with `AutoReplenishment = true` (a live `Timer`). Nothing in the pipeline itself calls
-`Dispose` on a middleware instance (a fresh `RateLimitingMiddleware<TContext>` wrapper is
-constructed per message — see `MiddlewarePipeline<TContext>` — but the underlying `RateLimiter` is
-one shared instance), so a middleware-level `ownsLimiter` flag alone cannot be *the* fix: whichever
-per-message instance ran `Dispose` first would break every later message. The actual fix registers
-the limiter with the DI container via a **factory** registration
-(`x.AddSingleton<RateLimiter>(_ => rateLimiter)`, not a pre-built instance) — the same convention
-this codebase already relies on for other container-created disposables (`RabbitMqConnectionProvider`,
-`MeshAnnouncer`): a compliant container disposes a singleton it constructed itself when the
-container is disposed, but never disposes an externally-supplied instance. `UseInternallyOwnedRateLimiting`
-(private, in `Extensions.cs`) also guards against two internal `UseX...` calls stacking on one
-pipeline (which would otherwise let the second silently shadow the first under the shared
-`RateLimiter` DI key) — it throws `InvalidOperationException` instead. Combine limits into one
-`RateLimiter` and call `UseRateLimiting`, or use `UsePartitionedRateLimiting`, if more than one
-layer is genuinely needed.
+`RateLimiter` with `AutoReplenishment = true` (a live `Timer`) that something must eventually
+dispose (#133's original finding). #133's first fix registered the limiter with the DI container via
+a factory registration (`x.AddSingleton<RateLimiter>(_ => rateLimiter)`) so the container's own
+singleton disposal would dispose it, plus a same-pipeline stacking guard
+(`IsTypeRegistered<RateLimiter>()`, throwing `InvalidOperationException` on a second internal call).
+**#200 removed both.** `IBenzeneServiceContainer` registrations are shared by every sibling pipeline
+built off the same container — several transport pipelines sharing one container is this framework's
+supported multi-transport pattern (see `Benzene.Abstractions.Middleware/CLAUDE.md`'s
+`Create<TNewContext>()`) — so two independent `UseXRateLimiting` calls, even on entirely different
+pipelines, silently collided under that one shared `RateLimiter` DI key: whichever call registered
+last "won" resolution for every message on every affected pipeline, throttling an earlier pipeline's
+messages by a later pipeline's limiter. The stacking guard only detected the collision on one
+pipeline; it neither fixed the cross-pipeline case nor allowed the legitimate same-pipeline one.
+<br><br>
+The fix (`UseInternallyOwnedRateLimiting`, private, in `Extensions.cs`) is now the same one the BYO
+`UseRateLimiting(RateLimiter, ...)` overload already uses: capture the created limiter directly in
+the middleware factory's closure (`ownsLimiter: true` here, `false` for BYO) instead of resolving it
+from DI. Nothing is registered with the container, so the collision is structurally impossible, and
+stacking multiple internally-created limiters — on one pipeline or across siblings sharing a
+container — is fully supported; each middleware instance only ever sees the exact limiter its own
+call created. Disposal ownership (#133's actual point) now lives on
+`RateLimitingMiddleware<TContext>.DisposeAsync` itself: a caller that wants an internally-created
+limiter's `Timer` torn down disposes the middleware instance directly (or manages its lifetime
+itself), the same as any other `IAsyncDisposable` a caller constructs — nothing disposes it
+automatically on process/container shutdown any more. Combining limits into one `RateLimiter` and
+calling `UseRateLimiting`, or using `UsePartitionedRateLimiting`, remain available for a caller that
+wants one limiter object instead of several independent ones.
 
 ### #135 — payload-size limiting is a rate bound, not a memory bound
 On ASP.NET Core hosts, `UseBufferedRequestBody()` reads the whole request body into memory
@@ -97,6 +111,17 @@ concern, not this package's) or a host-level cap in front of Benzene entirely (K
 `MaxRequestBodySize`, a gateway body-size limit). Document this residual gap wherever the middleware
 is documented; do not present it as a memory bound.
 
+### #202 — the cost delegate and the limiter each get their own disposed-dependency message
+`RateLimitingMiddlewareBase<TContext>.HandleAsync` used to run the cost delegate and `Acquire()`
+inside one shared `try`/`catch (ObjectDisposedException)`, so a disposed dependency the cost delegate
+itself relied on (e.g. a scoped resource resolved earlier in the pipeline) produced the exact same
+"the rate limiter has already been disposed" message as the limiter's own disposal — misleading
+whoever reads the rejection log/response into debugging the wrong thing. The cost delegate and
+`Acquire()` now each have their own `try`/`catch`, so the message names which one actually threw
+("a dependency used by the permit-cost delegate has already been disposed" vs. "the rate limiter has
+already been disposed"). **Both still fail CLOSED** (#143/#134's decision is not reopened) — this is
+a diagnostic-accuracy fix only, not a change to the reject-vs-allow outcome.
+
 ## Dependencies
 - `Benzene.Abstractions.Pipelines`, `Benzene.Core.MessageHandlers`, `Benzene.Core.Middleware`.
 - NuGet: **System.Threading.RateLimiting** (the abstraction this package is deliberately shaped
@@ -112,15 +137,22 @@ is documented; do not present it as a memory bound.
   resource exhaustion into memory.
 - Rejection status is `BenzeneResultStatus.TooManyRequests` (already in the status vocabulary,
   mapped to HTTP 429 by `DefaultHttpStatusCodeMapper`).
-- Only ONE internally-created (`UseFixedWindowRateLimiting`/`UseTokenBucketRateLimiting`/
-  `UsePayloadSizeRateLimiting`) limiter is supported per pipeline (see #133 above) — BYO limiters
-  (`UseRateLimiting`, `UsePartitionedRateLimiting`) are unaffected and can be combined freely with
-  each other or with one internal limiter.
+- Any number of internally-created (`UseFixedWindowRateLimiting`/`UseTokenBucketRateLimiting`/
+  `UsePayloadSizeRateLimiting`) limiters are supported per pipeline, and across sibling pipelines
+  sharing one `IBenzeneServiceContainer` (see #200 above) — each is captured directly in its own
+  middleware's closure, so stacking them (or combining them with BYO limiters via `UseRateLimiting`/
+  `UsePartitionedRateLimiting`) is always independent; there is no shared DI key any two calls could
+  collide on.
 
 ## Tests
 - `test/Benzene.Core.Test/Plugins/RateLimiting/RateLimitingPipelineTest.cs` - pass-through under
   the limit, 429 + message over it (+ `Retry-After` header), payload-size budget spend +
   oversized-payload rejection + Content-Length pre-check, BYO concurrency limiter lease release, BYO
   cost function (+ negative-cost rejection, + throwing-delegate propagation), BYO limiter disposed
-  before use fails closed, internally-created limiter disposed with the container, stacking two
-  internal limiters fails fast, partitioned limiter isolates one abusive partition from another.
+  before use fails closed (+ the #202 message naming the limiter, not the cost delegate), a disposed
+  cost-delegate dependency failing closed with the #202 message naming the cost delegate, not the
+  limiter, internally-created limiter disposed via its own middleware's `DisposeAsync` (+ the BYO
+  mirror case proving that disposal is a no-op for a caller-owned limiter), stacking two internal
+  limiters on one pipeline (now legal - each enforces its own budget independently), two sibling
+  pipelines sharing one container each calling `UseFixedWindowRateLimiting` independently (#200),
+  partitioned limiter isolates one abusive partition from another.

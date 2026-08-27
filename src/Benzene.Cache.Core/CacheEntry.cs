@@ -28,15 +28,21 @@ public abstract class CacheEntry<T> : CacheWriteActions<T>, ICacheEntry<T>
 
     /// <summary>
     /// Reads the entry, returning whether the key was <em>present</em> (a real cache hit) separately
-    /// from the deserialized value. The presence flag is what <see cref="GetEntryValueAsync"/> already
-    /// knows (a non-empty stored string), and it's the only reliable hit signal for an unconstrained
-    /// generic <typeparamref name="T"/>: for a value type, a genuine miss returns <c>default(T)</c>,
-    /// and <c>default(T) != null</c> (via boxing) is always <c>true</c> - so deciding hit/miss from
-    /// <c>value != null</c> mistakes every value-type miss for a hit of the default value. The same
-    /// presence flag also makes an intentionally-cached <c>null</c> a real hit for a reference-type
-    /// <typeparamref name="T"/> (see <see cref="LazyLoadAsync{TResult}"/>): the JSON serialization of
-    /// <c>null</c> is the 4-character string <c>"null"</c>, never an empty stored value, so presence
-    /// and "the stored value deserializes to null" are never confused with each other.
+    /// from the deserialized value. Presence is decided purely by whether
+    /// <see cref="GetEntryValueAsync"/> returned <c>null</c> - and <c>null</c> ALONE (#201):
+    /// <c>null</c> is the one universal "nothing stored under this key" signal every
+    /// <see cref="ICacheEntry{T}"/> provider produces on a genuine miss, whereas a stored empty
+    /// string is a value some <see cref="ISerializer"/> can legitimately produce (see that seam's own
+    /// docs) and must round-trip as a hit, not be mistaken for a miss - treating <c>""</c> as a miss
+    /// re-opened #140's cache-penetration scenario for exactly that serializer. This is also the only
+    /// reliable hit signal for an unconstrained generic <typeparamref name="T"/>: for a value type, a
+    /// genuine miss returns <c>default(T)</c>, and <c>default(T) != null</c> (via boxing) is always
+    /// <c>true</c> - so deciding hit/miss from <c>value != null</c> mistakes every value-type miss for
+    /// a hit of the default value. The same presence flag also makes an intentionally-cached
+    /// <c>null</c> a real hit for a reference-type <typeparamref name="T"/> (see
+    /// <see cref="LazyLoadAsync{TResult}"/>): the JSON serialization of <c>null</c> is the 4-character
+    /// string <c>"null"</c>, never a <c>null</c> stored value, so presence and "the stored value
+    /// deserializes to null" are never confused with each other.
     /// </summary>
     private async Task<(bool Found, T? Value)> TryReadEntryAsync(CancellationToken cancellationToken)
     {
@@ -44,7 +50,7 @@ public abstract class CacheEntry<T> : CacheWriteActions<T>, ICacheEntry<T>
         {
             Logger.LogDebug("Trying to hit cache key {key}", KeyDescription);
             var cacheValue = await GetEntryValueAsync(cancellationToken);
-            if (!string.IsNullOrEmpty(cacheValue))
+            if (cacheValue is not null)
             {
                 return (true, Serializer.Deserialize<T>(cacheValue));
             }

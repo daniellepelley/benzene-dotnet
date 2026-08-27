@@ -56,6 +56,14 @@ public abstract class RateLimitingMiddlewareBase<TContext> : IMiddleware<TContex
     /// <summary>A short, log-friendly description of the limiter (and partition key, if any) that rejected the message.</summary>
     protected abstract string LimiterDescription(TContext context);
 
+    /// <summary>
+    /// The rejection message for a cost that is invalid or exceeds the limiter's capacity - shared
+    /// between the cost-delegate try and the <see cref="Acquire"/> try below, since either can throw
+    /// <see cref="ArgumentOutOfRangeException"/> for the same reason (#142).
+    /// </summary>
+    private const string InvalidCostMessage =
+        "Rate limit exceeded: the message's cost is invalid, or exceeds the limiter's capacity and can never be granted";
+
     /// <inheritdoc />
     public async Task HandleAsync(TContext context, Func<Task> next)
     {
@@ -66,10 +74,14 @@ public abstract class RateLimitingMiddlewareBase<TContext> : IMiddleware<TContex
         {
             try
             {
-                // The cost delegate runs inside this try (not before it) so a delegate that throws -
-                // deliberately (e.g. signalling "reject this") or by bug - is handled the same way an
-                // out-of-range cost from AttemptAcquire itself is, rather than escaping unhandled and
-                // bypassing the limiter entirely.
+                // #202: the cost delegate has its OWN try/catch, separate from Acquire's below - a
+                // delegate that throws (deliberately, e.g. signalling "reject this", or by bug) is
+                // still handled the same way an out-of-range cost from AttemptAcquire itself is
+                // (ArgumentOutOfRangeException), rather than escaping unhandled and bypassing the
+                // limiter entirely; but an ObjectDisposedException here means some OTHER dependency
+                // the delegate closed over was disposed (e.g. a scoped resource), not the limiter -
+                // see the distinct message below, previously indistinguishable from the limiter's own
+                // disposal (Acquire's catch, further down).
                 cost = _permitCost(ServiceResolver, context);
                 if (cost < 0)
                 {
@@ -81,21 +93,39 @@ public abstract class RateLimitingMiddlewareBase<TContext> : IMiddleware<TContex
                     throw new ArgumentOutOfRangeException(nameof(cost), cost,
                         "The permit cost delegate returned a negative value.");
                 }
-
-                lease = Acquire(context, cost);
             }
             catch (ArgumentOutOfRangeException)
             {
-                rejectionDetail =
-                    "Rate limit exceeded: the message's cost is invalid, or exceeds the limiter's capacity and can never be granted";
+                rejectionDetail = InvalidCostMessage;
             }
             catch (ObjectDisposedException)
             {
-                // #134: a caller-disposed BYO limiter must not crash every subsequent message with an
-                // unhandled ObjectDisposedException. Fail CLOSED - the same 429-style rejection as any
-                // other denial - rather than failing open (which would silently turn off the protection
-                // this middleware exists to provide the moment the limiter is disposed).
-                rejectionDetail = "Rate limit exceeded: the rate limiter has already been disposed";
+                // #202: distinct from the limiter itself being disposed - see Acquire's catch below.
+                // Still fails CLOSED (#143's decision is not reopened), only the diagnostic differs.
+                rejectionDetail = "Rate limit exceeded: a dependency used by the permit-cost delegate has already been disposed";
+            }
+
+            if (rejectionDetail is null)
+            {
+                try
+                {
+                    lease = Acquire(context, cost);
+                }
+                catch (ArgumentOutOfRangeException)
+                {
+                    rejectionDetail = InvalidCostMessage;
+                }
+                catch (ObjectDisposedException)
+                {
+                    // #134/#202: a caller-disposed BYO limiter (or an internally-owned one whose
+                    // middleware DisposeAsync has already run - #200) must not crash every subsequent
+                    // message with an unhandled ObjectDisposedException. Fail CLOSED - the same
+                    // 429-style rejection as any other denial - rather than failing open (which would
+                    // silently turn off the protection this middleware exists to provide the moment
+                    // the limiter is disposed). Distinct message from the cost-delegate catch above:
+                    // this is the limiter itself, not some other dependency the delegate relied on.
+                    rejectionDetail = "Rate limit exceeded: the rate limiter has already been disposed";
+                }
             }
 
             if (lease is not { IsAcquired: true })
@@ -193,7 +223,10 @@ public class RateLimitingMiddleware<TContext> : RateLimitingMiddlewareBase<TCont
     /// another consumer of it. <c>true</c> only for a limiter this package created on the caller's
     /// behalf (the <c>UseFixedWindowRateLimiting</c>/<c>UseTokenBucketRateLimiting</c>/
     /// <c>UsePayloadSizeRateLimiting</c> convenience entry points), where nothing else could ever
-    /// dispose it otherwise (see #133 in <c>work/outstanding-bugs.md</c>).
+    /// dispose it otherwise (see #133 in <c>work/outstanding-bugs.md</c>) — since #200, disposal
+    /// ownership for that case lives entirely on this flag/this type's <see cref="DisposeAsync"/>,
+    /// not on any DI container registration (see <c>Extensions.cs</c>'s
+    /// <c>UseInternallyOwnedRateLimiting</c>).
     /// </param>
     /// <param name="logger">Optional; logs a warning naming the limiter and cost when a message is rejected.</param>
     public RateLimitingMiddleware(RateLimiter rateLimiter, Func<IServiceResolver, TContext, int> permitCost,
@@ -217,12 +250,17 @@ public class RateLimitingMiddleware<TContext> : RateLimitingMiddlewareBase<TCont
     /// <summary>
     /// Disposes the limiter this middleware owns (<see cref="_ownsLimiter"/>); a no-op for a
     /// caller-supplied limiter, which the caller always owns. Nothing in the pipeline calls this
-    /// automatically today — the built-in <c>UseXRateLimiting</c> entry points instead register the
-    /// limiter with the DI container (see <c>Extensions.cs</c>), so it is disposed when the
-    /// container itself is, the same convention this codebase already uses for other
-    /// container-created disposables. This member exists so a caller that manages a
-    /// <see cref="RateLimitingMiddleware{TContext}"/> instance's lifetime directly gets correct
-    /// disposal semantics too, and so ownership is explicit at the type level.
+    /// automatically - a fresh middleware instance is constructed per message (see
+    /// <c>MiddlewarePipeline&lt;TContext&gt;</c>), so this is meant for a caller that manages a
+    /// <see cref="RateLimitingMiddleware{TContext}"/> instance's own lifetime directly (or the
+    /// underlying <see cref="RateLimiter"/> it was constructed with, which is what actually matters -
+    /// the middleware instance itself carries no state worth keeping alive). Before #200 the built-in
+    /// <c>UseXRateLimiting</c> entry points instead registered the internally-created limiter with
+    /// the DI container so its disposal piggy-backed on the container's own; that registration
+    /// collided across sibling pipelines sharing one container (see <c>Extensions.cs</c>'s
+    /// <c>UseInternallyOwnedRateLimiting</c> for the full story) and was removed. Disposal ownership
+    /// for an internally-created limiter (<c>ownsLimiter: true</c>) now lives on this member alone -
+    /// it is the one place that decides whether the limiter's disposal is this middleware's to do.
     /// </summary>
     public async ValueTask DisposeAsync()
     {
