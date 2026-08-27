@@ -63,6 +63,26 @@ public class QueueStorageFailureHandlingTest
     }
 
     [Fact]
+    public async Task HandleAsync_RaiseOnFailureStatusTrue_NoResultRecorded_ThrowsQueueStorageMessageProcessingException()
+    {
+        // Nothing set a MessageResult - typically an unrouted message (no handler matched the topic).
+        // Per work/settlement-consistency-fix-plan.md row 4, a null outcome is escalated the same as an
+        // explicit failure result, not accepted (deleted) as success - the host's maxDequeueCount
+        // retry/poison-queue handling is the backstop that makes retaining it safe. Enforced via
+        // AzureFunctionBatchApplicationBase.EscalateUnestablishedOutcome (default true, not overridden
+        // by this transport).
+        var mockPipeline = new Mock<IMiddlewarePipeline<QueueStorageContext>>();
+        mockPipeline.Setup(x => x.HandleAsync(It.IsAny<QueueStorageContext>(), It.IsAny<IServiceResolver>()))
+            .Returns(Task.CompletedTask);
+
+        var application = new QueueStorageBatchApplication(mockPipeline.Object, new QueueStorageOptions { RaiseOnFailureStatus = true });
+
+        var exception = await Assert.ThrowsAsync<QueueStorageMessageProcessingException>(
+            () => application.HandleAsync(CreateEvent("msg-3"), CreateResolverFactory().Object));
+        Assert.Equal("msg-3", exception.MessageId);
+    }
+
+    [Fact]
     public async Task HandleAsync_DefaultOptions_HandlerReturnsFailureResult_ThrowsQueueStorageMessageProcessingException()
     {
         var mockPipeline = new Mock<IMiddlewarePipeline<QueueStorageContext>>();

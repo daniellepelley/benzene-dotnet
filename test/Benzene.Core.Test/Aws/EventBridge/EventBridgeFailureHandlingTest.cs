@@ -63,6 +63,24 @@ public class EventBridgeFailureHandlingTest
     }
 
     [Fact]
+    public async Task HandleAsync_RaiseOnFailureStatusTrue_NoResultRecorded_ThrowsEventBridgeMessageProcessingException()
+    {
+        // Nothing set a MessageResult - typically an unrouted event (no handler matched detail-type).
+        // Per work/settlement-consistency-fix-plan.md row 3, a null outcome is escalated the same as an
+        // explicit failure result, not accepted as success - the rule target's Lambda destination/DLQ
+        // retry is the backstop that makes retaining it safe.
+        var mockPipeline = new Mock<IMiddlewarePipeline<EventBridgeContext>>();
+        mockPipeline.Setup(x => x.HandleAsync(It.IsAny<EventBridgeContext>(), It.IsAny<IServiceResolver>()))
+            .Returns(Task.CompletedTask);
+
+        var application = new EventBridgeApplication(mockPipeline.Object, new EventBridgeOptions { RaiseOnFailureStatus = true });
+
+        var exception = await Assert.ThrowsAsync<EventBridgeMessageProcessingException>(
+            () => application.HandleAsync(CreateEvent("evt-3"), CreateResolverFactory().Object));
+        Assert.Equal("evt-3", exception.EventId);
+    }
+
+    [Fact]
     public async Task HandleAsync_DefaultOptions_HandlerReturnsFailureResult_ThrowsEventBridgeMessageProcessingException()
     {
         var mockPipeline = new Mock<IMiddlewarePipeline<EventBridgeContext>>();

@@ -128,6 +128,24 @@ public class EventHubFailureHandlingTest
     }
 
     [Fact]
+    public async Task HandleAsync_RaiseOnFailureStatusTrue_NoResultRecorded_DoesNotThrow()
+    {
+        // CARVE-OUT (work/settlement-consistency-fix-plan.md row 17) - unlike the queue-shaped
+        // transports, a null outcome here (typically an unrouted event) is NOT escalated: Event Hubs
+        // has no per-record dead-letter path, so escalating would replay the whole triggered batch
+        // forever. This must fail if EventHubBatchApplication.EscalateUnestablishedOutcome is ever
+        // "fixed" to true.
+        var mockPipeline = new Mock<IMiddlewarePipeline<EventHubContext>>();
+        mockPipeline.Setup(x => x.HandleAsync(It.IsAny<EventHubContext>(), It.IsAny<IServiceResolver>()))
+            .Returns(Task.CompletedTask);
+
+        var application = new EventHubBatchApplication(mockPipeline.Object, new EventHubOptions { RaiseOnFailureStatus = true });
+
+        // Reaching the end without throwing proves the null outcome settled as if it had succeeded.
+        await application.HandleAsync(CreateEvent(), CreateResolverFactory().Object);
+    }
+
+    [Fact]
     public async Task HandleAsync_RaiseOnFailureStatusTrue_HandlerSucceeds_DoesNotThrow()
     {
         var mockPipeline = new Mock<IMiddlewarePipeline<EventHubContext>>();

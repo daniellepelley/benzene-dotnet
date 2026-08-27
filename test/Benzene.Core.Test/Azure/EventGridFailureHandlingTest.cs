@@ -63,6 +63,26 @@ public class EventGridFailureHandlingTest
     }
 
     [Fact]
+    public async Task HandleAsync_RaiseOnFailureStatusTrue_NoResultRecorded_ThrowsEventGridMessageProcessingException()
+    {
+        // Nothing set a MessageResult - typically an unrouted event (no handler matched the event
+        // type). Per work/settlement-consistency-fix-plan.md row 5, a null outcome is escalated the
+        // same as an explicit failure result, not accepted as success - Event Grid's own delivery
+        // retry + optional dead-letter destination is the backstop that makes retaining it safe.
+        // Enforced via AzureFunctionBatchApplicationBase.EscalateUnestablishedOutcome (default true,
+        // not overridden by this transport).
+        var mockPipeline = new Mock<IMiddlewarePipeline<EventGridContext>>();
+        mockPipeline.Setup(x => x.HandleAsync(It.IsAny<EventGridContext>(), It.IsAny<IServiceResolver>()))
+            .Returns(Task.CompletedTask);
+
+        var application = new EventGridBatchApplication(mockPipeline.Object, new EventGridOptions { RaiseOnFailureStatus = true });
+
+        var exception = await Assert.ThrowsAsync<EventGridMessageProcessingException>(
+            () => application.HandleAsync(CreateEvent("evt-3"), CreateResolverFactory().Object));
+        Assert.Equal("evt-3", exception.EventId);
+    }
+
+    [Fact]
     public async Task HandleAsync_DefaultOptions_HandlerReturnsFailureResult_ThrowsEventGridMessageProcessingException()
     {
         var mockPipeline = new Mock<IMiddlewarePipeline<EventGridContext>>();

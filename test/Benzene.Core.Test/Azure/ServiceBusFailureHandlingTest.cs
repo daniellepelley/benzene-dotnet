@@ -86,6 +86,28 @@ public class ServiceBusFailureHandlingTest
     }
 
     [Fact]
+    public async Task HandleAsync_RaiseOnFailureStatusTrue_NoResultRecorded_ThrowsServiceBusMessageProcessingException()
+    {
+        // Nothing set a MessageResult - typically an unrouted message (no handler matched the topic).
+        // Per work/settlement-consistency-fix-plan.md row 8, a null outcome is escalated the same as an
+        // explicit failure result under the default AckMode = AutoComplete, not accepted (completed) as
+        // success - the host then abandons the message on the thrown exception, respecting the
+        // entity's max-delivery-count before auto-dead-lettering. Enforced via
+        // AzureFunctionBatchApplicationBase.EscalateUnestablishedOutcome (default true, not overridden
+        // by this transport's AutoComplete path - row 13's Explicit path is separately covered below).
+        var mockPipeline = new Mock<IMiddlewarePipeline<ServiceBusContext>>();
+        mockPipeline.Setup(x => x.HandleAsync(It.IsAny<ServiceBusContext>(), It.IsAny<IServiceResolver>()))
+            .Returns(Task.CompletedTask);
+
+        var (_, resolverFactory) = CreateResolver();
+        var application = new ServiceBusBatchApplication(mockPipeline.Object, new ServiceBusOptions { RaiseOnFailureStatus = true });
+
+        var exception = await Assert.ThrowsAsync<ServiceBusMessageProcessingException>(
+            () => application.HandleAsync(CreateEvent("msg-3"), resolverFactory.Object));
+        Assert.Equal("msg-3", exception.MessageId);
+    }
+
+    [Fact]
     public async Task HandleAsync_RaiseOnFailureStatusTrue_HandlerSucceeds_DoesNotThrow()
     {
         var mockPipeline = new Mock<IMiddlewarePipeline<ServiceBusContext>>();
@@ -146,6 +168,28 @@ public class ServiceBusFailureHandlingTest
         var mockPipeline = new Mock<IMiddlewarePipeline<ServiceBusContext>>();
         mockPipeline.Setup(x => x.HandleAsync(It.IsAny<ServiceBusContext>(), It.IsAny<IServiceResolver>()))
             .Callback<ServiceBusContext, IServiceResolver>((context, _) => context.MessageResult = BenzeneResult.UnexpectedError())
+            .Returns(Task.CompletedTask);
+
+        var (_, resolverFactory) = CreateResolver();
+        var mockActions = new Mock<ServiceBusMessageActions>();
+        var application = new ServiceBusBatchApplication(mockPipeline.Object, new ServiceBusOptions { AckMode = ServiceBusAckMode.Explicit });
+        var message = CreateEvent()[0];
+
+        await ((IMiddlewareApplication<ServiceBusTriggerBatch>)application)
+            .HandleAsync(new ServiceBusTriggerBatch(mockActions.Object, [message]), resolverFactory.Object);
+
+        mockActions.Verify(x => x.AbandonMessageAsync(message, null, It.IsAny<CancellationToken>()), Times.Once);
+        mockActions.Verify(x => x.CompleteMessageAsync(message, It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task HandleAsync_ExplicitAckMode_NoResultRecorded_AbandonsMessage()
+    {
+        // Row 13 (Explicit ack path) - already correct before this plan, unchanged: abandon on failure
+        // OR a null result, completing only on genuine success (OnPipelineSucceededAsync's own doc
+        // comment). Included here alongside row 8's AutoComplete coverage above for completeness.
+        var mockPipeline = new Mock<IMiddlewarePipeline<ServiceBusContext>>();
+        mockPipeline.Setup(x => x.HandleAsync(It.IsAny<ServiceBusContext>(), It.IsAny<IServiceResolver>()))
             .Returns(Task.CompletedTask);
 
         var (_, resolverFactory) = CreateResolver();

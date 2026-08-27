@@ -20,6 +20,14 @@ namespace Benzene.Test.Contract;
 // Together they stop the capability matrix from ever again describing a transport's data-safety
 // differently from how the code actually behaves - including the awkward stream-worker case where a
 // naive reading of RaiseOnFailureStatus=true wrongly suggests safe-by-default.
+//
+// A THIRD, SEPARATE AXIS is guarded below: the NULL/UNROUTED outcome (no MessageResult recorded -
+// overwhelmingly an unrouted message: no handler matched the topic), which is independent of the
+// failure-result axis above and is governed by work/settlement-consistency-fix-plan.md §1, not the
+// archived 1.0 contract. NullOutcomePolicy_MatchesTheDecidedTable pins the polarity of every adapter's
+// enforcement point in source (positive assertions for the Kafka/Event Hub carve-outs included -
+// it must fail if one of those is ever "fixed" to retain-on-null); read that document before touching
+// any of these lines or the code they assert against.
 public class SettlementContractDefaultsTest
 {
     [Fact]
@@ -106,6 +114,149 @@ public class SettlementContractDefaultsTest
     [InlineData("Benzene.Kafka.Core")]
     public void CapabilityMatrix_MarksStreamWorkerAtMostOnceByDefault(string packageId) =>
         AssertMatrixRow(packageId, "At-most-once by default");
+
+    // Guards the null/unrouted axis of work/settlement-consistency-fix-plan.md §1 (rows 1-18) - a
+    // separate axis from the failure-result axis pinned above. Decided policy (maintainer, 2026-08-25):
+    // retain/redeliver a null/unestablished outcome wherever a redelivery backstop exists to catch it;
+    // ack it only where retaining it would be an unbreakable poison loop (the Kafka x3 / Event Hub x2
+    // carve-outs). Each assertion below cites its row number from that document's §1 table; do not add,
+    // remove, or "tidy up" one without reading §0 first.
+    [Fact]
+    public void NullOutcomePolicy_MatchesTheDecidedTable()
+    {
+        // Rows 1-3: SNS/S3/EventBridge share Benzene.Aws.Lambda.Core's
+        // SingleContextEscalatingApplicationBase - blanket flip, no carve-out hook, all three RETAIN.
+        var singleContextBase = ReadRepoFile("src/Benzene.Aws.Lambda.Core/SingleContextEscalatingApplicationBase.cs");
+        Assert.Contains("context.MessageResult?.IsSuccessful != true", singleContextBase);
+        Assert.DoesNotContain("context.MessageResult?.IsSuccessful == false", singleContextBase);
+
+        // Rows 4, 5, 8: QueueStorage/EventGrid/ServiceBus(AutoComplete path) share
+        // Benzene.Azure.Function.Core's AzureFunctionBatchApplicationBase. Its EscalateUnestablishedOutcome
+        // hook defaults to RETAIN (true); none of the three overrides it back to ack.
+        var azureBatchBase = ReadRepoFile("src/Benzene.Azure.Function.Core/AzureFunctionBatchApplicationBase.cs");
+        Assert.Contains("protected virtual bool EscalateUnestablishedOutcome => true;", azureBatchBase);
+        Assert.DoesNotContain("EscalateUnestablishedOutcome",
+            ReadRepoFile("src/Benzene.Azure.Function.QueueStorage/QueueStorageApplication.cs")); // row 4
+        Assert.DoesNotContain("EscalateUnestablishedOutcome",
+            ReadRepoFile("src/Benzene.Azure.Function.EventGrid/EventGridApplication.cs")); // row 5
+
+        // Row 8 and row 13 share one file (ServiceBusApplication.cs) but are two different enforcement
+        // points: the base class's EscalateUnestablishedOutcome-gated guard (AutoComplete path, row 8,
+        // inherits the base's RETAIN default - no override) and ServiceBusBatchApplication's own
+        // OnPipelineSucceededAsync abandon (Explicit path, row 13, already correct before this plan).
+        var serviceBusApplication = ReadRepoFile("src/Benzene.Azure.Function.ServiceBus/ServiceBusApplication.cs");
+        Assert.DoesNotContain("EscalateUnestablishedOutcome", serviceBusApplication); // row 8
+        Assert.Contains("context.MessageResult?.IsSuccessful != true", serviceBusApplication); // row 13
+
+        // Row 6: Google Cloud Pub/Sub - standalone flip, RETAIN.
+        Assert.Contains("context.MessageResult?.IsSuccessful != true",
+            ReadRepoFile("src/Benzene.GoogleCloud.Functions.PubSub/PubSubMiddlewareApplication.cs"));
+
+        // Row 7: RabbitMQ worker - standalone flip, RETAIN (nack). Deliberately overturns this package's
+        // previously documented+tested ack-on-null behaviour - see the plan's decision register.
+        Assert.Contains("messageResult?.IsSuccessful != true",
+            ReadRepoFile("src/Benzene.RabbitMq/RabbitMqWorker.cs"));
+
+        // Rows 9-12: already correct before this plan (untouched by Batch 1), RETAIN.
+        Assert.Contains("context.MessageResult?.IsSuccessful != true",
+            ReadRepoFile("src/Benzene.Aws.Lambda.Sqs/SqsApplication.cs")); // row 9
+        Assert.Contains("pair.Context.MessageResult?.IsSuccessful != true",
+            ReadRepoFile("src/Benzene.Aws.Sqs/Consumer/SqsConsumerApplication.cs")); // row 10
+        Assert.Contains("context.MessageResult?.IsSuccessful != true",
+            ReadRepoFile("src/Benzene.Aws.Lambda.DynamoDb/DynamoDbApplication.cs")); // row 11
+        Assert.Contains("decision.MessageResult?.IsSuccessful != true",
+            ReadRepoFile("src/Benzene.Azure.ServiceBus/BenzeneServiceBusWorker.cs")); // row 12
+
+        // Rows 14-18: CARVE-OUTS - positive assertions that ack-on-null is still there. Each of these
+        // must fail if someone "fixes" a carve-out to retain-on-null; no per-record dead-letter path
+        // means retaining would replay the partition/batch forever.
+        Assert.Contains("context.MessageResult?.IsSuccessful == false",
+            ReadRepoFile("src/Benzene.Aws.Lambda.Kafka/KafkaApplication.cs")); // row 14
+        Assert.Contains("protected override bool EscalateUnestablishedOutcome => false;",
+            ReadRepoFile("src/Benzene.Azure.Function.Kafka/KafkaApplication.cs")); // row 15
+        Assert.Contains("messageResult?.IsSuccessful == false",
+            ReadRepoFile("src/Benzene.Kafka.Core/BenzeneKafkaWorker.cs")); // row 16
+        Assert.Contains("protected override bool EscalateUnestablishedOutcome => false;",
+            ReadRepoFile("src/Benzene.Azure.Function.EventHub/Function/EventHubApplication.cs")); // row 17
+        Assert.Contains("messageResult?.IsSuccessful == false",
+            ReadRepoFile("src/Benzene.Azure.EventHub/BenzeneEventHubWorker.cs")); // row 18
+    }
+
+    // Completeness backstop for the theory above: if a *new* class starts extending either shared base
+    // (or an existing one stops), that is a new/removed null-outcome policy row work/settlement-consistency-fix-plan.md
+    // §1 has not considered - fail loudly here instead of the new adapter silently inheriting whatever
+    // the base class default happens to be. Mirrors the grep the plan itself prescribes before editing
+    // either base class (see Batch 1, "Before editing either base class, re-run this...").
+    [Fact]
+    public void NullOutcomePolicy_SharedBaseConsumersAreComplete()
+    {
+        var repoRoot = FindRepoRoot();
+        var srcRoot = Path.Combine(repoRoot, "src");
+
+        AssertExactConsumerSet(repoRoot, srcRoot, ": SingleContextEscalatingApplicationBase<", new[]
+        {
+            "src/Benzene.Aws.Lambda.Sns/SnsApplication.cs",
+            "src/Benzene.Aws.Lambda.S3/S3Application.cs",
+            "src/Benzene.Aws.Lambda.EventBridge/EventBridgeApplication.cs",
+        }, "Benzene.Aws.Lambda.Core.SingleContextEscalatingApplicationBase");
+
+        AssertExactConsumerSet(repoRoot, srcRoot, ": AzureFunctionBatchApplicationBase<", new[]
+        {
+            "src/Benzene.Azure.Function.QueueStorage/QueueStorageApplication.cs",
+            "src/Benzene.Azure.Function.EventGrid/EventGridApplication.cs",
+            "src/Benzene.Azure.Function.ServiceBus/ServiceBusApplication.cs",
+            "src/Benzene.Azure.Function.Kafka/KafkaApplication.cs",
+            "src/Benzene.Azure.Function.EventHub/Function/EventHubApplication.cs",
+        }, "Benzene.Azure.Function.Core.AzureFunctionBatchApplicationBase");
+    }
+
+    private static void AssertExactConsumerSet(string repoRoot, string srcRoot, string extendsToken, string[] expectedRepoRelative, string baseClassName)
+    {
+        var actual = Directory.EnumerateFiles(srcRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
+                && !file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
+            .Where(file => File.ReadAllText(file).Contains(extendsToken))
+            .Select(file => Path.GetRelativePath(repoRoot, file).Replace(Path.DirectorySeparatorChar, '/'))
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToList();
+        var expected = expectedRepoRelative.OrderBy(path => path, StringComparer.Ordinal).ToList();
+
+        Assert.True(actual.SequenceEqual(expected),
+            $"The set of classes extending {baseClassName} has changed since " +
+            "work/settlement-consistency-fix-plan.md's §1 table was written.\n" +
+            $"Expected: {string.Join(", ", expected)}\n" +
+            $"Actual:   {string.Join(", ", actual)}\n" +
+            "A new or removed consumer means a null-outcome policy row that document has not " +
+            "considered - stop and report per its §0 rule 1; do not infer the policy from a " +
+            "neighbouring adapter.");
+    }
+
+    private static string ReadRepoFile(string repoRelativePath)
+    {
+        var full = Path.Combine(FindRepoRoot(), repoRelativePath.Replace('/', Path.DirectorySeparatorChar));
+        if (!File.Exists(full))
+        {
+            throw new FileNotFoundException(
+                $"Expected settlement-guard file not found: {repoRelativePath}. If it moved, update " +
+                "both this test and work/settlement-consistency-fix-plan.md's §1 table.", full);
+        }
+
+        return File.ReadAllText(full);
+    }
+
+    private static string FindRepoRoot()
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "work", "settlement-consistency-fix-plan.md")))
+            {
+                return dir.FullName;
+            }
+        }
+
+        throw new DirectoryNotFoundException(
+            $"Could not locate the repo root (work/settlement-consistency-fix-plan.md) walking up from {AppContext.BaseDirectory}");
+    }
 
     private static void AssertMatrixRow(string packageId, string expectedMarker)
     {

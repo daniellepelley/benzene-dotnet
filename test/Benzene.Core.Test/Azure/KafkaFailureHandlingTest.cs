@@ -83,6 +83,25 @@ public class KafkaFailureHandlingTest
     }
 
     [Fact]
+    public async Task HandleAsync_RaiseOnFailureStatusTrue_NoResultRecorded_DoesNotThrow()
+    {
+        // CARVE-OUT (work/settlement-consistency-fix-plan.md row 15) - unlike the queue-shaped
+        // transports, a null outcome here (typically an unrouted record) is NOT escalated: Kafka over
+        // Event Hubs has no per-record dead-letter path, so escalating would replay the whole
+        // triggered batch forever. This must fail if KafkaBatchApplication.EscalateUnestablishedOutcome
+        // is ever "fixed" to true.
+        var mockPipeline = new Mock<IMiddlewarePipeline<KafkaContext>>();
+        mockPipeline.Setup(x => x.HandleAsync(It.IsAny<KafkaContext>(), It.IsAny<IServiceResolver>()))
+            .Returns(Task.CompletedTask);
+
+        var (_, resolverFactory) = CreateResolver();
+        var application = new KafkaBatchApplication(mockPipeline.Object, new KafkaOptions { RaiseOnFailureStatus = true });
+
+        // Reaching the end without throwing proves the null outcome settled as if it had succeeded.
+        await application.HandleAsync(CreateEvent(), resolverFactory.Object);
+    }
+
+    [Fact]
     public async Task HandleAsync_RaiseOnFailureStatusTrue_HandlerSucceeds_DoesNotThrow()
     {
         var mockPipeline = new Mock<IMiddlewarePipeline<KafkaContext>>();
