@@ -18,6 +18,13 @@ unhandled exception already got. Set `EventBridgeOptions.RaiseOnFailureStatus = 
 instead of cascading them. Because a returned failure is now retried by default, the handler must be
 idempotent.
 
+**Null-outcome policy (flipped 2026-08-25):** an event whose `MessageResult` is never set - typically
+an unrouted event, no handler matched `detail-type` - is escalated the same as an explicit failure,
+not accepted as success. The rule target's Lambda destination/DLQ retry gives an
+escalated-and-retried event somewhere to land. Enforced in the shared
+`SingleContextEscalatingApplicationBase` guard (see `Benzene.Aws.Lambda.Core/CLAUDE.md`), not locally.
+See `work/settlement-consistency-fix-plan.md`.
+
 ## Key types/interfaces
 - `EventBridgeEvent` — Benzene's own model of the EventBridge envelope (`detail-type`, `source`,
   `id`, `account`, `region`, `time`, `resources`, raw-`JsonElement` `detail`). Deliberately not a

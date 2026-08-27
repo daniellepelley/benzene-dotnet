@@ -63,6 +63,11 @@ package wired through `UseMessageHandlers()` exactly like every other transport,
   — see `work/archive/settlement-contract-1.0-2026-07.md`). Set `PubSubOptions.CatchExceptions = true` to catch and
   log an exception instead; set `RaiseOnFailureStatus = false` for at-most-once (a failure result is
   accepted, not retried). A redelivered message must be handled idempotently.
+- **Null-outcome policy (flipped 2026-08-25):** a message whose `MessageResult` is never set -
+  typically an unrouted message, no handler matched the topic - is escalated the same as an explicit
+  failure, not accepted as success, in `PubSubMiddlewareApplication.HandleAsync`. Pub/Sub subscriptions
+  support a dead-letter topic, so an escalated-and-retried message has somewhere to land. See
+  `work/settlement-consistency-fix-plan.md`.
 - **Preset-topic override is not implemented for this package yet** - unlike
   `Benzene.Aws.Sqs`/`Benzene.Aws.Lambda.Sqs`/`Benzene.Azure.Function.ServiceBus`, there's no
   `UsePresetTopic()` wiring here. A subscription whose producer never sets a `"topic"` attribute

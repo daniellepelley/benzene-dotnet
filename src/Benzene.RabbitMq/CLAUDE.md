@@ -11,12 +11,24 @@ unlike the Lambda/Functions triggers.
 
 ## ⚠️ Ack policy: safe by default, unlike the Kafka/ServiceBus triggers
 `RabbitMqConfig.AckMode` defaults to `RabbitMqAckMode.Explicit`: a delivery is `BasicAck`ed on
-handler success and `BasicNack`ed on a failure `IBenzeneResult` **or** a thrown exception. RabbitMQ's
-first-class per-message ack (the Service Bus `Explicit` model, not Kafka's offset watermark) makes
-this the natural default and a real advantage - a failed message is redelivered or dead-lettered
-rather than silently lost. `RabbitMqAckMode.AutoAck` (broker acks on dispatch, before the handler
-runs) is available for at-most-once, loss-tolerant workloads. Because redelivery can reprocess a
-message, handlers must be idempotent - see [Idempotency](../../docs/cookbooks/idempotency.md).
+handler success and `BasicNack`ed on a failure `IBenzeneResult`, a null/unestablished outcome
+(`MessageResult` never set - typically an unrouted delivery whose topic matched no handler; see
+"Null-outcome policy" below), **or** a thrown exception. RabbitMQ's first-class per-message ack (the
+Service Bus `Explicit` model, not Kafka's offset watermark) makes this the natural default and a real
+advantage - a failed message is redelivered or dead-lettered rather than silently lost.
+`RabbitMqAckMode.AutoAck` (broker acks on dispatch, before the handler runs) is available for
+at-most-once, loss-tolerant workloads. Because redelivery can reprocess a message, handlers must be
+idempotent - see [Idempotency](../../docs/cookbooks/idempotency.md).
+
+## Null-outcome policy: nack, not ack (reversed 2026-08-25)
+A delivery whose handler pipeline never records a `MessageResult` - overwhelmingly an unrouted
+message, no handler matched the topic - is nacked (`BasicNackAsync`) exactly like an explicit failure
+result, **not** accepted as success. This is a deliberate reversal of this package's previous
+documented-and-tested behaviour (`RabbitMqWorkerTest.NoResultRecorded_Acks`, now
+`NoResultRecorded_Nacks`): RabbitMQ has a DLX and a bounded single requeue (see "Ack/nack policy"
+below), so an unestablished outcome has somewhere safe to land instead of vanishing silently. See
+`work/settlement-consistency-fix-plan.md` (row 7 and its decision-register entry) for the full
+reasoning and why this overturns a written decision rather than filling a gap.
 
 ## Key types/interfaces
 
@@ -188,7 +200,7 @@ lacking the configured header still routes by its AMQP routing key.
   routing-key fallback, body, header decoding), `RabbitMqApplicationTest` (delivery→context→result),
   `RabbitMqWorkerTest` (drives real deliveries through the `AsyncEventingBasicConsumer` against a
   mocked `IChannel`: success→ack, failure→nack-requeue, redelivered-failure→nack-no-requeue,
-  requeue-disabled, exception→nack, no-result→ack, AutoAck mode, config defaults),
+  requeue-disabled, exception→nack, no-result→nack, AutoAck mode, config defaults),
   `RabbitMqBenzeneMessageClientTest` (status mapping + topic-as-routing-key + header forwarding),
   `RabbitMqRealPipelineTest` (real DI registration completeness). `RabbitMqMandatoryPublishTest` also
   covers the WP-A hardening directly against `RabbitMqMandatoryPublishCoordinator`: cancelling mid-wait

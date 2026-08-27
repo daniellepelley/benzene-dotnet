@@ -68,7 +68,12 @@ public class PubSubMiddlewareApplication : IMiddlewareApplication<MessagePublish
                 await _pipeline.HandleAsync(context, scope);
             }
 
-            if (_options.RaiseOnFailureStatus && context.MessageResult?.IsSuccessful == false)
+            // A null/unestablished outcome (MessageResult never set - typically an unrouted message: no
+            // handler matched the topic) is escalated the same as an explicit failure, not treated as
+            // success. Pub/Sub subscriptions support a dead-letter topic, so an escalated-and-retried
+            // message has somewhere to land, unlike Kafka/Event Hub, which have no per-record
+            // dead-letter path and carve this out (see work/settlement-consistency-fix-plan.md).
+            if (_options.RaiseOnFailureStatus && context.MessageResult?.IsSuccessful != true)
             {
                 throw new PubSubMessageProcessingException(context.Message?.MessageId);
             }

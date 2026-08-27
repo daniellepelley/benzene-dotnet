@@ -20,6 +20,16 @@ retries the batch). A redelivered record can be reprocessed, so the handler must
 [Idempotency](../../docs/cookbooks/idempotency.md)). Set `RaiseOnFailureStatus = false` for
 at-most-once (a failure result is accepted, not retried).
 
+## Null-outcome policy: CARVE-OUT — stays ack (do not "fix" this)
+A record whose `MessageResult` is never set - typically an unrouted record, no handler matched the
+topic - is **not** escalated. It settles as if it had succeeded, unlike a returned failure result
+above. This is a deliberate carve-out (`KafkaBatchApplication.EscalateUnestablishedOutcome => false`),
+not an oversight: Kafka-over-Event-Hubs has no per-record dead-letter path, so escalating an unrouted
+record would replay the whole triggered batch forever - a worse failure mode than the one the
+queue-shaped transports' policy fixes. Matches `Benzene.Aws.Lambda.Kafka`, `Benzene.Kafka.Core`, and
+`Benzene.Azure.Function.EventHub`/`Benzene.Azure.EventHub`. See
+`work/settlement-consistency-fix-plan.md`.
+
 ## Key types
 - `KafkaContext : IHasMessageResult` — wraps a single `KafkaRecord`; records the handler outcome on
   `MessageResult`.

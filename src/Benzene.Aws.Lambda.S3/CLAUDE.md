@@ -24,6 +24,13 @@ failure result is accepted and the invocation is not retried — mirroring `Benz
 `S3Options.CatchExceptions` (default `false`) conversely swallows/logs handler exceptions instead of
 cascading them.
 
+**Null-outcome policy (flipped 2026-08-25):** a record whose `MessageResult` is never set - typically
+an unrouted record, no handler matched the topic - is escalated the same as an explicit failure, not
+accepted as success. S3's own async-invoke retry + on-failure destination/DLQ gives an
+escalated-and-retried record somewhere to land. Enforced in the shared
+`SingleContextEscalatingApplicationBase` guard (see `Benzene.Aws.Lambda.Core/CLAUDE.md`), not locally.
+See `work/settlement-consistency-fix-plan.md`.
+
 ## invocationId: `UseS3(...)` auto-wires `UseBenzeneInvocation()`
 Each S3 record is dispatched through its own DI scope (`S3Application`'s per-record
 `serviceResolverFactory.CreateScope()`), disconnected from whatever the outer Lambda invocation's

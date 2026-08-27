@@ -18,6 +18,13 @@ exception already got. Set `EventGridOptions.RaiseOnFailureStatus = false` (via
 `EventGridOptions.CatchExceptions` (default `false`) conversely swallows/logs handler exceptions.
 Because a returned failure is now retried by default, the handler must be idempotent.
 
+**Null-outcome policy (flipped 2026-08-25):** an event whose `MessageResult` is never set - typically
+an unrouted event, no handler matched the event type - is escalated the same as an explicit failure,
+not accepted as success. Event Grid's own delivery retry + optional dead-letter destination gives an
+escalated-and-retried event somewhere to land. Enforced via the
+`AzureFunctionBatchApplicationBase.EscalateUnestablishedOutcome` hook (default `true`, not overridden
+here - see `Benzene.Azure.Function.Core/CLAUDE.md`). See `work/settlement-consistency-fix-plan.md`.
+
 ## Zero dependencies — deliberately
 References only `Benzene.Azure.Function.Core` + `Benzene.Core.MessageHandlers` — no
 `Azure.Messaging.EventGrid`, no Functions extension package; the event payload rides as a BCL
