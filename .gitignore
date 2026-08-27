@@ -307,3 +307,6 @@ website/dist/
 
 # Stray codegen / scratch output at repo root (must never be committed)
 /Output/
+
+# Claude Code agent worktree scratch space (isolated per-agent git worktrees)
+.claude/worktrees/
