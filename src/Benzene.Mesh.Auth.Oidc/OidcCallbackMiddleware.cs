@@ -100,10 +100,26 @@ public class OidcCallbackMiddleware<TContext> : IMiddleware<TContext>, ITerminal
             return;
         }
 
+        OpenIdConnectConfiguration configuration;
+        try
+        {
+            // #173 / round 1's #20: kept as its own try/catch, separate from the token-exchange one
+            // below - a discovery failure here (misconfigured or unreachable issuer, transient IdP
+            // outage) is not the same thing as a failed token exchange, and gets OidcDiscoveryFailureResponse's
+            // distinct "temporarily unavailable" response instead of DenyAsync's "access denied" - it is
+            // not a statement about this caller's account.
+            configuration = await _configurationManager.GetConfigurationAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "OIDC callback rejected: could not fetch discovery metadata for issuer {Issuer}", _options.Issuer);
+            await OidcDiscoveryFailureResponse.WriteAsync(_responseAdapter, context);
+            return;
+        }
+
         string idToken;
         try
         {
-            var configuration = await _configurationManager.GetConfigurationAsync();
             var redirectUri = RequestUrl.BuildBaseUrl(request, _options) + _options.BasePath + "/callback";
             idToken = await _tokenExchangeClient.ExchangeCodeForIdTokenAsync(
                 configuration.TokenEndpoint, _options.ClientId, _options.ClientSecret, code, redirectUri);

@@ -1882,6 +1882,87 @@ build). Until one of those lands, the honest position (now documented in the XML
 oversized payloads reaching the handler, not the peak memory a single request costs the process: a
 genuine memory bound for a payload-size-sensitive endpoint still needs a host-level cap in front of
 Benzene entirely (Kestrel's `MaxRequestBodySize`, a gateway body-size limit).
+### Tracked findings round 11 — Benzene.Mesh.Auth.Oidc DI-lifetime/CSRF/fail-fast fixes (done)
+Task board #172, #173, #175, #177, #178, #180 (see `work/bug-fix-designs-round11-2026-08.md` §7). All
+five worth-fixing items plus the one minor item assigned to this package are landed; full design
+rationale and cross-references to round 1's #4/#20 rulings are in that doc.
+
+- **[RESOLVED] #172 — `OidcSessionGateMiddleware` was registered `AddSingleton` despite taking a SCOPED
+  `IOidcSessionSink` through its constructor**, so the container resolved that scoped sink exactly once,
+  at whichever scope happened to ask for the middleware first, and pinned that one instance (and the
+  middleware itself) for the rest of the container's life — every later request's identity silently
+  attributed to whatever the first request captured. Now registered `AddScoped` in `Extensions.cs`,
+  matching `Benzene.Auth.Basic.BasicAuthMiddleware`/`Benzene.Auth.OAuth2.OAuth2BearerMiddleware`'s
+  identical pattern for the identical reason. `examples/AwsMesh/Mesh/OidcDispatchIdentitySink.cs`'s doc
+  comment (which asserted "both sides are scoped" while the gate side actually wasn't) now documents the
+  historical bug and the fix explicitly. New test:
+  `OidcSessionGateMiddlewareDiScopeTest.ResolvingFromTwoDifferentScopes_EachGetsItsOwnMiddlewareAndSessionSinkInstance`
+  resolves the real `UseMeshOidcAuth` registration from two separate DI scopes (a real
+  `MicrosoftBenzeneServiceContainer`) and proves each scope gets its own middleware instance and its own
+  sink instance, and that one scope's `Authenticated` call never touches the other's sink.
+- **[RESOLVED] #173 — `MeshOidcOptions.Validate()` accepted a non-HTTPS `Issuer` with
+  `RequireHttpsMetadata` still `true`, crashing OIDC discovery as an unhandled 500 at request time.**
+  This is round 1's #20, previously fixed only in `deploy/Mesh/Benzene.Mesh.Host/MeshAuthGate.cs` and
+  never carried into this package. `Validate()` now runs the identical check (mirrored, not
+  reinvented). Also added: a `try`/`catch` around OIDC discovery in both `OidcLoginMiddleware` and
+  `OidcCallbackMiddleware` (previously absent entirely on login, and not covering discovery specifically
+  on callback), denying with a new shared `OidcDiscoveryFailureResponse` (`503`, generic body) instead of
+  an unhandled 500 — covers both a lingering misconfiguration and a transient IdP outage. Tests:
+  `MeshOidcOptionsValidateTest` (non-https issuer throws; `RequireHttpsMetadata: false` escape hatch
+  still works; https issuer unaffected), `OidcLoginMiddlewareTest.DiscoveryFailure_DeniesCleanly_NeverThrows`
+  and `OidcCallbackMiddlewareTest.DiscoveryFailure_DeniesWithServiceUnavailable_NeverThrows` (both against
+  a genuinely unreachable loopback endpoint, not a mocked exception).
+- **[RESOLVED] #175 — `OidcLogoutMiddleware` handled logout on a bare GET with no CSRF defense**, so a
+  cross-site GET (e.g. an `<img>` tag) could sign a victim out, since `SameSite=Lax` still sends the
+  cookie on a top-level GET navigation. This directly contradicted round 1's #4 ruling, already
+  implemented correctly in `MeshAuthGate.HandleLogoutAsync` (405 on GET, require POST + the
+  `X-Benzene-Logout` header) — mirrored here exactly, including the header name. The response contract
+  also changed from a 302 redirect to JSON (`{"redirect":null}`, this package resolves no IdP
+  end-session endpoint), because `Benzene.Mesh.Ui`'s shared Sign-out control already `fetch()`es this
+  endpoint expecting exactly that JSON shape (it was written against `MeshAuthGate`'s contract first, and
+  is shared by both this package's hosts and `MeshAuthGate`-gated ones) — the old 302 would have been
+  followed transparently by `fetch()` and failed `.json()` parsing. This package's own `CLAUDE.md` is
+  corrected (it documented the old, superseded "no CSRF protection on /logout, deliberately" position).
+  Tests in `OidcLogoutMiddlewareTest`: GET on the logout path → 405; POST without the header → 403; POST
+  with the header → clears the session cookie and returns 200 + the JSON body; header-name lookup is
+  case-insensitive; a present-but-blank header value is still rejected.
+- **[RESOLVED] #177 — `MeshOidcOptions.SigningKey` was checked for byte length only (≥32 bytes), so a
+  32-character repeated character passed** — and that key signs both the CSRF state token and a session
+  cookie that is a deterministic function of `{Email, Exp}` with no randomness of its own, making a
+  low-entropy key a full session-forgery vector. `Validate()` now also rejects a key with fewer than 8
+  distinct byte values across its whole length (a pragmatic floor, not a real entropy estimator — see its
+  own remarks for exactly what it does and does not catch: it catches a repeated/near-constant string,
+  not a guessable-but-diverse dictionary phrase). Tests: `LowEntropyRepeatedCharacterSigningKey_Throws`,
+  `LowEntropyShortAlternatingPatternSigningKey_Throws`, and `SigningKeyWithEnoughDistinctBytes_IsAccepted`
+  (hex-shaped and passphrase-shaped keys both still pass). The pre-existing
+  `SigningKeyExactly32Bytes_IsAccepted` test's fixture (`new string('k', 32)`) was itself an example of
+  the vulnerability and has been changed to a genuinely high-entropy key; the old shape now has its own
+  dedicated "must throw" test instead.
+- **[RESOLVED] #178 (minor) — OIDC logout was client-side only with no per-session identifier, and this
+  was not documented as a deliberate decision anywhere.** Added a random `Jti` to `OidcSessionPayload`
+  (defaults to `""` so a two-argument construction/deserialization of a pre-existing payload still works)
+  so a future deny-list could revoke one specific session without a cookie-format break — nothing reads
+  or checks it yet, by design; building the store itself is a real feature, not folded into this fix.
+  Added an explicit "Stateless logout (deliberate) - and its consequence" section to this package's
+  `CLAUDE.md` naming the tradeoff plainly: a leaked/stolen cookie stays valid until its own `Exp`,
+  regardless of the original holder logging out. `MeshOidcOptions.SessionDuration`'s doc comment now
+  explains why its lack of an enforced upper bound matters more here than usual, given stateless logout —
+  scoped down to a documentation fix rather than an enforced cap (see `[DECISION]` below).
+- **[RESOLVED] #180 (minor) — the post-login `returnTo` path was built from the LOWERCASED request**
+  (`HttpRequest.AsLowerCase()` lowercases `Path` as well as header names), breaking a case-sensitive deep
+  link (an S3 object key, a service-cased JSON route) with a 404 after an otherwise-successful login.
+  `OidcSessionGateMiddleware.HandleAsync` now keeps the original-cased request alongside the lowercased
+  one and feeds ONLY the original-cased `Path` into `BuildReturnTo`, while header lookups (cookie,
+  accept) keep using the lowercased copy. New test:
+  `OidcSessionGateMiddlewareTest.NoSessionCookie_HtmlRequest_RedirectsToLogin_PreservingOriginalPathCasing`.
+
+`[DECISION]` (recorded, not deferred — see `work/bug-fix-designs-round11-2026-08.md`'s scope note for
+this round): `MeshOidcOptions.SessionDuration` is NOT given an enforced upper bound. A hard cap (e.g. 30
+days) would reduce the blast radius of a leaked cookie further, but risks breaking a deployment that
+genuinely wants a longer "remember me" duration, and this package has no way to know what's genuinely
+needed for a given deployment. Documented instead (property remarks + `CLAUDE.md`) so the tradeoff is
+explicit rather than silent; revisit if a real deployment's incident shows the uncapped default causing
+harm in practice.
 
 ## Open — maintainer decisions (the real remaining backlog)
 

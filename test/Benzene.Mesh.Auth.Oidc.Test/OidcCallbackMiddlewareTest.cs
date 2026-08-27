@@ -210,6 +210,31 @@ public class OidcCallbackMiddlewareTest
         Assert.Equal("user@example.com", email);
     }
 
+    /// <summary>
+    /// #173 / round 1's #20: before this fix, a discovery failure reached here (after `state`/`code`
+    /// validation, at the token-exchange step) had nothing catching it and surfaced as an unhandled 500.
+    /// Disposing the fake provider before the request makes its discovery endpoint genuinely
+    /// unreachable - a real connection failure, not a mocked exception - and this is kept distinct from
+    /// <see cref="TokenExchangeFailure_Denies"/>'s 401: this is a service-unavailable case, not a
+    /// statement about the caller's authorization code.
+    /// </summary>
+    [Fact]
+    public async Task DiscoveryFailure_DeniesWithServiceUnavailable_NeverThrows()
+    {
+        var fixture = new Fixture();
+        fixture.Provider.Dispose(); // discovery endpoint no longer reachable
+        var state = OidcStateToken.Create(Key, "/mesh-ui");
+        var context = CallbackContext();
+        context.QueryParameters["state"] = state;
+        context.QueryParameters["code"] = "some-code";
+        context.Headers["cookie"] = $"benzene_mesh_oidc_state={state}";
+
+        await fixture.Middleware.HandleAsync(context, () => Task.CompletedTask);
+
+        Assert.Equal(503, context.StatusCode);
+        Assert.DoesNotContain(context.SetCookies, c => c.StartsWith("benzene_mesh_session="));
+    }
+
     [Fact]
     public async Task DeniedCallback_ClearsStateCookie()
     {

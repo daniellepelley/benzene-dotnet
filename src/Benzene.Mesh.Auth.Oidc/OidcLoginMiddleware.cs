@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Benzene.Abstractions.MessageHandlers.Response;
 using Benzene.Abstractions.Middleware;
 using Benzene.Http;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 
@@ -27,6 +28,7 @@ public class OidcLoginMiddleware<TContext> : IMiddleware<TContext>, ITerminalMid
     private readonly IHttpRequestAdapter<TContext> _httpRequestAdapter;
     private readonly IBenzeneResponseAdapter<TContext> _responseAdapter;
     private readonly IOidcQueryStringReader<TContext> _queryStringReader;
+    private readonly ILogger? _logger;
     private readonly string _loginPath;
 
     /// <summary>Gets the name of the middleware.</summary>
@@ -39,10 +41,16 @@ public class OidcLoginMiddleware<TContext> : IMiddleware<TContext>, ITerminalMid
     /// <param name="httpRequestAdapter">Adapter used to read the request method/path/headers.</param>
     /// <param name="responseAdapter">Adapter used to write the redirect response and state cookie.</param>
     /// <param name="queryStringReader">Reads the <c>returnTo</c> query parameter.</param>
+    /// <param name="logger">
+    /// Optional logger for a discovery failure (see <see cref="HandleAsync"/>) - the real reason is
+    /// logged server-side only, never echoed to the browser, matching
+    /// <see cref="OidcCallbackMiddleware{TContext}"/>'s convention. Nullable/optional so a direct,
+    /// logger-free construction (tests) still works.
+    /// </param>
     public OidcLoginMiddleware(
         MeshOidcOptions options, byte[] signingKey, ConfigurationManager<OpenIdConnectConfiguration> configurationManager,
         IHttpRequestAdapter<TContext> httpRequestAdapter, IBenzeneResponseAdapter<TContext> responseAdapter,
-        IOidcQueryStringReader<TContext> queryStringReader)
+        IOidcQueryStringReader<TContext> queryStringReader, ILogger? logger = null)
     {
         _options = options;
         _signingKey = signingKey;
@@ -50,6 +58,7 @@ public class OidcLoginMiddleware<TContext> : IMiddleware<TContext>, ITerminalMid
         _httpRequestAdapter = httpRequestAdapter;
         _responseAdapter = responseAdapter;
         _queryStringReader = queryStringReader;
+        _logger = logger;
         _loginPath = OidcPaths.Normalize(options.BasePath + "/login");
     }
 
@@ -70,7 +79,23 @@ public class OidcLoginMiddleware<TContext> : IMiddleware<TContext>, ITerminalMid
         // (no returnTo) must land somewhere the host actually serves.
         var returnTo = ReturnToValidator.IsSafe(requestedReturnTo) ? requestedReturnTo! : _options.HomePath;
 
-        var configuration = await _configurationManager.GetConfigurationAsync();
+        OpenIdConnectConfiguration configuration;
+        try
+        {
+            // #173 / round 1's #20: this is the exact request-time crash MeshOidcOptions.Validate() now
+            // rejects at wire-up time for a non-https issuer - but validation can only ever prove the
+            // issuer LOOKS safe, never that it is actually reachable and serving a real discovery
+            // document. A misconfigured issuer, or a transient IdP outage, must still deny the login
+            // cleanly here rather than surface as an unhandled 500.
+            configuration = await _configurationManager.GetConfigurationAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "OIDC login denied: could not fetch discovery metadata for issuer {Issuer}", _options.Issuer);
+            await OidcDiscoveryFailureResponse.WriteAsync(_responseAdapter, context);
+            return;
+        }
+
         var redirectUri = RequestUrl.BuildBaseUrl(request, _options) + _options.BasePath + "/callback";
         var state = OidcStateToken.Create(_signingKey, returnTo);
 

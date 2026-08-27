@@ -215,6 +215,33 @@ public class OidcSessionGateMiddlewareTest
         Assert.Equal(302, context.StatusCode);
     }
 
+    /// <summary>
+    /// #180: <c>returnTo</c> used to be built from the LOWERCASED request (path included, not just
+    /// header names), so a case-sensitive deep link - an S3 object key, a service-cased JSON route -
+    /// 404'd after a successful login even though the ORIGINAL request would have resolved fine. The
+    /// path segment in the redirect must come back in its original casing.
+    /// </summary>
+    [Fact]
+    public async Task NoSessionCookie_HtmlRequest_RedirectsToLogin_PreservingOriginalPathCasing()
+    {
+        var gate = CreateGate(Options());
+        var context = new FakeHttpContext
+        {
+            Method = "GET",
+            Path = "/Mesh-UI/Reports/MyReport.JSON",
+            Headers = { ["accept"] = "text/html" },
+        };
+
+        await gate.HandleAsync(context, () => Task.CompletedTask);
+
+        Assert.Equal(302, context.StatusCode);
+        Assert.NotNull(context.Location);
+        Assert.Contains(Uri.EscapeDataString("/Mesh-UI/Reports/MyReport.JSON"), context.Location);
+        // The BasePath prefix of the redirect target itself is fine to be whatever casing the option
+        // was configured with - this assertion is specifically about the embedded original path, not
+        // about the login URL's own casing.
+    }
+
     [Fact]
     public async Task EmptyAllowlist_RejectsEveryone_EvenWithValidSignature()
     {

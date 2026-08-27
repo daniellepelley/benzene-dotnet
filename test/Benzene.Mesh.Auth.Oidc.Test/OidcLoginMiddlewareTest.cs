@@ -1,5 +1,7 @@
 using System;
 using System.Linq;
+using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using System.Threading.Tasks;
 using Benzene.Mesh.Auth.Oidc.Test.Fakes;
@@ -137,5 +139,55 @@ public class OidcLoginMiddlewareTest
         OidcStateToken.TryValidate(Key, stateValue, stateValue, out var returnTo);
 
         Assert.Equal("/", returnTo);
+    }
+
+    /// <summary>
+    /// #173 / round 1's #20: before this fix, an OIDC discovery failure at request time (a misconfigured
+    /// or unreachable issuer, or a transient IdP outage) had nothing catching it here at all and
+    /// surfaced as an unhandled 500. Points discovery at a genuinely unreachable loopback port (nothing
+    /// listening) so <c>ConfigurationManager.GetConfigurationAsync()</c> actually fails, for real - not a
+    /// mocked exception.
+    /// </summary>
+    [Fact]
+    public async Task DiscoveryFailure_DeniesCleanly_NeverThrows()
+    {
+        var options = new MeshOidcOptions
+        {
+            Issuer = $"http://localhost:{GetUnreachablePort()}",
+            ClientId = "client-id",
+            ClientSecret = "client-secret",
+            SigningKey = Encoding.UTF8.GetString(Key),
+            AllowedEmails = new[] { "user@example.com" },
+            BasePath = "/mesh/auth",
+            RequireHttpsMetadata = false,
+        };
+        var configurationManager = OidcConfigurationManagerFactory.Create(options);
+        var middleware = new OidcLoginMiddleware<FakeHttpContext>(
+            options, Key, configurationManager, new FakeHttpRequestAdapter(), new FakeResponseAdapter(), new FakeQueryStringReader());
+        var context = new FakeHttpContext
+        {
+            Method = "GET",
+            Path = "/mesh/auth/login",
+            Headers = { ["host"] = "mesh.example.com" },
+        };
+
+        var nextCalled = false;
+        await middleware.HandleAsync(context, () => { nextCalled = true; return Task.CompletedTask; });
+
+        Assert.False(nextCalled);
+        Assert.Equal(503, context.StatusCode);
+        Assert.Empty(context.SetCookies);
+        Assert.DoesNotContain("client-secret", context.Body);
+    }
+
+    /// <summary>A closed TCP port on loopback - guaranteed nothing answers, so discovery fails fast
+    /// with a real connection-refused error rather than a timeout.</summary>
+    private static int GetUnreachablePort()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+        return port;
     }
 }

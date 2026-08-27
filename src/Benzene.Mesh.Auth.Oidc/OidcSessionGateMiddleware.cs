@@ -35,6 +35,11 @@ public class OidcSessionGateMiddleware<TContext> : IMiddleware<TContext> where T
     /// <param name="httpRequestAdapter">Adapter used to read the request method/path/headers.</param>
     /// <param name="responseAdapter">Adapter used to write a redirect or 401 response on denial.</param>
     /// <param name="queryStringReader">Reads the query string to preserve it in the login redirect's <c>returnTo</c>.</param>
+    /// <param name="sessionSink">
+    /// Optional. Receives the validated caller's identity on success - see <see cref="IOidcSessionSink"/>.
+    /// Null (the default) simply means nothing downstream needs attribution; the gate's own allow/deny
+    /// decision does not depend on it.
+    /// </param>
     public OidcSessionGateMiddleware(
         MeshOidcOptions options, byte[] signingKey, IHttpRequestAdapter<TContext> httpRequestAdapter,
         IBenzeneResponseAdapter<TContext> responseAdapter, IOidcQueryStringReader<TContext> queryStringReader,
@@ -51,7 +56,13 @@ public class OidcSessionGateMiddleware<TContext> : IMiddleware<TContext> where T
     /// <inheritdoc />
     public async Task HandleAsync(TContext context, Func<Task> next)
     {
-        var request = _httpRequestAdapter.Map(context).AsLowerCase();
+        // #180: keep the ORIGINAL-cased request around too - AsLowerCase() lowercases Path as well as
+        // header names (see its own remarks), which is exactly right for header lookups below (cookie/
+        // accept) but wrong for a path fed into a post-login redirect: a case-sensitive deep link (an
+        // S3 object key, a service-cased JSON route) would 404 after a successful login if BuildReturnTo
+        // used the lowercased copy. rawRequest.Path is what BuildReturnTo actually uses.
+        var rawRequest = _httpRequestAdapter.Map(context);
+        var request = rawRequest.AsLowerCase();
 
         var cookies = CookieHeader.Parse(request.Headers.TryGetValue("cookie", out var cookieHeader) ? cookieHeader : null);
         cookies.TryGetValue(OidcCookies.SessionCookieName, out var sessionCookie);
@@ -75,7 +86,7 @@ public class OidcSessionGateMiddleware<TContext> : IMiddleware<TContext> where T
 
         if (acceptsHtml)
         {
-            var returnTo = BuildReturnTo(request, context);
+            var returnTo = BuildReturnTo(rawRequest, context);
             var loginUrl = _options.BasePath + "/login?returnTo=" + Uri.EscapeDataString(returnTo);
             _responseAdapter.SetStatusCode(context, "302");
             _responseAdapter.SetResponseHeader(context, "Location", loginUrl);
@@ -90,6 +101,9 @@ public class OidcSessionGateMiddleware<TContext> : IMiddleware<TContext> where T
         await _responseAdapter.FinalizeAsync(context);
     }
 
+    // #180: callers must pass the ORIGINAL-cased request (not the lowercased one HandleAsync otherwise
+    // works from) - this feeds a post-login redirect target, and a case-sensitive deep link must come
+    // back exactly as it was requested.
     private string BuildReturnTo(HttpRequest request, TContext context)
     {
         var path = string.IsNullOrWhiteSpace(request.Path) ? "/" : request.Path;

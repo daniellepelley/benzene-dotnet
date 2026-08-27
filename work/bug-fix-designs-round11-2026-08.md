@@ -344,6 +344,18 @@ add); `RequestUrl.BuildBaseUrl` trusts client-supplied Host/`X-Forwarded-Proto` 
 malformed path silently scopes the cookie, causing a login loop); package CLAUDE.md drift on the
 logout redirect target.
 
+**AMENDMENT (2026-08-26, `Benzene.Mesh.Auth.Oidc` fix-round implementing agent):** #172, #173, #175,
+#177, #178, and #180 are landed (see `work/outstanding-bugs.md`'s new "round 11 —
+`Benzene.Mesh.Auth.Oidc`" section for full detail per item). One scope-down, recorded as a `[DECISION]`
+in that same file: #178's callout to "consider adding a sane upper bound" on
+`MeshOidcOptions.SessionDuration` was resolved as documentation-only (the property's remarks and this
+package's `CLAUDE.md` now name the tradeoff explicitly) rather than an enforced cap, since a hard cap
+risks breaking a deployment that genuinely needs a longer session and this package has no way to know
+what's genuinely needed for a given deployment. #174 (the identical `Benzene.Auth.OAuth2` gap), #176
+(`MeshAuthGate`'s IPv4-mapped-IPv6 proxy-trust gap), #179, #181, and #182 are **out of scope for this
+package's agent** — they live in `Benzene.Auth.OAuth2`/`Benzene.Mesh.Host` respectively, assigned (per
+the orchestrator's task-board split) to other worktrees/agents, not deferred by this one.
+
 ---
 
 ## §8 Next steps

@@ -76,7 +76,8 @@ public static class Extensions
                 options, signingKey, configurationManager,
                 resolver.GetService<IHttpRequestAdapter<TContext>>(),
                 resolver.GetService<IBenzeneResponseAdapter<TContext>>(),
-                resolver.GetService<IOidcQueryStringReader<TContext>>()));
+                resolver.GetService<IOidcQueryStringReader<TContext>>(),
+                resolver.GetService<ILoggerFactory>().CreateLogger(LoggerCategory)));
 
             x.AddSingleton(resolver => new OidcCallbackMiddleware<TContext>(
                 options, signingKey, configurationManager,
@@ -91,7 +92,15 @@ public static class Extensions
                 resolver.GetService<IHttpRequestAdapter<TContext>>(),
                 resolver.GetService<IBenzeneResponseAdapter<TContext>>()));
 
-            x.AddSingleton(resolver => new OidcSessionGateMiddleware<TContext>(
+            // #172: SCOPED, not singleton - unlike its three siblings above, this middleware takes an
+            // optional *scoped* IOidcSessionSink (see IOidcSessionSink's remarks). A singleton
+            // registration would resolve that scoped dependency exactly once, at the very first
+            // request's scope, and then hold that one instance for the container's entire lifetime -
+            // every later request would silently attribute its identity to whatever the first request's
+            // sink instance was (or, worse, keep writing into a disposed scope's object graph). Scoped
+            // here matches exactly how Benzene.Auth.Basic's BasicAuthMiddleware and
+            // Benzene.Auth.OAuth2's OAuth2BearerMiddleware are registered, for the identical reason.
+            x.AddScoped(resolver => new OidcSessionGateMiddleware<TContext>(
                 options, signingKey,
                 resolver.GetService<IHttpRequestAdapter<TContext>>(),
                 resolver.GetService<IBenzeneResponseAdapter<TContext>>(),
