@@ -2,6 +2,7 @@ using System.Text.Json;
 using Benzene.Core.Middleware;
 using Benzene.Mesh.Collector;
 using Benzene.Mesh.Wire;
+using Microsoft.Extensions.Logging;
 
 namespace Benzene.Mesh.Fleet.Jaeger;
 
@@ -25,12 +26,21 @@ public class JaegerTraceSource : IMeshTraceSource
 {
     private readonly HttpClient _httpClient;
     private readonly JaegerTraceSourceOptions _options;
+    private readonly ILogger? _logger;
 
     /// <summary>Creates the source over an <see cref="HttpClient"/> and Jaeger endpoint/window options.</summary>
-    public JaegerTraceSource(HttpClient httpClient, JaegerTraceSourceOptions options)
+    public JaegerTraceSource(HttpClient httpClient, JaegerTraceSourceOptions options) : this(httpClient, options, null)
+    {
+    }
+
+    /// <summary>Creates the source over an <see cref="HttpClient"/>, Jaeger endpoint/window options, and an
+    /// optional logger (used to warn when an individual per-service search fails during the fan-out — see
+    /// <see cref="SearchAcrossServicesAsync"/>).</summary>
+    public JaegerTraceSource(HttpClient httpClient, JaegerTraceSourceOptions options, ILogger? logger)
     {
         _httpClient = httpClient;
         _options = options;
+        _logger = logger;
     }
 
     public async Task<TraceView?> GetTraceAsync(string traceId, CancellationToken cancellationToken = default)
@@ -108,6 +118,11 @@ public class JaegerTraceSource : IMeshTraceSource
         var startMicros = window.Start.ToUnixTimeMilliseconds() * 1000;
         var endMicros = window.End.ToUnixTimeMilliseconds() * 1000;
 
+        // #189: isolate each per-service search in its own try/catch. BoundedFanOut's Task.WhenAll semantics
+        // are fail-fast by design (correct for a caller that wants that) - without this, one service's
+        // connection-level failure would fault the whole fan-out and discard every other service's already-
+        // fetched traces, exactly the all-or-nothing failure mode #188 fixes on the Tempo side. Isolation is
+        // this call site's policy, not BoundedFanOut's - it stays a plain fail-fast primitive.
         var perService = await BoundedFanOut.WhenAllAsync(services, async service =>
         {
             var url = $"{_options.JaegerUrl}/api/traces?service={Uri.EscapeDataString(service)}"
@@ -117,8 +132,18 @@ public class JaegerTraceSource : IMeshTraceSource
                 url += $"&tags={Uri.EscapeDataString(tags)}";
             }
 
-            var body = await GetStringOrNullAsync(url, cancellationToken);
-            return body is null ? new List<JaegerMappedTrace>() : JaegerTraceMapper.MapTraces(body);
+            try
+            {
+                var body = await GetStringOrNullAsync(url, cancellationToken);
+                return body is null ? new List<JaegerMappedTrace>() : JaegerTraceMapper.MapTraces(body);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex,
+                    "JaegerTraceSource's search against service {Service} failed; dropping this service's traces and keeping the rest.",
+                    service);
+                return new List<JaegerMappedTrace>();
+            }
         }, _options.SearchConcurrency);
 
         var byTraceId = new Dictionary<string, JaegerMappedTrace>();

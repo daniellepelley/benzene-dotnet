@@ -1,5 +1,6 @@
 using Benzene.Abstractions.DI;
 using Benzene.Mesh.Collector;
+using Microsoft.Extensions.Logging;
 
 namespace Benzene.Mesh.Fleet.Jaeger;
 
@@ -31,7 +32,10 @@ public static class Extensions
     {
         services.AddSingleton(options);
         services.TryAddSingleton<HttpClient>();
-        services.AddSingleton<IMeshTraceSource, JaegerTraceSource>();
+        services.AddSingleton<IMeshTraceSource>(resolver => new JaegerTraceSource(
+            resolver.GetService<HttpClient>(),
+            resolver.GetService<JaegerTraceSourceOptions>(),
+            resolver.TryGetService<ILogger<JaegerTraceSource>>()));
         services.AddSingleton<IMeshFleetReadModel, CompositeMeshFleetReadModel>();
         return services;
     }

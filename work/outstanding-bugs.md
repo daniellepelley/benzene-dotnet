@@ -2069,6 +2069,49 @@ top-of-file summary blockquote).
   scheme specifically) to record this explicitly as a `[DECISION]` in place, rather than leaving it
   silently misleading. Left for a future round to decide whether/how to carry the scheme onto the wire.
 
+### Tracked findings rounds 12–13, WP-2 — Fleet trace-source fetch isolation (done)
+Decisions, rationale, and rejected alternatives are ruled in
+[`bug-fix-rulings-round12-13-2026-08.md`](bug-fix-rulings-round12-13-2026-08.md) §"WP-2 — Fleet
+trace-source fetch isolation". This WP extends `Benzene.Mesh.Fleet.Aws.XRay`'s round 9/10 (#74–#79)
+per-batch isolation pattern (P8: "a fix lands on every sibling, not just the instance that surfaced it")
+to its two siblings that missed it.
+- **[RESOLVED] #188 — `TempoTraceSource.GetCorrelationAsync` fetched up to 100 matched traces fully
+  sequentially in a `foreach` loop, with no per-trace try/catch; `CompositeMeshFleetReadModel`'s
+  single try/catch around the whole call meant one trace's transient failure discarded every
+  already-fetched result.** Reworked to fan the per-trace fetches out via `BoundedFanOut.WhenAllAsync`,
+  capped by new `TempoTraceSourceOptions.SearchConcurrency` (default 8, matching Jaeger's default), with
+  each fetch wrapped in its own try/catch — a failing fetch logs a warning and is dropped, the rest are
+  kept. Test: `TempoTraceSourceTest.GetCorrelationAsync_IsolatesAPerTraceFetchFailure_AndKeepsTheRest`
+  (3 matched traces, the middle one's fetch throws → 2 traces returned, not 0) and
+  `...FetchesMatchedTracesConcurrently_NotSequentially` (a gated-concurrency handler that deadlocks under
+  a sequential regression). See WP-2.
+- **[RESOLVED] #189 — `JaegerTraceSource.SearchAcrossServicesAsync` already used `BoundedFanOut` but had
+  no per-item isolation inside it; a faulted per-service task discarded every other service's completed
+  results via `Task.WhenAll` fail-fast semantics.** Added a try/catch inside the lambda passed to
+  `BoundedFanOut.WhenAllAsync` (not inside `BoundedFanOut` itself — the ruling explicitly rejects an
+  `isolate` flag on the shared helper, since isolation is a per-call-site policy, not the helper's job): a
+  service whose search throws logs a warning and contributes an empty trace list, the rest are kept. Test:
+  `JaegerTraceSourceTest.GetRecentFlowsAsync_IsolatesAPerServiceSearchFailure_AndKeepsTheRest` (3
+  services, the middle one's search throws → 2 services' traces returned, not 0) and
+  `...LogsAWarning_WhenAPerServiceSearchFails`. See WP-2.
+- **[RESOLVED] #190 — Tempo's correlation search limit was hardcoded to 100, with no override and no
+  warning when hit.** Added `TempoTraceSourceOptions.CorrelationSearchLimit` (default 100, preserving
+  prior behavior); `GetCorrelationAsync` logs a warning when the search returns exactly that many matches
+  (Tempo's `/api/search` has no further paging, so hitting the limit means matches may have been missed),
+  mirroring X-Ray's #77 at-limit warning pattern. Test:
+  `TempoTraceSourceTest.GetCorrelationAsync_LogsAWarning_WhenTheSearchReturnsExactlyTheConfiguredLimit`,
+  `...UsesTheConfiguredCorrelationSearchLimit`, `...DoesNotWarn_WhenBelowTheConfiguredLimit`. See WP-2.
+- **Implementation note (not a design divergence — no ruling amendment needed):** to reach
+  `BoundedFanOut`, `Benzene.Mesh.Fleet.Tempo`'s `.csproj` gained a `ProjectReference` to
+  `Benzene.Core.Middleware` (Jaeger already had it, for the same helper). Both sources also gained an
+  optional `ILogger?` constructor parameter (defaulting to `null` via a new overload, so the existing
+  2-arg constructor stays source-compatible) and `AddTempoFleetReadModel`/`AddJaegerFleetReadModel` now
+  resolve `ILogger<T>` from the container the same way `AddXRayFleetReadModel` already does — no new
+  NuGet package (`Microsoft.Extensions.Logging.Abstractions` was already transitive via
+  `Benzene.Abstractions`), no public API signature change to any existing member. **Not locally
+  build/test-verified — this environment has no .NET SDK; verify via CI**
+  (`.github/workflows/build-benzene.yml`) before merge.
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.

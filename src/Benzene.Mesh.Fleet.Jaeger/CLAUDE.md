@@ -20,6 +20,17 @@ and the fleet view's recent-flows from a **Jaeger query service**, reusing the *
     success class) — richer than the Tempo/X-Ray summary path, with no second fetch.
   - Reachable-but-unsuccessful (HTTP error / malformed body) → null/empty (the topology adapter's rule); a
     connection failure throws and the composite's fetch-isolation degrades that slice.
+  - **Per-service fetch isolation (#189, round 12-13).** `SearchAcrossServicesAsync`'s per-service search
+    runs inside `BoundedFanOut.WhenAllAsync`'s lambda with its own try/catch: a service whose search throws
+    (a genuine connection failure) logs a warning and contributes an empty trace list, rather than faulting
+    the whole `Task.WhenAll` and discarding every other service's already-fetched traces. This closes the
+    gap `Benzene.Mesh.Fleet.Aws.XRay`'s per-batch isolation already had — see
+    `work/bug-fix-rulings-round12-13-2026-08.md` §WP-2. **Decision: isolate inside the call-site lambda, not
+    inside `BoundedFanOut` itself** — the helper's fail-fast `Task.WhenAll` semantics stay correct for a
+    caller that wants them; isolation is a per-call-site policy, not the shared helper's job (an `isolate`
+    flag on `BoundedFanOut` was the rejected alternative). Covered by
+    `JaegerTraceSourceTest.GetRecentFlowsAsync_IsolatesAPerServiceSearchFailure_AndKeepsTheRest` (N-1, not
+    zero) and `...LogsAWarning_WhenAPerServiceSearchFails`.
 - `JaegerTraceMapper.MapTraces(body)` → one `JaegerMappedTrace` (id + events) per trace in `data[]`. Maps
   Jaeger's own model, which differs from OTLP/Tempo: times are **microseconds** (`startTime`/`duration`),
   parentage is a `references` entry with `refType == "CHILD_OF"` (not `parentSpanId`), and the service is
@@ -56,8 +67,9 @@ Jaeger stores span tags searchably, so the correlation tag filter works without 
 `JaegerTraceMapper`, the tag-search construction, the service fan-out/dedupe, and the response parsing are
 unit-tested against Jaeger's **documented** API shapes (`test/Benzene.Mesh.Test/JaegerTraceSourceTest.cs`,
 mocked `HttpClient`), covering trace mapping + non-Benzene-span filtering, correlation fan-out + dedupe +
-ordering, recent-flows full-trace mapping (event count + failure), service discovery, and the null cases.
-It has **not** been run against a **live** Jaeger instance — the same egress limitation as the other
+ordering, recent-flows full-trace mapping (event count + failure), service discovery, the null cases, and
+(round 12-13) per-service search fetch isolation (#189 — one service's search throwing keeps the rest,
+logs a warning). It has **not** been run against a **live** Jaeger instance — the same egress limitation as the other
 adapters. Treat the API paths (`/api/traces/{id}`, `/api/traces?service=…&tags=…`, `/api/services`), the
 Jaeger trace JSON model, and the microsecond time unit as "per Jaeger's public documentation, not
 independently confirmed" until verified against a real instance.
@@ -66,5 +78,9 @@ independently confirmed" until verified against a real instance.
 - **Benzene.Mesh.Collector** — `IMeshTraceSource`/`IMeshFleetReadModel`/`CompositeMeshFleetReadModel`/
   `TraceView`/`TraceSummary`/`CorrelationView`/`MeshTraceEvent` (via `Benzene.Mesh.Wire`), the
   `BenzeneResultStatusExtensions` success class, and `MeshCollectorHandlers.Queries`.
-- **Benzene.Abstractions** — `IBenzeneServiceContainer` for the DI extension. Uses `System.Net.Http`'s
-  `HttpClient` and `System.Text.Json` directly, matching the `Benzene.Mesh.*` family.
+- **Benzene.Core.Middleware** — `BoundedFanOut` (the per-service search fan-out).
+- **Benzene.Abstractions** — `IBenzeneServiceContainer` for the DI extension; `Microsoft.Extensions.Logging.Abstractions`
+  (transitive via `Benzene.Abstractions`) for the source's optional `ILogger` constructor overload, wired by
+  `AddJaegerFleetReadModel` via `resolver.TryGetService<ILogger<JaegerTraceSource>>()` (the same pattern
+  `AddXRayFleetReadModel` uses). Uses `System.Net.Http`'s `HttpClient` and `System.Text.Json` directly,
+  matching the `Benzene.Mesh.*` family.

@@ -20,8 +20,26 @@ either, both, or neither.
   - `GetTraceAsync` → `GET /api/traces/{id}` (OTLP/JSON), mapped by `TempoTraceMapper`; null (→ handler
     answers `NotFound`) when Tempo has no such trace or it carried no Benzene topic-bearing span.
   - `GetCorrelationAsync` → TraceQL search `{ span."benzene.correlation-id" = "…" }` over the correlation
-    window, then fetch each matching trace by id and group into a `CorrelationView` (traces earliest-first
-    — the same ordering the in-memory collector and the X-Ray adapter use, so every plane renders identically).
+    window (`limit` = `TempoTraceSourceOptions.CorrelationSearchLimit`), then fetch each matching trace by
+    id and group into a `CorrelationView` (traces earliest-first — the same ordering the in-memory
+    collector and the X-Ray adapter use, so every plane renders identically). **Fetch isolation + bounded
+    fan-out (#188, round 12-13).** The per-trace fetches run concurrently via `BoundedFanOut.WhenAllAsync`,
+    capped by `TempoTraceSourceOptions.SearchConcurrency` (default 8, matching
+    `JaegerTraceSourceOptions.SearchConcurrency`'s default/rationale) — not the old sequential `foreach`.
+    Each fetch is wrapped in its own try/catch: a trace whose fetch throws (a genuine connection failure)
+    logs a warning and is dropped, the rest are kept — before this fix the sequential loop had no
+    try/catch, so one bad fetch propagated out of `GetCorrelationAsync` entirely and the composite's own
+    fetch-isolation degraded the *whole* correlation to `null`, discarding every already-fetched trace too.
+    See `work/bug-fix-rulings-round12-13-2026-08.md` §WP-2. Covered by `TempoTraceSourceTest`
+    (`GetCorrelationAsync_IsolatesAPerTraceFetchFailure_AndKeepsTheRest` — N-1, not zero;
+    `...FetchesMatchedTracesConcurrently_NotSequentially`).
+  - **At-limit warning (#190, round 12-13).** `TempoTraceSourceOptions.CorrelationSearchLimit` (default
+    100, preserving the prior hardcoded behavior) bounds the search; Tempo's `/api/search` has no further
+    paging, so a search that returns exactly the limit may have missed matches beyond it — logged as a
+    warning (`ILogger?`, optional constructor param) rather than silently truncated, mirroring X-Ray's #77
+    at-limit warning. Covered by `TempoTraceSourceTest`
+    (`GetCorrelationAsync_LogsAWarning_WhenTheSearchReturnsExactlyTheConfiguredLimit`,
+    `...UsesTheConfiguredCorrelationSearchLimit`, `...DoesNotWarn_WhenBelowTheConfiguredLimit`).
   - `GetRecentFlowsAsync` → one TraceQL search `{ span."benzene.topic" != "" }` (mesh flows only) over the
     recent-flows window → `TraceSummary` rows (traceID; `durationMs`; start from `startTimeUnixNano`;
     `rootServiceName` → `Services`), newest first, capped. `Failed=false` and `Events=0`: Tempo's search
@@ -48,6 +66,10 @@ either, both, or neither.
   `TempoTraceSourceTest` (`...PrefersBenzeneServiceTag_OverResourceServiceName`).
 - `TempoTraceSourceOptions(tempoUrl)` — `CorrelationLookback` (24h) and `RecentFlowsLookback` (1h) bound
   the two searches (Tempo's `/api/search` needs a time range); a trace lookup is by id (no window).
+  `CorrelationSearchLimit` (default 100, round 12-13 #190) is the `/api/search` `limit` for a correlation
+  search — logged as a warning when hit, since there's no further paging beyond it.
+  `SearchConcurrency` (default 8, round 12-13 #188) caps how many per-trace fetches
+  `GetCorrelationAsync` runs concurrently while hydrating the search's matched trace ids.
 - `Extensions.AddTempoFleetReadModel(options)` — registers the options, an `HttpClient` (unless one is
   already registered — the same shape as `AddTempoTopology`), `TempoTraceSource` as `IMeshTraceSource`, and
   `CompositeMeshFleetReadModel` as `IMeshFleetReadModel` (composed with whatever `IMeshUsageSource`s are
@@ -71,7 +93,8 @@ filters on span attributes directly by their dotted names.
 `TempoTraceMapper`, the TraceQL construction, and the search/trace parsing are unit-tested against Tempo's
 **documented** API shapes (`test/Benzene.Mesh.Test/TempoTraceSourceTest.cs`, mocked `HttpClient`), covering
 trace mapping + non-Benzene-span filtering, correlation search/fetch/group, recent-flows ordering + the
-single-search (no per-row fetch) guarantee, and the null cases. It has **not** been run against a **live**
+single-search (no per-row fetch) guarantee, the null cases, and (round 12-13) per-trace fetch isolation +
+concurrent hydration + the `CorrelationSearchLimit` at-limit warning. It has **not** been run against a **live**
 Tempo instance — the same egress limitation that blocked live-verifying `Benzene.Mesh.Tracing.Tempo`. Treat
 the API paths (`/api/traces/{id}`, `/api/search`), the OTLP/JSON trace shape, and the TraceQL attribute
 syntax as "per Tempo's public documentation, not independently confirmed" until verified against a real instance.
@@ -80,5 +103,9 @@ syntax as "per Tempo's public documentation, not independently confirmed" until 
 - **Benzene.Mesh.Collector** — `IMeshTraceSource`/`IMeshFleetReadModel`/`CompositeMeshFleetReadModel`/
   `TraceView`/`TraceSummary`/`CorrelationView`/`MeshTraceEvent` (via `Benzene.Mesh.Wire`) and
   `MeshCollectorHandlers.Queries`.
-- **Benzene.Abstractions** — `IBenzeneServiceContainer` for the DI extension. Uses `System.Net.Http`'s
-  `HttpClient` and `System.Text.Json` directly, matching the `Benzene.Mesh.*` family.
+- **Benzene.Core.Middleware** — `BoundedFanOut` (the per-trace correlation fetch fan-out, round 12-13 #188).
+- **Benzene.Abstractions** — `IBenzeneServiceContainer` for the DI extension; `Microsoft.Extensions.Logging.Abstractions`
+  (transitive via `Benzene.Abstractions`) for the source's optional `ILogger` constructor overload, wired by
+  `AddTempoFleetReadModel` via `resolver.TryGetService<ILogger<TempoTraceSource>>()` (the same pattern
+  `AddXRayFleetReadModel` uses). Uses `System.Net.Http`'s `HttpClient` and `System.Text.Json` directly,
+  matching the `Benzene.Mesh.*` family.

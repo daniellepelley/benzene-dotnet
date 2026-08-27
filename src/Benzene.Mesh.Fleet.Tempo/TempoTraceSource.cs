@@ -1,7 +1,9 @@
 using System.Globalization;
 using System.Text.Json;
+using Benzene.Core.Middleware;
 using Benzene.Mesh.Collector;
 using Benzene.Mesh.Wire;
+using Microsoft.Extensions.Logging;
 
 namespace Benzene.Mesh.Fleet.Tempo;
 
@@ -26,12 +28,22 @@ public class TempoTraceSource : IMeshTraceSource
 {
     private readonly HttpClient _httpClient;
     private readonly TempoTraceSourceOptions _options;
+    private readonly ILogger? _logger;
 
     /// <summary>Creates the source over an <see cref="HttpClient"/> and Tempo endpoint/window options.</summary>
-    public TempoTraceSource(HttpClient httpClient, TempoTraceSourceOptions options)
+    public TempoTraceSource(HttpClient httpClient, TempoTraceSourceOptions options) : this(httpClient, options, null)
+    {
+    }
+
+    /// <summary>Creates the source over an <see cref="HttpClient"/>, Tempo endpoint/window options, and an
+    /// optional logger (used to warn when a correlation search hits its result limit — see
+    /// <see cref="TempoTraceSourceOptions.CorrelationSearchLimit"/> — and when an individual per-trace fetch
+    /// fails during correlation hydration).</summary>
+    public TempoTraceSource(HttpClient httpClient, TempoTraceSourceOptions options, ILogger? logger)
     {
         _httpClient = httpClient;
         _options = options;
+        _logger = logger;
     }
 
     public async Task<TraceView?> GetTraceAsync(string traceId, CancellationToken cancellationToken = default)
@@ -57,21 +69,44 @@ public class TempoTraceSource : IMeshTraceSource
         // Attribute names carry dots and a hyphen, so quote the name in TraceQL.
         var traceQl = $"{{ span.\"benzene.correlation-id\" = \"{Escape(correlationId)}\" }}";
         var (start, end) = ResolveWindow(range, _options.CorrelationLookback);
-        var matches = await SearchAsync(traceQl, start, end, limit: 100, cancellationToken);
+        var matches = await SearchAsync(traceQl, start, end, _options.CorrelationSearchLimit, cancellationToken);
         if (matches.Count == 0)
         {
             return null;
         }
 
-        var traces = new List<TraceView>();
-        foreach (var match in matches)
+        // #190: Tempo's /api/search has no further paging - a full result set means the search may have
+        // missed matches beyond the limit, not merely truncated a page. Logged, not silent (X-Ray's #77
+        // at-limit warning, same rationale).
+        if (matches.Count >= _options.CorrelationSearchLimit)
         {
-            var events = await FetchTraceEventsAsync(match.TraceId, cancellationToken);
-            if (events.Count > 0)
-            {
-                traces.Add(new TraceView { TraceId = match.TraceId, Events = events });
-            }
+            _logger?.LogWarning(
+                "TempoTraceSource.GetCorrelationAsync's search for correlation id {CorrelationId} returned {Limit} matches, its configured CorrelationSearchLimit - there may be more matching traces that were not returned.",
+                correlationId, _options.CorrelationSearchLimit);
         }
+
+        // #188: fan the per-trace fetches out concurrently (bounded by SearchConcurrency) instead of one
+        // sequential foreach, and isolate each fetch in its own try/catch so one trace's transient failure
+        // drops only that trace rather than discarding every already-fetched result - the composite's own
+        // fetch-isolation wraps the whole GetCorrelationAsync call, which previously meant a single failing
+        // fetch inside the old sequential loop's exception path lost the entire correlation view.
+        var fetched = await BoundedFanOut.WhenAllAsync(matches, async match =>
+        {
+            try
+            {
+                var events = await FetchTraceEventsAsync(match.TraceId, cancellationToken);
+                return events.Count > 0 ? new TraceView { TraceId = match.TraceId, Events = events } : null;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex,
+                    "TempoTraceSource.GetCorrelationAsync failed to fetch trace {TraceId} while hydrating correlation id {CorrelationId}; dropping this trace and keeping the rest.",
+                    match.TraceId, correlationId);
+                return null;
+            }
+        }, _options.SearchConcurrency);
+
+        var traces = fetched.Where(t => t is not null).Select(t => t!).ToList();
 
         if (traces.Count == 0)
         {
