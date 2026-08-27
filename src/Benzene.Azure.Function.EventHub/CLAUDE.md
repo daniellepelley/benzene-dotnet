@@ -37,6 +37,16 @@ is now **escalated** the same way by default (`RaiseOnFailureStatus` defaults to
   because it routes by event type directly on its own context.) Covered by
   `EventHubPipelineTest.EnvelopeHandlerReturnsFailure_*`.
 
+## Null-outcome policy: CARVE-OUT — stays ack (do not "fix" this)
+An event whose `MessageResult` is never set - typically an unrouted event, no handler matched the
+topic - is **not** escalated. It settles as if it had succeeded, unlike a returned failure result
+above. This is a deliberate carve-out (`EventHubBatchApplication.EscalateUnestablishedOutcome =>
+false`), not an oversight: Event Hubs has no per-record dead-letter path - the trigger checkpoints (or
+replays) the whole batch - so escalating an unrouted event would replay the entire batch forever, a
+worse failure mode than the one the queue-shaped transports' policy fixes. Matches
+`Benzene.Azure.EventHub` (the self-hosted worker), `Benzene.Aws.Lambda.Kafka`, `Benzene.Kafka.Core`,
+and `Benzene.Azure.Function.Kafka`. See `work/settlement-consistency-fix-plan.md`.
+
 `CatchExceptions` defaults off and `RaiseOnFailureStatus` defaults on (both purely additive,
 non-breaking on the exception path). The existing `maxDegreeOfParallelism` knob
 is folded into `EventHubOptions.MaxDegreeOfParallelism`; the original `UseEventHub(action,

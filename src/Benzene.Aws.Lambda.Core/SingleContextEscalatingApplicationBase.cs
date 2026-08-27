@@ -45,9 +45,11 @@ public abstract class SingleContextEscalatingApplicationBase<TSelf, TContext>
     /// instead of propagated out of <see cref="ProcessAsync"/>.
     /// </param>
     /// <param name="raiseOnFailureStatus">
-    /// Whether a context whose <see cref="IHasMessageResult.MessageResult"/> comes back unsuccessful
-    /// (and didn't itself throw) is escalated into a thrown exception via
-    /// <paramref name="exceptionFactory"/>.
+    /// Whether a context whose <see cref="IHasMessageResult.MessageResult"/> comes back unsuccessful -
+    /// including a null/unestablished outcome (typically an unrouted message: no handler matched the
+    /// topic), which is treated the same as an explicit failure, not as success - and didn't itself
+    /// throw is escalated into a thrown exception via <paramref name="exceptionFactory"/>. See
+    /// work/settlement-consistency-fix-plan.md.
     /// </param>
     /// <param name="idSelector">Extracts the transport's own correlation id from a context (e.g. an SNS <c>MessageId</c>).</param>
     /// <param name="exceptionFactory">Builds the transport's own <c>*MessageProcessingException</c> from that id.</param>
@@ -88,7 +90,14 @@ public abstract class SingleContextEscalatingApplicationBase<TSelf, TContext>
                 await _pipeline.HandleAsync(context, scope);
             }
 
-            if (_raiseOnFailureStatus && context.MessageResult?.IsSuccessful == false)
+            // A null/unestablished outcome (MessageResult never set - typically an unrouted message: no
+            // handler matched the topic) is escalated the same as an explicit failure, not treated as
+            // success. SNS/S3/EventBridge each have a redelivery backstop for the resulting retry (SNS
+            // subscription retry/redrive, S3 async-invoke retry + on-failure destination, EventBridge
+            // rule target retry/DLQ), so retaining an unrouted message here is safe - unlike Kafka/Event
+            // Hub, which have no per-record dead-letter path and carve this out instead of retaining (see
+            // work/settlement-consistency-fix-plan.md).
+            if (_raiseOnFailureStatus && context.MessageResult?.IsSuccessful != true)
             {
                 // _idSelector runs here, inside the try, deliberately - not unconditionally before it.
                 // Some transports' selectors (SNS, EventBridge) dereference nested event properties with

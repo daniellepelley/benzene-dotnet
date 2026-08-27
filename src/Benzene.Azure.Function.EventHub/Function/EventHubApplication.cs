@@ -66,6 +66,17 @@ public class EventHubBatchApplication : AzureFunctionBatchApplicationBase<EventH
     public Task HandleAsync(EventData[] @event, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
         => HandleBatchAsync(@event.Select(item => (EventHubContext.CreateInstance(item), (object?)null)), serviceResolverFactory, cancellationToken);
 
+    /// <summary>
+    /// CARVE-OUT — do not remove without reading work/settlement-consistency-fix-plan.md. Event Hubs has
+    /// no per-record dead-letter path: the trigger checkpoints (or replays) the whole batch, there is no
+    /// per-event redrive. Escalating an unrouted event here - the way the queue-shaped transports do -
+    /// would mean an unroutable event replays the entire batch forever, a worse failure mode than the one
+    /// this policy exists to fix. So an unestablished outcome stays ack'd (treated as success), matching
+    /// <c>Benzene.Azure.EventHub</c> (the self-hosted worker), <c>Benzene.Aws.Lambda.Kafka</c>,
+    /// <c>Benzene.Kafka.Core</c>, and <c>Benzene.Azure.Function.Kafka</c>.
+    /// </summary>
+    protected override bool EscalateUnestablishedOutcome => false;
+
     /// <inheritdoc/>
     protected override Exception CreateProcessingException(EventHubContext context)
         => new EventHubMessageProcessingException(context.EventData.SequenceNumber.ToString(CultureInfo.InvariantCulture));

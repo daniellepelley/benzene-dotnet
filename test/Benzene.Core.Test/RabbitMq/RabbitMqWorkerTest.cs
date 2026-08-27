@@ -179,17 +179,20 @@ public class RabbitMqWorkerTest
     }
 
     [Fact]
-    public async Task NoResultRecorded_Acks()
+    public async Task NoResultRecorded_Nacks()
     {
-        // Nothing set a MessageResult (result: null, no throw) - the worker treats "not unsuccessful"
-        // as success and acks, so a pipeline that never records a result doesn't wedge the queue.
+        // Nothing set a MessageResult (result: null, no throw) - typically an unrouted delivery whose
+        // topic matched no handler. The worker nacks it the same as an explicit failure result rather
+        // than accepting it as success, so it lands on RabbitMQ's DLX / bounded single requeue instead
+        // of vanishing silently. See work/settlement-consistency-fix-plan.md (row 7) - this reverses the
+        // previous ack-on-null behaviour this test used to assert.
         var harness = CreateHarness(Config(), result: null);
         await harness.Worker.StartAsync(CancellationToken.None);
 
         await FireDeliveryAsync(harness.GetConsumer(), 12, redelivered: false);
 
-        await WaitForAsync(() => harness.Channel.Invocations.Count(i => i.Method.Name == nameof(IChannel.BasicAckAsync)) > 0);
-        harness.Channel.Verify(x => x.BasicAckAsync(12, false, It.IsAny<CancellationToken>()), Times.Once);
+        await WaitForAsync(() => harness.Channel.Invocations.Count(i => i.Method.Name == nameof(IChannel.BasicNackAsync)) > 0);
+        harness.Channel.Verify(x => x.BasicNackAsync(12, false, true, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

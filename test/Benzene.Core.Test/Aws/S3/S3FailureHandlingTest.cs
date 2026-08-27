@@ -78,6 +78,24 @@ public class S3FailureHandlingTest
     }
 
     [Fact]
+    public async Task HandleAsync_RaiseOnFailureStatusTrue_NoResultRecorded_ThrowsS3MessageProcessingException()
+    {
+        // Nothing set a MessageResult - typically an unrouted record (no handler matched the topic).
+        // Per work/settlement-consistency-fix-plan.md row 2, a null outcome is escalated the same as an
+        // explicit failure result, not accepted as success - S3's own async-invoke retry + on-failure
+        // destination is the backstop that makes retaining it safe.
+        var mockPipeline = new Mock<IMiddlewarePipeline<S3RecordContext>>();
+        mockPipeline.Setup(x => x.HandleAsync(It.IsAny<S3RecordContext>(), It.IsAny<IServiceResolver>()))
+            .Returns(Task.CompletedTask);
+
+        var application = new S3Application(mockPipeline.Object, new S3Options { RaiseOnFailureStatus = true });
+
+        var exception = await Assert.ThrowsAsync<S3MessageProcessingException>(
+            () => application.HandleAsync(CreateEvent("object-3"), CreateResolverFactory().Object));
+        Assert.Equal("object-3", exception.ObjectKey);
+    }
+
+    [Fact]
     public async Task HandleAsync_DefaultOptions_HandlerReturnsFailureResult_ThrowsS3MessageProcessingException()
     {
         var mockPipeline = new Mock<IMiddlewarePipeline<S3RecordContext>>();

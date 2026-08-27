@@ -62,6 +62,17 @@ public class KafkaBatchApplication : AzureFunctionBatchApplicationBase<KafkaCont
         // (KafkaOptions.MaxDegreeOfParallelism); unset leaves the fan-out unbounded, exactly as before.
         => HandleBatchAsync(@event.Select(item => (new KafkaContext(item), (object?)null)), serviceResolverFactory, cancellationToken);
 
+    /// <summary>
+    /// CARVE-OUT — do not remove without reading work/settlement-consistency-fix-plan.md. Kafka (over
+    /// Event Hubs' Kafka-compatible endpoint) has no per-record dead-letter path: the only redelivery
+    /// lever is re-running the whole triggered batch. Escalating an unrouted record here - the way the
+    /// queue-shaped transports do - would mean an unroutable record replays the entire batch forever, a
+    /// worse failure mode than the one this policy exists to fix. So an unestablished outcome stays
+    /// ack'd (treated as success), matching <c>Benzene.Aws.Lambda.Kafka</c>,
+    /// <c>Benzene.Kafka.Core</c>, and <c>Benzene.Azure.Function.EventHub</c>/<c>Benzene.Azure.EventHub</c>.
+    /// </summary>
+    protected override bool EscalateUnestablishedOutcome => false;
+
     /// <inheritdoc/>
     protected override Exception CreateProcessingException(KafkaContext context)
         => new KafkaMessageProcessingException(context.KafkaEvent.Topic);

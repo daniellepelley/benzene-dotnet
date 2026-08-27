@@ -23,7 +23,8 @@ namespace Benzene.RabbitMq;
 /// (QoS) count bounds how many unacknowledged deliveries the broker sends. Under
 /// <see cref="RabbitMqAckMode.Explicit"/> (the default) each delivery is acked on handler success and
 /// nacked - requeued or dead-lettered per <see cref="RabbitMqConfig.RequeueOnFailure"/> - on a
-/// failure result or a thrown exception, so nothing is settled until its handler has actually run.
+/// failure result, a null/unestablished outcome (typically an unrouted delivery), or a thrown
+/// exception, so nothing is settled until its handler has actually run.
 /// <see cref="StartAsync"/> opens the connection/channel and starts consuming, then returns;
 /// <see cref="StopAsync"/> cancels the consumer, drains in-flight handlers (up to
 /// <see cref="RabbitMqConfig.DrainTimeout"/>), and closes the channel and connection.
@@ -173,7 +174,14 @@ public class RabbitMqWorker : IBenzeneWorker, IDisposable
         {
             var messageResult = await _application.HandleAsync(delivery, _serviceResolverFactory);
 
-            if (messageResult?.IsSuccessful == false)
+            // A null/unestablished outcome (no MessageResult recorded - typically an unrouted delivery:
+            // no handler matched the topic) is nacked the same as an explicit failure, not treated as
+            // success. RabbitMQ has a DLX and a bounded single requeue (see NackAsync), so an
+            // unestablished outcome has somewhere to land instead of being silently dropped - unlike
+            // Kafka/Event Hub, which have no per-record dead-letter path and ack-on-null instead (see
+            // work/settlement-consistency-fix-plan.md). This overturns the previously documented and
+            // tested ack-on-null behaviour; see that document's decision register for why.
+            if (messageResult?.IsSuccessful != true)
             {
                 await NackAsync(delivery);
             }

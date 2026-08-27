@@ -95,6 +95,25 @@ public class SnsFailureHandlingTest
     }
 
     [Fact]
+    public async Task HandleAsync_RaiseOnFailureStatusTrue_NoResultRecorded_ThrowsSnsMessageProcessingException()
+    {
+        // Nothing set a MessageResult - typically an unrouted record (no handler matched the topic).
+        // Per work/settlement-consistency-fix-plan.md row 1, a null outcome is escalated the same as an
+        // explicit failure result, not accepted as success - SNS's own subscription retry/redrive is the
+        // backstop that makes retaining it safe.
+        var mockPipeline = new Mock<IMiddlewarePipeline<SnsRecordContext>>();
+        mockPipeline.Setup(x => x.HandleAsync(It.IsAny<SnsRecordContext>(), It.IsAny<IServiceResolver>()))
+            .Returns(Task.CompletedTask);
+
+        var (_, resolverFactory) = CreateResolver();
+        var application = new SnsApplication(mockPipeline.Object, new SnsOptions { RaiseOnFailureStatus = true });
+
+        var exception = await Assert.ThrowsAsync<SnsMessageProcessingException>(
+            () => application.HandleAsync(CreateEvent("msg-3"), resolverFactory.Object));
+        Assert.Equal("msg-3", exception.MessageId);
+    }
+
+    [Fact]
     public async Task HandleAsync_RaiseOnFailureStatusTrue_HandlerSucceeds_DoesNotThrow()
     {
         var mockPipeline = new Mock<IMiddlewarePipeline<SnsRecordContext>>();

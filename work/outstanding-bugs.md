@@ -180,7 +180,8 @@ These were previously listed as open. They are now confirmed fixed — do **not*
   self-hosted Kafka worker, which had no such flag at all until the
   `work/settlement-default-alignment-proposal.md` item A1 fix. A returned failure result is no longer
   silently settled anywhere by default. *(Tier B of that proposal — the `!= true` vs `== false`
-  null/unrouted policy — is a separate, still-open decision; see below.)*
+  null/unrouted policy — was a separate decision; see "Tier B/C null-unrouted-outcome policy" below,
+  now DECIDED and implemented.)*
 - **`AddMessageHandlers` finder lock-in** — **FIXED.** `IMessageHandlersFinder` is now registered once,
   built **lazily** over the **deduped union** of every registered `MessageHandlerCandidateTypes`, so a
   no-arg-then-typed call sequence discovers both and overlapping scans don't double-register (the
@@ -190,6 +191,18 @@ These were previously listed as open. They are now confirmed fixed — do **not*
   `BenzeneResultStatus.IsSuccess(status)`, so it covers all six success statuses and agrees with
   `IBenzeneResult.IsSuccessful`; `IsOk()` remains the narrower "exactly `Ok`" check.
   (`Benzene.Results/BenzeneResultExtensions.cs`.)
+- **Tier B/C null/unrouted-outcome policy** — **DECIDED (maintainer, 2026-08-25) and implemented.**
+  A null/unestablished outcome (no `MessageResult` recorded — overwhelmingly an unrouted message) is
+  now retained/redelivered wherever a redelivery backstop exists (SNS, S3, EventBridge, Azure Functions
+  QueueStorage/EventGrid/ServiceBus's `AutoComplete` path, Google Pub/Sub, and the RabbitMQ worker —
+  flipped from ack-on-null); it stays ack'd only on the five adapters with no per-record dead-letter
+  path (`Benzene.Aws.Lambda.Kafka`, `Benzene.Azure.Function.Kafka`, `Benzene.Kafka.Core`,
+  `Benzene.Azure.Function.EventHub`, `Benzene.Azure.EventHub` — deliberate carve-outs, unchanged).
+  Closes Tier B of `work/settlement-default-alignment-proposal.md` (now archived — see
+  `work/archive/settlement-default-alignment-proposal-2026-08.md`) and folds in the separately-tracked
+  "RabbitMQ null-result → ack" decision below. Full policy table, reasoning, and the
+  `SettlementContractDefaultsTest.NullOutcomePolicy_MatchesTheDecidedTable` drift guard:
+  `work/settlement-consistency-fix-plan.md`.
 
 ### Security/concurrency (fresh-hunt series, done)
 Native AMQP batch leak; XML entity-expansion DoS; MessagePack `TrustedData` DoS; Redis faulted-connection
@@ -2303,8 +2316,13 @@ None of these is a clean self-contained bug; each changes behaviour, a public AP
 - **[DECISION] Kinesis & DynamoDB streams swallow the pipeline exception** — both return a batch
   response and rely on the ESM having `ReportBatchItemFailures`, which Benzene can't see. Consider a
   thrown-exception fallback or a startup warning. (`KinesisStreamApplication.cs:101`, `DynamoDbApplication.cs:57`.)
-- **[DECISION] RabbitMQ null-result → ack** — documented/tested deliberate, diverges from
-  ServiceBus/DynamoDb (null → redeliver). Cross-transport-consistency call only.
+- **[RESOLVED] RabbitMQ null-result → ack** — **DECIDED (maintainer, 2026-08-25) and implemented:
+  reversed to nack.** Previously documented/tested deliberate (ack-on-null), diverging from
+  ServiceBus/DynamoDb (null → redeliver); the cross-transport-consistency call landed in favour of
+  consistency — RabbitMQ's DLX + bounded single requeue gives a null/unrouted outcome somewhere safe to
+  land, the same backstop test SNS/S3/EventBridge/Pub/Sub meet. `RabbitMqWorkerTest.NoResultRecorded_Acks`
+  is now `NoResultRecorded_Nacks`. Folded into the "Tier B/C null/unrouted-outcome policy" entry above;
+  see `work/settlement-consistency-fix-plan.md` row 7 and its decision register.
 
 ### DI / mesh
 - **[DECISION] `MeshSelfReportMiddleware` fire-and-forget on Lambda** — `_ = PublishBestEffortAsync()`

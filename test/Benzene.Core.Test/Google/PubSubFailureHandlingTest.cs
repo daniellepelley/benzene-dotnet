@@ -86,6 +86,25 @@ public class PubSubFailureHandlingTest
     }
 
     [Fact]
+    public async Task HandleAsync_RaiseOnFailureStatusTrue_NoResultRecorded_ThrowsPubSubMessageProcessingException()
+    {
+        // Nothing set a MessageResult - typically an unrouted message (no handler matched the topic).
+        // Per work/settlement-consistency-fix-plan.md row 6, a null outcome is escalated the same as
+        // an explicit failure result, not accepted as success - Pub/Sub's own dead-letter topic support
+        // is the backstop that makes retaining it safe.
+        var mockPipeline = new Mock<IMiddlewarePipeline<PubSubContext>>();
+        mockPipeline.Setup(x => x.HandleAsync(It.IsAny<PubSubContext>(), It.IsAny<IServiceResolver>()))
+            .Returns(Task.CompletedTask);
+
+        var (_, resolverFactory) = CreateResolver();
+        var application = new PubSubMiddlewareApplication(mockPipeline.Object, new PubSubOptions { RaiseOnFailureStatus = true });
+
+        var exception = await Assert.ThrowsAsync<PubSubMessageProcessingException>(
+            () => application.HandleAsync(CreateData("msg-3"), resolverFactory.Object));
+        Assert.Equal("msg-3", exception.MessageId);
+    }
+
+    [Fact]
     public async Task HandleAsync_RaiseOnFailureStatusTrue_HandlerSucceeds_DoesNotThrow()
     {
         var mockPipeline = new Mock<IMiddlewarePipeline<PubSubContext>>();

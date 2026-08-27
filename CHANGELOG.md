@@ -89,6 +89,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mesh-collector-cases.json`) synced from the canonical spec repo to pin the new behavior. A port
   conformant under the pre-2026-08 revision (trace-derived consumer edges) is not conformant under
   this one until it adopts outbound registration — see the revision note at the top of mesh.md.
+- **BREAKING behavioural change: a null/unrouted outcome is no longer silently accepted on eight
+  adapters.** A message whose handler pipeline never records a `MessageResult` - overwhelmingly an
+  **unrouted message** (no handler matched the topic) - used to settle as if it had succeeded on
+  `Benzene.Aws.Lambda.Sns`/`.S3`/`.EventBridge`, `Benzene.Azure.Function.QueueStorage`/`.EventGrid`,
+  `Benzene.Azure.Function.ServiceBus` (`AckMode = AutoComplete`), `Benzene.GoogleCloud.Functions.PubSub`,
+  and `Benzene.RabbitMq`'s worker. It is now **retained/redelivered** the same way a returned failure
+  result already was, on every one of those adapters, wherever a redelivery backstop (DLQ, poison
+  queue, dequeue-count, subscription retry/redrive, RabbitMQ's DLX) exists to catch it - closing Tier B
+  of `work/settlement-default-alignment-proposal.md` (now archived), decided 2026-08-25. **This means an
+  unrouted message you previously never saw now surfaces and is retried** - if your deployment relies
+  on an unrouted message vanishing silently, the one-line opt-out is the same `RaiseOnFailureStatus =
+  false` (or, for RabbitMQ, `AckMode = AutoAck`) that already opts out of the failure-result axis; both
+  axes share one flag per adapter. **Deliberately unchanged (carve-outs, not an oversight):**
+  `Benzene.Aws.Lambda.Kafka`, `Benzene.Azure.Function.Kafka`, `Benzene.Kafka.Core`,
+  `Benzene.Azure.Function.EventHub`, and `Benzene.Azure.EventHub` — none has a per-record dead-letter
+  path, so retaining an unrouted record there would replay the partition/batch forever, a worse failure
+  mode than the one this change fixes. `SettlementContractDefaultsTest.NullOutcomePolicy_MatchesTheDecidedTable`
+  guards the full per-adapter table against drift. See `work/settlement-consistency-fix-plan.md` for
+  the decided policy, the row-by-row reasoning, and the migration register.
 
 ### Removed
 - **BREAKING:** removed the `Benzene.SelfHost.Http` package. It hosted HTTP on

@@ -22,6 +22,12 @@ app.UseAwsLambda(eventPipeline => eventPipeline
 Full detail (including the interaction with `CatchExceptions`): `docs/cookbooks/sns-fan-out.md`
 §"Configuring exception and retry behavior with `SnsOptions`" and `docs/message-result.md` §"AWS SNS".
 
+**Null-outcome policy (flipped 2026-08-25):** a record whose `MessageResult` is never set - typically
+an unrouted record, no handler matched the topic - is escalated the same as an explicit failure, not
+accepted as success. SNS's own subscription-level retry/redrive gives an escalated-and-retried record
+somewhere to land. Enforced in the shared `SingleContextEscalatingApplicationBase` guard (see
+`Benzene.Aws.Lambda.Core/CLAUDE.md`), not locally. See `work/settlement-consistency-fix-plan.md`.
+
 ## Key types/interfaces
 
 ### Application & Handler

@@ -26,6 +26,16 @@ Either way Service Bus may redeliver the same message, so the handler must be id
 [Idempotency](../../docs/cookbooks/idempotency.md). Opt back into at-most-once with
 `RaiseOnFailureStatus = false`.
 
+**Null-outcome policy (`AutoComplete` path flipped 2026-08-25):** a message whose `MessageResult` is
+never set - typically an unrouted message, no handler matched the topic - is escalated the same as an
+explicit failure under `AckMode = AutoComplete`, not accepted (completed) as success; the host then
+abandons it → redelivery, respecting the entity's max-delivery-count before auto-dead-lettering.
+Enforced via the `AzureFunctionBatchApplicationBase.EscalateUnestablishedOutcome` hook (default
+`true`, not overridden here - see `Benzene.Azure.Function.Core/CLAUDE.md`); `ShouldEscalateFailure`
+(`!state.ExplicitAck`) still stops this from double-settling under `AckMode = Explicit`, whose own
+`OnPipelineSucceededAsync` already abandons a null outcome (see "True per-message ack" below - this
+path was already correct and is unchanged). See `work/settlement-consistency-fix-plan.md`.
+
 ## Key types/interfaces
 - `ServiceBusContext` - wraps a single `Azure.Messaging.ServiceBus.ServiceBusReceivedMessage`; a
   plain description of the message only - preset-topic override (see "Important conventions"

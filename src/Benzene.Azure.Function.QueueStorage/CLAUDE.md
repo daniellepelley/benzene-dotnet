@@ -31,6 +31,13 @@ suppressed) `BenzeneMessageQueueStorageHandler` surfaces the inner handler's rec
 outer context (via `BenzeneMessageResultApplication`), so a failure inside the envelope pipeline
 escalates too rather than being silently deleted.
 
+**Null-outcome policy (flipped 2026-08-25):** a message whose `MessageResult` is never set - no
+handler matched, or (envelope path) nothing recorded on the inner context - is escalated the same as
+an explicit failure, not accepted (deleted) as success. The host's `maxDequeueCount` retry/poison-queue
+handling gives an escalated-and-retried message somewhere to land. Enforced via the
+`AzureFunctionBatchApplicationBase.EscalateUnestablishedOutcome` hook (default `true`, not overridden
+here - see `Benzene.Azure.Function.Core/CLAUDE.md`). See `work/settlement-consistency-fix-plan.md`.
+
 ## Zero dependencies — deliberately
 References only `Benzene.Azure.Function.Core` + `Benzene.Core.MessageHandlers` — no storage SDK,
 no Functions extension package (same approach as `Benzene.Azure.Function.CosmosDb` and

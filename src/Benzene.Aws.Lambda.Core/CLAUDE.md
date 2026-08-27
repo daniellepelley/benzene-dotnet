@@ -39,6 +39,13 @@ Core AWS Lambda integration for Benzene. Provides base classes and abstractions 
   each transport's logs keep their own recognizable category. Not adopted by SQS/Kafka (their own
   extra batch-failure-mode/partition concerns don't fit this shape) or DynamoDB/Kinesis
   (deliberately different ordered-stream shapes).
+  - **Escalation guard (`ProcessAsync`) treats a null outcome as a failure, no per-adapter opt-out.**
+    `context.MessageResult?.IsSuccessful != true` (flipped from `== false`, 2026-08-25) - a context
+    whose `MessageResult` was never set (typically an unrouted message: no handler matched) is
+    escalated the same as an explicit failure, for all three adapters this base serves. Unlike
+    `AzureFunctionBatchApplicationBase` (below), there is **no** carve-out hook here: SNS/S3/
+    EventBridge all want the flip (each has its own redelivery backstop), so the base class itself
+    was safe to change blanket. See `work/settlement-consistency-fix-plan.md`.
 - `HeaderDictionaryExtensions.AddIfPresent` - shared `IDictionary<string,string>` helper (add a
   header only if the value is non-null/non-empty), used by `EventBridgeMessageHeadersGetter` and
   `DynamoDbMessageHeadersGetter` to stop their identical private copies from drifting.

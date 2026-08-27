@@ -45,6 +45,21 @@ is picked up by the reflection metadata/executor rather than the SDK's worker-in
     `IBenzeneInvocation` from the `FunctionContext.InvocationId`; requires the worker middleware
     above (see `docs/azure-functions.md`'s `IBenzeneInvocation` troubleshooting entry).
 
+- `AzureFunctionBatchApplicationBase<TContext, TState>` — shared fan-out/settle/escalate/log skeleton
+  for a Functions-trigger batch application; used by `Benzene.Azure.Function.QueueStorage`,
+  `.EventGrid`, `.ServiceBus`, `.Kafka`, and `.EventHub`. Every hook is virtual with a
+  behavior-preserving default; only Service Bus overrides most of them (see its own `CLAUDE.md`).
+  - **`EscalateUnestablishedOutcome` (added 2026-08-25, default `true`)** — whether a null/
+    unestablished outcome (`MessageResult` never set - typically an unrouted message: no handler
+    matched) is escalated like a failure result. The guard reads
+    `EscalateUnestablishedOutcome ? outcome != true : outcome == false`. QueueStorage/EventGrid/
+    ServiceBus keep the default (they have a DLQ/poison/dequeue-count backstop); **Kafka and EventHub
+    override it to `false`** — a named carve-out, not a bug, since neither has a per-record
+    dead-letter path and retaining an unrouted record would replay the whole batch forever. Do not
+    flip this base class's default blanket, and do not remove either override without reading
+    `work/settlement-consistency-fix-plan.md` — this is exactly the base class the plan calls out as
+    "mixing flip rows and carve-out rows in one place".
+
 ## When to use this package
 - Referenced directly by any project hosting Benzene on Azure Functions (it's the base every
   trigger adapter needs), and by tests via `InlineAzureFunctionStartUp`.

@@ -56,6 +56,23 @@ app.UseKinesisStream(kinesis => kinesis
   there's no single natural per-record id here (one scope covers the whole batch), so
   `InvocationId` is a freshly generated id, not derived from any record.
 
+## Settlement: no null/failure-result axis here — signal failure by throwing or withholding the checkpoint
+Unlike every fan-**out** transport in `work/settlement-consistency-fix-plan.md` §1 (rows 1-18), this
+package has no per-record `MessageResult`/failure-result axis to have a settlement policy about: the
+whole batch is handed to one handler as a `StreamContext<KinesisEventRecord>`, and nothing inspects a
+per-record result. **Returning a `BenzeneResult` failure from inside a stream handler does nothing** —
+there is no result setter reading it and nothing that escalates it. Signal a failure the two ways this
+package actually inspects:
+- **Throw.** `KinesisStreamApplication` catches the exception (by default - see `CatchExceptions`
+  below) and reports the resume point as the sequence number *after* the last record the handler
+  explicitly checkpointed (or the very first record's if it checkpointed nothing).
+- **Withhold the checkpoint.** Don't call `context.Checkpointer.CheckpointAsync(record)` for a record
+  you consider failed/not-yet-safe; the reported resume point never advances past it. See "Real
+  checkpointing" and "Checkpoint in shard order" below for exactly how that resume point is computed.
+
+This is a documentation clarification, not a behavior change (Batch 3 of
+`work/settlement-consistency-fix-plan.md` — see row 19 of its §1 table).
+
 ## `KinesisStreamOptions.CatchExceptions` (default `true`) — catches by default, unlike the fan-out transports
 Unlike SNS/S3/EventBridge (`CatchExceptions` defaults `false` — an exception cascades by default),
 Kinesis defaults to **catching** a pipeline exception: the checkpointer's resume point already *is*

@@ -179,6 +179,11 @@ poison its whole batch into endless redelivery. Catch and route irrecoverable do
 honest advice as the [Event Hubs cookbook](event-hub-processing.md), because the constraint is the
 platform's, not Benzene's.
 
+**Signal failure by throwing — a returned `BenzeneResult` failure does nothing here.** This transport
+is fan-in: the whole batch is handed to one stream handler, and nothing inspects a per-document
+result the way the fan-out transports' `MessageResult`/`RaiseOnFailureStatus` axis does. **Throwing**
+is the only failure signal this package acts on.
+
 The `StreamContext<TDocument>.Checkpointer` is the no-op default (`NullStreamCheckpointer`) on
 this transport — calling it is harmless but does nothing, because the Functions trigger exposes no
 manual checkpoint API. Manual per-batch checkpoint control is the domain of the self-hosted

@@ -119,6 +119,15 @@ public abstract class AzureFunctionBatchApplicationBase<TContext, TState>
     protected virtual bool ShouldEscalateFailure(TContext context, TState state) => true;
 
     /// <summary>
+    /// Whether an unestablished outcome (no result recorded - typically an unrouted message no handler
+    /// matched) is escalated like a failure. True for queue-shaped transports, which have a DLQ /
+    /// poison / dequeue-count backstop to catch a retained message. Overridden to false by the stream
+    /// transports, which have no per-record dead-letter path: retaining an unrouted record there would
+    /// replay the partition from that offset forever. See work/settlement-consistency-fix-plan.md.
+    /// </summary>
+    protected virtual bool EscalateUnestablishedOutcome => true;
+
+    /// <summary>
     /// Runs inside the <c>catch (Exception ex) when (catchExceptions)</c> block, before the exception
     /// is logged. Default no-op. Service Bus overrides this to abandon a not-yet-settled message.
     /// </summary>
@@ -169,7 +178,15 @@ public abstract class AzureFunctionBatchApplicationBase<TContext, TState>
 
             await OnPipelineSucceededAsync(context, state);
 
-            if (_raiseOnFailureStatus && context.MessageResult?.IsSuccessful == false && ShouldEscalateFailure(context, state))
+            // EscalateUnestablishedOutcome ? outcome != true : outcome == false - the null-outcome half
+            // of the settlement policy is a per-transport override (see that property's own doc comment),
+            // not a blanket polarity: queue-shaped transports (QueueStorage/EventGrid/ServiceBus) retain
+            // an unestablished outcome like a failure, while Kafka/EventHub override it back to false and
+            // keep ack-on-null, because they have no per-record dead-letter path.
+            var outcome = context.MessageResult?.IsSuccessful;
+            var shouldSettleAsFailure = EscalateUnestablishedOutcome ? outcome != true : outcome == false;
+
+            if (_raiseOnFailureStatus && shouldSettleAsFailure && ShouldEscalateFailure(context, state))
             {
                 throw CreateProcessingException(context);
             }

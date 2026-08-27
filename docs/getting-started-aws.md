@@ -464,7 +464,14 @@ The handler receives an `IAsyncEnumerable<KinesisEventRecord>` — pull records 
 decode each with `record.Kinesis.GetData()` / `GetDataAsString()`, and use the stream operators
 `PartitionBy(...)` (restore per-shard order the poller batched together) and `Window(n)` (fixed-size
 batches). Processing is fire-and-forget; the Lambda poller checkpoints the shard on success. This is
-the AWS counterpart to the Azure Event Hubs streaming binding. See
+the AWS counterpart to the Azure Event Hubs streaming binding.
+
+**Error handling here is not the per-record `MessageResult` axis the fan-out transports above use.**
+The whole batch is handed to one handler, and nothing inspects a per-record result — **returning a
+`BenzeneResult` failure from inside the stream callback does nothing.** Signal a failure by
+**throwing** (the resume point becomes the sequence number after the last record you checkpointed) or
+by **withholding the checkpoint** for a record you don't consider safe yet — see
+`src/Benzene.Aws.Lambda.Kinesis/CLAUDE.md` for the full checkpoint-in-shard-order contract. See
 [AWS IAM Permissions](aws-iam-permissions.md) for the stream-consumer permissions the event source
 mapping needs (`kinesis:GetRecords`, `kinesis:GetShardIterator`, `kinesis:DescribeStream`,
 `kinesis:ListShards`).
