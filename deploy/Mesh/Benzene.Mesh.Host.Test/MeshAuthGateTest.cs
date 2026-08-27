@@ -550,6 +550,77 @@ public class MeshAuthGateTest
             context.RequestServices.GetRequiredService<AuthenticationHolder>().Principal?.FindFirst(ClaimTypes.Email)?.Value);
     }
 
+    // --- #176: IPv4-mapped IPv6 peers must match a plain-IPv4 trustedProxies entry (and vice versa) -
+    // the dual-stack-listener case (Kestrel bound to "[::]", the container default). --------------
+
+    [Fact]
+    public void ProxyMode_IPv4MappedIPv6PeerAgainstPlainIPv4TrustedProxy_IsAdmitted()
+    {
+        var next = NextDelegate(out var wasCalled);
+        var gate = new MeshAuthGate(next, ProxyConfig("10.0.0.5"));
+        var context = NewContext();
+        context.Request.Headers["X-Forwarded-User"] = "alice@example.com";
+        // What Connection.RemoteIpAddress reports for an IPv4 peer on a dual-stack ([::]) listener.
+        context.Connection.RemoteIpAddress = IPAddress.Parse("::ffff:10.0.0.5");
+
+        Invoke(gate, context);
+
+        Assert.True(wasCalled());
+        Assert.Equal("alice@example.com",
+            context.RequestServices.GetRequiredService<AuthenticationHolder>().Principal?.FindFirst(ClaimTypes.Email)?.Value);
+    }
+
+    [Fact]
+    public void ProxyMode_PlainIPv4PeerAgainstIPv4MappedIPv6TrustedProxyEntry_IsAdmitted()
+    {
+        // The mirror image: the operator wrote the trustedProxies entry in IPv6-mapped form, the
+        // actual peer arrives as plain IPv4 (a non-dual-stack listener, or IPv4-only Kestrel binding).
+        var next = NextDelegate(out var wasCalled);
+        var gate = new MeshAuthGate(next, ProxyConfig("::ffff:10.0.0.5"));
+        var context = NewContext();
+        context.Request.Headers["X-Forwarded-User"] = "alice@example.com";
+        context.Connection.RemoteIpAddress = IPAddress.Parse("10.0.0.5");
+
+        Invoke(gate, context);
+
+        Assert.True(wasCalled());
+    }
+
+    [Fact]
+    public void ProxyMode_IPv4MappedIPv6PeerNotInTrustedProxies_StillUnauthorized()
+    {
+        // Confirms the normalization doesn't widen trust beyond the configured entry - a mapped peer
+        // whose underlying IPv4 address genuinely isn't trusted must still be refused.
+        var next = NextDelegate(out var wasCalled);
+        var gate = new MeshAuthGate(next, ProxyConfig("10.0.0.5"));
+        var context = NewContext();
+        context.Request.Headers["X-Forwarded-User"] = "alice@example.com";
+        context.Connection.RemoteIpAddress = IPAddress.Parse("::ffff:203.0.113.9");
+
+        Invoke(gate, context);
+
+        Assert.False(wasCalled());
+        Assert.Equal(401, context.Response.StatusCode);
+    }
+
+    [Fact]
+    public void ProxyMode_UntrustedPeer_ResponseNamesTheObservedPeerAddress()
+    {
+        // The refusal used to name no peer at all, making an operability failure undiagnosable in
+        // production logs/response body.
+        var next = NextDelegate(out _);
+        var gate = new MeshAuthGate(next, ProxyConfig("10.0.0.5"));
+        var context = NewContext();
+        context.Request.Headers["X-Forwarded-User"] = "alice@example.com";
+        context.Connection.RemoteIpAddress = IPAddress.Parse("203.0.113.9");
+
+        Invoke(gate, context);
+
+        context.Response.Body.Seek(0, SeekOrigin.Begin);
+        var body = new StreamReader(context.Response.Body).ReadToEnd();
+        Assert.Contains("203.0.113.9", body);
+    }
+
     // --- mode basic (task 2.3) ------------------------------------------------------------------
 
     [Fact]
@@ -664,6 +735,48 @@ public class MeshAuthGateTest
         Assert.True(wasCalled());
     }
 
+    // #181: an empty local part ("@example.com") is not a deliverable address and must not pass the
+    // domain check like a real mailbox would; the domain extraction must also trim consistently
+    // (leading and trailing whitespace both handled), matching EmailAllowlist.IsAllowed's discipline.
+
+    [Fact]
+    public void AllowedEmailDomains_EmptyLocalPart_Forbidden()
+    {
+        var next = NextDelegate(out var wasCalled);
+        var config = ProxyConfig("10.0.0.5");
+        config.AllowedEmailDomains = new[] { "example.com" };
+        var gate = new MeshAuthGate(next, config);
+        var context = NewContext();
+        // "@example.com" - crafted to have the right domain but no local part at all.
+        context.Request.Headers["X-Forwarded-User"] = "@example.com";
+        context.Connection.RemoteIpAddress = IPAddress.Parse("10.0.0.5");
+
+        Invoke(gate, context);
+
+        Assert.False(wasCalled());
+        Assert.Equal(403, context.Response.StatusCode);
+    }
+
+    [Fact]
+    public void AllowedEmailDomains_TrailingWhitespaceOnEmail_StillMatchesConfiguredDomain()
+    {
+        // Before the fix, a trailing space on the extracted domain ("example.com ") never matched the
+        // clean "example.com" config entry - trailing whitespace was NOT tolerated, unlike leading
+        // whitespace (which sits in the local part and never touches the domain either way). Trimming
+        // the whole value first (matching EmailAllowlist.IsAllowed) fixes the asymmetry.
+        var next = NextDelegate(out var wasCalled);
+        var config = ProxyConfig("10.0.0.5");
+        config.AllowedEmailDomains = new[] { "example.com" };
+        var gate = new MeshAuthGate(next, config);
+        var context = NewContext();
+        context.Request.Headers["X-Forwarded-User"] = "alice@example.com ";
+        context.Connection.RemoteIpAddress = IPAddress.Parse("10.0.0.5");
+
+        Invoke(gate, context);
+
+        Assert.True(wasCalled());
+    }
+
     [Fact]
     public void RequiredGroups_CallerMissingGroup_Forbidden()
     {
@@ -683,6 +796,84 @@ public class MeshAuthGateTest
 
         Assert.False(wasCalled());
         Assert.Equal(403, context.Response.StatusCode);
+    }
+
+    // #182: MeshAuthGate.HasAnyRole used to reimplement the role-claim-type union itself, reading each
+    // claim value ordinally with no JSON-array expansion - disagreeing with
+    // Benzene.Auth.Core.AuthorizationExtensions.RequireRole (via RoleClaims) for the identical
+    // principal. Delegating to RoleClaims.IsInAnyRole makes both readers agree, including for the
+    // Azure AD app-roles shape: a single "roles" claim whose value is a JSON array.
+
+    [Fact]
+    public void RequiredGroups_CallerHasRoleAsJsonArrayClaim_CallsNext()
+    {
+        WithEnvVars(("MESH_OIDC_CLIENT_SECRET", "shh"), () =>
+        {
+            var next = NextDelegate(out var wasCalled);
+            var config = new MeshAuthConfig { Mode = "oidc", RequiredGroups = new[] { "mesh-admins" } };
+            config.Oidc.Authority = "https://idp.example.com";
+            config.Oidc.ClientId = "client-id";
+            var gate = new MeshAuthGate(next, config);
+
+            var context = NewContext();
+            var identity = new ClaimsIdentity("TestScheme");
+            identity.AddClaim(new Claim(ClaimTypes.Email, "bob@example.com"));
+            // Azure AD app-roles shape: a single "roles" claim whose value is a JSON array - the exact
+            // case the old ordinal-only reimplementation in MeshAuthGate never expanded.
+            identity.AddClaim(new Claim("roles", "[\"reader\",\"mesh-admins\"]"));
+            context.User = new ClaimsPrincipal(identity);
+
+            Invoke(gate, context);
+
+            Assert.True(wasCalled());
+        });
+    }
+
+    [Fact]
+    public void RequiredGroups_CallerMissingFromJsonArrayRoleClaim_Forbidden()
+    {
+        WithEnvVars(("MESH_OIDC_CLIENT_SECRET", "shh"), () =>
+        {
+            var next = NextDelegate(out var wasCalled);
+            var config = new MeshAuthConfig { Mode = "oidc", RequiredGroups = new[] { "mesh-admins" } };
+            config.Oidc.Authority = "https://idp.example.com";
+            config.Oidc.ClientId = "client-id";
+            var gate = new MeshAuthGate(next, config);
+
+            var context = NewContext();
+            var identity = new ClaimsIdentity("TestScheme");
+            identity.AddClaim(new Claim(ClaimTypes.Email, "bob@example.com"));
+            identity.AddClaim(new Claim("roles", "[\"reader\"]"));
+            context.User = new ClaimsPrincipal(identity);
+
+            Invoke(gate, context);
+
+            Assert.False(wasCalled());
+            Assert.Equal(403, context.Response.StatusCode);
+        });
+    }
+
+    [Fact]
+    public void DispatchRole_CallerHasRoleAsJsonArrayClaim_CallsNext()
+    {
+        WithEnvVars(("MESH_OIDC_CLIENT_SECRET", "shh"), () =>
+        {
+            var next = NextDelegate(out var wasCalled);
+            var config = new MeshAuthConfig { Mode = "oidc", DispatchRole = "mesh-admins" };
+            config.Oidc.Authority = "https://idp.example.com";
+            config.Oidc.ClientId = "client-id";
+            var gate = new MeshAuthGate(next, config, dispatchEnabled: true);
+
+            var context = NewContext(MeshAuthGate.DispatchPath);
+            var identity = new ClaimsIdentity("TestScheme");
+            identity.AddClaim(new Claim(ClaimTypes.Email, "bob@example.com"));
+            identity.AddClaim(new Claim("roles", "[\"mesh-admins\"]"));
+            context.User = new ClaimsPrincipal(identity);
+
+            Invoke(gate, context);
+
+            Assert.True(wasCalled());
+        });
     }
 
     // --- the ingestion endpoint (task 2.6) - exempt from the modes above, controlled on its own -----

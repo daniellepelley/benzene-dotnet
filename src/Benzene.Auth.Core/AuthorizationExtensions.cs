@@ -82,15 +82,46 @@ public static class AuthorizationExtensions
     /// <typeparam name="TContext">The transport-specific context type.</typeparam>
     /// <param name="app">The middleware pipeline builder.</param>
     /// <param name="policyName">The name of the registered policy to enforce.</param>
+    /// <remarks>
+    /// #179: the DI lookup + <c>Name</c> scan happen at most once - the resolved policy (or, if none
+    /// is registered, the fact that it's missing) is cached after the first call and reused on every
+    /// later one, rather than repeating the lookup, and re-throwing the same "not registered" wiring
+    /// error, on every single request this middleware handles. <see cref="IMiddlewarePipelineBuilder{TContext}.Use"/>'s
+    /// factory delegate genuinely cannot resolve <paramref name="policyName"/> any earlier than the
+    /// first invocation - no built <c>IServiceResolver</c> exists yet at the point this extension
+    /// method itself runs (see <see cref="UseOAuth2Bearer"/> in <c>Benzene.Auth.OAuth2</c> for the
+    /// contrast: that config needs no DI resolution, so it validates synchronously at this same
+    /// call site) - caching is the closest this can get to "resolved once, at wire-up": whichever
+    /// request reaches this link first pays the lookup cost and fixes the outcome for every request
+    /// after it, including a start-up check that resolves every pipeline's middleware once (see
+    /// <c>PipelineResolutionStartUpCheck</c>) surfacing a missing policy before real traffic arrives.
+    /// </remarks>
     public static IMiddlewarePipelineBuilder<TContext> RequirePolicy<TContext>(
         this IMiddlewarePipelineBuilder<TContext> app, string policyName)
     {
         app.Register(x => x.TryAddScoped<AuthenticationHolder>());
+
+        IAuthorizationPolicy? resolvedPolicy = null;
+        var gate = new object();
+
         return app.Use(resolver =>
         {
-            var policy = resolver.GetServices<IAuthorizationPolicy>().FirstOrDefault(p => p.Name == policyName)
-                ?? throw new InvalidOperationException(
-                    $"No IAuthorizationPolicy named '{policyName}' is registered. Register one with AddAuthorizationPolicy.");
+            var policy = Volatile.Read(ref resolvedPolicy);
+            if (policy is null)
+            {
+                lock (gate)
+                {
+                    policy = resolvedPolicy;
+                    if (policy is null)
+                    {
+                        policy = resolver.GetServices<IAuthorizationPolicy>().FirstOrDefault(p => p.Name == policyName)
+                            ?? throw new InvalidOperationException(
+                                $"No IAuthorizationPolicy named '{policyName}' is registered. Register one with AddAuthorizationPolicy.");
+                        Volatile.Write(ref resolvedPolicy, policy);
+                    }
+                }
+            }
+
             return PolicyMiddleware<TContext>(resolver, policy);
         });
     }
