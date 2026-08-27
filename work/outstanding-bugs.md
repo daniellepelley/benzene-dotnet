@@ -1963,6 +1963,97 @@ genuinely wants a longer "remember me" duration, and this package has no way to 
 needed for a given deployment. Documented instead (property remarks + `CLAUDE.md`) so the tradeoff is
 explicit rather than silent; revisit if a real deployment's incident shows the uncapped default causing
 harm in practice.
+### Tracked findings round 11, §6 — spec/descriptor/CloudService/Probe pipeline (task board #166–#171, this pass)
+Ruled in [`bug-fix-designs-round11-2026-08.md`](bug-fix-designs-round11-2026-08.md) §6 (working doc — other
+round-11 work packages, #121–#165 and #172–#183, are tracked separately and may still be open).
+
+- **[RESOLVED] #166 — generated typed clients turned every enum property into an empty C# class with
+  no members**, so a real generated client sent `"status":{}` on the wire and got HTTP 400 even with
+  `JsonStringEnumConverter` applied. Root cause: `OpenApiSchemaCSharpTypeBuilder.BuildSimpleType`
+  emitted a class for every catalogue schema with no branch on `schema.Enum`. Fixed: a schema with
+  `enum` entries now emits a real C# `enum` (`OpenApiSchemaCSharpTypeBuilder.BuildEnumType`) — a
+  string enum (Swashbuckle's shape for a `[JsonConverter(typeof(JsonStringEnumConverter))]` C# enum)
+  gets that same converter applied and each enum value used verbatim as the member name; an integer
+  enum gets each numeric value as an explicit member value (System.Text.Json already serializes an
+  int enum as its number by default, and the schema carries no name metadata to recover for it
+  anyway). `CSharpTypeName.GetName`'s existing `$ref` handling (`Reference.Id`) already resolves to
+  the enum's own name correctly since a class and an enum share the same catalogue name — verified by
+  a new regression test rather than changed. New `EnumClientGenerationTest` drives the real
+  `SchemaBuilder` → `OpenApiSchemaCSharpTypeBuilder` pipeline against a request DTO with both enum
+  shapes, compiles the generated code with Roslyn, loads the compiled assembly, and actually
+  serializes an instance to confirm the wire shape is a real value (not `{}`).
+- **[RESOLVED] #167 — `CloudServiceProfileReport` reported R8 (trace context propagation) satisfied
+  whenever `MeshEnabled` was true, but `UseMeshTrace` is only actually wired in `Extensions.cs` when a
+  trace exporter is *also* resolved (`TraceExporter` or `CollectorEnvelopeUrl`)** — the default wiring
+  (mesh on, no collector) falsely claimed R8 satisfied while `MeshSpan.Current` was genuinely null.
+  Fixed by hoisting the `traceExporter` resolution in `Extensions.cs` above the
+  `CloudServiceProfileReport.Evaluate` call and passing that same resolved value in, so the pipeline
+  wiring and the report read one shared value instead of duplicating (and drifting from) the
+  condition. `UseBenzeneCloudServiceTest.ProfileReport_EvaluatesTheWiringHonestly`'s `noCollector`
+  case — previously asserting the buggy `{ "R6" }` — now asserts `{ "R6", "R8" }`; two new focused
+  tests (`ProfileReport_MeshEnabledWithNoCollectorOrExporter_R8IsNotSatisfied`,
+  `ProfileReport_MeshEnabledWithAnExplicitTraceExporter_R8IsSatisfied_EvenWithNoCollector`) cover both
+  sides of the corrected condition.
+- **[RESOLVED] #168 — `benzene diff` (`SchemaCompatibilityComparer.CompareSchemas`) never recursed
+  into `additionalProperties`, so a breaking change entirely inside a `Dictionary<string, T>`-shaped
+  schema's value type passed the CI gate as "No changes"** — distinct from the existing `[DECISION]`
+  entry above about `.Enum`/`.Nullable`/facet classification gaps, which needs new `SchemaChangeKind`
+  values and policy calls; this needed only the missing recursive call the `Items` branch already
+  modelled. Fixed: `CompareSchemas` now recurses into `AdditionalProperties` when both sides have one,
+  and reports a breaking `TypeChanged` when the map's value schema appears/disappears entirely on one
+  side, mirroring the `Items` branch exactly. New tests in `SchemaCompatibilityComparerTest`: a
+  `Dictionary<string, Address>`-shaped property where `Address` gains a breaking type change and a new
+  required property (`AdditionalPropertiesValueSchema_BreakingChangeInside_IsDetected`, asserts
+  `report.Overall == Breaking`), the value-schema-appears/disappears case, and an unchanged-map guard.
+- **[RESOLVED] #169 — the derived spec's schema property names were PascalCase
+  (`SchemaBuilder` passed a bare `new JsonSerializerOptions()` to `JsonSerializerDataContractResolver`)
+  while the wire, the spec's own `example` block, and the sibling `.service.json` from the same build
+  are all camelCase** — one `benzene-descriptor --emit both` run produced self-contradictory casing.
+  Fixed: `SchemaBuilder` now passes `PropertyNamingPolicy = JsonNamingPolicy.CamelCase`. This is a
+  wire-format-output change with broad golden-file churn — see the design doc's §6 and this session's
+  final report for the touched test files; the three downstream camelCase-patching consumers named in
+  the design doc (`ExamplePayloadBuilder.CamelCase`, `MeshSchemaGenerator`'s reflection-based naming,
+  `CodeGenHelpers.Camelcase`) were reviewed and left as-is: none of them consumes `SchemaBuilder`'s
+  output exclusively (`MeshSchemaGenerator` derives its own schema from CLR types via reflection,
+  independent of `SchemaBuilder` entirely; `ExamplePayloadBuilder`/`CodeGenHelpers` are general-purpose
+  string utilities also exercised directly by tests with hand-built, non-camelCase input), so removing
+  them risked breaking call sites this fix doesn't touch for no behavioural gain now that the root is
+  fixed (redundant-but-harmless). Two genuine ripples surfaced by the full-suite run and fixed in the
+  same pass (not just test-fixture churn — real behaviour regressions the casing fix would otherwise
+  have introduced): (1) `OpenApiValidationSchemaBuilder.AddSchema` matched a validation rule's own
+  reflected (PascalCase) member name straight against `schema.Properties` — now camelCase — so every
+  lookup missed and validation facets (`Required`/`MinLength`/`Pattern`/...) silently stopped being
+  applied to any schema at all; fixed by camelCasing the rule's key before the lookup. (2)
+  `JsonOpenApiSchemaBuilder.CreateObjectSchema` (the JSON-literal inferrer behind `AddJsonEvent`) used
+  a nested object's raw JSON property key verbatim as its component schema id — now camelCase, where
+  every other builder in this codebase registers component ids as PascalCase type names — so a nested
+  inferred schema's id no longer matched the reflection path's for the exact same data; fixed by
+  capitalizing the derived id. Golden-file/test-expectation updates: 4 `MessageClientSdkBuilderTest`
+  contract-hash fixtures (`LambdaService_{UserGet,UserCreate,UserFull,TenantFull}.txt`); property-key
+  casing assertions in `OpenApiValidationSchemaBuilderTest`, `SchemaBuilderPolymorphismTest`,
+  `EventServiceDocumentDeserializerTest`; and the raw JSON literals in
+  `EventServiceDocumentBuilderJsonTest`/`AsyncApiDocumentBuilderJsonTest` (Newtonsoft-serialized with
+  no naming policy, so they no longer matched the now-camelCase reflected schema - camelCased via
+  `CamelCasePropertyNamesContractResolver` to represent what a real event body actually looks like).
+  Full-suite result after all of the above: `Benzene.Test` 3067 passed/2 skipped/0 failed (3069 total),
+  `Benzene.Conformance.Test` 236/236, full `Benzene.sln` build 0 errors.
+- **[RESOLVED] #170 (minor) — topic-scoped client generation (`benzene build -output client -topics
+  ...`, `MessageClientSdkBuilder`) emitted DTOs (and hashed) the entire service catalogue instead of
+  narrowing via `SchemaClosure.Reachable`, unlike `AtomicClientSdkBuilder`, which does it correctly.**
+  Fixed: `MessageClientSdkBuilder.BuildCodeFiles` now narrows the scoped document's
+  `Components.Schemas` via `SchemaClosure.Reachable` over the surviving requests' request/response
+  roots, mirroring `AtomicClientSdkBuilder.ReachableSchemas` — this also fixes the contract hash
+  instability the design doc noted (the hash is computed from the same narrowed document). New test:
+  `MessageClientSdkBuilderTest.Topics_NarrowsGeneratedSchemas_ToOnlyTheSurvivingTopicsReachableTypes`.
+- **[DECISION] #171 (minor, scoped down this round) — `benzene-descriptor --version-scheme` is
+  validated at build time (`EmitOptions.ValidateVersion`) then discarded: it never reaches the emitted
+  descriptor, because `MeshServiceInfo`/`MeshServiceDescriptor` (`Benzene.Mesh.Wire`) have no scheme
+  field.** Carrying the scheme onto the wire descriptor is a spec-adjacent change (touches
+  `docs/specification/mesh.md`'s `ServiceDescriptor` shape, its conformance fixtures, and every
+  language port's descriptor type) and was judged too large for this fix round. Scoped down to:
+  fixed the misleading `Program.cs` comment ("after here the value travels", which was false for the
+  scheme specifically) to record this explicitly as a `[DECISION]` in place, rather than leaving it
+  silently misleading. Left for a future round to decide whether/how to carry the scheme onto the wire.
 
 ## Open — maintainer decisions (the real remaining backlog)
 

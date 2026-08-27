@@ -57,8 +57,9 @@ public class SchemaBuilderPolymorphismTest
         Assert.True(schemas.ContainsKey(nameof(CardPayment)));
         Assert.True(schemas.ContainsKey(nameof(BankPayment)));
 
-        // The base-typed member is a oneOf union of the declared subtypes...
-        var payment = schemas[nameof(CheckoutRequest)].Properties["Payment"];
+        // The base-typed member is a oneOf union of the declared subtypes... (#169: schema property
+        // keys are camelCase, matching the wire - "payment", not the C# member name "Payment".)
+        var payment = schemas[nameof(CheckoutRequest)].Properties["payment"];
         Assert.Equal(2, payment.OneOf.Count);
         Assert.Contains(payment.OneOf, x => x.Reference?.Id == nameof(CardPayment));
         Assert.Contains(payment.OneOf, x => x.Reference?.Id == nameof(BankPayment));
@@ -86,7 +87,8 @@ public class SchemaBuilderPolymorphismTest
         var cardPayment = schemas[nameof(CardPayment)];
         Assert.Contains(cardPayment.AllOf, x => x.Reference?.Id == nameof(PaymentMethod));
         // The derived schema carries only its own properties; the base's come via the allOf $ref.
-        Assert.Contains("CardNumber", cardPayment.Properties.Keys);
-        Assert.DoesNotContain("Currency", cardPayment.Properties.Keys);
+        // (#169: property keys are camelCase, matching the wire.)
+        Assert.Contains("cardNumber", cardPayment.Properties.Keys);
+        Assert.DoesNotContain("currency", cardPayment.Properties.Keys);
     }
 }

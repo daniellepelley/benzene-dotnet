@@ -16,7 +16,15 @@ if (opts is null)
 }
 
 // mesh.md §2.5: a version that does not parse under its declared scheme fails the build that emitted
-// it. This is the one place in the system where the error is cheap — after here the value travels.
+// it. This is the one place in the system where the error is cheap.
+//
+// [DECISION] (round 11, #171): --version-scheme is validated here and then discarded - it does NOT
+// currently travel any further. MeshServiceInfo/MeshServiceDescriptor (Benzene.Mesh.Wire) have no
+// scheme field, so DescriptorEmitter.BuildMesh only ever carries ServiceVersion onto the emitted
+// descriptor, never VersionScheme. Carrying the scheme onto the wire descriptor is a spec-adjacent
+// change (docs/specification/mesh.md's ServiceDescriptor shape, its conformance fixtures, and every
+// language port's descriptor type) and was judged out of scope for this fix round - see
+// work/outstanding-bugs.md and work/bug-fix-designs-round11-2026-08.md §6 for the full record.
 var versionError = opts.ValidateVersion();
 if (versionError is not null)
 {

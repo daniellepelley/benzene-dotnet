@@ -1,5 +1,7 @@
 using Benzene.CodeGen.Core;
 using Benzene.CodeGen.Core.Writers;
+using Benzene.Schema.OpenApi.Examples;
+using Microsoft.OpenApi.Any;
 using Microsoft.OpenApi.Models;
 
 namespace Benzene.CodeGen.Client;
@@ -30,6 +32,17 @@ public class OpenApiSchemaCSharpTypeBuilder : ICodeBuilder<IDictionary<string, O
     private ICodeFile BuildSimpleType(string name, OpenApiSchema schema,
         IDictionary<string, OpenApiSchema>? catalogue)
     {
+        // #166: a schema with `enum` entries (however it reached the catalogue - reflected off a
+        // real C# enum type via SchemaBuilder/Swashbuckle, or hand-built/deserialized) is not an
+        // object and has no properties to emit - falling through to the class-emission code below
+        // produced a real but completely empty C# class (`public class Status { }`), which then
+        // serializes as "{}" on the wire instead of the enum's actual value. Branch here and emit a
+        // real C# enum instead.
+        if (schema.Enum is { Count: > 0 })
+        {
+            return BuildEnumType(name, schema);
+        }
+
         // allOf composition: a single $ref branch is the base type; inline branches carry the
         // schema's own properties (Swashbuckle also leaves own properties at the top level).
         var baseTypeId = schema.AllOf?.FirstOrDefault(x => x.Reference != null)?.Reference.Id;
@@ -86,6 +99,60 @@ public class OpenApiSchemaCSharpTypeBuilder : ICodeBuilder<IDictionary<string, O
         lineWriter.WriteLine("}");
 
         return new CodeFile($"{name}.cs", lineWriter.GetLines());
+    }
+
+    /// <summary>
+    /// Emits a real C# enum for an <c>enum</c>-shaped schema: a string enum (Swashbuckle's shape for
+    /// a C# enum with <c>[JsonConverter(typeof(JsonStringEnumConverter))]</c> applied) gets
+    /// <see cref="JsonStringEnumConverter"/> on the generated type too, using each enum value string
+    /// verbatim as the member name so the default converter (which serializes/deserializes by member
+    /// name) round-trips exactly what the schema declares; an integer enum gets each numeric value as
+    /// an explicit member value - System.Text.Json serializes an int enum as that number by default,
+    /// so the member *name* has no wire effect and the schema carries none anyway (Swashbuckle emits
+    /// only the raw numbers, no name metadata, for an integer enum).
+    /// </summary>
+    private ICodeFile BuildEnumType(string name, OpenApiSchema schema)
+    {
+        var isStringEnum = schema.Enum.Any(x => x is OpenApiString);
+
+        var lineWriter = new LineWriter();
+        if (isStringEnum)
+        {
+            lineWriter.WriteLine("using System.Text.Json.Serialization;");
+        }
+        lineWriter.WriteLine("");
+        lineWriter.WriteLine($"namespace {_baseNamespace}");
+        lineWriter.WriteLine("{");
+        // No [ExcludeFromCodeCoverage] here - unlike a class, it is not a valid target on an enum
+        // declaration (CS0592) and would make every generated enum uncompilable.
+        if (isStringEnum)
+        {
+            lineWriter.WriteLine("[JsonConverter(typeof(JsonStringEnumConverter))]", 1);
+        }
+        lineWriter.WriteLine($"public enum {_nameFormatter.Format(name)}", 1);
+        lineWriter.WriteLine("{", 1);
+
+        foreach (var entry in schema.Enum)
+        {
+            lineWriter.WriteLine($"{FormatEnumMember(entry, isStringEnum)},", 2);
+        }
+
+        lineWriter.WriteLine("}", 1);
+        lineWriter.WriteLine("}");
+
+        return new CodeFile($"{name}.cs", lineWriter.GetLines());
+    }
+
+    private string FormatEnumMember(IOpenApiAny entry, bool isStringEnum)
+    {
+        if (isStringEnum)
+        {
+            var value = OpenApiAnyConverter.ToPlainValue(entry) as string ?? entry.ToString() ?? string.Empty;
+            return _nameFormatter.Format(value);
+        }
+
+        var numeric = OpenApiAnyConverter.ToPlainValue(entry);
+        return $"Value{numeric} = {numeric}";
     }
 
     private static IEnumerable<KeyValuePair<string, OpenApiSchema>> GetOwnProperties(OpenApiSchema schema)

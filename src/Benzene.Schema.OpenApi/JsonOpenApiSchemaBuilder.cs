@@ -80,7 +80,15 @@ public class JsonOpenApiSchemaBuilder
     }
     private OpenApiSchema CreateObjectSchema(string key, JToken jToken)
     {
-        var schemaId = key;
+        // #169 ripple: a component schema id is conventionally a type name (PascalCase, as
+        // Swashbuckle's reflection path always registers it - e.g. "Inner"), not a JSON property
+        // name. The top-level call already passes a real type name for `key`, so this is a no-op
+        // there; a nested object/array-of-object discovered while walking `Properties()` below passes
+        // its own JSON property key instead, which is camelCase now that schema property names match
+        // the wire (SchemaBuilder) - capitalizing it here keeps every schema id in one convention
+        // regardless of which path produced it, rather than registering a lowercase-led component id
+        // no other builder in this codebase would ever emit.
+        var schemaId = char.ToUpperInvariant(key[0]) + key.Substring(1);
         var properties = ((JObject)jToken).Properties();
         var schema = new OpenApiSchema
         {

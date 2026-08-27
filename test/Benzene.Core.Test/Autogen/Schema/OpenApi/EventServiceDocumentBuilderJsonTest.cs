@@ -6,6 +6,7 @@ using Microsoft.OpenApi;
 using Microsoft.OpenApi.Extensions;
 using Microsoft.OpenApi.Models;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Serialization;
 using Xunit;
 
 namespace Benzene.Test.Autogen.Schema.OpenApi;
@@ -14,6 +15,13 @@ public class EventServiceDocumentBuilderJsonTest
 {
     private SchemaBuilder _schemaBuilder;
     private const string Topic = "tenant:created";
+
+    // #169: SchemaBuilder's reflection path now camelCases property names to match the wire
+    // (Benzene.Core.MessageHandlers.Serialization.JsonSerializer). AddJsonEvent infers its schema
+    // straight off the literal JSON's own keys, so that literal must be camelCased the same way a
+    // real event body would be - otherwise this test compares the (now correct) reflected schema
+    // against a JSON literal in a casing no real Benzene event ever produces.
+    private static readonly JsonSerializerSettings CamelCase = new() { ContractResolver = new CamelCasePropertyNamesContractResolver() };
 
     [Fact]
     public void Json_NestedType()
@@ -32,7 +40,7 @@ public class EventServiceDocumentBuilderJsonTest
                     Date = new DateTime(2023, 1, 1, 0,0,0, DateTimeKind.Utc)
                 }
             }
-        });
+        }, CamelCase);
 
         var doc = CreateBuilder()
             .AddBroadcastEventDefinitions(new[] { responseEventDefinition })
@@ -59,7 +67,7 @@ public class EventServiceDocumentBuilderJsonTest
             Title = "some-title",
             Value = 42,
             Date = new DateTime(2023, 1, 1, 0, 0, 0, DateTimeKind.Utc)
-        });
+        }, CamelCase);
 
         var doc = CreateBuilder()
             .AddBroadcastEventDefinitions(new[] { responseEventDefinition })

@@ -57,7 +57,7 @@ public class MessageClientSdkBuilder : ICodeBuilder<EventServiceDocument>
 
     public ICodeFile[] BuildCodeFiles(EventServiceDocument eventServiceDocument)
     {
-        var scopedDocument = TopicScope.Apply(eventServiceDocument, _options);
+        var scopedDocument = NarrowToReachableSchemas(TopicScope.Apply(eventServiceDocument, _options));
 
         var output = new List<ICodeFile>();
 
@@ -263,5 +263,28 @@ public class MessageClientSdkBuilder : ICodeBuilder<EventServiceDocument>
     private static string GetTopicFunction(string topic)
     {
         return topic.Split(':').LastOrDefault();
+    }
+
+    // #170: TopicScope.Apply narrows Requests but leaves Components.Schemas untouched, so a
+    // topic-scoped client (e.g. `benzene build -output client -topics user:get`) used to still emit
+    // (and hash - see AddHashCode) DTOs for the *entire* service catalogue rather than just the
+    // surviving requests' own schemas. AtomicClientSdkBuilder already narrows correctly via
+    // SchemaClosure.Reachable (see its ReachableSchemas) - mirror that here so both builders agree,
+    // and so the contract hash for a topic-scoped client varies only with what that client can
+    // actually reach, not with unrelated schemas elsewhere in the same service.
+    private static EventServiceDocument NarrowToReachableSchemas(EventServiceDocument document)
+    {
+        var roots = document.Requests
+            .SelectMany(request => new[] { request.Request, request.Response })
+            .ToArray();
+
+        var reachable = SchemaClosure.Reachable(document.Components.Schemas, roots);
+
+        return new EventServiceDocument(document.Info, document.Tags, document.Requests, document.Events,
+            new OpenApiComponents { Schemas = reachable })
+        {
+            MessageEndpoint = document.MessageEndpoint,
+            Transports = document.Transports,
+        };
     }
 }

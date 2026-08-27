@@ -95,4 +95,17 @@ public class CSharpTypeNameTest
 
         Assert.Equal("object", _typeName.GetName(schema));
     }
+
+    [Fact]
+    public void GetName_RefToAnEnumSchema_ResolvesToTheEnumTypeName_NotEmptyOrTheRefWrapper()
+    {
+        // #166: a property referencing an enum-shaped schema (Swashbuckle's shape for a real C#
+        // enum) is, at this call site, just a $ref placeholder - Type/Enum live on the catalogue
+        // entry, not here. GetName must resolve it to the enum's own name (matching
+        // OpenApiSchemaCSharpTypeBuilder, which now emits a real `enum` under that exact name)
+        // rather than resolving the reference before/instead of recognising what it points at.
+        var schema = Ref("OrderStatus");
+
+        Assert.Equal("OrderStatus", _typeName.GetName(schema));
+    }
 }

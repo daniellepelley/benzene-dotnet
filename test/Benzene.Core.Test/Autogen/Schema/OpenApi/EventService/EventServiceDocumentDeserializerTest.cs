@@ -65,10 +65,11 @@ public class EventServiceDocumentDeserializerTest
         var baseline = deserializer.Deserialize(baselineJson);
         var current = deserializer.Deserialize(currentJson);
 
-        Assert.True(baseline.Components.Schemas["Order"].Properties.ContainsKey("Status"));
+        // #169: schema property keys are camelCase, matching the wire - "status", not "Status".
+        Assert.True(baseline.Components.Schemas["Order"].Properties.ContainsKey("status"));
         // Before the fix: current's "Order" resolved to baseline's first-written definition and
-        // still carried "Status".
-        Assert.False(current.Components.Schemas["Order"].Properties.ContainsKey("Status"));
+        // still carried "status".
+        Assert.False(current.Components.Schemas["Order"].Properties.ContainsKey("status"));
     }
 
     [Fact]
