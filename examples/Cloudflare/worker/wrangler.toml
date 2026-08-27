@@ -14,9 +14,6 @@ class_name = "BenzeneContainer"
 image = "../Dockerfile"
 max_instances = 5
 
-[containers.configuration]
-instance_type = "basic"
-
 [[durable_objects.bindings]]
 name = "BENZENE_CONTAINER"
 class_name = "BenzeneContainer"
