@@ -1,6 +1,6 @@
 # Round 15 review findings (2026-08)
 
-**Status: ACTIVE — findings only, not yet fixed.** This round is different in kind from every prior
+**Status: ACTIVE — findings only; fix designs now ruled in [`bug-fix-rulings-round14-15-2026-08.md`](bug-fix-rulings-round14-15-2026-08.md) (#225–#275) — not yet implemented.** This round is different in kind from every prior
 round: it is the first genuinely **comprehensive** pass — twelve parallel agents, one per coherent
 subsystem, together spanning every package under `src/`, every test project, and the full
 `examples/`/`templates/`/`deploy/` tree, run simultaneously rather than picking untouched corners.

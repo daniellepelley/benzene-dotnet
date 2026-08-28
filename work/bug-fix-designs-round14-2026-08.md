@@ -1,6 +1,6 @@
 # Round 14 review findings (2026-08)
 
-**Status: ACTIVE — findings only, not yet fixed.** With every `src/` package now touched by at least
+**Status: ACTIVE — findings only; fix designs now ruled in [`bug-fix-rulings-round14-15-2026-08.md`](bug-fix-rulings-round14-15-2026-08.md) (#204–#223) — not yet implemented.** With every `src/` package now touched by at least
 one prior round, this round shifted to two things: genuinely untested ground that no C#-package-based
 review could ever reach (the mesh UI's client-side code), and areas last reviewed in early rounds (1
 and 9) before the "execute real adversarial probes" standard matured — treated as full first-rigor
