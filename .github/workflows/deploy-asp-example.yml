@@ -10,15 +10,17 @@ jobs:
   build:
     environment: test
     runs-on: ubuntu-latest
-    env: 
+    permissions:
+      contents: read
+    env:
       working-directory: ./examples/Asp/Benzene.Example.Asp
 
     steps:
-    - name: Checkout code  
-      uses: actions/checkout@v2
-      
+    - name: Checkout code
+      uses: actions/checkout@v4
+
     - name: Setup .NET
-      uses: actions/setup-dotnet@v1
+      uses: actions/setup-dotnet@v4
       with:
         dotnet-version: 10.0.x
         
