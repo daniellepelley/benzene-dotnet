@@ -1,5 +1,6 @@
 using Amazon.StepFunctions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Benzene.Clients.Aws.StepFunctions;
 
@@ -34,7 +35,10 @@ public class StepFunctionsClientFactory : IStepFunctionsClientFactory
     {
         _amazonStepFunctionsClient = amazonStepFunctionsClient;
         _stateMachineArn = stateMachineArn;
-        _logger = logger;
+        // #267: normalize here too, not just in StepFunctionsClient's own constructor - this factory
+        // stores and forwards the logger to every client it creates, so a null coming through DI is
+        // guarded at the same seam it enters the package.
+        _logger = logger ?? NullLogger<StepFunctionsClient>.Instance;
     }
 
     /// <summary>

@@ -83,7 +83,15 @@ an `OutboundRoutingBuilder.Route(...)` pipeline:
   transports it fans out to. From the AWS X-Ray perf analysis: sequential SQS+SNS sends (6.5ms +
   18.6ms) collapse to ~max. (Note: sending *different* messages to *different* topics is still just
   `Task.WhenAll` over two `SendAsync` calls at the app level - `UseParallel` is specifically one
-  message → many transports.) Tests: `test/Benzene.Core.Test/Clients/ParallelOutboundTest.cs`.
+  message → many transports.) **A branch's `OperationCanceledException` is classified distinctly from
+  an ordinary transport failure (#269, WP-I)**: when it fires while the ambient
+  `ICancellationTokenAccessor` token is actually cancelled (not some branch-local timeout - the same
+  ambient-vs-budget distinction `HealthCheckError.Classify`/`GrpcHealthCheck` apply), the branch's
+  `BranchOutcome.IsCancelled` is set and its formatted error reads `"{branch}: Cancelled"` instead of
+  the generic exception-type text an actual failure gets. The branch still counts as a non-success for
+  the all-must-succeed aggregate, and every other branch still runs to completion - this is
+  classification of the error text, not a rethrow (a rethrow would abandon the other branches' still
+  in-flight results). Tests: `test/Benzene.Core.Test/Clients/ParallelOutboundTest.cs`.
 - `DefaultBenzeneMessageSender` (internal) - resolves a topic to its pipeline and runs it; throws
   `UnroutedTopicException` for a topic with no registered route. If the route's response isn't an
   `IBenzeneResult<TResponse>` for the caller's requested `TResponse` - the common case being a

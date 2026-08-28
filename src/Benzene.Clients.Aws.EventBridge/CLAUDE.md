@@ -12,7 +12,10 @@ Outbound EventBridge client for a Benzene app: put events on an EventBridge bus.
 `AWSSDK.EventBridge`.
 
 ## Key types
-- `EventBridgeBenzeneMessageClient` — `IBenzeneMessageClient`; puts events on a bus.
+- `EventBridgeBenzeneMessageClient` — `IBenzeneMessageClient`; puts events on a bus. Both constructors
+  fall back to `NullLogger<EventBridgeBenzeneMessageClient>.Instance` when `logger` is null
+  (#192/#266, the P8 sweep completed in WP-I), so a null-logger construction can't make the `catch`
+  block's own `LogError` call throw and mask the real publish failure.
 - `EventBridgeClientMiddleware` / `EventBridgeSendMessageContext` — terminal put-events middleware
   and its context.
 - `EventBridgeContextConverter<T>` — `IBenzeneClientContext<T, Void>` → put-events context.

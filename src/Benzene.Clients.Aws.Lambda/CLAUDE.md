@@ -8,7 +8,10 @@ fixed during the Tier 2.1 split).
 
 ## Key types
 - `AwsLambdaBenzeneMessageClient` — `IBenzeneMessageClient`; invokes a Benzene Lambda, embedding
-  request headers in its own `BenzeneMessageClientRequest` envelope.
+  request headers in its own `BenzeneMessageClientRequest` envelope. Falls back to
+  `NullLogger.Instance` (non-generic - this class holds a plain `ILogger`, not `ILogger<T>`) when
+  `logger` is null (#192/#266, the P8 sweep completed in WP-I), so a null-logger construction can't
+  make the `catch` block's own `LogError` call throw and mask the real invocation failure.
 - `AwsLambdaClient` / `IAwsLambdaClient` — lower-level invoke wrapper. Classifies the real outcome
   instead of assuming success: throws `AwsLambdaFunctionErrorException` when a `RequestResponse`
   invoke's `InvokeResponse.FunctionError` is set (AWS returns HTTP 200 even when the target function

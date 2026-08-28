@@ -17,6 +17,14 @@ introduces `Azure.Messaging.EventGrid` (5.0.0) fresh — the ingress package is 
   set to the Benzene topic. Prefer the CloudEvents path for new code.
 - Both share `EventGridSendMessageContext` (holds exactly one of `CloudEvent`/`EventGridEvent`) and
   `EventGridClientMiddleware` (dispatches to whichever is set).
+- `EventGridBenzeneMessageClient` — `IBenzeneMessageClient`; sends via a caller-supplied
+  `EventGridPublisherClient` (CloudEvents path). Both constructors fall back to
+  `NullLogger<EventGridBenzeneMessageClient>.Instance` when `logger` is null (#192/#266, the P8 sweep
+  completed in WP-I), so a null-logger construction can't make the `catch` block's own `LogError`
+  call throw and mask the real publish failure. Directly unit-tested (success/throws-mapped/
+  null-logger) in `test/Benzene.Core.Test/Clients/Azure/EventGrid/EventGridBenzeneMessageClientTest.cs`
+  — previously zero direct coverage (only exercised indirectly via `BatchMessageClientTest`'s batch
+  sibling).
 - `EventGridBatchMessageClient` — `IBenzeneBatchMessageClient` (from `Benzene.Clients`); publishes a
   collection via `SendEventsAsync(IEnumerable<CloudEvent>)` (CloudEvents path). Reuses
   `EventGridContextConverter<T>` per event and chunks with `BatchSend.Chunk` to `batchSize` (default

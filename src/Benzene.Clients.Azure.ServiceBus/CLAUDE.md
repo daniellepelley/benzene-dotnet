@@ -8,6 +8,12 @@ plan Tier 2.2, §5.2). Pins only `Azure.Messaging.ServiceBus` (7.18.2, matching 
 
 ## Key types
 - `ServiceBusBenzeneMessageClient` — `IBenzeneMessageClient`; sends via a caller-supplied `ServiceBusSender`.
+  Both constructors fall back to `NullLogger<ServiceBusBenzeneMessageClient>.Instance` when `logger`
+  is null (#192/#266, the P8 sweep completed in WP-I), so a null-logger construction can't make the
+  `catch` block's own `LogError` call throw and mask the real send failure. Directly unit-tested
+  (success/throws-mapped/null-logger) in
+  `test/Benzene.Core.Test/Clients/Azure/ServiceBus/ServiceBusBenzeneMessageClientTest.cs` — previously
+  zero direct coverage.
 - `ServiceBusClientMiddleware` / `ServiceBusSendMessageContext` — terminal send middleware and its context.
 - `ServiceBusContextConverter<T>` — `IBenzeneClientContext<T, Void>` → send context.
 - `OutboundServiceBusContextConverter` — the `Benzene.Clients.OutboundContext` counterpart, used by

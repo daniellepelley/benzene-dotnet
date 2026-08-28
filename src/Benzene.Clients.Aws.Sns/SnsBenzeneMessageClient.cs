@@ -10,6 +10,7 @@ using Benzene.Clients.Common;
 using Benzene.Core.Middleware;
 using Benzene.Results;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Void = Benzene.Abstractions.Results.Void;
 
 namespace Benzene.Clients.Aws.Sns;
@@ -39,7 +40,9 @@ public class SnsBenzeneMessageClient : IBenzeneMessageClient
     {
         _topicArn = topicArn;
         _serviceResolver = serviceResolver;
-        _logger = logger;
+        // #266/WP-I shape re-grep: a null logger must not make the catch block's own LogError throw
+        // and mask the real publish failure - fall back to a no-op logger (mechanical P8 sweep).
+        _logger = logger ?? NullLogger<SnsBenzeneMessageClient>.Instance;
 
         var benzeneServiceContainer = new NullBenzeneServiceContainer();
         var middlewarePipelineBuilder = new MiddlewarePipelineBuilder<SnsSendMessageContext>(benzeneServiceContainer);
@@ -58,7 +61,7 @@ public class SnsBenzeneMessageClient : IBenzeneMessageClient
     /// <param name="serviceResolver">The service resolver used to run the pipeline.</param>
     public SnsBenzeneMessageClient(string topicArn, IMiddlewarePipeline<SnsSendMessageContext> middlewarePipeline, ILogger<SnsBenzeneMessageClient> logger, IServiceResolver serviceResolver)
     {
-        _logger = logger;
+        _logger = logger ?? NullLogger<SnsBenzeneMessageClient>.Instance;
         _topicArn = topicArn;
         _middlewarePipeline = middlewarePipeline;
         _serviceResolver = serviceResolver;

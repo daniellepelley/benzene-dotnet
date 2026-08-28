@@ -185,7 +185,9 @@ producer support. This is one of the "self-hosted worker" startup modes document
   `SendMessageAsync`'s status mapping (`Persisted` → `Accepted`, anything else → `UnexpectedError`,
   a thrown exception → `ServiceUnavailable`) is unit-testable against a mocked
   `IProducer<string,string>` with no live broker - see
-  `test/Benzene.Core.Test/Kafka/KafkaBenzeneMessageClientTest.cs`.
+  `test/Benzene.Core.Test/Kafka/KafkaBenzeneMessageClientTest.cs`. Both constructors fall back to
+  `NullLogger<KafkaBenzeneMessageClient>.Instance` when `logger` is null (#266, WP-I) so a null-logger
+  construction can't make the `catch` block's own `LogError` call throw and mask the real send failure.
 - **This package IS the Azure "Kafka over Event Hubs" egress** (release plan Tier 2.2/§5.2's Kafka
   decision): Event Hubs exposes a Kafka-protocol endpoint, so `KafkaBenzeneMessageClient`/
   `.UseKafka(...)` work unchanged against it - just point `ProducerConfig.BootstrapServers` at the

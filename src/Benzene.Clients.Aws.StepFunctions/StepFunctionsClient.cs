@@ -8,6 +8,7 @@ using Benzene.Abstractions.Results;
 using Benzene.Abstractions.Serialization;
 using Benzene.Results;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Benzene.Clients.Aws.StepFunctions;
 
@@ -30,7 +31,10 @@ public class StepFunctionsClient : IStepFunctionsClient
     public StepFunctionsClient(string stateMachineArn, IAmazonStepFunctions amazonStepFunctionsClient, ILogger<StepFunctionsClient> logger)
     {
         _amazonStepFunctionsClient = amazonStepFunctionsClient;
-        _logger = logger;
+        // #267: a null logger must not make the catch block's own LogError throw and mask the real
+        // failure - fall back to a no-op logger (this class isn't named *BenzeneMessageClient, but
+        // shares the identical hazard shape as the #192/#266 sweep - see work/bug-fix-rulings-round14-15-2026-08.md WP-I).
+        _logger = logger ?? NullLogger<StepFunctionsClient>.Instance;
         _stateMachineArn = stateMachineArn;
         _serializer = new JsonSerializer();
     }

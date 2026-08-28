@@ -8,6 +8,12 @@ only `Azure.Messaging.EventHubs` (5.11.5, matching the ingress packages' `.Proce
 
 ## Key types
 - `EventHubBenzeneMessageClient` — `IBenzeneMessageClient`; sends via a caller-supplied `EventHubProducerClient`.
+  Both constructors fall back to `NullLogger<EventHubBenzeneMessageClient>.Instance` when `logger` is
+  null (#192/#266, the P8 sweep completed in WP-I), so a null-logger construction can't make the
+  `catch` block's own `LogError` call throw and mask the real send failure. Directly unit-tested
+  (success/throws-mapped/null-logger) in
+  `test/Benzene.Core.Test/Clients/Azure/EventHub/EventHubBenzeneMessageClientTest.cs` — previously
+  zero direct coverage.
 - `EventHubClientMiddleware` / `EventHubSendMessageContext` — terminal send middleware and its context;
   the middleware sends the event as a single-event batch (`CreateBatchAsync` + `TryAdd` + `SendAsync`).
 - `EventHubContextConverter<T>` — `IBenzeneClientContext<T, Void>` → send context.

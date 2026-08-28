@@ -9,6 +9,7 @@ using Benzene.Clients.Common;
 using Benzene.Core.Middleware;
 using Benzene.Results;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Void = Benzene.Abstractions.Results.Void;
 
 namespace Benzene.Clients.Azure.EventGrid;
@@ -39,7 +40,9 @@ public class EventGridBenzeneMessageClient : IBenzeneMessageClient
     {
         _serviceResolver = serviceResolver;
         _source = source;
-        _logger = logger;
+        // #266/WP-I shape re-grep: a null logger must not make the catch block's own LogError throw
+        // and mask the real send failure - fall back to a no-op logger (mechanical P8 sweep).
+        _logger = logger ?? NullLogger<EventGridBenzeneMessageClient>.Instance;
 
         var benzeneServiceContainer = new NullBenzeneServiceContainer();
         var middlewarePipelineBuilder = new MiddlewarePipelineBuilder<EventGridSendMessageContext>(benzeneServiceContainer);
@@ -61,7 +64,7 @@ public class EventGridBenzeneMessageClient : IBenzeneMessageClient
         _serviceResolver = serviceResolver;
         _source = source;
         _middlewarePipeline = middlewarePipeline;
-        _logger = logger;
+        _logger = logger ?? NullLogger<EventGridBenzeneMessageClient>.Instance;
     }
 
     /// <summary>

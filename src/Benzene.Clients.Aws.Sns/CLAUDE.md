@@ -10,7 +10,11 @@ Outbound SNS client for a Benzene app: publish messages to an SNS topic. Pins **
 `AWSSDK.SimpleNotificationService`.
 
 ## Key types
-- `SnsBenzeneMessageClient` — `IBenzeneMessageClient`; publishes to a topic ARN.
+- `SnsBenzeneMessageClient` — `IBenzeneMessageClient`; publishes to a topic ARN. Both constructors
+  fall back to `NullLogger<SnsBenzeneMessageClient>.Instance` when `logger` is null (#192/#266, the
+  P8 sweep completed in WP-I — this class was in-scope but the fix had not actually landed until
+  then), so a null-logger construction can't make the `catch` block's own `LogError` call throw and
+  mask the real publish failure.
 - `SnsClientMiddleware` / `SnsSendMessageContext` — terminal publish middleware and its context.
 - `SnsBatchMessageClient` — `IBenzeneBatchMessageClient` (from `Benzene.Clients`); publishes a
   collection via `PublishBatch` (≤10/call). Reuses `SnsContextConverter<T>` per entry (message +

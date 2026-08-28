@@ -12,7 +12,12 @@ a Benzene middleware pipeline over a `Grpc.Net.Client.GrpcChannel`. Mirrors the 
   pipeline (the normal DI path); the other takes a pre-built `IMiddlewarePipeline<GrpcSendMessageContext>`
   directly (used by tests). `SendMessageAsync<TRequest,TResponse>` converts the outbound payload,
   runs the pipeline, converts the protobuf response back to `TResponse` via `IGrpcMessageAdapter`,
-  and wraps it in an `IBenzeneResult<TResponse>` via the reverse status mapper.
+  and wraps it in an `IBenzeneResult<TResponse>` via the reverse status mapper. Both constructors fall
+  back to `NullLogger<GrpcBenzeneMessageClient>.Instance` when `logger` is null (#266, WP-I) so a
+  null-logger construction can't make the `catch` block's own `LogError` call throw and mask the real
+  send failure. `test/Benzene.Grpc.Test/GrpcBenzeneMessageClientTest.cs`'s `BuildClient` helper passes
+  `logger` straight through (not defaulted inside the helper) specifically so this path is exercisable
+  by omitting it - see that test's `SendMessageAsync_NullLogger_DoesNotThrow_...` case.
   **Deadline propagation**: when the send happens inside an inbound gRPC call, it resolves
   `IGrpcServerCallAccessor` and forwards that call's absolute `ServerCallContext.Deadline` onto the
   downstream `CallOptions.Deadline`, so the downstream call must finish by the same wall-clock time

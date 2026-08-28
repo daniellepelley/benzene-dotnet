@@ -8,6 +8,7 @@ using Benzene.Core.Middleware;
 using Benzene.Results;
 using Confluent.Kafka;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Void = Benzene.Abstractions.Results.Void;
 
 namespace Benzene.Kafka.Core.Kafka;
@@ -39,7 +40,9 @@ public class KafkaBenzeneMessageClient : IBenzeneMessageClient
     public KafkaBenzeneMessageClient(IProducer<string, string> producer, ILogger<KafkaBenzeneMessageClient> logger, IServiceResolver serviceResolver)
     {
         _serviceResolver = serviceResolver;
-        _logger = logger;
+        // #266: a null logger must not make the catch block's own LogError throw and mask the real
+        // send failure - fall back to a no-op logger (mechanical P8 sweep of the #192 fix).
+        _logger = logger ?? NullLogger<KafkaBenzeneMessageClient>.Instance;
 
         var benzeneServiceContainer = new NullBenzeneServiceContainer();
         var middlewarePipelineBuilder = new MiddlewarePipelineBuilder<KafkaSendMessageContext>(benzeneServiceContainer);
@@ -55,7 +58,7 @@ public class KafkaBenzeneMessageClient : IBenzeneMessageClient
     public KafkaBenzeneMessageClient(IMiddlewarePipeline<KafkaSendMessageContext> middlewarePipeline, ILogger<KafkaBenzeneMessageClient> logger, IServiceResolver serviceResolver)
     {
         _serviceResolver = serviceResolver;
-        _logger = logger;
+        _logger = logger ?? NullLogger<KafkaBenzeneMessageClient>.Instance;
         _middlewarePipeline = middlewarePipeline;
     }
 

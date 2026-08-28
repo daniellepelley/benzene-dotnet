@@ -9,6 +9,7 @@ using Benzene.Clients.Common;
 using Benzene.Core.Middleware;
 using Benzene.Results;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Void = Benzene.Abstractions.Results.Void;
 
 namespace Benzene.Clients.Azure.QueueStorage;
@@ -37,7 +38,9 @@ public class QueueStorageBenzeneMessageClient : IBenzeneMessageClient
     public QueueStorageBenzeneMessageClient(QueueClient queueClient, ILogger<QueueStorageBenzeneMessageClient> logger, IServiceResolver serviceResolver)
     {
         _serviceResolver = serviceResolver;
-        _logger = logger;
+        // #266/WP-I shape re-grep: a null logger must not make the catch block's own LogError throw
+        // and mask the real send failure - fall back to a no-op logger (mechanical P8 sweep).
+        _logger = logger ?? NullLogger<QueueStorageBenzeneMessageClient>.Instance;
 
         var benzeneServiceContainer = new NullBenzeneServiceContainer();
         var middlewarePipelineBuilder = new MiddlewarePipelineBuilder<QueueStorageSendMessageContext>(benzeneServiceContainer);
@@ -57,7 +60,7 @@ public class QueueStorageBenzeneMessageClient : IBenzeneMessageClient
     {
         _serviceResolver = serviceResolver;
         _middlewarePipeline = middlewarePipeline;
-        _logger = logger;
+        _logger = logger ?? NullLogger<QueueStorageBenzeneMessageClient>.Instance;
     }
 
     /// <summary>

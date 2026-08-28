@@ -5,7 +5,10 @@ Outbound SQS client for a Benzene app: send messages to an SQS queue (to reach a
 consumer, or any SQS target), plus an SQS health check. Pins **only** `AWSSDK.SQS`.
 
 ## Key types
-- `SqsBenzeneMessageClient` — `IBenzeneMessageClient`; sends to a queue URL.
+- `SqsBenzeneMessageClient` — `IBenzeneMessageClient`; sends to a queue URL. Both constructors fall
+  back to `NullLogger<SqsBenzeneMessageClient>.Instance` when `logger` is null (#192/#266, the P8
+  sweep completed in WP-I), so a null-logger construction can't make the `catch` block's own
+  `LogError` call throw and mask the real send failure.
 - `SqsClientMiddleware` / `SqsSendMessageContext` — terminal send middleware and its context.
 - `SqsContextConverter<T>` — `IBenzeneClientContext<T, Void>` → send context.
 - `OutboundSqsContextConverter` — the `Benzene.Clients.OutboundContext` counterpart, used by the

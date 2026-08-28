@@ -9,6 +9,7 @@ using Benzene.Clients.Common;
 using Benzene.Core.Middleware;
 using Benzene.Results;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Void = Benzene.Abstractions.Results.Void;
 
 namespace Benzene.Clients.Azure.ServiceBus;
@@ -38,7 +39,9 @@ public class ServiceBusBenzeneMessageClient : IBenzeneMessageClient
     public ServiceBusBenzeneMessageClient(ServiceBusSender sender, ILogger<ServiceBusBenzeneMessageClient> logger, IServiceResolver serviceResolver, string topicPropertyKey = ServiceBusContextConverter<object>.DefaultTopicProperty)
     {
         _serviceResolver = serviceResolver;
-        _logger = logger;
+        // #266/WP-I shape re-grep: a null logger must not make the catch block's own LogError throw
+        // and mask the real send failure - fall back to a no-op logger (mechanical P8 sweep).
+        _logger = logger ?? NullLogger<ServiceBusBenzeneMessageClient>.Instance;
         _topicPropertyKey = topicPropertyKey;
 
         var benzeneServiceContainer = new NullBenzeneServiceContainer();
@@ -60,7 +63,7 @@ public class ServiceBusBenzeneMessageClient : IBenzeneMessageClient
     {
         _serviceResolver = serviceResolver;
         _middlewarePipeline = middlewarePipeline;
-        _logger = logger;
+        _logger = logger ?? NullLogger<ServiceBusBenzeneMessageClient>.Instance;
         _topicPropertyKey = topicPropertyKey;
     }
 
