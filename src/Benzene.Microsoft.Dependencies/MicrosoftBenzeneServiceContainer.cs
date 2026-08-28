@@ -19,6 +19,16 @@ public class MicrosoftBenzeneServiceContainer : IBenzeneServiceContainer
 
     public void Reopen()
     {
+        // Looks like it shouldn't compile: ServiceCollection's own Add is Add(ServiceDescriptor), and
+        // IServiceCollection has no conversion to ServiceDescriptor. It compiles because a collection
+        // initializer's "Add" is resolved against instance AND extension methods, and
+        // Microsoft.Extensions.DependencyInjection.Extensions (imported above) declares
+        // ServiceCollectionDescriptorExtensions.Add(this IServiceCollection, IEnumerable<ServiceDescriptor>).
+        // _services (declared type IServiceCollection : IList<ServiceDescriptor>) satisfies that
+        // parameter directly - it IS an IEnumerable<ServiceDescriptor> - and no other Add candidate is
+        // applicable, so that overload is the only match. Net effect: every descriptor already in
+        // _services is copied, in order, into the fresh ServiceCollection - i.e. this reopens with a
+        // new, independently-mutable collection holding the same registrations, not an empty one.
         _services = new ServiceCollection { _services };
     }
     
