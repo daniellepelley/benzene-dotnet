@@ -2388,7 +2388,7 @@ evidence in [`bug-fix-designs-round15-2026-08.md`](bug-fix-designs-round15-2026-
 
 ## Open — maintainer decisions (the real remaining backlog)
 
-## Tracked findings rounds 14-15
+### Tracked findings rounds 14-15, WP-K — Examples, mesh-example CI, Helm lint (done)
 
 Per `work/bug-fix-rulings-round14-15-2026-08.md` §0 gate G3: rounds 14's #204-#223 and round 15's
 #225-#275 were absent from this file's open section. This section folds in WP-K's slice
