@@ -41,11 +41,13 @@ public static class DependencyInjectionExtensions
     public static IBenzeneServiceContainer AddAzureEventHub(this IBenzeneServiceContainer services, string topicPropertyKey)
     {
         services.TryAddScoped<JsonSerializer>();
-        services.AddScoped<IMessageTopicGetter<EventHubContext>>(_ => new EventHubMessageTopicGetter(topicPropertyKey));
-        services.AddHeaderMessageVersionGetter<EventHubContext>();
-        services.AddScoped<IMessageHeadersGetter<EventHubContext>, EventHubMessageHeadersGetter>();
-        services.AddScoped<IMessageBodyGetter<EventHubContext>, EventHubMessageBodyGetter>();
-        services.AddScoped<IMessageHandlerResultSetter<EventHubContext>, EventHubMessageHandlerResultSetter>();
+        // TryAdd: a user registration made earlier (ConfigureServices runs before Configure, where
+        // UseEventHub calls this) wins over these per-context defaults.
+        services.TryAddScoped<IMessageTopicGetter<EventHubContext>>(_ => new EventHubMessageTopicGetter(topicPropertyKey));
+        services.TryAddHeaderMessageVersionGetter<EventHubContext>();
+        services.TryAddScoped<IMessageHeadersGetter<EventHubContext>, EventHubMessageHeadersGetter>();
+        services.TryAddScoped<IMessageBodyGetter<EventHubContext>, EventHubMessageBodyGetter>();
+        services.TryAddScoped<IMessageHandlerResultSetter<EventHubContext>, EventHubMessageHandlerResultSetter>();
         services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.EventHub));
         return services;
     }

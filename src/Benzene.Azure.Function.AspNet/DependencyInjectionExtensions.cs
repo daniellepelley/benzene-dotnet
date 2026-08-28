@@ -77,16 +77,19 @@ public static class DependencyInjectionExtensions
     /// </remarks>
     public static IBenzeneServiceContainer AddAspNet(this IBenzeneServiceContainer services)
     {
-        services.AddScoped<IMessageTopicGetter<AspNetContext>, AspNetMessageTopicGetter>();
-        services.AddScoped<IMessageVersionGetter<AspNetContext>>(resolver =>
+        // TryAdd on the message-handler-seam registrations: a user registration made earlier
+        // (ConfigureServices runs before Configure, where UseHttp calls this) wins over these
+        // per-context defaults.
+        services.TryAddScoped<IMessageTopicGetter<AspNetContext>, AspNetMessageTopicGetter>();
+        services.TryAddScoped<IMessageVersionGetter<AspNetContext>>(resolver =>
             new AspNetMessageVersionGetter(resolver.GetService<IRouteFinder>(),
                 resolver.GetService<IMessageHeadersGetter<AspNetContext>>(),
                 resolver.TryGetService<MessageVersionHeaderNames>()?.HeaderNames));
-        services.AddScoped<IMessageHeadersGetter<AspNetContext>, AspNetMessageHeadersGetter>();
-        services.AddScoped<IMessageBodyGetter<AspNetContext>, AspNetMessageBodyGetter>();
+        services.TryAddScoped<IMessageHeadersGetter<AspNetContext>, AspNetMessageHeadersGetter>();
+        services.TryAddScoped<IMessageBodyGetter<AspNetContext>, AspNetMessageBodyGetter>();
         services.AddScoped<IHttpRequestBodyReader<AspNetContext>, AspNetMessageBodyGetter>();
         services.AddScoped<HttpRequestBodyBuffer>();
-        services.AddScoped<IMessageHandlerResultSetter<AspNetContext>, AspNetMessageHandlerResultSetter>();
+        services.TryAddScoped<IMessageHandlerResultSetter<AspNetContext>, AspNetMessageHandlerResultSetter>();
         services.AddScoped<IHttpRequestAdapter<AspNetContext>, AspNetHttpRequestAdapter>();
         services.AddScoped<IBenzeneResponseAdapter<AspNetContext>, AspNetResponseAdapter>();
 

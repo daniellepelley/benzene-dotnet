@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using Benzene.Abstractions.Messages.Mappers;
 using Benzene.Aws.Lambda.DynamoDb;
 using Benzene.Aws.Lambda.EventBridge;
+using Benzene.Aws.Lambda.Kafka;
 using Benzene.Aws.Lambda.S3;
 using Benzene.GoogleCloud.Functions.PubSub;
 using Benzene.Microsoft.Dependencies;
@@ -16,11 +17,19 @@ namespace Benzene.Test.Customization;
 // UseXxx registers the transport's defaults) was silently shadowed - last registration wins under MS
 // DI. Converting to TryAddScoped/TryAddHeaderMessageVersionGetter (matching Benzene.Aws.Lambda.Sns,
 // the already-correct reference) makes the earlier, more specific registration win instead.
+// #229 (round 14-15): Benzene.Aws.Lambda.Kafka was a missed instance of this exact defect class -
+// AddKafka() used plain AddScoped/AddHeaderMessageVersionGetter and was never included in the
+// original #160 fix or this regression suite. See work/bug-fix-rulings-round14-15-2026-08.md WP-D.
 public class AwsGoogleTransportGetterOverrideTest
 {
     private class MarkerS3HeadersGetter : IMessageHeadersGetter<S3RecordContext>
     {
         public IDictionary<string, string> GetHeaders(S3RecordContext context) => new Dictionary<string, string> { ["x-marker"] = "on" };
+    }
+
+    private class MarkerKafkaHeadersGetter : IMessageHeadersGetter<KafkaContext>
+    {
+        public IDictionary<string, string> GetHeaders(KafkaContext context) => new Dictionary<string, string> { ["x-marker"] = "on" };
     }
 
     private class MarkerDynamoDbHeadersGetter : IMessageHeadersGetter<DynamoDbRecordContext>
@@ -84,5 +93,17 @@ public class AwsGoogleTransportGetterOverrideTest
         var getter = services.BuildServiceProvider().GetRequiredService<IMessageHeadersGetter<PubSubContext>>();
 
         Assert.IsType<MarkerPubSubHeadersGetter>(getter);
+    }
+
+    [Fact]
+    public void AddKafka_CustomHeadersGetterRegisteredFirst_Wins()
+    {
+        var services = new ServiceCollection();
+        services.UsingBenzene(x => x.AddScoped<IMessageHeadersGetter<KafkaContext>, MarkerKafkaHeadersGetter>());
+        services.UsingBenzene(x => x.AddKafka());
+
+        var getter = services.BuildServiceProvider().GetRequiredService<IMessageHeadersGetter<KafkaContext>>();
+
+        Assert.IsType<MarkerKafkaHeadersGetter>(getter);
     }
 }

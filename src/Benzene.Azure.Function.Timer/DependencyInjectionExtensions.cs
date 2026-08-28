@@ -30,12 +30,14 @@ public static class DependencyInjectionExtensions
         services.TryAddScoped<JsonSerializer>();
         services.TryAddScoped<PresetTopicHolder>();
 
-        services.AddScoped<IMessageTopicGetter<TimerContext>>(resolver =>
+        // TryAdd: a user registration made earlier (ConfigureServices runs before Configure, where
+        // UseTimerTrigger calls this) wins over these per-context defaults.
+        services.TryAddScoped<IMessageTopicGetter<TimerContext>>(resolver =>
             new PresetTopicMessageTopicGetter<TimerContext>(new TimerMessageTopicGetter(), resolver.GetService<PresetTopicHolder>()));
-        services.AddHeaderMessageVersionGetter<TimerContext>();
-        services.AddScoped<IMessageHeadersGetter<TimerContext>, TimerMessageHeadersGetter>();
-        services.AddScoped<IMessageBodyGetter<TimerContext>, TimerMessageBodyGetter>();
-        services.AddScoped<IMessageHandlerResultSetter<TimerContext>, TimerMessageHandlerResultSetter>();
+        services.TryAddHeaderMessageVersionGetter<TimerContext>();
+        services.TryAddScoped<IMessageHeadersGetter<TimerContext>, TimerMessageHeadersGetter>();
+        services.TryAddScoped<IMessageBodyGetter<TimerContext>, TimerMessageBodyGetter>();
+        services.TryAddScoped<IMessageHandlerResultSetter<TimerContext>, TimerMessageHandlerResultSetter>();
 
         services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.Timer));
         return services;

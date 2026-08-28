@@ -29,11 +29,13 @@ public static class DependencyInjectionExtensions
     {
         services.TryAddScoped<JsonSerializer>();
 
-        services.AddScoped<IMessageTopicGetter<KafkaContext>, KafkaMessageTopicGetter>();
-        services.AddHeaderMessageVersionGetter<KafkaContext>();
-        services.AddScoped<IMessageHeadersGetter<KafkaContext>, KafkaMessageHeadersGetter>();
-        services.AddScoped<IMessageBodyGetter<KafkaContext>, KafkaMessageBodyGetter>();
-        services.AddScoped<IMessageHandlerResultSetter<KafkaContext>, KafkaMessageHandlerResultSetter>();
+        // TryAdd: a user registration made earlier (ConfigureServices runs before Configure, where
+        // UseKafka calls this) wins over these per-context defaults.
+        services.TryAddScoped<IMessageTopicGetter<KafkaContext>, KafkaMessageTopicGetter>();
+        services.TryAddHeaderMessageVersionGetter<KafkaContext>();
+        services.TryAddScoped<IMessageHeadersGetter<KafkaContext>, KafkaMessageHeadersGetter>();
+        services.TryAddScoped<IMessageBodyGetter<KafkaContext>, KafkaMessageBodyGetter>();
+        services.TryAddScoped<IMessageHandlerResultSetter<KafkaContext>, KafkaMessageHandlerResultSetter>();
 
         services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.Kafka));
         return services;
