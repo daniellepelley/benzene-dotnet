@@ -16,8 +16,6 @@ host example (Asp, Aws, Azure, Google, Grpc, Kafka). A host example is then most
 that wires this shared domain onto one transport. When adding a demo capability, prefer putting the
 handler/logic in `Benzene.Examples.App` and wiring it from the hosts, rather than duplicating it.
 
-`App/Benzene.Examples.App.Data` is a small companion data project.
-
 ## Layout (one folder per host/transport)
 - **`App/`** — shared handlers/validators/services (above); the reused core.
 - **`Asp/`** — ASP.NET Core host. Two projects:
@@ -108,16 +106,51 @@ handler/logic in `Benzene.Examples.App` and wiring it from the hosts, rather tha
   tagged Function Apps are found identically to Web Apps. Own `.sln`, `README.md`, and Terraform `deploy/`
   (zip-deployed Function Apps + Service Bus/Event Hub/Event Grid, no container registry; Event Grid
   subscriptions wired in a second apply after publish). Does **not** use the shared `App` domain.
+- **`GoogleCloudMesh/`** — the Google Cloud counterpart of `AwsMesh`/`AzureFunctionsMesh`: **four**
+  domain services (`orders`/`payments`/`shipping`/`notifications`, sharing `Shared/`) plus the mesh,
+  each deployed as **two Cloud Functions Gen2** sharing one `Startup` (a Gen2 function has exactly one
+  trigger) — an **HTTP function** serving the Cloud Service Profile the mesh polls, and a **Pub/Sub
+  function** consuming events published to a per-service "inbox" topic (Benzene routes by the
+  `"topic"` message attribute, not by Pub/Sub topic, mirroring `AwsMesh`'s one-queue-per-service
+  shape). The mesh is an HTTP function too: it polls each service's profile from a static registry
+  (`MeshRegistry.FromEnvironment`, since Google Cloud has no mesh discovery provider yet), persists the
+  catalog to **GCS** (`Benzene.Mesh.GoogleCloud.Storage`), and serves the Mesh UI; **Cloud Scheduler**
+  drives aggregation via `POST /mesh/refresh` (Cloud Functions has no timer trigger). Own `.sln`
+  (`Benzene.Examples.GoogleCloudMesh.sln`, built by the `mesh-examples-build` CI job — see below),
+  `README.md`, and Terraform `deploy/`. Does **not** use the shared `App` domain.
 
 ## How these build (important)
-- Examples build via **`Benzene.Examples.sln`** at the repo root — **not** the main `Benzene.sln`.
-  Several folders also have their own solution (`Benzene.Example.Asp.sln`, `Benzene.Examples.Aws.sln`,
-  `Benzene.Example.Azure.sln`, `Benzene.Example.Grpc.sln`, `Benzene.Example.Kafka.sln`).
-- **The examples are NOT part of the primary CI gate.** `build-benzene.yml` builds `Benzene.sln` and the
-  library tests only. The examples are exercised by the deploy workflows
-  (`.github/workflows/deploy-asp-example.yml`, `deploy-aws-example.yml`) and otherwise by building
-  `Benzene.Examples.sln` locally. So **a change here is not compile-checked by the main build** — if you
-  edit an example, build `Benzene.Examples.sln` (or the relevant per-folder `.sln`) to verify it.
+- Examples build via **`Benzene.Examples.sln`** at the repo root — **not** the main `Benzene.sln`. Several
+  folders also have their own solution: `Benzene.Example.Asp.sln`, `Benzene.Examples.Aws.sln`,
+  `Benzene.Example.Azure.sln`, `Benzene.Example.Grpc.sln`, `Benzene.Example.Kafka.sln`,
+  `Benzene.Examples.Versioning.sln`, `Benzene.Example.Cloudflare.sln`, plus the four mesh-topology
+  examples' own solutions — `Benzene.Examples.GoogleCloudMesh.sln`,
+  `Benzene.Example.AzureFunctionsMesh.sln`, `Benzene.Examples.AwsMesh.sln`, and
+  `Benzene.Examples.AzureMesh.sln` (the last two added by #272; deliberately kept out of
+  `Benzene.Examples.sln` itself — see below).
+- **The examples ARE part of the primary CI gate — `build-benzene.yml` has a real `examples-build`
+  job**, contrary to what this section used to (falsely) claim. On every push/PR to `main` it builds
+  `Benzene.Examples.sln` in full (every folder that solution lists — AWS, Asp, Azure Functions +
+  Worker, Grpc, Kafka, Saga, Mesh, CodeGen, Cloudflare, Versioning, and Google), then runs `dotnet test`
+  against the in-memory example test projects (no external dependency, so they run on a plain runner):
+  `Benzene.Examples.App.Test`, `Benzene.Example.Asp.Test`, `Benzene.Examples.Aws.Tests`,
+  `Benzene.Examples.Aws.Minimal.Tests`, `Benzene.Example.Azure.Test`, `Benzene.Example.Grpc.Test`,
+  `Benzene.Examples.OpenTelemetry.Test`, `Benzene.Example.Saga.Tests`, `Benzene.Examples.Google.Tests`,
+  and `Benzene.Examples.Versioning.Tests`. Two further jobs run real-dependency tiers that need Docker
+  (`examples-aws-localstack-tests` against LocalStack SQS, `examples-azure-servicebus-tests` against the
+  Service Bus emulator) — those `.Dev.Test` projects are deliberately NOT in `Benzene.Examples.sln`.
+  `Benzene.Examples.Kafka.Test`, despite its name, connects to a real Kafka broker and is excluded from
+  the in-memory test step for the same reason.
+- **The four mesh-topology examples build in their own CI job, `mesh-examples-build`** (added by
+  #272), which runs `dotnet build` against all four of their per-folder `.sln`s on every push/PR —
+  they are **not** folded into `Benzene.Examples.sln`'s own build, because that would drag AWS/Azure/GCP
+  cloud-SDK restore into every contributor's default `dotnet build`. Before this job existed, a compile
+  break in any of these ~15 projects (`AwsMesh`'s 7, `AzureMesh`'s 1, plus `GoogleCloudMesh` and
+  `AzureFunctionsMesh`) was invisible to every build gate in the repo — the `.sln` files existed but
+  nothing built them.
+- So: **a change to any example is compile-checked by the main build** (via one of the two jobs above)
+  — if you edit one, still build the relevant `.sln` locally first (`Benzene.Examples.sln`,
+  the mesh example's own `.sln`, or another per-folder `.sln`) rather than waiting on CI to find out.
 - Examples reference `src/` projects directly via `ProjectReference` (they track local source), not the
   published NuGet packages. Adding a new Benzene dependency to an example means adding a `ProjectReference`
   to the `src/` project.
@@ -155,5 +188,9 @@ host-specific startup base classes (`AwsLambdaStartUp`, `BenzeneWorkerStartup`,
 
 ## Do NOT
 - Do not modify `Benzene.Examples.sln` / the per-folder `.sln` structure without explicit approval.
-- Do not add example projects to the main `Benzene.sln` — examples belong to `Benzene.Examples.sln`.
-- Do not assume the main CI verifies example changes — it doesn't; build the examples solution yourself.
+- Do not add example projects to the main `Benzene.sln` — examples belong to `Benzene.Examples.sln` (or,
+  for the four mesh-topology examples, their own per-folder `.sln` — see "How these build" above).
+- Do not assume a new example project is CI-checked just because it compiles locally — it's only
+  compile-checked once it's a member of `Benzene.Examples.sln` (covered by `examples-build`) or one of
+  the four mesh solutions (covered by `mesh-examples-build`); a project sitting in a folder with no
+  `.sln` membership at all is invisible to every build gate (this was #272's root cause).

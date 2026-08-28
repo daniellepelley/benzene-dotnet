@@ -1,3 +1,6 @@
 {
-  "DB_CONNECTION_STRING": "Server = localhost; port = 5432; user id = user; password = mysecretpassword; database = OrdersDB; pooling = true"
+  "_comment_DB_CONNECTION_STRING": "Unused placeholder (#222) - nothing in this example reads it. Replace <PASSWORD> with a real secret from your own config/secret store before using this key for anything; never commit a real connection string.",
+  "DB_CONNECTION_STRING": "Server = localhost; port = 5432; user id = user; password = <PASSWORD>; database = OrdersDB; pooling = true",
+  "_comment_APPINSIGHTS_INSTRUMENTATIONKEY": "Placeholder (#218) - not a real key. Replace with your own Application Insights instrumentation key (or connection string) before deploying; never commit a real one. With this placeholder in place, Serilog's ApplicationInsights sink simply fails to deliver telemetry - console logging (above) still works.",
+  "APPINSIGHTS_INSTRUMENTATIONKEY": "00000000-0000-0000-0000-000000000000"
 }

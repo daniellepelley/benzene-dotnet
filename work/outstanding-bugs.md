@@ -2278,7 +2278,106 @@ themselves are in `bug-fix-designs-round12-2026-08.md`/`bug-fix-designs-round13-
   `SnsBenzeneMessageClientTest.SendMessageAsync_ThrowingClient_ConstructedWithANullLogger_DoesNotThrow`,
   `HttpBenzeneMessageClientTest.SendMessageAsync_ReturnsServiceUnavailable_WhenTheTransportThrows_AndTheLoggerIsNull`.
 
-## Open — maintainer decisions (the real remaining backlog)
+## Tracked findings rounds 14-15
+
+Per `work/bug-fix-rulings-round14-15-2026-08.md` §0 gate G3: rounds 14's #204-#223 and round 15's
+#225-#275 were absent from this file's open section. This section folds in WP-K's slice
+(`examples/`, `Benzene.Examples.sln`, `.github/workflows/`, `deploy/Mesh/helm/**` — see the ruling's
+§3 WP-K); other work packages' entries land here as their own agents complete them, per the same
+ruling. **Environment note: no .NET SDK was available while implementing WP-K** — every `dotnet
+build`/`dotnet sln` change below is pattern-mirrored against the existing `Benzene.Examples.GoogleCloudMesh.sln`
+template and structurally validated (balanced `Project`/`EndProject`, every referenced `.csproj` path
+resolves on disk, every GUID referenced in `ProjectConfigurationPlatforms`/`NestedProjects` is
+declared) but **not locally compiled**; CI (`build-benzene.yml`'s `examples-build` and new
+`mesh-examples-build` jobs) is the verification loop, per `AGENTS.md`.
+
+- **[RESOLVED] #271 — `examples/CLAUDE.md`'s "How these build" section falsely claimed examples are
+  "NOT part of the primary CI gate" and "not compile-checked by the main build".** Rewritten to state
+  what `build-benzene.yml` actually runs: the `examples-build` job builds `Benzene.Examples.sln` on
+  every push/PR, then a `dotnet test` step runs the ten in-memory example test projects
+  (`Benzene.Examples.App.Test`, `Benzene.Example.Asp.Test`, `Benzene.Examples.Aws.Tests`,
+  `Benzene.Examples.Aws.Minimal.Tests`, `Benzene.Example.Azure.Test`, `Benzene.Example.Grpc.Test`,
+  `Benzene.Examples.OpenTelemetry.Test`, `Benzene.Example.Saga.Tests`, `Benzene.Examples.Google.Tests`,
+  `Benzene.Examples.Versioning.Tests`) — named explicitly since the workflow lists them by project
+  path rather than `dotnet test <sln>`. See WP-K.
+- **[RESOLVED] #272 + #214 — `AwsMesh` (7 projects) and `AzureMesh` (1 project) were members of no
+  solution file anywhere, so a compile break was invisible to every build gate, automatic or manual.**
+  Gave each its own per-folder solution, mirroring `Benzene.Examples.GoogleCloudMesh.sln`'s structure
+  (solution folders per service, plus the full transitive closure of referenced `src/` projects listed
+  flat): `examples/AwsMesh/Benzene.Examples.AwsMesh.sln` (72 project entries: 8 example projects + 64
+  transitively-referenced `src/` projects) and `examples/AzureMesh/Benzene.Examples.AzureMesh.sln` (30
+  entries: 1 example project + 29 `src/` projects). **The load-bearing half:** a new `mesh-examples-build`
+  job in `.github/workflows/build-benzene.yml` runs `dotnet build` against all four mesh-example
+  solutions (AwsMesh, AzureMesh, GoogleCloudMesh, AzureFunctionsMesh) on every push/PR — kept separate
+  from `Benzene.Examples.sln` deliberately (folding cloud-SDK examples in would drag AWS/Azure/GCP SDK
+  restore into every contributor's default build), matching the ruling's explicit rejection of that
+  alternative. Fixed **#214** in the same pass: `examples/GoogleCloudMesh/Mesh/Startup.cs:48` called
+  `MeshServiceRegistry.FromEnvironment()`, which doesn't exist — corrected to `MeshRegistry.FromEnvironment()`
+  (the example's own static class in `Mesh/MeshRegistry.cs`, which does have this method and returns
+  the same `MeshServiceRegistry` type). This error is now caught by `mesh-examples-build` going forward.
+  **Not locally compiled** (no .NET SDK); structurally validated per the note above — CI is the
+  verification loop. See WP-K.
+- **[RESOLVED] #215 — `examples/Outbox` was not a member of any solution file.** Unlike AwsMesh/AzureMesh
+  it is in-memory with no cloud SDK dependency, so it joins `Benzene.Examples.sln` directly (new
+  `Outbox` solution folder + `Benzene.Example.Outbox` project entry, plus `Benzene.Outbox`'s src/
+  project entry which the main solution's `src` folder didn't carry yet), mirroring the pattern round
+  12's #193 used for `Cqrs`/`K8sTransports`. See WP-K.
+- **[RESOLVED] #216 — `examples/GoogleCloudMesh` was entirely undocumented in `examples/CLAUDE.md`,
+  unlike every sibling mesh example.** Added a layout entry alongside `AzureMesh`/`AzureFunctionsMesh`.
+  See WP-K.
+- **[RESOLVED] #217 — `examples/Kafka/docker-compose.yaml` pinned `confluentinc/cp-kafka:latest` in a
+  ZooKeeper topology; Docker Hub's `latest` no longer supports ZK.** Pinned both the `zookeeper` and
+  `kafka` images to `7.4.4`, matching the version `Benzene.Examples.Kafka.Test/docker-compose.yaml`
+  (the example's own test-harness compose file) already correctly pins. See WP-K.
+- **[RESOLVED] #218 + #222 — `examples/Asp/Benzene.Example.Asp/Startup.cs` hardcoded an Application
+  Insights instrumentation key in source, and `config.json` shipped a dummy DB connection string with
+  a plaintext placeholder password.** Both moved to obvious placeholders with an explanatory comment:
+  the instrumentation key now reads from `Configuration["APPINSIGHTS_INSTRUMENTATIONKEY"]` (config.json
+  ships an all-zero placeholder GUID, overridable via env var), and the connection string's password
+  is now the literal placeholder `<PASSWORD>`, both annotated in `config.json` with an underscore-prefixed
+  `_comment_*` sibling key (JSON has no native comment syntax) explaining neither is real and nothing
+  reads the DB string today. See WP-K.
+- **[RESOLVED] #219 — `examples/Asp`'s demo JWT issuer hardcoded `Issuer`/`JwksUri` to
+  `http://localhost:5000/` with no hint on failure if the app runs on a different port.** Added a
+  doc comment on `DemoJwtIssuer.Issuer` explaining the failure mode (opaque 401 on every
+  `/protected/*` request) and the fix (match the constant to the port Kestrel actually bound). See WP-K.
+- **[RESOLVED] #220 — `examples/App/Benzene.Examples.App.Data` was a dead, orphaned project referenced
+  by nothing.** Confirmed via repo-wide grep for `Benzene.Examples.App.Data.csproj` and `App\.Data` in
+  every `.csproj` (only `Benzene.Examples.sln` referenced it — no `ProjectReference` anywhere) before
+  deleting the project directory and removing its `Project`/`ProjectConfigurationPlatforms`/
+  `NestedProjects` entries from `Benzene.Examples.sln`. See WP-K.
+- **[RESOLVED] #221 — a CS8632 nullable-annotation warning in
+  `examples/GoogleCloudMesh/Shared/MeshServiceWiring.cs`.** The project has `<Nullable>disable</Nullable>`
+  (deliberately, shared by every `GoogleCloudMesh` project) yet `ConfigureServices` used a `?`-annotated
+  parameter type, which is only meaningful in a nullable context. Removed the `?` (parameter keeps its
+  `= null` default; behaviourally identical) rather than flipping the project-wide `Nullable` setting,
+  to keep the fix scoped to the one warning. See WP-K.
+- **[RESOLVED] #223 — `examples/Asp/Benzene.Example.Asp/Startup.cs` emitted an ASP0001
+  middleware-ordering warning.** Moved `app.UseAuthorization()` to sit immediately before the final
+  `app.UseEndpoints(...)` call, with nothing (including the `app.Map("/protected", ...)` /
+  `app.Map("/slow", ...)` branches) between them, matching the canonical
+  Routing→Authorization→Endpoints ordering: `app.UseRouting()` now leads straight into
+  `app.UseBenzene(...)` and the `Map` branches, and `app.UseAuthorization()` is the line directly above
+  `app.UseEndpoints(endpoints => endpoints.MapControllers())`. **Not locally compiled** — the analyzer's
+  exact trigger condition could not be confirmed against a real Roslyn run in this environment; verify
+  the warning is gone in CI and amend this entry if it persists. See WP-K.
+- **[RESOLVED] #273 — `examples/CodeGen/Benzene.Examples.CodeGen.Client/some.dll` was a 12KB
+  unexplained, unreferenced binary.** Confirmed via repo-wide grep for `some.dll` that no `.csproj`
+  referenced it (only mentioned in `work/` docs) before deleting it. See WP-K.
+- **[RESOLVED] #274 — `examples/CLAUDE.md`'s "own solution" list omitted `Benzene.Examples.GoogleCloudMesh.sln`
+  and `Benzene.Example.AzureFunctionsMesh.sln`.** Added both, plus the two new solutions from #272
+  (`Benzene.Examples.AwsMesh.sln`, `Benzene.Examples.AzureMesh.sln`). See WP-K.
+- **[RESOLVED] #275 — `deploy/Mesh/helm/benzene-mesh/` had zero CI validation.** Added a `helm-lint`
+  job to `.github/workflows/build-mesh-host.yml` (the workflow that builds the host this chart
+  deploys, already path-filtered on `deploy/Mesh/**`): `helm lint --strict`, then `helm template`
+  piped into `kubectl apply --dry-run=client` for schema validation. **Deviation from the ruling's
+  literal wording:** the ruling names `helm template --validate`, but that flag requires a live,
+  reachable cluster (it round-trips through the current kube context's API discovery) — not available
+  on a plain runner and not what "near-zero cost, no cluster needed" meant. `kubectl apply
+  --dry-run=client` gets equivalent rendered-manifest schema validation entirely client-side (kubectl's
+  bundled OpenAPI schemas), at the same zero cluster cost the ruling asked for. The kind-cluster `helm
+  install --dry-run` remains the documented optional stretch, not implemented here. **Not locally
+  run** (no `helm`/`kubectl` in this environment) — verify in CI. See WP-K.
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.
 

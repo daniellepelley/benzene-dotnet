@@ -70,3 +70,29 @@ jobs:
       run: dotnet build deploy/Mesh/Benzene.Mesh.Host.sln --no-restore
     - name: Test
       run: dotnet test deploy/Mesh/Benzene.Mesh.Host.sln --no-build
+
+  # #275: deploy/Mesh/helm/benzene-mesh (the chart that deploys the host this workflow just built) had
+  # zero CI validation of any kind. Near-zero cost, no cluster needed - a full `helm install --dry-run`
+  # against a throwaway kind cluster is the documented optional stretch (see deploy-k8s-mesh-example.yml
+  # for the kind-cluster pattern to reuse if that's ever added), not required here.
+  helm-lint:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup Helm
+      uses: azure/setup-helm@v4
+      with:
+        version: 'v3.16.1'
+    - name: helm lint
+      run: helm lint --strict deploy/Mesh/helm/benzene-mesh
+    - name: helm template
+      run: helm template benzene-mesh deploy/Mesh/helm/benzene-mesh > /tmp/benzene-mesh-rendered.yaml
+    # `helm template --validate` needs a live, reachable cluster (it round-trips through the current
+    # kube context's API discovery) - not available on a plain runner, and not what "no cluster needed"
+    # meant here. `kubectl apply --dry-run=client` gets the same rendered-manifest schema validation
+    # (malformed resources, unknown fields, bad apiVersion/kind) entirely client-side, using kubectl's
+    # bundled OpenAPI schemas - zero cluster cost, which the literal --validate flag can't offer.
+    - name: Validate rendered manifests (client-side, no cluster)
+      run: kubectl apply --dry-run=client -f /tmp/benzene-mesh-rendered.yaml
