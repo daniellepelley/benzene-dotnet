@@ -43,8 +43,16 @@ namespace Benzene.CodeGen.ApiGateway
             // Benzene.Http.Routing.ReflectionHttpEndpointFinder's own duplicate-route check - a
             // method+path collision is a spec authoring error, not something codegen can silently
             // resolve.
+            //
+            // Case-fold the grouping key's Method (not Path - unlike ReflectionHttpEndpointFinder's
+            // route-matching concern, a path here is emitted verbatim as the YAML mapping key, so two
+            // paths differing only by case are genuinely two different keys, not a collision) -
+            // BuildVerb always emits the verb lower-cased (`verb.ToLowerInvariant()`), so two topics
+            // mapped to "GET" and "get" for the same path used to pass this check and then collide as
+            // identical `get:` keys under that path in the emitted YAML - the same duplicate-key shape
+            // this guard exists to catch, just reached via verb casing instead of identical casing.
             var duplicates = mappings
-                .GroupBy(x => new { x.http.Method, x.http.Path })
+                .GroupBy(x => new { Method = x.http.Method.ToLowerInvariant(), x.http.Path })
                 .Where(x => x.Count() > 1)
                 .ToArray();
 
@@ -53,7 +61,7 @@ namespace Benzene.CodeGen.ApiGateway
                 var duplicate = duplicates[0];
                 var topics = string.Join(", ", duplicate.Select(x => x.request.Topic));
                 throw new BenzeneException(
-                    $"Route '{duplicate.Key.Method} - {duplicate.Key.Path}' has been assigned to more than one topic ({topics}), this is not permitted");
+                    $"Route '{duplicate.First().http.Method} - {duplicate.Key.Path}' has been assigned to more than one topic ({topics}), this is not permitted");
             }
 
             var paths = mappings
@@ -79,7 +87,10 @@ namespace Benzene.CodeGen.ApiGateway
         public string BuildPath(string path, (string, string)[] endpoints)
         {
             var stringBuilder = new StringBuilder();
-            stringBuilder.AppendLine($@"  /{path}:");
+            // path is user-authored (an [HttpEndpoint] URL) - quote-escape the mapping key rather
+            // than emitting it raw, so a `:`/`"`/`#` in a path segment can't corrupt the YAML
+            // structure (#212/#263).
+            stringBuilder.AppendLine($@"  {YamlLiteral.Format("/" + path)}:");
             stringBuilder.Append(BuildOptions(endpoints.Select(x => x.Item1).ToArray(), path, endpoints[0].Item2));
 
             foreach (var endpoint in endpoints)
@@ -104,7 +115,9 @@ namespace Benzene.CodeGen.ApiGateway
             var stringBuilder = new StringBuilder();
             stringBuilder.AppendLine(@"    options:");
             stringBuilder.AppendLine(@"      tags:");
-            stringBuilder.AppendLine($@"        - {tag}");
+            // tag is title-cased from the user-authored path - quote-escape it so e.g. a `:` in a
+            // path segment can't survive title-casing into an invalid unquoted sequence item (#212/#263).
+            stringBuilder.AppendLine($@"        - {YamlLiteral.Format(tag)}");
             BuildParameters(routeTemplate, stringBuilder);
             stringBuilder.AppendLine(@"      responses:");
             stringBuilder.AppendLine(@"        ""200"":");
@@ -167,9 +180,10 @@ namespace Benzene.CodeGen.ApiGateway
 
             var stringBuilder = new StringBuilder();
             stringBuilder.AppendLine($@"    {verb.ToLowerInvariant()}:");
-            stringBuilder.AppendLine($@"      summary: ""{topic}""");
+            // topic is user-authored - a `"` in it used to break this double-quoted scalar (#212/#263).
+            stringBuilder.AppendLine($@"      summary: {YamlLiteral.Format(topic)}");
             stringBuilder.AppendLine(@"      tags:");
-            stringBuilder.AppendLine($@"        - {tag}");
+            stringBuilder.AppendLine($@"        - {YamlLiteral.Format(tag)}");
 
             BuildParameters(routeTemplate, stringBuilder);
 

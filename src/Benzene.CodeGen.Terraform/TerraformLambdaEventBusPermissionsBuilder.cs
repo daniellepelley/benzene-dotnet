@@ -78,7 +78,10 @@ public class TerraformLambdaEventBusPermissionsBuilder : ICodeBuilder<TerraformL
             lineWriter.WriteLine("protocol = \"lambda\"");
             lineWriter.WriteLine($"endpoint = aws_lambda_function.{NameFormatter.UnderScoreCase(lambdaName)}.arn");
             lineWriter.WriteLine("endpoint_auto_confirms = true");
-            lineWriter.WriteLine($"filter_policy = jsonencode({{\"topic\" = [{string.Join(",", topics.Select(topic => $"\"{topic}\""))}]}})");
+            // topics are user-authored Benzene message topics - HclLiteral escapes each one for safe
+            // embedding as an HCL string literal within this jsonencode(...) object constructor
+            // (#212/#263).
+            lineWriter.WriteLine($"filter_policy = jsonencode({{\"topic\" = [{string.Join(",", topics.Select(HclLiteral.Format))}]}})");
         }
 
         lineWriter.WriteLine("}");

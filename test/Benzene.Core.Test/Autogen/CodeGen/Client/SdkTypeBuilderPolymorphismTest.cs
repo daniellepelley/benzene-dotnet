@@ -1,9 +1,11 @@
+using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json.Serialization;
 using Benzene.CodeGen.Client;
 using Benzene.CodeGen.Core;
 using Benzene.Schema.OpenApi;
 using Benzene.Test.Autogen.CodeGen.Helpers;
+using Microsoft.OpenApi.Models;
 using Xunit;
 
 namespace Benzene.Test.Autogen.CodeGen.Client;
@@ -87,5 +89,45 @@ public class SdkTypeBuilderPolymorphismTest
         var checkoutRequest = FileText(files, "CheckoutRequest.cs");
 
         Assert.Contains("public PaymentMethod Payment { get; set; }", checkoutRequest);
+    }
+
+    // #263: the discriminator property name and each mapping key come straight off the schema (which
+    // may be hand-authored/deserialized, not only reflected off real C# attributes) and are
+    // interpolated into the generated [JsonPolymorphic]/[JsonDerivedType] attribute arguments - an
+    // unescaped quote used to break the attribute's string-literal argument outright.
+    [Fact]
+    public void Discriminator_AdversarialContent_QuoteAndBackslash_EscapedInGeneratedAttributes()
+    {
+        const string adversarialPropertyName = "ki\"nd\\type";
+        const string adversarialMappingKey = "ca\"rd";
+
+        var schema = new OpenApiSchema
+        {
+            Type = "object",
+            Discriminator = new OpenApiDiscriminator
+            {
+                PropertyName = adversarialPropertyName,
+                Mapping = new Dictionary<string, string> { [adversarialMappingKey] = "#/components/schemas/CardPayment" }
+            },
+            Properties = new Dictionary<string, OpenApiSchema>
+            {
+                ["currency"] = new OpenApiSchema { Type = "string" }
+            }
+        };
+
+        var file = new OpenApiSchemaCSharpTypeBuilder("Benzene.Service.Clients.Payments")
+            .BuildType(new KeyValuePair<string, OpenApiSchema>("PaymentMethod", schema));
+        var text = file.Lines.ToText();
+
+        Assert.Contains(
+            $"[JsonPolymorphic(TypeDiscriminatorPropertyName = {CodeGenHelpers.ToCSharpStringLiteral(adversarialPropertyName)})]",
+            text);
+        Assert.Contains(
+            $"[JsonDerivedType(typeof(CardPayment), {CodeGenHelpers.ToCSharpStringLiteral(adversarialMappingKey)})]",
+            text);
+        // The pre-fix raw interpolation ($"...\"{value}\"...") would have broken the attribute's
+        // string literal open at the embedded quote instead of escaping it.
+        Assert.DoesNotContain($"\"{adversarialPropertyName}\"", text);
+        Assert.DoesNotContain($"\"{adversarialMappingKey}\"", text);
     }
 }

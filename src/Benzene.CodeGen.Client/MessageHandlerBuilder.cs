@@ -56,7 +56,10 @@ public class MessageHandlerBuilder : ICodeBuilder<EventServiceDocument>
 
         lineWriter.WriteLine($"namespace {_baseNamespace};");
         lineWriter.WriteLine("");
-        lineWriter.WriteLine($"[Message(\"{topic}\")]");
+        // topic is user-authored - see CodeGenHelpers.ToCSharpStringLiteral (#212/#263: the same
+        // unescaped-interpolation-into-generated-C# hazard as MessageClientSdkBuilder's topic
+        // interpolation, reached here through the "message-handlers" build output instead).
+        lineWriter.WriteLine($"[Message({CodeGenHelpers.ToCSharpStringLiteral(topic)})]");
         lineWriter.WriteLine($"public class {name}MessageHandler : IMessageHandler<{requestTypeName}, {responseTypeName}>");
         lineWriter.WriteLine("{");
         lineWriter.WriteLine($"public {name}MessageHandler()", 1);

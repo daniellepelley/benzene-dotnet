@@ -56,4 +56,7 @@ public static class Constants
     public const string TopicsDescription = "A comma-delimited topic include-list for 'build' (e.g. 'order:create,order:cancel'). Only these topics are generated; a named topic the document doesn't have fails the build. Defaults to every non-reserved topic in the document when not given.";
     public const string HealthCheckFailOnDefault = "unhealthy";
     public const string HealthCheckFailOnDescription = "The verdict that fails the command: 'unhealthy' (exits non-zero if the target's health check response reports isHealthy: false) or 'none' (report only, always exit 0)";
+    public const string Strict = "strict";
+    public const string StrictDefault = "false";
+    public const string StrictDescription = "When 'true', an unrecognized response shape (no isHealthy field at all) is treated as unhealthy instead of the default, deliberately lenient 'don't fail-loud on a shape this tool doesn't recognize' fallback - lets a CI pipeline opt into catching a misconfigured target (e.g. a --lambda-name returning unrelated 200 JSON) that the default would silently pass";
 }

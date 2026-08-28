@@ -158,6 +158,30 @@ public class MarkdownTypeBuilderTest
         Assert.Contains("payment: oneOf: {CardPayment|BankPayment}", text);
     }
 
+    // #213: an array schema with Items == null isn't reachable through Benzene's own SchemaBuilder,
+    // but MapProperty is reached via the public BuildType and can be handed any hand-authored/
+    // deserialized schema - it used to NRE on `openApiSchema.Items.Reference`.
+    [Fact]
+    public void BuildType_ArraySchemaWithNullItems_HandledGracefully_NotNullReferenceException()
+    {
+        var rootSchema = new OpenApiSchema
+        {
+            Type = "object",
+            Properties = new Dictionary<string, OpenApiSchema>
+            {
+                { "tags", new OpenApiSchema { Type = "array", Items = null } }
+            }
+        };
+
+        var schemas = new Dictionary<string, OpenApiSchema> { { "Root", rootSchema } };
+        var lineWriter = new LineWriter();
+        var markdownTypeBuilder = new MarkdownTypeBuilder(new SchemaGetter(schemas));
+
+        markdownTypeBuilder.BuildType("Root", lineWriter);
+
+        Assert.Contains("tags: Void[]", lineWriter.GetLines().ToText());
+    }
+
     [Fact]
     public void BuildType_OneOfProperty_MembersShareAnAllOfBase_RendersTheSharedBaseTypeName()
     {

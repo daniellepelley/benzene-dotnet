@@ -34,9 +34,17 @@ public class AutofacBenzeneServiceContainer : IBenzeneServiceContainer
         return _registeredTypes.Contains(type);
     }
 
+    // #210: every IsGenericTypeDefinition check below (six, one per AddScoped/AddTransient/
+    // AddSingleton Type overload pair) used to read IsGenericType, which is true for BOTH an open
+    // generic type definition (e.g. typeof(Foo<>) - the only shape Autofac's RegisterGeneric accepts)
+    // and a closed generic (e.g. typeof(Foo<int>) - which RegisterGeneric throws on, since it isn't
+    // a type definition). A discovered handler class that happens to be a closed generic therefore
+    // threw here while resolving cleanly under the Microsoft adapter (whose RegisterType/AddScoped(Type)
+    // has no such distinction - see MicrosoftBenzeneServiceContainer). IsGenericTypeDefinition is the
+    // check that actually distinguishes "needs RegisterGeneric" from "RegisterType handles it fine".
     public IBenzeneServiceContainer AddScoped(Type type)
     {
-        if (type.IsGenericType)
+        if (type.IsGenericTypeDefinition)
         {
             _containerBuilder.RegisterGeneric(type).InstancePerLifetimeScope();
         }
@@ -51,7 +59,7 @@ public class AutofacBenzeneServiceContainer : IBenzeneServiceContainer
 
     public IBenzeneServiceContainer AddScoped(Type serviceType, Type implementationType)
     {
-        if (implementationType.IsGenericType)
+        if (implementationType.IsGenericTypeDefinition)
         {
             _containerBuilder.RegisterGeneric(implementationType).As(serviceType).InstancePerLifetimeScope();
         }
@@ -114,7 +122,7 @@ public class AutofacBenzeneServiceContainer : IBenzeneServiceContainer
 
     public IBenzeneServiceContainer AddTransient(Type type)
     {
-        if (type.IsGenericType)
+        if (type.IsGenericTypeDefinition)
         {
             _containerBuilder.RegisterGeneric(type).InstancePerDependency();
         }
@@ -129,7 +137,7 @@ public class AutofacBenzeneServiceContainer : IBenzeneServiceContainer
 
     public IBenzeneServiceContainer AddTransient(Type serviceType, Type implementationType)
     {
-        if (implementationType.IsGenericType)
+        if (implementationType.IsGenericTypeDefinition)
         {
             _containerBuilder.RegisterGeneric(implementationType).As(serviceType).InstancePerDependency();
         }
@@ -178,7 +186,7 @@ public class AutofacBenzeneServiceContainer : IBenzeneServiceContainer
 
     public IBenzeneServiceContainer AddSingleton(Type type)
     {
-        if (type.IsGenericType)
+        if (type.IsGenericTypeDefinition)
         {
             _containerBuilder.RegisterGeneric(type).SingleInstance();
         }
@@ -193,7 +201,7 @@ public class AutofacBenzeneServiceContainer : IBenzeneServiceContainer
 
     public IBenzeneServiceContainer AddSingleton(Type serviceType, Type implementationType)
     {
-        if (implementationType.IsGenericType)
+        if (implementationType.IsGenericTypeDefinition)
         {
             _containerBuilder.RegisterGeneric(implementationType).As(serviceType).SingleInstance();
         }

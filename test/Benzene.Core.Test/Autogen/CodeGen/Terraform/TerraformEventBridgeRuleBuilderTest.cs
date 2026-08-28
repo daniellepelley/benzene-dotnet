@@ -132,6 +132,38 @@ public class TerraformEventBridgeRuleBuilderTest
         Assert.Contains($"    \"detail-type\" = [\"{Defaults.Topic}\", \"{Defaults.TopicNoResponse}\"]", rule.Lines);
     }
 
+    // #212/#263: a Benzene message topic is user-authored and lands directly in the EventBridge
+    // rule's detail-type match list - a `"`/`\` used to break the HCL string literal outright, and a
+    // `${`/`%{` is live Terraform template-interpolation/directive syntax, not just mangled text.
+    [Fact]
+    public void BuildRule_AdversarialTopic_QuoteBackslashAndInterpolation_EscapedNotEvaluated()
+    {
+        const string adversarialTopic = "order.created\"; \\${aws_iam_role.admin.arn}";
+        var settings = CreateSettings();
+        settings.Topics = new[] { adversarialTopic };
+
+        var result = new TerraformEventBridgeRuleBuilder().BuildRule(settings);
+        var joined = string.Join("\n", result);
+
+        Assert.Contains($"\"detail-type\" = [{HclLiteral.Format(adversarialTopic)}]", joined);
+        // The sharpest edge of the finding: a live "${" must never survive into the generated .tf -
+        // it would be evaluated by Terraform as an expression, not read back as this literal text.
+        Assert.DoesNotContain("\"${", joined);
+    }
+
+    [Fact]
+    public void BuildRule_AdversarialEventBusName_Interpolation_Neutralized()
+    {
+        const string adversarialBusName = "orders-bus${data.aws_caller_identity.current.account_id}";
+        var settings = CreateSettings();
+        settings.EventBusName = adversarialBusName;
+
+        var result = new TerraformEventBridgeRuleBuilder().BuildRule(settings);
+
+        Assert.Contains($"  event_bus_name = {HclLiteral.Format(adversarialBusName)}", result);
+        Assert.DoesNotContain(result, line => line.Contains("\"${"));
+    }
+
     [Fact]
     public void TerraformLambdaBuilder_WithEventBridgeSettings_AppendsRuleFilesAndDefaultsLambdaName()
     {

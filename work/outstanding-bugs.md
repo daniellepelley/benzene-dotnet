@@ -2764,6 +2764,107 @@ below for why the fix footprint ended up wider than the ruling's own four-file c
   existing test in the file. `logger` now passes straight through (default `null`), and a new
   `SendMessageAsync_NullLogger_DoesNotThrow_AndStillReturnsServiceUnavailable` test pins the real
   behavior explicitly.
+> **Tracked findings, rounds 14-15 (WP-H: CodeGen escaping + Autofac/ApiGateway/Markdown stragglers)
+> — #210, #211, #212, #213, #263, #264, #265 fixed.** WP-H closes the specific findings listed below,
+> ruled in **[`bug-fix-rulings-round14-15-2026-08.md`](bug-fix-rulings-round14-15-2026-08.md)** §3
+> WP-H, with full evidence in
+> **[`bug-fix-designs-round14-2026-08.md`](bug-fix-designs-round14-2026-08.md)** §3 (#210-#213) and
+> **[`bug-fix-designs-round15-2026-08.md`](bug-fix-designs-round15-2026-08.md)** §10 (#263-#265).
+> Rounds 14-15 raised further findings outside WP-H's scope (#266+); those are tracked by their own
+> work packages and are not represented here.
+
+- **[RESOLVED] #212 + #263 (same underlying fix, two rounds) — the "unescaped interpolation into
+  generated output" defect class, previously fixed only for `MessageHandlerSourceGenerator`'s topic
+  literal (`SymbolDisplay.FormatLiteral`), was never propagated to the sibling generators.** #212
+  (round 14) found it in `ApiGatewayBuilderV1`'s YAML emission (a `"` in a topic broke the
+  double-quoted `summary:` scalar; a `:` in a path segment survived `CreateTag`'s title-casing into
+  an invalid unquoted `tags:` sequence item); #263 (round 15) found the identical root cause is
+  systemic across `Benzene.CodeGen.Terraform` (every string field on the Terraform settings types —
+  `Name`/`Domain`/`SubDomain`/`EntryPoint`/`Runtime`, event-bus/rule names, and especially message
+  topic strings — interpolated raw into every builder in the package) and reaches
+  `Benzene.CodeGen.Client` (a topic interpolated as a raw C# string literal in
+  `MessageClientSdkBuilder`, and a discriminator property name/mapping key in
+  `OpenApiSchemaCSharpTypeBuilder` — a `"` breaks the generated literal outright; a crafted `", ...`
+  sequence is a genuine C#-source-injection vector). A sweep of the rest of the package this WP ran
+  turned up one more site the ruling didn't name: `MessageHandlerBuilder.cs`'s `[Message("<topic>")]`
+  attribute emission (the `-output message-handlers` build path) — identical hazard, same fix. Fixed
+  with one small escaping helper per output format, each doc-commented as the reference-implementation
+  fix mirrored:
+  - **C#** (`Benzene.CodeGen.Client/MessageClientSdkBuilder.cs`, `OpenApiSchemaCSharpTypeBuilder.cs`,
+    `MessageHandlerBuilder.cs` — the last one found by this WP's own sweep, not named in the ruling):
+    `CodeGenHelpers.ToCSharpStringLiteral` (`Benzene.CodeGen.Core`) — the same escaping semantics as
+    `SymbolDisplay.FormatLiteral(value, quote: true)`, reimplemented locally rather than taking a
+    `Microsoft.CodeAnalysis.CSharp` package dependency in these shipped (packable) NuGet libraries —
+    unlike the analyzer project, which only needs it as a build-time, non-shipping dependency. (This
+    is a deliberate deviation from the ruling's literal "use `SymbolDisplay.FormatLiteral`" wording,
+    made to honor `AGENTS.md`'s "no new NuGet dependencies without asking first"; functionally
+    equivalent escaping, same hazard closed.)
+  - **YAML** (`Benzene.CodeGen.ApiGateway/YamlLiteral.cs`): wraps in single quotes, doubling any
+    embedded single quote — applied to every `summary:`, `tags:` sequence item, and the path mapping
+    key itself. The golden test files now show the single-quoted form (`summary: 'user:get'`,
+    `- 'Rbac User'`, `'/rbac/user/{id}':`) — a real, equivalent-YAML behavior change, not a rename.
+  - **HCL** (`Benzene.CodeGen.Terraform/HclLiteral.cs`): escapes `"`/`\`, and — the sharpest edge of
+    the finding — neutralizes `${`/`%{` (HCL's own live template-interpolation/directive syntax) via
+    HCL's `$${`/`%%{` escaping convention, so a topic containing e.g. `${aws_iam_role.admin.arn}` is
+    emitted as literal text instead of being *evaluated* by Terraform as a real expression. Applied
+    across all three builders in the package (`TerraformLambdaBuilder`, `TerraformEventBridgeRuleBuilder`,
+    `TerraformLambdaEventBusPermissionsBuilder`) to every settings-derived string emitted as an HCL
+    string literal — not to a resource label/identifier, and not to the generator's own deliberately-raw
+    `"${path.module}/file.zip"` filename literal or `vpc_config`'s `subnet_ids` expression, both left
+    untouched on purpose.
+  Tests: adversarial-content cases (quote, backslash, and — for HCL — `${`) added to
+  `MessageClientSdkBuilderTest` (client + `MessageHandlerBuilder`'s own `Autogen/CodeGen/Service`
+  test file), `SdkTypeBuilderPolymorphismTest`, `LambdaOpenApiBuilderTest`, and all three Terraform
+  builder test files, plus dedicated `YamlLiteralTest`/`HclLiteralTest` unit tests for the helpers
+  themselves — round 15 confirmed this coverage was previously entirely absent (zero matches for
+  "quote"/"escape").
+- **[RESOLVED] #211 — `ApiGatewayBuilderV1`'s duplicate-route guard grouped on raw `Method`
+  (case-sensitive) while `BuildVerb` lowercases the verb for emission, so two topics mapped to `"GET"`
+  and `"get"` for the same path passed the check uncaught and then collided as two identical `get:`
+  keys under that path in the emitted YAML — the same duplicate-key shape #87 originally fixed,
+  reached via verb casing instead of identical casing.** Fixed: the grouping key now case-folds
+  `Method` (`ToLowerInvariant()`) while leaving `Path` raw (a path is emitted verbatim as the YAML
+  mapping key, so two differently-cased paths are genuinely different keys) — mirrors
+  `Benzene.Http.Routing.ReflectionHttpEndpointFinder`'s own case-folded duplicate-route check, same
+  comment pattern. The thrown exception's message still names the offending route in its original
+  case (read off the first colliding entry, not the folded key) so existing case-sensitive message
+  assertions keep passing. Test:
+  `BuildCodeFiles_TwoTopicsShareAPathWithDifferentlyCasedMethod_FailsLoudly_NotDuplicateKeyYaml`.
+- **[RESOLVED] #213 — `MarkdownTypeBuilder.MapProperty` NREs on an array schema with `Items == null`**
+  (not reachable through Benzene's own `SchemaBuilder`, but the method is public and callable with any
+  hand-authored/deserialized schema). Fixed: added an `openApiSchema.Items != null` guard mirroring
+  the null-safety `GetPropertyTypeName` (the sibling method in the same class) already has for the
+  identical case — a null-Items array now falls through to the generic branch and renders as
+  `Void[]` instead of throwing. Test:
+  `BuildType_ArraySchemaWithNullItems_HandledGracefully_NotNullReferenceException`.
+- **[RESOLVED] #210 — the Autofac adapter threw on a closed generic `Type` where the Microsoft
+  adapter succeeded, because six generic-routing checks across `AutofacBenzeneServiceContainer`
+  (`AddScoped`/`AddTransient`/`AddSingleton`, both the `Type` and `(Type, Type)` overloads) tested
+  `IsGenericType` (true for both an open generic type definition and a closed generic) instead of
+  `IsGenericTypeDefinition` (true only for the type definition Autofac's `RegisterGeneric` actually
+  requires).** A discovered handler class that happened to be a closed generic worked under
+  `MicrosoftBenzeneServiceContainer` (whose `RegisterType`/`AddScoped(Type)` draws no such
+  distinction) and threw under Autofac. Fixed: all six checks now test `IsGenericTypeDefinition`.
+  Tests (comparative, both adapters, in the existing `AutofacBenzeneServiceContainer`/
+  `MicrosoftBenzeneServiceContainer` parity suite):
+  `Autofac_ClosedGenericHandlerType_RegisteredAndResolvedSuccessfully_LikeMicrosoft`,
+  `Microsoft_ClosedGenericHandlerType_RegisteredAndResolvedSuccessfully`.
+- **[RESOLVED] #264 (minor) — `HealthCheckCommand.IsHealthy` treats an unrecognized response shape
+  (no `isHealthy` field at all) as healthy, a documented, deliberate default that stayed a residual
+  CI-gate softness (a misconfigured `--lambda-name` returning unrelated 200 JSON passed as
+  healthy).** Fixed: added a `--strict` CLI flag/option (`HealthCheckPayload.Strict`, `"true"`/
+  `"false"`, default `"false"` — mirrors the existing `--no-traceparent-probe` string-boolean
+  convention in this CLI) that flips only the "no `isHealthy` field" case to unhealthy; an explicit
+  `isHealthy: false` still trips the gate identically either way, and the lenient default is
+  unchanged when `--strict` is omitted. Tests: `ExecuteAsync_ResponseMissingIsHealthy_Strict_Throws`,
+  `ExecuteAsync_ResponseMissingIsHealthy_ExplicitlyNotStrict_DoesNotThrow`,
+  `ExecuteAsync_Unhealthy_Strict_StillThrows`.
+- **[RESOLVED] #265 (minor) — `LambdaServiceMarkdownBuilder.BuildValidation` embedded property
+  names/rules into a Markdown table row with no `|` escaping**, so a property name containing a pipe
+  corrupted the rendered table (same class as #213 — a hand-authored/deserialized schema, not
+  reachable through reflection, but the method is public). Fixed: a small `EscapeTableCell` helper
+  (`value.Replace("|", "\\|")`) applied to both the field-name and validation-rules cells. Test:
+  `BuildValidation_PropertyNameContainingPipe_RendersAsACorrectTableRow`.
 
 ## Open — maintainer decisions (the real remaining backlog)
 

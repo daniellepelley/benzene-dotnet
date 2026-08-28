@@ -177,4 +177,62 @@ public class LambdaOpenApiBuilderTest
         Assert.Contains("'GET,OPTIONS'", options);
         Assert.DoesNotContain("'GET,GET,OPTIONS'", options);
     }
+
+    // #211: the duplicate-route guard used to group on raw Method (case-sensitive) while BuildVerb
+    // lowercases the verb for emission, so "GET" and "get" mapped to the same path passed the check
+    // and then collided as two identical `get:` keys under that path in the emitted YAML - mirrors
+    // ReflectionHttpEndpointFinder's own case-folded duplicate-route check for the identical concern.
+    [Fact]
+    public void BuildCodeFiles_TwoTopicsShareAPathWithDifferentlyCasedMethod_FailsLoudly_NotDuplicateKeyYaml()
+    {
+        var messageHandlerDefinitions = new IMessageHandlerDefinition[]
+        {
+            MessageHandlerDefinition.CreateInstance("user:get", typeof(GetUserMessage), typeof(GetUserMessage), typeof(UserDto)),
+            MessageHandlerDefinition.CreateInstance("user:get-legacy", typeof(GetUserMessage), typeof(GetUserMessage), typeof(UserDto)),
+        };
+        var httpEndpointDefinitions = new[]
+        {
+            HttpEndpointDefinition.CreateInstance("GET", "user/{id}", "user:get"),
+            HttpEndpointDefinition.CreateInstance("get", "user/{id}", "user:get-legacy"),
+        };
+        var eventServiceDocument = httpEndpointDefinitions.ToEventServiceDocument(messageHandlerDefinitions);
+
+        var builder = new ApiGatewayBuilderV1("MY_FUNC_URI");
+
+        var exception = Assert.Throws<BenzeneException>(() => builder.BuildCodeFiles(eventServiceDocument));
+
+        // Whichever of the two differently-cased endpoints happened to be encountered first names
+        // the route in the message - case-insensitive check keeps this independent of that ordering.
+        Assert.Contains("GET", exception.Message.ToUpperInvariant());
+        Assert.Contains("user/{id}", exception.Message);
+    }
+
+    // #212/#263: a message topic (summary/tag source) or a path segment (tag source, and the path
+    // mapping key itself) can contain a `"`, `:` or `'` - unescaped, these used to break the
+    // double-quoted `summary:` scalar or survive title-casing into an invalid unquoted `tags:`
+    // sequence item. YamlLiteral's single-quote-and-escape now guards every such value.
+    [Fact]
+    public void BuildVerb_AdversarialTopic_QuoteAndBackslash_SafelySingleQuoted()
+    {
+        const string adversarialTopic = "user:get\" # inject: value";
+
+        var verb = new ApiGatewayBuilderV1("URI").BuildVerb("GET", "user/{id}", adversarialTopic);
+
+        Assert.Contains($"summary: {YamlLiteral.Format(adversarialTopic)}", verb);
+        // The pre-fix raw double-quoted interpolation would have produced this exact broken form.
+        Assert.DoesNotContain($@"summary: ""{adversarialTopic}""", verb);
+    }
+
+    [Fact]
+    public void BuildPath_AdversarialPath_ColonAndQuote_KeyAndTagSafelySingleQuoted()
+    {
+        // A `:` surviving title-casing (CreateTag upper-cases each segment but leaves punctuation
+        // alone) into an unquoted YAML sequence item is the exact #212 reproduction.
+        const string adversarialPath = "user/weird:segment";
+
+        var built = new ApiGatewayBuilderV1("URI").BuildPath(adversarialPath, new[] { ("GET", "user:get") });
+
+        Assert.Contains($"  {YamlLiteral.Format("/" + adversarialPath)}:", built);
+        Assert.DoesNotContain($"  /{adversarialPath}:", built);
+    }
 }

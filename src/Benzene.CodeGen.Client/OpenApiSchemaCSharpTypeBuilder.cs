@@ -65,12 +65,18 @@ public class OpenApiSchemaCSharpTypeBuilder : ICodeBuilder<IDictionary<string, O
         {
             // Mirror the contract's discriminator as System.Text.Json polymorphism attributes so
             // the generated hierarchy round-trips derived instances the way the spec describes.
+            //
+            // The discriminator property name and each mapping key come straight off the schema (a
+            // user-authored [JsonPolymorphic]/[JsonDerivedType] pair, or a hand-built/deserialized
+            // schema), so - like a message topic - they can contain a quote/backslash that would
+            // otherwise break, or inject into, these generated attribute-argument literals. See
+            // CodeGenHelpers.ToCSharpStringLiteral.
             lineWriter.WriteLine(
-                $"[JsonPolymorphic(TypeDiscriminatorPropertyName = \"{schema.Discriminator!.PropertyName}\")]", 1);
+                $"[JsonPolymorphic(TypeDiscriminatorPropertyName = {CodeGenHelpers.ToCSharpStringLiteral(schema.Discriminator!.PropertyName)})]", 1);
             foreach (var mapping in schema.Discriminator.Mapping)
             {
                 lineWriter.WriteLine(
-                    $"[JsonDerivedType(typeof({_nameFormatter.Format(RefName(mapping.Value))}), \"{mapping.Key}\")]", 1);
+                    $"[JsonDerivedType(typeof({_nameFormatter.Format(RefName(mapping.Value))}), {CodeGenHelpers.ToCSharpStringLiteral(mapping.Key)})]", 1);
             }
         }
 

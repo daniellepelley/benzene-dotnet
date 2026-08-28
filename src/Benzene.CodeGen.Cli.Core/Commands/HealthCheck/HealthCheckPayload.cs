@@ -12,4 +12,7 @@ public class HealthCheckPayload
 
     [Arg(Name = Constants.FailOn, DefaultValue = Constants.HealthCheckFailOnDefault, Description = Constants.HealthCheckFailOnDescription)]
     public string FailOn { get; set; }
+
+    [Arg(Name = Constants.Strict, DefaultValue = Constants.StrictDefault, Description = Constants.StrictDescription)]
+    public string Strict { get; set; }
 }

@@ -14,6 +14,13 @@ namespace Benzene.CodeGen.Cli.Core.Commands.HealthCheck;
 /// <see cref="HealthCheckFailedException"/> when false, gated behind the same <c>--fail-on</c>
 /// convention those siblings use.
 /// </summary>
+/// <remarks>
+/// #264: <see cref="IsHealthy"/>'s default treats a response with no <c>isHealthy</c> field at all
+/// as healthy - a deliberate choice (don't fail-loud on a response shape this tool doesn't
+/// recognize) that stays the default. <c>--strict</c> flips that one case for a CI pipeline that
+/// wants a misconfigured target (a <c>--lambda-name</c> answering with unrelated 200 JSON) caught
+/// rather than silently passed.
+/// </remarks>
 public class HealthCheckCommand : CommandBase<HealthCheckPayload>
 {
     private static readonly string[] ValidFailOnValues = { "unhealthy", "none" };
@@ -43,12 +50,13 @@ public class HealthCheckCommand : CommandBase<HealthCheckPayload>
     public override async Task ExecuteAsync(HealthCheckPayload payload)
     {
         var failOn = ResolveFailOn(payload);
+        var strict = string.Equals(payload.Strict, "true", StringComparison.OrdinalIgnoreCase);
 
         var client = _healthCheckClient ?? CreateClient(payload);
         var json = await client.GetHealthCheckAsync();
         Console.Out.WriteJson(json);
 
-        if (Trips(json, failOn))
+        if (Trips(json, failOn, strict))
         {
             throw new HealthCheckFailedException(json,
                 $"benzene healthcheck: target reported unhealthy - failing on --fail-on {failOn}");
@@ -73,20 +81,26 @@ public class HealthCheckCommand : CommandBase<HealthCheckPayload>
         return failOn;
     }
 
-    private static bool Trips(string json, string failOn) => failOn switch
+    private static bool Trips(string json, string failOn, bool strict) => failOn switch
     {
-        "unhealthy" => !IsHealthy(json),
+        "unhealthy" => !IsHealthy(json, strict),
         _ => false, // "none": report only, never fail.
     };
 
-    private static bool IsHealthy(string json)
+    private static bool IsHealthy(string json, bool strict)
     {
         var jObject = JObject.Parse(json);
         var isHealthyToken = jObject["isHealthy"];
 
-        // Absent/unparseable `isHealthy`: don't fail-loud on a response shape this tool doesn't
-        // recognize - only trip on an explicit `false`.
-        return isHealthyToken == null || isHealthyToken.Value<bool>();
+        if (isHealthyToken == null)
+        {
+            // Absent `isHealthy`: the documented, deliberate default doesn't fail-loud on a response
+            // shape this tool doesn't recognize - only trip on an explicit `false`. --strict flips
+            // this one case so a CI pipeline can opt into treating an unrecognized shape as unhealthy.
+            return !strict;
+        }
+
+        return isHealthyToken.Value<bool>();
     }
 }
 

@@ -28,11 +28,11 @@ public class TerraformEventBridgeRuleBuilder : ICodeBuilder<TerraformEventBridge
         lineWriter.WriteLine($"resource \"aws_cloudwatch_event_rule\" \"{lambdaName}_event_rule\" {{");
         using (lineWriter.StartIndent())
         {
-            lineWriter.WriteLine($"name = \"{settings.LambdaName}-event-rule\"");
+            lineWriter.WriteLine($"name = {HclLiteral.Format(settings.LambdaName + "-event-rule")}");
 
             if (!string.IsNullOrEmpty(settings.EventBusName))
             {
-                lineWriter.WriteLine($"event_bus_name = \"{settings.EventBusName}\"");
+                lineWriter.WriteLine($"event_bus_name = {HclLiteral.Format(settings.EventBusName)}");
             }
 
             lineWriter.WriteLine("event_pattern = jsonencode({");
@@ -66,7 +66,7 @@ public class TerraformEventBridgeRuleBuilder : ICodeBuilder<TerraformEventBridge
 
             if (!string.IsNullOrEmpty(settings.EventBusName))
             {
-                lineWriter.WriteLine($"event_bus_name = \"{settings.EventBusName}\"");
+                lineWriter.WriteLine($"event_bus_name = {HclLiteral.Format(settings.EventBusName)}");
             }
 
             lineWriter.WriteLine($"arn = aws_lambda_function.{lambdaName}.arn");
@@ -97,8 +97,10 @@ public class TerraformEventBridgeRuleBuilder : ICodeBuilder<TerraformEventBridge
         return lineWriter.GetLines();
     }
 
+    // Topics/Sources are user-authored (Benzene message topics, or a caller-supplied event source
+    // filter) - HclLiteral escapes each entry for safe embedding as an HCL string literal (#212/#263).
     private static string QuoteList(IEnumerable<string> values)
     {
-        return string.Join(", ", values.Select(x => $"\"{x}\""));
+        return string.Join(", ", values.Select(HclLiteral.Format));
     }
 }

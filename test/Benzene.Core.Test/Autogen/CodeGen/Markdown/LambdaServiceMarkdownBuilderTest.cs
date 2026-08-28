@@ -5,8 +5,10 @@ using System.Reflection;
 using Benzene.CodeGen.Markdown;
 using Benzene.FluentValidation.Schema;
 using Benzene.Schema.OpenApi;
+using Benzene.Schema.OpenApi.EventService;
 using Benzene.Test.Autogen.CodeGen.Helpers;
 using Benzene.Test.Autogen.CodeGen.Model;
+using Microsoft.OpenApi.Models;
 using Xunit;
 
 namespace Benzene.Test.Autogen.CodeGen.Markdown;
@@ -94,6 +96,38 @@ public class LambdaServiceMarkdownBuilderTest
         var result = lambdaServiceSdkBuilder.Build(dictionary.ToEventServiceDocument(new OpenApiValidationSchemaBuilder(new SchemaBuilder(), fluentValidationSchemaBuilder)));
 
         Assert.Equal(expected, result["README.md"], ignoreLineEndingDifferences: true);
+    }
+
+    // #265: BuildValidation embeds property names/rules straight into a Markdown table row with no
+    // `|` escaping - a property name containing a pipe (reachable via any hand-authored/deserialized
+    // schema, same class as #213's MapProperty) used to be read as an extra table cell boundary,
+    // corrupting the rendered row.
+    [Fact]
+    public void BuildValidation_PropertyNameContainingPipe_RendersAsACorrectTableRow()
+    {
+        var requestSchema = new OpenApiSchema
+        {
+            Type = "object",
+            Properties = new Dictionary<string, OpenApiSchema>
+            {
+                ["bad|name"] = new OpenApiSchema { Type = "string", Nullable = false }
+            }
+        };
+        var responseSchema = new OpenApiSchema { Type = "object" };
+
+        var document = new EventServiceDocument(
+            new OpenApiInfo(),
+            Array.Empty<OpenApiTag>(),
+            new[] { new RequestResponse { Topic = "user:get", Request = requestSchema, Response = responseSchema } },
+            Array.Empty<Event>(),
+            new OpenApiComponents { Schemas = new Dictionary<string, OpenApiSchema>() });
+
+        var builder = new LambdaServiceMarkdownBuilder(UserLambdaName, UserServiceName, BaseNameSpace);
+        var readme = builder.Build(document)["README.md"];
+
+        Assert.Contains(@"|bad\|name|Not Null|", readme);
+        // The un-escaped, table-corrupting form must not appear.
+        Assert.DoesNotContain("|bad|name|Not Null|", readme);
     }
 }
 

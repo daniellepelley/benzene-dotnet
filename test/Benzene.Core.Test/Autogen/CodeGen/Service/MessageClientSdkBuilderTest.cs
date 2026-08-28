@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Benzene.CodeGen.Client;
+using Benzene.CodeGen.Core;
 using Benzene.Test.Autogen.CodeGen.Helpers;
 using Benzene.Test.Autogen.CodeGen.Model;
 using Xunit;
@@ -62,6 +64,35 @@ public class MessageHandlerBuilderTest
         Assert.Equal(expectedCreateUserMessage, result["CreateUserMessage.cs"], ignoreLineEndingDifferences: true);
         Assert.Equal(expectedUserDto, result["UserDto.cs"], ignoreLineEndingDifferences: true);
         Assert.Equal(expectedInternalDto, result["InternalDto.cs"], ignoreLineEndingDifferences: true);
+    }
+
+    // #212/#263: found via a sweep of the C# emission package - not one of the ruling's named sites,
+    // but the identical raw-interpolation-into-generated-C#-attribute hazard reached through the
+    // "message-handlers" build output instead of the "client" one. An embedded `"` used to break the
+    // generated [Message("...")] attribute's string literal outright.
+    [Fact]
+    public void AdversarialTopic_QuoteAndBackslash_EscapedInGeneratedMessageAttribute()
+    {
+        const string adversarialTopic = "user:get\" + Malicious()) + \"";
+
+        var dictionary = new Dictionary<string, (Type, Type, Type)>
+        {
+            { adversarialTopic, (typeof(GetUserMessage), typeof(GetUserMessage), typeof(UserDto)) }
+        };
+
+        var lambdaServiceSdkBuilder = new MessageHandlerBuilder(BaseNameSpace);
+        var result = lambdaServiceSdkBuilder.Build(dictionary.ToEventServiceDocument());
+
+        // The derived class/file name depends on TopicMethodName's own identifier-sanitizing of the
+        // adversarial topic - irrelevant to this fix, so find the one generated file that carries the
+        // [Message(...)] attribute rather than hand-deriving its name.
+        var handlerSource = result.Values.Single(text => text.Contains("[Message("));
+
+        var expectedLiteral = CodeGenHelpers.ToCSharpStringLiteral(adversarialTopic);
+        var naiveUnescapedForm = $"\"{adversarialTopic}\"";
+
+        Assert.Contains($"[Message({expectedLiteral})]", handlerSource);
+        Assert.DoesNotContain($"[Message({naiveUnescapedForm})]", handlerSource);
     }
 }
 

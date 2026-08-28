@@ -86,7 +86,13 @@ public class MarkdownTypeBuilder
                 lineWriter.WriteLine("{}");
             }
         }
-        else if (openApiSchema.Type == "array" && (openApiSchema.Items.Reference != null || openApiSchema.Items.Type == "object"))
+        // #213: an `Items == null` array schema isn't reachable through Benzene's own SchemaBuilder,
+        // but this method is public and callable with any hand-authored/deserialized schema - the
+        // `openApiSchema.Items != null` guard mirrors the null-safety GetPropertyTypeName already has
+        // for the identical case (its own `openApiSchema == null` check), so an array with no Items
+        // falls through to the generic branch below (GetPropertyTypeName's array handling renders it
+        // as "Void[]") instead of NRE-ing on `openApiSchema.Items.Reference`.
+        else if (openApiSchema.Type == "array" && openApiSchema.Items != null && (openApiSchema.Items.Reference != null || openApiSchema.Items.Type == "object"))
         {
             // Collapse to "{...}[]" only for a genuine reference cycle (the item points back at a
             // type we're already rendering), mirroring the single-object branch below. The original

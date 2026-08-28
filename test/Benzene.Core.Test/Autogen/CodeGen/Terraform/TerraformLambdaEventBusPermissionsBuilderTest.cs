@@ -100,6 +100,24 @@ public class TerraformLambdaEventBusPermissionsBuilderTest
         Assert.Equal("benzene_orders_func", NameFormatter.UnderScoreCase("benzene-orders-func"));
     }
 
+    // #212/#263: the SNS filter_policy's topics are user-authored Benzene message topics - a `"`/`\`
+    // used to break the HCL string literal inside jsonencode(...) outright, and a `${`/`%{` is live
+    // Terraform template-interpolation syntax, not just mangled text.
+    [Fact]
+    public void BuildSubscription_AdversarialTopic_QuoteBackslashAndInterpolation_EscapedNotEvaluated()
+    {
+        const string adversarialTopic = "order.created\"; \\${aws_iam_role.admin.arn}";
+
+        var result = new TerraformLambdaEventBusPermissionsBuilder()
+            .BuildSubscription("benzene-orders-func", "orders-topic", new[] { adversarialTopic });
+        var joined = string.Join("\n", result);
+
+        Assert.Contains($"filter_policy = jsonencode({{\"topic\" = [{HclLiteral.Format(adversarialTopic)}]}})", joined);
+        // The sharpest edge of the finding: a live "${" must never survive into the generated .tf -
+        // it would be evaluated by Terraform as an expression, not read back as this literal text.
+        Assert.DoesNotContain("\"${", joined);
+    }
+
     [Fact]
     public void CustomSnsRemoteStateName_IsUsedInTheArnReference()
     {

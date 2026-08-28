@@ -38,6 +38,16 @@ of hand-maintained. See `docs/terraform.md`.
   (`IMessageHandlerDefinition[]`, `params Type[]`, or `params Assembly[]`), de-duplicated on
   `Topic.Id` (handler versions never reach the wire) and ordinal-sorted for diff-stable output.
 - `TerraformDirectoryMerger` — merges generated files into an existing Terraform directory.
+- `HclLiteral` — escapes a settings-derived value (`Name`/`Domain`/`SubDomain`/`EntryPoint`/`Runtime`,
+  an event-bus/rule name, and especially a Benzene message topic) for safe embedding as an HCL
+  string literal: escapes `"` and `\`, and — the sharpest edge of round 14-15's #212/#263 finding —
+  neutralizes `${`/`%{` (HCL's own live template-interpolation/directive syntax) via HCL's own
+  `$${`/`%%{` escaping convention. An unescaped topic containing `${aws_iam_role.admin.arn}` isn't
+  just mangled output — Terraform *evaluates* it as a real expression referencing whatever symbol
+  happens to be in scope. Applied everywhere any of the three builders below interpolates a
+  settings-derived string as an HCL string literal (not to a Terraform resource label/identifier,
+  and not to a deliberately-raw expression like `vpc_config`'s `subnet_ids` or the generator's own
+  `"${path.module}/file.zip"` filename literal — both stay untouched, on purpose).
 
 ## Important conventions
 - Builders emit `ICodeFile[]` (one file per resource type) via `LineWriter(2)` — two-space
@@ -59,6 +69,12 @@ of hand-maintained. See `docs/terraform.md`.
   `BuildPermissions`/`BuildSubscriptions` (one resource block per `TopicsMap` entry),
   `BuildCodeFiles`'s two-file output, `NameFormatter.UnderScoreCase`, and the configurable
   `SnsRemoteStateName` in the SNS ARN reference.
+- `HclLiteralTest.cs` — the helper directly: plain values, embedded `"`/`\`, and the `${`/`%{`
+  neutralization (asserting the live-interpolation form never survives into the output).
+  `TerraformLambdaBuilderTest.cs`/`TerraformEventBridgeRuleBuilderTest.cs`/
+  `TerraformLambdaEventBusPermissionsBuilderTest.cs` each carry an adversarial-content case
+  (quote/backslash/`${`) proving the corresponding builder's `.tf` output stays syntactically valid
+  and that no live `"${` interpolation sequence reaches the generated file (#212/#263).
 - `test/Benzene.Core.Test/Autogen/CodeGen/Terraform/TerraformDirectoryMergerTest.cs` — real
   filesystem round trips (temp directory, cleaned up via `IDisposable`): no existing file → new
   content passes through unchanged; an existing file whose first line matches the new content's
