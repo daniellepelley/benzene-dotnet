@@ -125,7 +125,11 @@ public class MessageClientSdkBuilder : ICodeBuilder<EventServiceDocument>
         // Benzene's own reserved endpoints (benzene:*) are framework plumbing, not a client's domain
         // surface, and are excluded by TopicScope like any other reserved topic - naming one here
         // would demand an outbound route the consumer never asked for and fail its start-up checks.
-        var requiredTopics = string.Join(", ", eventServiceDocument.Requests.Select(x => $@"""{x.Topic}"""));
+        //
+        // Topic is user-authored (a [Message] attribute value), so it can contain a quote/backslash
+        // that would otherwise break, or inject into, this generated string-array literal - see
+        // CodeGenHelpers.ToCSharpStringLiteral.
+        var requiredTopics = string.Join(", ", eventServiceDocument.Requests.Select(x => CodeGenHelpers.ToCSharpStringLiteral(x.Topic)));
 
         var lineWriter = new LineWriter();
         lineWriter.WriteLine();
@@ -213,8 +217,10 @@ public class MessageClientSdkBuilder : ICodeBuilder<EventServiceDocument>
         lineWriter.WriteLine(
             $"public Task<IBenzeneResult<{responseTypeName}>> {methodName}Async({requestTypeName} message, IDictionary<string, string> headers)", 2);
         lineWriter.WriteLine("{", 2);
+        // topic is user-authored - see CodeGenHelpers.ToCSharpStringLiteral for why this can't be a
+        // raw interpolation into the generated string literal.
         lineWriter.WriteLine(
-            $@"return _sender.SendAsync<{requestTypeName}, {responseTypeName}>(""{topic}"", message, headers);",
+            $@"return _sender.SendAsync<{requestTypeName}, {responseTypeName}>({CodeGenHelpers.ToCSharpStringLiteral(topic)}, message, headers);",
             3);
         lineWriter.WriteLine("}", 2);
         lineWriter.WriteLine();

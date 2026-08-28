@@ -85,4 +85,36 @@ public class HealthCheckCommandFailOnTest
 
         await command.ExecuteAsync(new HealthCheckPayload { LambdaName = "orders-fn" });
     }
+
+    // #264: --strict opts a CI pipeline into treating a response with no isHealthy field at all as
+    // unhealthy, while the documented lenient default (above) stays unchanged.
+    [Fact]
+    public async Task ExecuteAsync_ResponseMissingIsHealthy_Strict_Throws()
+    {
+        var command = new HealthCheckCommand(FakeClient(@"{""healthChecks"": {}}"));
+
+        var exception = await Assert.ThrowsAsync<HealthCheckFailedException>(
+            () => command.ExecuteAsync(new HealthCheckPayload { LambdaName = "orders-fn", Strict = "true" }));
+
+        Assert.Contains("unhealthy", exception.Message);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ResponseMissingIsHealthy_ExplicitlyNotStrict_DoesNotThrow()
+    {
+        var command = new HealthCheckCommand(FakeClient(@"{""healthChecks"": {}}"));
+
+        await command.ExecuteAsync(new HealthCheckPayload { LambdaName = "orders-fn", Strict = "false" });
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_Unhealthy_Strict_StillThrows()
+    {
+        // --strict only changes the "no isHealthy field at all" case - an explicit false still trips
+        // the gate exactly as it does without --strict.
+        var command = new HealthCheckCommand(FakeClient(@"{""isHealthy"": false, ""healthChecks"": {}}"));
+
+        await Assert.ThrowsAsync<HealthCheckFailedException>(
+            () => command.ExecuteAsync(new HealthCheckPayload { LambdaName = "orders-fn", Strict = "true" }));
+    }
 }

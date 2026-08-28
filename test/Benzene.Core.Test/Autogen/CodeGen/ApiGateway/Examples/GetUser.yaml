@@ -1,9 +1,9 @@
 # AUTOGEN START BENZENE_MARKETPLACE_CORE_FUNC_URI
 
-  /rbac/user/{id}:
+  '/rbac/user/{id}':
     options:
       tags:
-        - Rbac User
+        - 'Rbac User'
       parameters:
       - name: id
         in: path
@@ -43,9 +43,9 @@
           application/json: '{"statusCode": 200}'
         type: mock
     get:
-      summary: "user:get"
+      summary: 'user:get'
       tags:
-        - Rbac User
+        - 'Rbac User'
       parameters:
       - name: id
         in: path
@@ -138,9 +138,9 @@
                 #end
 
     put:
-      summary: "user:update"
+      summary: 'user:update'
       tags:
-        - Rbac User
+        - 'Rbac User'
       parameters:
       - name: id
         in: path

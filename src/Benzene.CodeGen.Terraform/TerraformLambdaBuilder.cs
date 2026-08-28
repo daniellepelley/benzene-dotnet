@@ -40,11 +40,14 @@ public class TerraformLambdaBuilder : ICodeBuilder<TerraformLambdaSettings>
         lineWriter.WriteLine($"resource \"aws_lambda_function\" \"{lambdaName}\" {{");
         using (lineWriter.StartIndent())
         {
-            lineWriter.WriteLine($"function_name = \"{settings.Name}\"");
+            // settings.Name/EntryPoint/Runtime are caller-supplied - HclLiteral escapes them for safe
+            // embedding as HCL string literals (#212/#263); "${path.module}/file.zip" below is the
+            // generator's own literal Terraform expression, not settings-derived, so it stays raw.
+            lineWriter.WriteLine($"function_name = {HclLiteral.Format(settings.Name)}");
             lineWriter.WriteLine("filename = \"${path.module}/file.zip\"");
             lineWriter.WriteLine($"role = aws_iam_role.{lambdaName}_role.arn");
-            lineWriter.WriteLine($"handler = \"{settings.EntryPoint}\"");
-            lineWriter.WriteLine($"runtime = \"{settings.Runtime}\"");
+            lineWriter.WriteLine($"handler = {HclLiteral.Format(settings.EntryPoint)}");
+            lineWriter.WriteLine($"runtime = {HclLiteral.Format(settings.Runtime)}");
             lineWriter.WriteLine($"timeout = {settings.Timeout}");
             lineWriter.WriteLine($"memory_size = {settings.MemorySize}");
 
@@ -97,9 +100,9 @@ public class TerraformLambdaBuilder : ICodeBuilder<TerraformLambdaSettings>
             lineWriter.WriteLine("tags = {");
             using (lineWriter.StartIndent())
             {
-                lineWriter.WriteLine($"name = \"{settings.Name}\"");
-                lineWriter.WriteLine($"domain = \"{settings.Domain}\"");
-                lineWriter.WriteLine($"subdomain = \"{settings.SubDomain}\"");
+                lineWriter.WriteLine($"name = {HclLiteral.Format(settings.Name)}");
+                lineWriter.WriteLine($"domain = {HclLiteral.Format(settings.Domain)}");
+                lineWriter.WriteLine($"subdomain = {HclLiteral.Format(settings.SubDomain)}");
             }
 
             lineWriter.WriteLine("}");
@@ -118,15 +121,15 @@ public class TerraformLambdaBuilder : ICodeBuilder<TerraformLambdaSettings>
         lineWriter.WriteLine($"resource \"aws_iam_role\" \"{lambdaName}_role\" {{");
         using (lineWriter.StartIndent())
         {
-            lineWriter.WriteLine($"name = \"{settings.Name}-role\"");
+            lineWriter.WriteLine($"name = {HclLiteral.Format(settings.Name + "-role")}");
             lineWriter.WriteLine("assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json");
             lineWriter.WriteLine();
             lineWriter.WriteLine("tags = {");
             using (lineWriter.StartIndent())
             {
-                lineWriter.WriteLine($"name = \"{settings.Name}-role\"");
-                lineWriter.WriteLine($"domain = \"{settings.Domain}\"");
-                lineWriter.WriteLine($"subdomain = \"{settings.SubDomain}\"");
+                lineWriter.WriteLine($"name = {HclLiteral.Format(settings.Name + "-role")}");
+                lineWriter.WriteLine($"domain = {HclLiteral.Format(settings.Domain)}");
+                lineWriter.WriteLine($"subdomain = {HclLiteral.Format(settings.SubDomain)}");
             }
             lineWriter.WriteLine("}");
         }

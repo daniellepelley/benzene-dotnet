@@ -12,6 +12,14 @@ registrations land in your Autofac container and Benzene resolves services throu
 - `AutofacBenzeneServiceContainer : IBenzeneServiceContainer` - maps Benzene lifetimes to Autofac:
   `AddScoped` → `InstancePerLifetimeScope`, `AddSingleton` → `SingleInstance`, `AddTransient` →
   `InstancePerDependency` (open generics via `RegisterGeneric`).
+  - Every `Type`-based overload (`AddScoped`/`AddTransient`/`AddSingleton`, both the `Type` and
+    `(Type, Type)` shapes — six checks in total) routes to `RegisterGeneric` only for an **open**
+    generic type definition (`type.IsGenericTypeDefinition`), never for a closed generic
+    (`typeof(Foo<int>)`), which goes through the ordinary `RegisterType` path instead. This used to
+    test `IsGenericType` (true for both open *and* closed generics), so a discovered handler class
+    that happened to be a closed generic threw here — `RegisterGeneric` requires a genuine type
+    definition — while resolving cleanly under `MicrosoftBenzeneServiceContainer` (whose
+    `RegisterType`/`AddScoped(Type)` draws no such distinction) (round 14-15, #210).
   - `IsTypeRegistered` is backed by an explicit `HashSet<Type>` maintained by every `AddXxx`/
     `AddServiceResolver` call, **not** Autofac's `ComponentRegistryBuilder`, which stays empty until
     `ContainerBuilder.Build()` runs - reading it pre-`Build()` (as this method used to) always reports
@@ -66,3 +74,11 @@ registrations land in your Autofac container and Benzene resolves services throu
   (via `IfNotRegistered`) so `ILogger<T>` always resolves; register your own `ILoggerFactory`
   instance (e.g. `LoggerFactory.Create(x => x.AddConsole())`) to enable real logging — user
   registrations always win over the fallbacks.
+
+## Tests
+- `test/Benzene.Core.Test/Core/Core/DI/AutofacDIParityTest.cs` — round 7-10 container-lifecycle
+  parity fixes (#82-#85), run against the real Autofac package (no mocking).
+- `test/Benzene.Core.Test/Core/Core/DI/ServiceContainerInstanceRegistrationTest.cs` — instance
+  registration parity between the two adapters, plus the closed-generic parity case (#210):
+  `AddScoped(typeof(ClosedGenericWidget<string>))` resolves under both `AutofacBenzeneServiceContainer`
+  and `MicrosoftBenzeneServiceContainer`.

@@ -1,9 +1,9 @@
 # AUTOGEN START BENZENE_RBAC_BFF_FUNC_URI
 
-  /rbac/test:
+  '/rbac/test':
     options:
       tags:
-        - Rbac Test
+        - 'Rbac Test'
       responses:
         "200":
           $ref: "#/components/responses/corsResponse"
@@ -37,9 +37,9 @@
           application/json: '{"statusCode": 200}'
         type: mock
     get:
-      summary: "rbac:test"
+      summary: 'rbac:test'
       tags:
-        - Rbac Test
+        - 'Rbac Test'
       responses:
         "200":
           $ref: "#/components/responses/200OkEmpty"

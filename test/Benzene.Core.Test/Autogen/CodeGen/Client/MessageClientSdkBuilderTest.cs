@@ -350,5 +350,35 @@ public class MessageClientSdkBuilderTest
 
         Assert.Equal(new[] { "using System.Diagnostics.CodeAnalysis;", "using Benzene.Abstractions.DI;" }, usings);
     }
+
+    // #263: topic is user-authored (a [Message] attribute value) and interpolated into two generated
+    // C# string literals - RequiredTopics and the _sender.SendAsync("<topic>", ...) call. The old raw
+    // interpolation ($@"""{topic}""") let an embedded `"` break the literal outright, and a crafted
+    // `", ...` sequence inject arbitrary tokens into the generated source - the same defect class
+    // MessageHandlerSourceGenerator.cs already fixed for its own topic interpolation via
+    // SymbolDisplay.FormatLiteral (see CodeGenHelpers.ToCSharpStringLiteral, this package's
+    // dependency-free equivalent).
+    [Fact]
+    public void AdversarialTopic_QuoteAndBackslash_EscapedInGeneratedLiterals_NotRawInterpolated()
+    {
+        const string adversarialTopic = "user:get\", 1); // \\injected";
+
+        var dictionary = new Dictionary<string, (Type, Type, Type)>
+        {
+            { adversarialTopic, (typeof(GetUserMessage), typeof(GetUserMessage), typeof(UserDto)) }
+        };
+
+        var result = new MessageClientSdkBuilder(UserServiceName, BaseNameSpace).Build(dictionary.ToEventServiceDocument());
+        var classSource = result["UserServiceClient.cs"];
+
+        var expectedLiteral = CodeGenHelpers.ToCSharpStringLiteral(adversarialTopic);
+        // What the pre-fix raw interpolation ($@"""{topic}""") would have produced verbatim - the
+        // embedded `"` in adversarialTopic would break out of the string literal here.
+        var naiveUnescapedForm = $"\"{adversarialTopic}\"";
+
+        Assert.Contains($"RequiredTopics = {{ {expectedLiteral} }}", classSource);
+        Assert.Contains($"_sender.SendAsync<GetUserMessage, UserDto>({expectedLiteral}, message, headers);", classSource);
+        Assert.DoesNotContain(naiveUnescapedForm, classSource);
+    }
 }
 

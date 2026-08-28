@@ -86,11 +86,16 @@ public class LambdaServiceMarkdownBuilder : ICodeBuilder<EventServiceDocument>
         foreach (var property in openApiSchema.Properties)
         {
             var validationRules = string.Join(", ", ValidationRules(property.Value));
-            lineWriter.WriteLine($"|{CodeGenHelpers.Camelcase(property.Key)}|{validationRules}|");
+            // #265: a property name (or a validation rule string) containing a `|` would otherwise
+            // be read as an extra Markdown table cell boundary, corrupting the rendered row.
+            var fieldName = EscapeTableCell(CodeGenHelpers.Camelcase(property.Key).ToString());
+            lineWriter.WriteLine($"|{fieldName}|{EscapeTableCell(validationRules)}|");
         }
 
         return lineWriter.GetLines();
     }
+
+    private static string EscapeTableCell(string value) => value.Replace("|", "\\|");
 
     private string[] ValidationRules(OpenApiSchema openApiSchema)
     {
