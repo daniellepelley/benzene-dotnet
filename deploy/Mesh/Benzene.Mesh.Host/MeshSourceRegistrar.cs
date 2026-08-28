@@ -4,6 +4,7 @@ using Benzene.Mesh.Aggregator;
 using Benzene.Mesh.Aws.S3;
 using Benzene.Mesh.Azure.Blob;
 using Benzene.Mesh.Contracts;
+using Benzene.Mesh.Dispatch;
 using Benzene.Mesh.Fleet.Aws.XRay;
 using Benzene.Mesh.Fleet.Jaeger;
 using Benzene.Mesh.Fleet.Tempo;
@@ -42,6 +43,14 @@ public static class MeshSourceRegistrar
 
     /// <summary>Valid <see cref="MeshTopologyConfig.Source"/> values, in the case <c>mesh.json</c> should use.</summary>
     public static readonly string[] ValidTopologySources = { "none", "tempo" };
+
+    // #247/#248's bounds-check ceilings - "sane ceiling" values, not derived from any hard technical
+    // limit, sized so a genuine operator need clears them by a wide margin while an obvious config
+    // mistake (a units confusion, a stray extra zero) does not.
+    private const int MaxPerMinuteCeiling = 100_000;
+    private const int MaxResponseBytesCeiling = 10_000_000; // 10 MB
+    private const int MaxCorrelationSearchLimitCeiling = 10_000;
+    private const int MaxFleetSearchConcurrencyCeiling = 100;
 
     /// <summary>
     /// Registers the mesh aggregator against <paramref name="config"/>'s artifact store - the local
@@ -199,10 +208,26 @@ public static class MeshSourceRegistrar
     {
         var url = RequireOption(options, "url", "fleet source", "tempo");
         var defaults = new TempoTraceSourceOptions(url);
+
+        // #247/#248: SearchConcurrency/CorrelationSearchLimit existed on TempoTraceSourceOptions since
+        // rounds 12-13 (WP-2, #188/#190) but were unreachable from mesh.json - fleet.options now carries
+        // them, matching the same loose-dictionary shape every other fleet.options key already uses.
+        var searchConcurrency = options != null && options.TryGetValue("searchConcurrency", out var concurrency)
+            ? ParseInt(concurrency, "searchConcurrency", "tempo fleet source")
+            : defaults.SearchConcurrency;
+        ValidateFleetSearchConcurrencyCeiling(searchConcurrency, "tempo fleet source");
+
+        var correlationSearchLimit = options != null && options.TryGetValue("correlationSearchLimit", out var limit)
+            ? ParseInt(limit, "correlationSearchLimit", "tempo fleet source")
+            : defaults.CorrelationSearchLimit;
+        ValidateInRange(correlationSearchLimit, 1, MaxCorrelationSearchLimitCeiling, "tempo fleet source option 'correlationSearchLimit'");
+
         return new TempoTraceSourceOptions(url)
         {
             CorrelationLookback = TryGetHours(options, "correlationLookbackHours") ?? defaults.CorrelationLookback,
             RecentFlowsLookback = TryGetHours(options, "recentFlowsLookbackHours") ?? defaults.RecentFlowsLookback,
+            SearchConcurrency = searchConcurrency,
+            CorrelationSearchLimit = correlationSearchLimit,
         };
     }
 
@@ -211,6 +236,13 @@ public static class MeshSourceRegistrar
         var url = RequireOption(options, "url", "fleet source", "jaeger");
         var defaults = new JaegerTraceSourceOptions(url);
         var services = GetOption(options, "services");
+
+        // #247/#248: same unreachable-from-config gap as Tempo's SearchConcurrency, above.
+        var searchConcurrency = options != null && options.TryGetValue("searchConcurrency", out var concurrency)
+            ? ParseInt(concurrency, "searchConcurrency", "jaeger fleet source")
+            : defaults.SearchConcurrency;
+        ValidateFleetSearchConcurrencyCeiling(searchConcurrency, "jaeger fleet source");
+
         return new JaegerTraceSourceOptions(url)
         {
             Services = string.IsNullOrEmpty(services)
@@ -221,7 +253,69 @@ public static class MeshSourceRegistrar
             SearchLimitPerService = options != null && options.TryGetValue("searchLimitPerService", out var limit)
                 ? ParseInt(limit, "searchLimitPerService", "jaeger fleet source")
                 : defaults.SearchLimitPerService,
+            SearchConcurrency = searchConcurrency,
         };
+    }
+
+    /// <summary>
+    /// #247/#248: maps <see cref="MeshDispatchConfig"/>'s optional guard-bound fields onto a fresh
+    /// <see cref="MeshDispatchGuardOptions"/>, falling back to that type's own defaults when a field is
+    /// left null (today's hardcoded-only behavior, preserved exactly), with bounds validation so a
+    /// config mistake fails at startup/<c>--validate-config</c> rather than shipping a guard that
+    /// doesn't actually guard (a negative limit, a request cap Kestrel would silently never deliver).
+    /// Called by both <see cref="Startup"/> and <see cref="MeshConfigValidator"/> - the one-set-of-rules
+    /// guarantee this class's own remarks describe.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">A configured value is out of its valid range.</exception>
+    public static MeshDispatchGuardOptions BuildDispatchGuardOptions(MeshDispatchConfig dispatch)
+    {
+        var result = new MeshDispatchGuardOptions();
+
+        if (dispatch.MaxRequestBytes.HasValue)
+        {
+            // Ceiling is MeshDispatchGuardOptions.DefaultMaxRequestBytes itself, not a larger number -
+            // see MeshDispatchConfig.MaxRequestBytes' own remarks for why a value above it would be
+            // silently unreachable (Program.cs pins Kestrel's own MaxRequestBodySize to that same
+            // constant, host-wide, at process startup).
+            ValidateInRange(dispatch.MaxRequestBytes.Value, 1, MeshDispatchGuardOptions.DefaultMaxRequestBytes, "dispatch.maxRequestBytes");
+            result.MaxRequestBytes = dispatch.MaxRequestBytes.Value;
+        }
+
+        if (dispatch.MaxPerMinutePerIdentity.HasValue)
+        {
+            // 0 is a legitimate, documented value (MeshDispatchGuardOptions.MaxPerMinutePerIdentity's own
+            // remarks: "0 disables the per-identity limit") - only reject negative/implausibly large.
+            ValidateInRange(dispatch.MaxPerMinutePerIdentity.Value, 0, MaxPerMinuteCeiling, "dispatch.maxPerMinutePerIdentity");
+            result.MaxPerMinutePerIdentity = dispatch.MaxPerMinutePerIdentity.Value;
+        }
+
+        if (dispatch.MaxPerMinutePerTarget.HasValue)
+        {
+            ValidateInRange(dispatch.MaxPerMinutePerTarget.Value, 0, MaxPerMinuteCeiling, "dispatch.maxPerMinutePerTarget");
+            result.MaxPerMinutePerTarget = dispatch.MaxPerMinutePerTarget.Value;
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// #247/#248: resolves <see cref="HttpMeshServiceDispatcher.MaxResponseBytes"/>'s own
+    /// unreachable-from-config bound - null (unset) keeps
+    /// <see cref="HttpMeshServiceDispatcher.DefaultMaxResponseBytes"/>. Unlike
+    /// <see cref="MeshDispatchConfig.MaxRequestBytes"/>, this isn't bounded by Kestrel (it caps a
+    /// response read FROM a dispatched-to service, not a request INTO this host), so it has its own,
+    /// independent ceiling.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">A configured value is out of its valid range.</exception>
+    public static int ResolveMaxResponseBytes(MeshDispatchConfig dispatch)
+    {
+        if (!dispatch.MaxResponseBytes.HasValue)
+        {
+            return HttpMeshServiceDispatcher.DefaultMaxResponseBytes;
+        }
+
+        ValidateInRange(dispatch.MaxResponseBytes.Value, 1, MaxResponseBytesCeiling, "dispatch.maxResponseBytes");
+        return dispatch.MaxResponseBytes.Value;
     }
 
     private static TempoTopologyOptions BuildTempoTopologyOptions(Dictionary<string, string>? options)
@@ -284,4 +378,32 @@ public static class MeshSourceRegistrar
 
     private static InvalidOperationException Unknown(string kind, string name, IReadOnlyList<string> validValues)
         => new($"Unknown {kind} '{name}'. Valid values: {string.Join(", ", validValues)}.");
+
+    /// <summary>#247/#248: shared bounds check - throws naming <paramref name="description"/> when
+    /// <paramref name="value"/> falls outside [<paramref name="min"/>, <paramref name="max"/>].</summary>
+    private static void ValidateInRange(int value, int min, int max, string description)
+    {
+        if (value < min || value > max)
+        {
+            throw new InvalidOperationException($"{description} must be between {min} and {max}; got {value}.");
+        }
+    }
+
+    /// <summary>
+    /// #247/#248: a fleet trace source's <c>searchConcurrency</c> (Tempo/Jaeger) documents <c>0</c> or a
+    /// negative value as a deliberate "run every fetch at once, unbounded" choice (see
+    /// <see cref="TempoTraceSourceOptions.SearchConcurrency"/>/<see cref="JaegerTraceSourceOptions.SearchConcurrency"/>'s
+    /// own remarks) - so unlike <see cref="ValidateInRange"/>, this never rejects a low value, only a
+    /// positive one so large it is very likely a units mistake (e.g. confused with a byte or millisecond
+    /// value) rather than a deliberate fan-out width a shared query backend could actually sustain.
+    /// </summary>
+    private static void ValidateFleetSearchConcurrencyCeiling(int value, string source)
+    {
+        if (value > MaxFleetSearchConcurrencyCeiling)
+        {
+            throw new InvalidOperationException(
+                $"{source} option 'searchConcurrency' must be at most {MaxFleetSearchConcurrencyCeiling} " +
+                $"(0 or a negative value means unbounded); got {value}.");
+        }
+    }
 }

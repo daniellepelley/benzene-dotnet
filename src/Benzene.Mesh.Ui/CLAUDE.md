@@ -1,5 +1,40 @@
 # Benzene.Mesh.Ui
 
+## `mesh-ui.html` / `mesh-spec-ui.html` are vendored build output — read this before touching anything below
+
+**Neither `mesh-ui.html` nor `mesh-spec-ui.html` is hand-written code that lives in this repo.**
+Both are minified React + Redux Toolkit production bundles, built by the external
+[`benzene-ui`](https://github.com/daniellepelley/benzene-ui) repo and committed here **verbatim** as
+vendored output — the same trade `test/conformance-fixtures/` makes for the spec fixtures (source of
+truth elsewhere, a byte-for-byte copy here because this repo's consumers aren't a Node.js
+toolchain). `mesh-spec-ui.html` is additionally **byte-identical** to `src/Benzene.Spec.Ui/spec-ui.html`
+— all three files trace back to two `benzene-ui` build outputs vendored into three locations. CI's
+`.github/workflows/mesh-ui-drift-check.yml` enforces this on every push/PR/weekly schedule: it fetches
+`benzene-ui`'s canonical `build/mesh-ui.html` and `build/mesh-spec-ui.html`, discovers every committed
+HTML page over 100KB by scanning for the page's opening-tag fingerprint, and fails the build if any of
+them isn't a byte-for-byte match against one of the two canonical files. There is no path allowlist to
+fall out of date — any new vendored copy (another package, another example) is covered automatically.
+
+**Never hand-edit `mesh-ui.html` or `mesh-spec-ui.html` directly.** A local edit survives exactly until
+the next drift-check run (or the next `benzene-ui` re-vendor overwrites it), and in the meantime CI is
+red. A change to what either viewer does, looks like, or fetches belongs in `benzene-ui` — implement it
+there, run `npm run build`, and re-vendor the output:
+```
+cp <benzene-ui>/build/mesh-ui.html      <this repo>/src/Benzene.Mesh.Ui/mesh-ui.html
+cp <benzene-ui>/build/mesh-spec-ui.html <this repo>/src/Benzene.Mesh.Ui/mesh-spec-ui.html
+cp <benzene-ui>/build/mesh-spec-ui.html <this repo>/src/Benzene.Spec.Ui/spec-ui.html
+```
+This package's own C# (`MeshUiPage`, `MeshUiMiddleware`, `MeshUiExtensions`, `MeshSpecUiPage`,
+`MeshSpecUiMiddleware`, `UseMeshSpecUi`) is real, hand-written, freely editable code — only the two
+embedded `.html` resources are off-limits.
+
+The change history below (newest first) predates the extraction of the UI source into `benzene-ui` and
+was originally written as a description of hand-rolled code sitting in this repo. It is kept here as a
+record of the shipped bundle's behavior and reasoning — **read every entry as "what the vendored
+`benzene-ui` build does and why," never as a description of code you can edit from this repo** — and
+any claim below that the page is dependency-free vanilla JS reflects that repo's implementation choices
+(also since evolved to a React/Redux Toolkit build), not this one's.
+
 > **2026-07-25 COST ROUND 2 — the inbox poll no longer scans a day of traces.** The account hit 85% of
 > the X-Ray free tier on `Global-XRay-TracesAccessed` — traces **retrieved/scanned**, i.e. the UI's own
 > queries, not the demo's traffic. `GetTraceSummaries` scans every trace in the queried window, so the
@@ -326,8 +361,8 @@
 > **existing** `buildWaterfall(view)`. It surfaces the trace waterfall as its own window rather than
 > only via clicking one of the last ~20 recent flows, so a trace still in the collector's ring but off
 > the recent list is reachable. `not-found` → an honest "aged out of the ring buffer" empty state;
-> empty id is a client-side no-op. Reuses the `.corr-box`/`.corr-results` styles and the no-dependency
-> floor (vanilla JS, one `fetch`); no new read-model (the collector's `mesh:query:trace`/`TraceView`
+> empty id is a client-side no-op. Reuses the `.corr-box`/`.corr-results` styles and a single `fetch`
+> call; no new read-model (the collector's `mesh:query:trace`/`TraceView`
 > were already built + conformance-tested, just previously reachable only by row-click).
 >
 > **2026-07-23 (usage panel): "By status" reconciles with "By transport" via a neutral bucket.**
@@ -360,14 +395,14 @@
 > that drives the same lookup — so an investigator who opened a failed flow reaches every related flow
 > in one click ("surface it from a reported failure"). Collector-plane only, by design: the static
 > `mesh-ui.html` / AwsMesh artifact plane has no live ring and gets an X-Ray/CloudWatch deep-link
-> instead (a separate, still-deferred item). Reuses the no-dependency floor (vanilla JS, one `fetch`).
+> instead (a separate, still-deferred item). Reuses a single `fetch` call, no new read-model.
 >
 > **2026-07-16:** this package now ships a second page: `MeshFleetUiPage`/`MeshFleetUiMiddleware`/
 > `UseMeshFleetUi(path, envelopeUrl)` - the **Fleet view**, the live counterpart to the
 > artifact-driven explorer below. It polls a `Benzene.Mesh.Collector`'s `mesh:query:fleet` topic
 > through a wire-envelope endpoint and renders the derived fleet (services with health and
 > reduced-feed markers, topic catalog with observed consumers, recent flows). Same embedded-HTML
-> pattern (`mesh-fleet-ui.html`, attribute-injected config, no JS framework); see
+> pattern (`mesh-fleet-ui.html`, attribute-injected config); see
 > `examples/Mesh/run.sh` for it running against live services.
 >
 > **2026-07-22 (P2 of the vision doc's roadmap): the Fleet view now has the flow view + staleness.**
@@ -381,7 +416,7 @@
 >   their parent span (cycle-guarded, capped at depth 8 visually). A trace is immutable once
 >   captured, so the `TraceView` is cached per trace id (a transient fetch failure is not cached);
 >   the open waterfall survives the 2s poll's table rebuild, and an empty `events` answer renders
->   the "aged out of the ring buffer" note. Self-contained CSS bars - no chart/graph library.
+>   the "aged out of the ring buffer" note. CSS-drawn bars, no chart/graph library.
 > - **Staleness (the roadmap's 2026-07-20 ruling, collector-plane half):** a new "Last seen" column
 >   renders each service's heartbeat age, and a service whose `lastSeen` exceeds `STALE_AFTER_MS`
 >   (90s default - a few missed heartbeats; a JS knob, deliberately not a contract value) has its
@@ -389,7 +424,7 @@
 >
 > **2026-07-22 (P3 of the vision doc's roadmap): both pages now render a topology graph.**
 > - **`mesh-ui.html`:** a node-link SVG graph above the topology edge table (the table stays -
->   the graph answers "what's the shape", the table answers "sort me by error rate"). Hand-rolled
+>   the graph answers "what's the shape", the table answers "sort me by error rate"). Custom-drawn
 >   SVG, no graph/layout library: deterministic layered left-to-right layout (longest-path
 >   layering, cycle-guarded; nodes sorted by name within a layer - stable across reloads). Nodes
 >   are stroked by the manifest's health status (dashed = not in the manifest) and are full
@@ -514,7 +549,7 @@
 > path is the separate, gated F3b case (1).
 
 ## What this package does
-Serves a self-contained, catalog-style web viewer for a **Benzene service mesh** - the
+Serves a catalog-style web viewer for a **Benzene service mesh** - the
 `manifest.json`/`services/{name}.json` artifacts produced by `Benzene.Mesh.Aggregator`. It shows
 every registered service's health status and contract-drift flag at a glance, with a per-service
 drill-down into health check detail.
@@ -586,10 +621,13 @@ directory/bucket the aggregator writes `manifest.json`/`services/*.json` to, and
 as static files. `MeshUiMiddleware`/`UseMeshUi` exist for the secondary case where you do want to
 serve it from a live Benzene app (local demo, or an aggregator host self-serving its dashboard).
 
-## The viewer (`mesh-ui.html`)
-- A single self-contained HTML file (inline CSS + vanilla JS, no external requests), embedded as
-  a resource (`LogicalName` `Benzene.Mesh.Ui.mesh-ui.html`). Reuses `Benzene.Spec.Ui`'s exact CSS
-  design-token block (light/dark theming) for visual consistency across Benzene's UI family.
+## What the shipped bundle does (`mesh-ui.html`)
+Below is what the vendored `benzene-ui` React bundle actually renders, embedded as a resource
+(`LogicalName` `Benzene.Mesh.Ui.mesh-ui.html`) — useful for understanding behavior from this side of
+the repo split, but a description of the shipped output, not a spec for code that lives here. To
+change any of it, change `benzene-ui` and re-vendor (see the top of this file). It shares
+`Benzene.Spec.Ui`'s exact CSS design-token block (light/dark theming) for visual consistency across
+Benzene's UI family.
 - Below the stats bar, an **issue inbox** (`#issues-section`, `renderIssues()`) promotes the fleet's
   scattered problem signals into one severity-grouped, actionable worklist — the "what do I need to
   act on now" landing surface. It's a pure client-side reduction over the same static artifacts the
@@ -692,9 +730,12 @@ serve it from a live Benzene app (local demo, or an aggregator host self-serving
   `MeshUiMiddleware`/`MeshUiExtensions`. `MeshUiPage` alone has no Benzene dependencies at all.
 
 ## Conventions
-- Keep the viewer dependency-free and self-contained (no CDN/webfont/script references) so it
-  works offline and behind strict CSPs, matching `Benzene.Spec.Ui`'s convention.
-- Topology rendering is **both** a node-link SVG graph and the flat sortable edge table beneath
-  it - they are two views over the same `topology.json` edges (shape vs. sortable detail), so
-  keep them in sync when the edge contract changes. The graph is hand-rolled SVG under the same
-  no-dependency floor as everything else here: never introduce a chart/graph/layout library.
+- `mesh-ui.html`/`mesh-spec-ui.html` themselves are not a convention to keep in mind while editing —
+  they aren't edited here at all. See the vendoring section at the top of this file. The convention
+  that does apply from this side of the split: neither embedded resource should be loaded from a
+  CDN or otherwise reach out at runtime for anything the bundle itself doesn't already fetch (its own
+  artifacts/envelope endpoints), so it keeps working offline and behind strict CSPs — enforce that
+  expectation in `benzene-ui`, not by patching the vendored output here.
+- Topology rendering (per the change history below) is **both** a node-link SVG graph and the flat
+  sortable edge table beneath it - two views over the same `topology.json` edges (shape vs. sortable
+  detail) - kept in sync on the `benzene-ui` side when the edge contract changes.

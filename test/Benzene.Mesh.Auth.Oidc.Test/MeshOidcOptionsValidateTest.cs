@@ -169,6 +169,67 @@ public class MeshOidcOptionsValidateTest
         Assert.Throws<ArgumentException>(() => options.Validate());
     }
 
+    // --- #244: port OAuth2BearerOptions' algorithm-confusion hardening (round 11 #174) here - mirrors
+    // OAuth2BearerOptionsValidationTest's matrix (null/whitespace entry, "none", a typo'd algorithm
+    // name). Prior to this fix, Validate() only checked ValidAlgorithms was non-empty; any of the
+    // three shapes below was silently accepted at wire-up. -----------------------------------------
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ValidAlgorithmsContainingUselessEntry_Throws(string? badEntry)
+    {
+        var options = Valid();
+        options.ValidAlgorithms = new[] { "RS256", badEntry! };
+        Assert.Throws<ArgumentException>(() => options.Validate());
+    }
+
+    [Fact]
+    public void ValidAlgorithmsContainingNone_Throws()
+    {
+        // RFC 8725 §3.1's canonical algorithm-confusion attack - "alg": "none" must never be a
+        // wire-up-accepted allowlist entry, not just something the ID token itself can't claim its
+        // way past.
+        var options = Valid();
+        options.ValidAlgorithms = new[] { "none" };
+
+        var exception = Assert.Throws<ArgumentException>(() => options.Validate());
+        Assert.Contains("none", exception.Message);
+    }
+
+    [Fact]
+    public void ValidAlgorithmsContainingNoneAmongRealOnes_Throws()
+    {
+        var options = Valid();
+        options.ValidAlgorithms = new[] { "RS256", "none" };
+        Assert.Throws<ArgumentException>(() => options.Validate());
+    }
+
+    [Theory]
+    [InlineData("RS257")]
+    [InlineData("rot13")]
+    [InlineData("HMAC-SHA256")]
+    public void ValidAlgorithmsContainingUnrecognizedName_Throws(string badAlgorithm)
+    {
+        var options = Valid();
+        options.ValidAlgorithms = new[] { badAlgorithm };
+        Assert.Throws<ArgumentException>(() => options.Validate());
+    }
+
+    [Theory]
+    [InlineData("RS256")]
+    [InlineData("HS256")]
+    [InlineData("RS384")]
+    [InlineData("ES512")]
+    [InlineData("PS256")]
+    public void ValidAlgorithmsContainingRecognizedName_DoesNotThrow(string goodAlgorithm)
+    {
+        var options = Valid();
+        options.ValidAlgorithms = new[] { goodAlgorithm };
+        options.Validate();
+    }
+
     [Theory]
     [InlineData("https://evil.com")]
     [InlineData("//evil.com")]

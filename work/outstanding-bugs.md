@@ -132,6 +132,74 @@ first). **[PERF]** performance hygiene, not a correctness bug. **[RESOLVED]** ve
 >   a CQRS example meant to be copied; the write side calls `Tenants.Add`/`Users.Add` directly instead.
 >   Deleted the file.
 
+> **Tracked findings rounds 14–15 (WP-J — Mesh auth/UI/docs/config, #204, #244–#248) — fixed.** The
+> round-14/15 ruling ([`bug-fix-rulings-round14-15-2026-08.md`](bug-fix-rulings-round14-15-2026-08.md),
+> §3 WP-J) covers task board #244–#248 plus round 14's #204, spanning `Benzene.Mesh.Auth.Oidc`,
+> `Benzene.Mesh.Ui`/`Benzene.Spec.Ui`'s `CLAUDE.md`s, `Benzene.Mesh.Dispatch`, and
+> `deploy/Mesh/Benzene.Mesh.Host`. The other rounds-14/15 work packages land separately in that same
+> ruling doc and are **not** covered by this entry.
+> - **[RESOLVED] #244** — `MeshOidcOptions.Validate()`'s doc claimed algorithm-confusion parity with
+>   `Benzene.Auth.OAuth2.OAuth2BearerOptions.ValidAlgorithms` (round 11 #174) but only checked
+>   non-empty. Ported the same three checks: reject null/whitespace `ValidAlgorithms` entries, reject
+>   `"none"` by name, and validate every entry against a `KnownSigningAlgorithms` allowlist —
+>   duplicated (not shared via project reference), with a cross-reference comment, since the OAuth2
+>   original's constant is `private` and this package deliberately carries no dependency on
+>   `Benzene.Auth.OAuth2` (see its own `CLAUDE.md`'s minimal-dependency stance). Tests mirror
+>   `OAuth2BearerOptionsValidationTest`'s matrix (null/whitespace entry, `"none"`, a typo'd algorithm
+>   name) in `MeshOidcOptionsValidateTest`.
+> - **[RESOLVED] #245 (and round 14's #204 — the same underlying doc-truth fix, two files)** —
+>   `src/Benzene.Mesh.Ui/CLAUDE.md` and `src/Benzene.Spec.Ui/CLAUDE.md` both narrated
+>   `mesh-ui.html`/`mesh-spec-ui.html`/`spec-ui.html` as hand-written, dependency-free vanilla JS —
+>   false for all three: they are minified React + Redux Toolkit production bundles vendored verbatim
+>   from the external `benzene-ui` repo (`spec-ui.html` and `mesh-spec-ui.html` are byte-identical),
+>   kept honest by `.github/workflows/mesh-ui-drift-check.yml`, which fails CI on any hand-edit. An
+>   agent trusting either doc would plausibly hand-edit the generated file directly — exactly what the
+>   drift-check exists to prevent. Both `CLAUDE.md`s rewritten to lead with the vendoring reality (what
+>   ships, where it comes from, the drift-check, and the load-bearing "never hand-edit — changes go
+>   upstream to `benzene-ui`" instruction); existing feature narration kept where still accurate, but
+>   reframed as "what the shipped bundle does," and every "vanilla JS"/"hand-rolled"/"self-contained,
+>   no external requests" claim removed. No `.html` file touched by this fix, in either package.
+> - **[RESOLVED] #246** — `HttpMeshServiceDispatcher.ReadCappedAsync` truncated at a raw byte boundary
+>   before UTF-8 decoding, so a response cut mid-multi-byte-character produced a `U+FFFD` replacement
+>   glyph ahead of `TruncatedMarker` in the audit-visible record. Added `LastCompleteUtf8SequenceEnd`,
+>   a small backward scan from the byte cap to the end of the last complete UTF-8 sequence, and
+>   truncate there instead.
+> - **[RESOLVED] #247 / #248** — `TempoTraceSourceOptions.SearchConcurrency`/`CorrelationSearchLimit`,
+>   `JaegerTraceSourceOptions.SearchConcurrency` (rounds 12–13's WP-2), and
+>   `MeshDispatchGuardOptions`'s `MaxRequestBytes`/`MaxPerMinutePerIdentity`/`MaxPerMinutePerTarget` +
+>   `HttpMeshServiceDispatcher.MaxResponseBytes` (rounds 12–13's WP-1) were all unreachable from
+>   `mesh.json` — an operator could only ever get the hardcoded C# defaults. Added
+>   `fleet.options.searchConcurrency`/`.correlationSearchLimit` (Tempo/Jaeger) and four new
+>   `dispatch.*` config keys (`maxRequestBytes`/`maxPerMinutePerIdentity`/`maxPerMinutePerTarget`/
+>   `maxResponseBytes`), wired through new `MeshSourceRegistrar` methods
+>   (`BuildDispatchGuardOptions`/`ResolveMaxResponseBytes`, plus extending `BuildTempoTraceOptions`/
+>   `BuildJaegerOptions`) and `Startup.cs`, with bounds validation (positive/non-negative, and a "sane
+>   ceiling" per key — notably `maxRequestBytes`'s ceiling is the compile-time default itself, since
+>   `Program.cs` pins Kestrel's own `MaxRequestBodySize` to that same constant host-wide, so a larger
+>   configured value would be silently unreachable) exercised by both `Startup` and
+>   `MeshConfigValidator`, the one-set-of-rules guarantee this file's class remarks already describe.
+>   `deploy/Mesh/CONFIG.md` documents all six new keys. `HttpMeshServiceDispatcher.MaxResponseBytes`
+>   specifically has no config hook in `Benzene.Mesh.Dispatch` itself (out of this fix's scope), so
+>   `Startup.cs` shadow-registers a config-built `HttpMeshServiceDispatcher` ahead of
+>   `UseMeshDispatch`'s own — Microsoft DI's `IEnumerable<T>` registration-order resolution plus
+>   `MeshDispatchMessageHandler`'s `FirstOrDefault(d => d.Key == entry.Source)` pick makes the
+>   config-built one win, with `UseMeshDispatch`'s own becoming a harmless, never-reached second entry.
+>
+> **[UPSTREAM: benzene-ui] #205, #206, #207** — round 14's three mesh-UI *behaviour* findings (the
+> Refresh button has no confirmation step despite the package's own doc calling it "real money per
+> click"; Sign-out has no pending/disabled state, unlike Refresh and Send; Sign-out's `fetch()` doesn't
+> pass `credentials: "same-origin"` explicitly) are changes to `mesh-ui.html`, which #204/#245 (above)
+> establish is a minified React bundle vendored verbatim from the external `benzene-ui` repo and
+> guarded by a drift-check that fails CI on any hand-edit. Per the round-14/15 ruling's §1: **no agent
+> edits those files in this repo, ever** — these three are routed upstream to `benzene-ui` and are
+> **not fixable in this repo**. Not `[RESOLVED]`: no code here changed, or could change, for them.
+>
+> Tests: `test/Benzene.Mesh.Auth.Oidc.Test/MeshOidcOptionsValidateTest.cs` (#244);
+> `test/Benzene.Mesh.Test/MeshDispatchTest.cs`'s `HttpMeshServiceDispatcherTest` (#246);
+> `deploy/Mesh/Benzene.Mesh.Host.Test/MeshSourceRegistrarTest.cs`, `MeshConfigValidatorTest.cs`,
+> `MeshDispatchSizeGuardAcceptanceTest.cs`, and the new `MeshDispatchResponseCapAcceptanceTest.cs`
+> (#247/#248 — the last two boot the real Kestrel-hosted host, not just unit-level).
+
 ---
 
 ## Resolved since the prior triage (verified in current source)

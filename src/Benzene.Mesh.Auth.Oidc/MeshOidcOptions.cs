@@ -1,3 +1,5 @@
+using Microsoft.IdentityModel.Tokens;
+
 namespace Benzene.Mesh.Auth.Oidc;
 
 /// <summary>
@@ -238,7 +240,64 @@ public class MeshOidcOptions
                 "an empty list would trust whatever \"alg\" the ID token itself claims (RFC 8725 §3.1 algorithm confusion).",
                 nameof(ValidAlgorithms));
         }
+
+        // #244: this package's own doc (and this property's remarks, above) claims parity with
+        // Benzene.Auth.OAuth2.OAuth2BearerOptions.ValidAlgorithms' algorithm-confusion hardening
+        // (round 11 #174) - until now that was only true of the non-empty check above. Port the same
+        // three checks: null/whitespace entries, "none" rejected by name, and an allowlist match
+        // against KnownSigningAlgorithms (duplicated below, not shared via project reference - see
+        // that constant's remarks for why).
+        foreach (var algorithm in ValidAlgorithms)
+        {
+            if (string.IsNullOrWhiteSpace(algorithm))
+            {
+                throw new System.ArgumentException(
+                    $"{nameof(ValidAlgorithms)} contains a null/empty/whitespace entry - every entry must " +
+                    "be a genuine signing algorithm name.",
+                    nameof(ValidAlgorithms));
+            }
+
+            // Explicit, named rejection - RFC 8725 §3.1's canonical algorithm-confusion attack is
+            // exactly "alg": "none" accepted by a validator that never meant to allow it. Called out
+            // separately from the "unrecognized name" check below so the error is unambiguous about why.
+            if (string.Equals(algorithm, SecurityAlgorithms.None, System.StringComparison.OrdinalIgnoreCase))
+            {
+                throw new System.ArgumentException(
+                    $"{nameof(ValidAlgorithms)} must not contain \"{SecurityAlgorithms.None}\" - accepting " +
+                    "the unsigned algorithm defeats signature validation entirely (RFC 8725 §3.1 algorithm confusion).",
+                    nameof(ValidAlgorithms));
+            }
+
+            if (!KnownSigningAlgorithms.Contains(algorithm))
+            {
+                throw new System.ArgumentException(
+                    $"{nameof(ValidAlgorithms)} contains '{algorithm}', which is not a recognized JWS " +
+                    "signing algorithm (see Microsoft.IdentityModel.Tokens.SecurityAlgorithms) - likely a " +
+                    "typo that would silently make this entry unmatchable by any real ID token.",
+                    nameof(ValidAlgorithms));
+            }
+        }
     }
+
+    /// <summary>
+    /// #244: signing algorithms <see cref="ValidAlgorithms"/> entries are checked against -
+    /// deliberately a byte-for-byte duplicate of
+    /// <c>Benzene.Auth.OAuth2.OAuth2BearerOptions.KnownSigningAlgorithms</c>, not a shared reference.
+    /// That constant is <c>private</c> (making it reachable from here would mean either widening its
+    /// access purely to serve this one cross-package read, or adding a project reference from this
+    /// provider-agnostic, deliberately minimal-dependency package - see this package's own
+    /// <c>CLAUDE.md</c> "Dependencies" section - onto an entire unrelated bearer-token-auth package
+    /// just to borrow one field), which is worse than the small duplication risk here. If the two ever
+    /// drift, fix both - <c>OAuth2BearerOptions.KnownSigningAlgorithms</c>'s remarks are the source of
+    /// truth for what belongs on this list and why.
+    /// </summary>
+    private static readonly System.Collections.Generic.HashSet<string> KnownSigningAlgorithms = new(System.StringComparer.Ordinal)
+    {
+        SecurityAlgorithms.HmacSha256, SecurityAlgorithms.HmacSha384, SecurityAlgorithms.HmacSha512,
+        SecurityAlgorithms.RsaSha256, SecurityAlgorithms.RsaSha384, SecurityAlgorithms.RsaSha512,
+        SecurityAlgorithms.EcdsaSha256, SecurityAlgorithms.EcdsaSha384, SecurityAlgorithms.EcdsaSha512,
+        SecurityAlgorithms.RsaSsaPssSha256, SecurityAlgorithms.RsaSsaPssSha384, SecurityAlgorithms.RsaSsaPssSha512,
+    };
 
     /// <summary>
     /// #177's pragmatic entropy floor: the minimum number of DISTINCT byte values a
