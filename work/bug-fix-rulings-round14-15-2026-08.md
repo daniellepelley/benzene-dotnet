@@ -239,11 +239,17 @@ Kafka case added to `AwsGoogleTransportGetterOverrideTest`, and a new
 
 The behaviour-sensitive package cluster; every ruling here changes what happens to data under
 failure. Read round 15 §8 AND round 14 §2 in full first.
-- **#253 (DynamoDb outbox drains before write):** build the transact-item list from a
+> **Amendment (2026-08-28, corrected before WP-F's implementation landed):** this section originally
+> had #253 and #254 swapped relative to their actual assignment in
+> `bug-fix-designs-round15-2026-08.md` §8 (#253 is the `OutboxDispatcher` settle-throw finding; #254
+> is the `DynamoDbOutboxTransaction` drain finding). Corrected here to match the findings doc, which
+> is the source of truth for finding identity.
+
+- **#254 (DynamoDb outbox drains before write):** build the transact-item list from a
   **non-destructive peek**; drain only after `TransactWriteItemsAsync` succeeds. The existing
   over-100-items retry test is the model; add the thrown-write case (staged envelopes still present,
   retry commits them).
-- **#254 (settle-throw → guaranteed duplicate):** split the try — a `SendAsync` failure keeps
+- **#253 (settle-throw → guaranteed duplicate):** split the try — a `SendAsync` failure keeps
   today's reschedule path; a `MarkDispatchedAsync` **throw after a successful send** is handled
   separately: log at error level with the envelope id, retry the settle once, and if it still fails
   leave the envelope for the sweeper **with an attempt-count/log signature that says
