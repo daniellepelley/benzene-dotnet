@@ -99,8 +99,12 @@ Neither write mode is exactly-once. Read this before picking one.
 - `InMemoryOutboxStore` - the in-process default (dictionary + lock + lease), registered via
   `AddInMemoryOutboxStore()`.
 - `IOutboxStage` / `BufferedOutboxStage` - the scoped staging seam for `Transactional` mode (see
-  "Capability boundary" above). `DrainStaged()` returns and clears the buffer; disposing with
-  undrained envelopes logs a warning.
+  "Capability boundary" above). `Peek()` returns the staged envelopes **without** clearing the buffer
+  - for a caller that must build a fallible write (e.g. a single SDK call that can itself throw) from
+  the staged envelopes and only consume them once that write has actually succeeded; `DrainStaged()`
+  returns and clears the buffer - call only after the write succeeded (see
+  `Benzene.Outbox.DynamoDb/CLAUDE.md`'s "Commit atomicity" for why the distinction matters). Disposing
+  with undrained envelopes logs a warning.
 - `OutboxDispatchScope` - the scoped marker+headers holder `IOutboxDispatcher` sets before re-sending
   an envelope, and `OutboxMiddleware` reads to decide capture vs. pass-through. Deliberately **not**
   carried on `OutboundContext` itself - see `Benzene.Abstractions.Middleware/CLAUDE.md`'s "Context
@@ -112,7 +116,10 @@ Neither write mode is exactly-once. Read this before picking one.
   straight into this). Dispatching an envelope creates a fresh DI scope
   (`IServiceResolverFactory.CreateScope()`), marks that scope's `OutboxDispatchScope`, deserializes
   the payload, and re-sends through that scope's `IBenzeneMessageSender` - the exact same route
-  pipeline (transport, retry, health checks) an inline send would have used.
+  pipeline (transport, retry, health checks) an inline send would have used. **A send failure and a
+  settle-call failure after a genuinely successful send are handled on two different paths** (see
+  "Settle-failure-after-send handling" below) - `OutboxDispatchOutcome` gains `SentButUnsettled` for
+  the second case, and `OutboxDispatchResult` a matching `SentButUnsettled` tally.
 - `OutboxDispatcherWorker : IBenzeneWorker, IDisposable` - a poll loop calling `RunOnceAsync` on
   `OutboxOptions.PollInterval` (default 5s), with a graceful stop that finishes an in-flight run.
   `Dispose()` releases the internal stop-signal `CancellationTokenSource` - call it after `StopAsync`
@@ -161,6 +168,29 @@ ignores the result.
 
 A custom `IOutboxStore` MUST implement the same fencing - see `IOutboxStore`'s XML docs (`ClaimDueAsync`'s
 remarks carry the full contract) for the exact semantics each settle method must honor.
+
+## Settle-failure-after-send handling
+`OutboxDispatcher.DispatchEnvelopeAsync` splits what used to be a single try/catch around both
+`sender.SendAsync` and `_store.MarkDispatchedAsync` into two distinct failure modes, because treating
+them identically converts a routine transient store error into a guaranteed duplicate delivery:
+- **`SendAsync` fails or throws** - unchanged: the existing reschedule/park path (backoff, then
+  `OutboxOptions.MaxAttempts` parks it).
+- **`MarkDispatchedAsync` throws AFTER a genuinely successful send** (not the fenced `false` - a real
+  store exception, e.g. DynamoDB throttling, a network blip) - handled separately, never by the
+  reschedule/park path: logged at error level with the envelope id, retried once, and if it still
+  throws the envelope is deliberately left exactly as claimed (still `Pending` in the store, lease
+  outstanding) rather than rescheduled/parked as if the send itself had failed - `DispatchEnvelopeAsync`
+  returns `OutboxDispatchOutcome.SentButUnsettled` (tallied on `OutboxDispatchResult.SentButUnsettled`).
+  The envelope is never lost: once its lease naturally lapses, the next sweep's `ClaimDueAsync` reclaims
+  it exactly like any other lost/stalled claim - the mechanism that makes "leave it for the sweeper" a
+  real recovery path rather than a dead end.
+
+**What this closes, and what it doesn't.** Before this split, ANY exception from `MarkDispatchedAsync`
+- including an ordinary transient store hiccup with nothing actually wrong with the claim - was caught
+by the same handler as a failed send and rescheduled, guaranteeing a resend of an already-delivered
+message. This closes that specific path. It does **not** close the inherent crash-after-send window
+(process dies between "sent" and "settle call ever runs") - that remains, as documented above and in
+"Capability boundary"; only a downstream consumer/idempotency layer can fully absorb it.
 
 ## Relay hosts
 - **`Benzene.HostedService` / `Benzene.SelfHost`:** resolve `OutboxDispatcherWorker` (or
@@ -231,9 +261,12 @@ await sender.SendAsync<CapturePaymentRequest, Void>("payments:capture", request)
 - `test/Benzene.Core.Test/Outbox/InMemoryOutboxStoreTest.cs` - claim/lease/due semantics, reschedule,
   park, retention cleanup, independence across ids.
 - `test/Benzene.Core.Test/Outbox/BufferedOutboxStageTest.cs` - staging buffers, drain returns and
-  clears, undrained-on-dispose warns.
+  clears, undrained-on-dispose warns, `Peek()` returns without clearing.
 - `test/Benzene.Core.Test/Outbox/OutboxDispatcherTest.cs` - run-once success/reschedule/park paths,
-  retention cleanup, `DispatchOneAsync`'s claim-refused path.
+  retention cleanup, `DispatchOneAsync`'s claim-refused path, and (see "Settle-failure-after-send
+  handling" above) a `MarkDispatchedAsync` that throws once then succeeds on retry (still
+  `Dispatched`, exactly one send, no duplicate resend driven) and one that throws on both attempts
+  (`SentButUnsettled`, the envelope stays claimed/recoverable rather than rescheduled/parked).
 - `test/Benzene.Core.Test/Outbox/OutboxDispatcherWorkerTest.cs` - starts/stops cleanly, polls on the
   configured interval, survives a failing run, disposes cleanly (with or without ever starting, and
   idempotently on a repeat `Dispose()`).

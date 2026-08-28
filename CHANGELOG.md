@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`SagaResult` gains `Failures` and `StateStoreFailure` (additive - both new members, no existing
+  member changed shape or removed).** `Failures` (`IReadOnlyList<SagaStepOutcome>`) carries every step
+  that failed within the failing stage, not just one - the normal case when two steps in the same
+  stage fail concurrently (a stage's steps all run concurrently and are all awaited before the stage
+  is judged failed). `Failure`/`FailureException` are unchanged and still populated exactly as before
+  (mirroring `Failures[0]`, kept for source/binary compatibility), so existing code needs no changes.
+  `StateStoreFailure` (`Exception?`) carries the exception a configured `ISagaStateStore` call threw
+  during the attempt, if any - see the Fixed entry below for what this makes possible.
+- **`Benzene.Outbox`: `BufferedOutboxStage.Peek()`** - a non-destructive counterpart to the existing
+  `DrainStaged()`, letting a caller build a fallible write from the staged envelopes and only consume
+  the buffer once that write has actually succeeded. **`OutboxDispatchOutcome.SentButUnsettled`** and a
+  matching **`OutboxDispatchResult.SentButUnsettled`** tally - a new, additive outcome distinguishing
+  "the send succeeded but its dispatched state couldn't be recorded" from a genuinely failed send; see
+  the Fixed entry below.
 - **`OutboundContext` route extensions for RabbitMQ, Kafka and BenzeneMessage-over-HTTP.** Every cloud
   transport already had one; these three did not, so an outbound route could not reach them without a
   hand-written terminal middleware (seven copies of the same ~50-line adapter across the pattern
@@ -38,6 +52,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checks rather than failing on the message path.
 
 ### Fixed
+- **`Benzene.Saga`: a state-store failure no longer aborts a run, skips rollback, or discards a real
+  outcome.** Every `ISagaStateStore` call inside `RunOnceAsync` is now caught rather than left to
+  propagate raw: a throw right after an effect-producing stage completes still runs compensation for
+  every completed stage exactly as if the store had succeeded (previously it aborted with **zero**
+  rollback attempt - the saga's own documented all-or-nothing guarantee was silently broken); a throw
+  from the final `RecordFinishedAsync` after every stage genuinely succeeded no longer discards the
+  successful `SagaResult` in favor of a raw exception - the caller still learns the saga succeeded
+  (`Outcome == Succeeded`, `StateStoreFailure` populated), so a caller that reasonably retries on any
+  thrown exception can no longer re-run an already-succeeded saga with no compensation and no dedup.
+  The same handling applies symmetrically to the failure-path `RecordFinishedAsync` call, so a store
+  failure there can't silently drop `CompensationFailures` visibility either.
+- **`Benzene.Outbox`: a settle-call throw right after a successful send no longer guarantees a
+  duplicate delivery.** `OutboxDispatcher.DispatchEnvelopeAsync` used to catch a `MarkDispatchedAsync`
+  throw with the same handler as a `SendAsync` failure, so a routine transient store error (DynamoDB
+  throttling, a network blip) immediately after a genuinely successful send was rescheduled/resent.
+  Now a settle-call throw is retried once and, if it still fails, the envelope is deliberately left
+  claimed (`OutboxDispatchOutcome.SentButUnsettled`) for the sweeper to reclaim once its lease lapses,
+  rather than being treated as a failed send.
+- **`Benzene.Outbox.DynamoDb`: `DynamoDbOutboxTransaction.CommitAsync` no longer loses staged envelopes
+  when `TransactWriteItemsAsync` itself throws.** It previously drained the staging buffer before
+  issuing the write; a thrown (not just oversized) call permanently lost the staged envelope(s) with
+  no diagnostic signal. It now builds the write from a non-destructive `Peek()` and only drains after
+  the write succeeds, so a caller's retry still commits them.
+- **`Benzene.Outbox.EntityFramework`: the three settle methods no longer throw
+  `DbUpdateConcurrencyException` for a reclaim landing between their own read and their
+  `SaveChangesAsync`.** They now catch it and return `false`, matching `IOutboxStore`'s documented
+  strictly-`true`/`false` contract instead of letting an uncaught exception escape.
+- **`Benzene.Idempotency`: a store failure releasing a claim after a handler exception no longer masks
+  that original exception.** `IdempotencyMiddleware`'s exception-path release now catches a
+  `_store.ReleaseAsync` failure internally (logging it) so the caller's own rethrow always surfaces the
+  real reason the message failed, not an unrelated store exception.
+- **`Benzene.EventSourcing`: `InMemoryEventStore.AppendAsync` now rejects a negative `expectedVersion`
+  with `ArgumentOutOfRangeException`**, mirroring `DynamoDbEventStore` - previously it fell through to
+  `EventStoreConcurrencyException`, a test-vs-prod exception-type divergence for the same caller mistake.
 - **The self-hosted Kafka worker no longer commits a record whose handler returned a failure.**
   `BenzeneKafkaWorker` called `StoreOffset` straight after `KafkaApplication.HandleAsync` without ever
   inspecting `IsSuccessful`, so a *thrown* exception was retained but a **returned** failure result was

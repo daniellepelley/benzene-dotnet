@@ -9,6 +9,8 @@ using Benzene.Abstractions.MessageHandlers;
 using Benzene.Core;
 using Benzene.Core.MessageHandlers;
 using Benzene.Idempotency;
+using Benzene.Test.Logging.Helpers;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace Benzene.Test.Idempotency;
@@ -29,8 +31,25 @@ public class IdempotencyMiddlewareTest
 
     private static IdempotencyMiddleware<TestContext> Middleware(
         IIdempotencyStore store, string? key = "key-1", IdempotencyOptions? options = null,
-        ICancellationTokenAccessor? cancellation = null)
-        => new(store, new FixedKeyStrategy(key), options ?? new IdempotencyOptions(), cancellation: cancellation);
+        ICancellationTokenAccessor? cancellation = null, ILogger? logger = null)
+        => new(store, new FixedKeyStrategy(key), options ?? new IdempotencyOptions(), logger, cancellation);
+
+    // A test double wrapping a real InMemoryIdempotencyStore that throws (not returns false) from
+    // ReleaseAsync - used to simulate a genuine store failure (as opposed to a fenced "reclaimed"
+    // false) settling the release call.
+    private class ThrowsOnReleaseStore : IIdempotencyStore
+    {
+        private readonly InMemoryIdempotencyStore _inner = new();
+
+        public Task<ClaimResult> TryClaimAsync(string key, CancellationToken cancellationToken = default)
+            => _inner.TryClaimAsync(key, cancellationToken);
+
+        public Task<bool> CompleteAsync(string key, string claimToken, bool wasSuccessful, CancellationToken cancellationToken = default)
+            => _inner.CompleteAsync(key, claimToken, wasSuccessful, cancellationToken);
+
+        public Task<bool> ReleaseAsync(string key, string claimToken, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("simulated transient store failure releasing the claim");
+    }
 
     // Records the CancellationToken every call was actually invoked with, so a test can assert the
     // ambient token reached the store rather than CancellationToken.None being passed regardless
@@ -159,6 +178,29 @@ public class IdempotencyMiddlewareTest
         var reclaim = await store.TryClaimAsync("key-1");
         Assert.True(reclaim.Claimed);
         Assert.Equal(1, calls);
+    }
+
+    /// <summary>
+    /// #256: <c>catch { await ReleaseAsync(...); throw; }</c> must never let a store failure inside
+    /// <c>ReleaseAsync</c> replace the original handler exception - that would discard the actual
+    /// reason the message failed. The original exception must always be what propagates.
+    /// </summary>
+    [Fact]
+    public async Task HandlerThrows_AndReleaseAsyncAlsoThrows_TheOriginalHandlerExceptionStillPropagates()
+    {
+        var store = new ThrowsOnReleaseStore();
+        var loggerFactory = new FakeLoggerFactory();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            Middleware(store, logger: loggerFactory.CreateLogger("Idempotency")).HandleAsync(new TestContext(), () =>
+                throw new InvalidOperationException("the real handler failure")));
+
+        // The ORIGINAL handler exception, not the store's ReleaseAsync failure.
+        Assert.Equal("the real handler failure", ex.Message);
+
+        // The store failure was logged, not silently swallowed either.
+        Assert.Contains(loggerFactory.Collector.Entries, e =>
+            e.Level == LogLevel.Error && e.Message.Contains("Releasing idempotency claim"));
     }
 
     [Fact]

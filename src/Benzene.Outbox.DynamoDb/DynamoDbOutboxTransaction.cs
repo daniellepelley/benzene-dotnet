@@ -67,7 +67,11 @@ public class DynamoDbOutboxTransaction : IDynamoDbOutboxTransaction
                 $"DynamoDB transactions are limited to {MaxTransactionItems} items. Split the write.");
         }
 
-        var staged = _stage.DrainStaged();
+        // Non-destructive peek, not DrainStaged() - the transact-item list must be built from
+        // envelopes still in the buffer, so that if TransactWriteItemsAsync itself throws (throttling,
+        // a conditional-check failure, ...) the staged envelopes are still there for a caller's retry.
+        // Only DrainStaged() - after the call below has actually succeeded - is allowed to consume them.
+        var staged = _stage.Peek();
         var transactItems = new List<TransactWriteItem>(total);
         transactItems.AddRange(applicationItems);
         foreach (var envelope in staged)
@@ -84,5 +88,8 @@ public class DynamoDbOutboxTransaction : IDynamoDbOutboxTransaction
 
         await _dynamoDb.TransactWriteItemsAsync(
             new TransactWriteItemsRequest { TransactItems = transactItems }, cancellationToken);
+
+        // Only consume the buffer once the write above has actually succeeded.
+        _stage.DrainStaged();
     }
 }

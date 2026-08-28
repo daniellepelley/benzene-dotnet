@@ -2487,6 +2487,74 @@ tracked by their own work packages' entries as those land.
   — not an empty one. A one-line code comment at the call site now names the exact overload and why it
   binds, so the next reader isn't stopped by the same puzzle. No behavior change; comment-only.
 
+### Tracked findings rounds 14-15, WP-F — Outbox/Idempotency/Saga durability (#253–#259, #208, #209) (done)
+Ruled in [`bug-fix-rulings-round14-15-2026-08.md`](bug-fix-rulings-round14-15-2026-08.md) §3 WP-F
+(flagged for a maintainer glance — the most behaviour-sensitive package cluster in that batch, since
+every fix here changes what happens to data under failure); underlying evidence in
+[`bug-fix-designs-round15-2026-08.md`](bug-fix-designs-round15-2026-08.md) §8 and
+[`bug-fix-designs-round14-2026-08.md`](bug-fix-designs-round14-2026-08.md) §2.
+
+- **[RESOLVED] #254 — `DynamoDbOutboxTransaction.CommitAsync` destructively drained
+  the stage before the write** — a thrown (not just oversized) `TransactWriteItemsAsync` call
+  permanently lost the staged envelope(s), since the buffer was already drained by then. Fixed:
+  `BufferedOutboxStage` gained a non-destructive `Peek()` alongside the existing destructive
+  `DrainStaged()`; `CommitAsync` now builds its transact-item list from `Peek()` and only calls
+  `DrainStaged()` after `TransactWriteItemsAsync` has actually succeeded. New test
+  `Commit_TransactWriteItemsAsyncThrows_LeavesTheStagedEnvelopesInPlace_SoARetryStillCommitsThem`
+  (the thrown-write sibling of the existing over-100-items test). *(Note: the code comments and test
+  names in this fix cite #253 — the ruling doc had #253/#254 swapped relative to their actual
+  assignment in `bug-fix-designs-round15-2026-08.md` §8 when this WP was implemented; corrected here
+  and in the ruling doc, not swept through the source comments — see the ruling doc's WP-F amendment.)*
+- **[RESOLVED] #253 — `OutboxDispatcher.DispatchEnvelopeAsync` treated a post-send
+  settle-call throw as a failed dispatch** — a single try/catch wrapped both `sender.SendAsync` and
+  `_store.MarkDispatchedAsync`, so an ordinary transient store error throwing from
+  `MarkDispatchedAsync` immediately after a genuinely successful send was rescheduled/resent,
+  guaranteeing a duplicate delivery. Fixed: split into two paths — a `SendAsync` failure keeps the
+  existing reschedule/park path unchanged; a `MarkDispatchedAsync` throw after a successful send logs
+  at error level, retries the settle once, and if it still fails leaves the envelope claimed (new
+  outcome `OutboxDispatchOutcome.SentButUnsettled`, tallied on `OutboxDispatchResult`) for the sweeper
+  to reclaim once its lease lapses, rather than driving the reschedule/park path. New tests in
+  `OutboxDispatcherTest.cs` cover both the recovers-on-retry and still-fails-after-retry cases.
+- **[RESOLVED] #255 — `EntityFrameworkOutboxStore<TDbContext>`'s three settle methods could throw
+  `DbUpdateConcurrencyException`** (a reclaim landing between their own `SELECT` and `SaveChangesAsync`)
+  instead of returning the documented `false`. Fixed: all three now route their `SaveChangesAsync`
+  through a shared `TrySaveSettleAsync` helper that catches `DbUpdateConcurrencyException` and returns
+  `false`. New test `MarkDispatched_ReclaimedBetweenSelectAndSaveChanges_ReturnsFalse_NotDbUpdateConcurrencyException`
+  uses a `RacyOutboxDbContext`/`RacyOutboxDbContextFactory` test double (a `SaveChangesAsync` override
+  running a one-shot hook before the base call) to inject the race deterministically.
+- **[RESOLVED] #256 — `IdempotencyMiddleware<TContext>`'s exception-path `catch { await
+  ReleaseAsync(...); throw; }` could lose the original handler exception** if `_store.ReleaseAsync`
+  itself threw. Fixed: the private `ReleaseAsync` helper now wraps `_store.ReleaseAsync` in its own
+  try/catch, logging and swallowing a store failure there so the caller's own `throw;` always rethrows
+  the *original* exception. `CompleteAsync` (the success path) was checked and does not share the
+  masking shape — it is not inside a `catch` block, so there is no original exception to protect — and
+  was left as-is. New test `HandlerThrows_AndReleaseAsyncAlsoThrows_TheOriginalHandlerExceptionStillPropagates`.
+- **[RESOLVED] #257 (success path) + #208 (round 14, failure path) + #209 (round 14, concurrent
+  same-stage failures) — one coherent `Benzene.Saga` fix.** `SagaResult` gains two additive members:
+  `Failures` (`IReadOnlyList<SagaStepOutcome>`, every step that failed within the failing stage — not
+  just the first, mirroring `CompensationFailures`; `Failure`/`FailureException` still mirror
+  `Failures[0]` for source/binary compatibility) and `StateStoreFailure` (`Exception?`, the exception a
+  configured `ISagaStateStore` call threw during the attempt). `Saga.RunOnceAsync` now routes every
+  `ISagaStateStore` call through a `RecordSafelyAsync` helper that catches rather than propagates: a
+  state-store throw after an effect-producing stage no longer aborts with zero rollback attempt
+  (compensation for completed stages still runs, surfaced via `StateStoreFailure` on the returned
+  result); a `RecordFinishedAsync` throw after full success no longer discards the successful result
+  (returns `Outcome == Succeeded` with `StateStoreFailure` populated, so a caller retrying on any
+  thrown exception can't re-run an already-succeeded saga); the same symmetric handling applies to the
+  failure-path `RecordFinishedAsync` call so `CompensationFailures` visibility isn't lost either. New
+  tests in `SagaTest.cs` (#209) and `SagaRetryAndStateStoreTest.cs` (#208, #257, via a
+  `ThrowingSagaStateStore` test double). `CHANGELOG.md` entry added under `[Unreleased]`.
+- **[RESOLVED] #258 (minor) — `InMemoryEventStore.AppendAsync` had no negative-`expectedVersion`
+  guard**, unlike `DynamoDbEventStore` (round 11's #121 fix) — a negative value fell through to
+  `EventStoreConcurrencyException` instead of `ArgumentOutOfRangeException`, a test-vs-prod exception-type
+  divergence. Fixed: mirrors `DynamoDbEventStore`'s guard exactly. New test
+  `Append_WithANegativeExpectedVersion_Throws`.
+- **[RESOLVED] #259 (minor, coverage) — `Benzene.MapReduce` had thin test coverage** relative to its
+  public surface. New tests in `ScatterGatherTest.cs`: an empty `shards` collection (reduces to the
+  seed, never calls the sender); the `reduce` delegate itself throwing mid-fold (propagates directly,
+  not folded into `FailedShards`); and `MaxDegreeOfParallelism` actually bounding concurrency end to
+  end through `ScatterGatherAsync` (deterministic via a shared gate every admitted worker parks on).
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 ### Tracked findings rounds 14-15, WP-K — Examples, mesh-example CI, Helm lint (done)

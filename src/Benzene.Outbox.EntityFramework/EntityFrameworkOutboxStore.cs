@@ -200,8 +200,7 @@ public class EntityFrameworkOutboxStore<TDbContext> : IOutboxStore where TDbCont
         record.LeaseToken = null;
         record.DispatchedAtUtc = _now();
         record.Touch();
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return true;
+        return await TrySaveSettleAsync(dbContext, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -221,8 +220,7 @@ public class EntityFrameworkOutboxStore<TDbContext> : IOutboxStore where TDbCont
         record.LeaseUntil = null;
         record.LeaseToken = null;
         record.Touch();
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return true;
+        return await TrySaveSettleAsync(dbContext, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -240,8 +238,32 @@ public class EntityFrameworkOutboxStore<TDbContext> : IOutboxStore where TDbCont
         record.LeaseUntil = null;
         record.LeaseToken = null;
         record.Touch();
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return true;
+        return await TrySaveSettleAsync(dbContext, cancellationToken);
+    }
+
+    /// <summary>
+    /// Saves a settle write (<see cref="MarkDispatchedAsync"/>/<see cref="RescheduleAsync"/>/
+    /// <see cref="ParkAsync"/>), catching <see cref="DbUpdateConcurrencyException"/> and returning
+    /// <see langword="false"/> instead of letting it escape. The <c>leaseToken</c> WHERE-clause read
+    /// above already fences out a reclaim that happened <em>before</em> the read; this closes the
+    /// remaining window - a reclaim that lands <em>between</em> that read and this <c>SaveChanges</c> -
+    /// which trips EF's own <see cref="OutboxRecord.RowVersion"/> optimistic-concurrency check. Either
+    /// way the meaning is identical to every other refused settle in this class: another claimant won
+    /// the race, nothing was written, and <see cref="IOutboxStore"/>'s documented strictly-<c>true</c>/
+    /// <c>false</c> contract holds - never a raw <see cref="DbUpdateConcurrencyException"/> escaping to
+    /// the caller.
+    /// </summary>
+    private static async Task<bool> TrySaveSettleAsync(TDbContext dbContext, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return false;
+        }
     }
 
     /// <inheritdoc />

@@ -108,6 +108,113 @@ public class ScatterGatherTest
         Assert.Equal("boom", result.FailedShards.Single().Reason!.Message);
     }
 
+    // #259: an empty shard collection must reduce cleanly to the seed, report complete, and never
+    // touch the sender at all (MockBehavior.Strict - any unexpected call throws).
+    [Fact]
+    public async Task EmptyShards_ReducesToTheSeed_AndIsComplete_WithoutCallingTheSender()
+    {
+        var sender = new Mock<IBenzeneMessageSender>(MockBehavior.Strict);
+
+        var result = await sender.Object.ScatterGatherAsync<int, int, int>(
+            "work", System.Array.Empty<int>(), seed: 42, reduce: (acc, p) => acc + p);
+
+        Assert.Equal(42, result.Value);
+        Assert.True(result.IsComplete);
+        Assert.Empty(result.FailedShards);
+        sender.Verify(
+            x => x.SendAsync<int, int>(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<IDictionary<string, string>?>()),
+            Times.Never);
+    }
+
+    // #259: the reduce delegate itself throwing mid-fold (after some shards already reduced
+    // successfully) must propagate that exception directly - it is not a "failed shard" (every worker
+    // call succeeded here; the fold is the app's own code, run after every shard has already
+    // completed) and must not be swallowed or reported via FailedShards/ScatterGatherPartialFailureException.
+    [Fact]
+    public async Task ReduceDelegateThrows_MidFold_PropagatesDirectly()
+    {
+        var sender = SenderReturning(shard => Ok(shard)); // every shard succeeds
+
+        var thrown = await Assert.ThrowsAsync<System.InvalidOperationException>(() =>
+            sender.Object.ScatterGatherAsync<int, int, int>(
+                "work", new[] { 1, 2, 3 }, seed: 0,
+                reduce: (acc, p) =>
+                {
+                    if (p == 2)
+                    {
+                        throw new System.InvalidOperationException("reduce blew up");
+                    }
+
+                    return acc + p;
+                }));
+
+        Assert.Equal("reduce blew up", thrown.Message);
+    }
+
+    // #259: MaxDegreeOfParallelism must actually bound how many worker calls are in flight at once,
+    // end to end through ScatterGatherAsync - not just unit-tested in isolation on BoundedFanOut. Six
+    // shards, cap of 2: every worker call parks on a shared gate the moment it starts, so the number
+    // in flight can only ever grow past the cap if the bound isn't actually being enforced - this is
+    // deterministic (no timing-based flakiness), not merely "usually stays under the cap".
+    [Fact]
+    public async Task MaxDegreeOfParallelism_BoundsConcurrency_EndToEnd()
+    {
+        var current = 0;
+        var maxObserved = 0;
+        var gate = new TaskCompletionSource();
+
+        var sender = new Mock<IBenzeneMessageSender>();
+        sender
+            .Setup(x => x.SendAsync<int, int>("work", It.IsAny<int>(), It.IsAny<IDictionary<string, string>?>()))
+            .Returns(async (string _, int shard, IDictionary<string, string>? _) =>
+            {
+                var now = Interlocked.Increment(ref current);
+                InterlockedMax(ref maxObserved, now);
+                await gate.Task; // held open until the test explicitly releases it below.
+                Interlocked.Decrement(ref current);
+                return Ok(shard);
+            });
+
+        var shards = System.Linq.Enumerable.Range(1, 6).ToArray();
+        var runTask = sender.Object.ScatterGatherAsync<int, int, int>(
+            "work", shards, seed: 0, reduce: (acc, p) => acc + p,
+            new ScatterGatherOptions { MaxDegreeOfParallelism = 2 });
+
+        // Wait for exactly `cap` workers to be admitted and parked on the gate - proves the cap
+        // actually gated entry, not a race that merely happened to look bounded.
+        await WaitUntilAsync(() => Volatile.Read(ref current) == 2, System.TimeSpan.FromSeconds(5));
+        // A brief settle window for an over-admission bug to show up before asserting the ceiling.
+        await Task.Delay(50);
+        Assert.Equal(2, Volatile.Read(ref current));
+        Assert.Equal(2, maxObserved);
+
+        gate.SetResult();
+        var result = await runTask;
+
+        Assert.Equal(21, result.Value); // 1+2+3+4+5+6
+        Assert.True(result.IsComplete);
+    }
+
+    private static void InterlockedMax(ref int target, int value)
+    {
+        int initial, computed;
+        do
+        {
+            initial = target;
+            computed = initial > value ? initial : value;
+        } while (Interlocked.CompareExchange(ref target, computed, initial) != initial);
+    }
+
+    private static async Task WaitUntilAsync(System.Func<bool> condition, System.TimeSpan timeout)
+    {
+        var deadline = System.DateTime.UtcNow + timeout;
+        while (!condition())
+        {
+            Assert.True(System.DateTime.UtcNow <= deadline, "Timed out waiting for the expected concurrency to be reached.");
+            await Task.Delay(5);
+        }
+    }
+
     // Regression test for #92: ScatterGatherAsync used to discard per-shard exception detail
     // (Outcome.Failed carried only the shard), so a ScatterGatherPartialFailureException thrown from
     // ThrowOnAnyFailure had InnerException == null and no way to tell which shard failed for which

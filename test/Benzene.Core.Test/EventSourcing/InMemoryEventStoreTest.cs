@@ -148,6 +148,19 @@ public class InMemoryEventStoreTest
     }
 
     [Fact]
+    public async Task Append_WithANegativeExpectedVersion_Throws()
+    {
+        // #258 — mirrors DynamoDbEventStore's guard (round 11's #121 fix): before this fix a negative
+        // expectedVersion fell through to an EventStoreConcurrencyException here instead of the same
+        // ArgumentOutOfRangeException DynamoDbEventStore throws for the identical caller mistake - a
+        // test-vs-prod divergence in exception type for the same input.
+        var store = new InMemoryEventStore();
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            store.AppendAsync("acct-1", expectedVersion: -1, new[] { Event("Debited") }));
+    }
+
+    [Fact]
     public async Task Append_RejectedAgainstAnUnknownStream_DoesNotLeakAnEmptyStreamEntry()
     {
         // #132 — a rejected append must not register the unknown stream id at all; otherwise every

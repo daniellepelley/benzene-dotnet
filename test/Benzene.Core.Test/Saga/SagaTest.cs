@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Benzene.Abstractions.Results;
@@ -179,6 +180,55 @@ public class SagaTest
 
         Assert.Equal(SagaOutcome.RolledBack, result.Outcome);
         Assert.Empty(result.CompensationFailures);
+    }
+
+    /// <summary>
+    /// #209: when two steps in the same stage fail concurrently, both must be surfaced - not just the
+    /// one <see cref="SagaResult.Failure"/>/<see cref="SagaResult.FailureException"/> happen to carry.
+    /// </summary>
+    [Fact]
+    public async Task RunAsync_TwoStepsInSameStageFailConcurrently_SurfacesBothInFailures()
+    {
+        var saga = new SagaBuilder()
+            .Stage(stage => stage
+                .Step<string>(step => step.Do(_ => Task.FromResult(BenzeneResult.ServiceUnavailable<string>())))
+                .Step<string>(step => step.Do(_ => Task.FromResult(BenzeneResult.NotFound<string>()))))
+            .Build();
+
+        var result = await saga.RunAsync();
+
+        Assert.Equal(SagaOutcome.RolledBack, result.Outcome);
+        Assert.Equal(2, result.Failures.Count);
+        Assert.All(result.Failures, o => Assert.Equal(SagaStepState.Failed, o.State));
+
+        // Both distinct failures are represented - a real regression here would show as duplicates
+        // (a single failure double-counted) or a missing status.
+        var statuses = result.Failures.Select(o => o.Result!.Status).ToArray();
+        Assert.Contains(BenzeneResult.ServiceUnavailable<string>().Status, statuses);
+        Assert.Contains(BenzeneResult.NotFound<string>().Status, statuses);
+
+        // The existing single-failure members stay populated too - first item, for source/binary
+        // compatibility with code written against the pre-#209 shape.
+        Assert.Same(result.Failures[0].Result, result.Failure);
+        Assert.Same(result.Failures[0].Exception, result.FailureException);
+    }
+
+    /// <summary>
+    /// A single-step-failure run must still populate <see cref="SagaResult.Failures"/> with exactly
+    /// that one outcome, mirroring <see cref="SagaResult.Failure"/> - not just the multi-failure case.
+    /// </summary>
+    [Fact]
+    public async Task RunAsync_SingleStepFails_FailuresContainsExactlyOneMatchingEntry()
+    {
+        var saga = new SagaBuilder()
+            .Stage(stage => stage.Step<string>(step => step
+                .Do(_ => Task.FromResult(BenzeneResult.ServiceUnavailable<string>()))))
+            .Build();
+
+        var result = await saga.RunAsync();
+
+        Assert.Single(result.Failures);
+        Assert.Same(result.Failures[0].Result, result.Failure);
     }
 
     [Fact]

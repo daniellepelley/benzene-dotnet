@@ -153,6 +153,140 @@ public class OutboxDispatcherTest
         factory.Dispose();
     }
 
+    /// <summary>
+    /// A test double wrapping a real <see cref="InMemoryOutboxStore"/> that throws (not returns
+    /// <see langword="false"/>) from <see cref="MarkDispatchedAsync"/> the first <c>ThrowCount</c> times
+    /// it is called, then delegates normally - used to simulate a routine transient settle-call failure
+    /// (DynamoDB throttling, a network blip) distinct from the fencing "reclaimed" (<see langword="false"/>)
+    /// case that already has its own coverage.
+    /// </summary>
+    private sealed class ThrowsOnMarkDispatchedStore : IOutboxStore
+    {
+        private readonly InMemoryOutboxStore _inner;
+        private int _remainingThrows;
+
+        public ThrowsOnMarkDispatchedStore(InMemoryOutboxStore inner, int throwCount)
+        {
+            _inner = inner;
+            _remainingThrows = throwCount;
+        }
+
+        public int MarkDispatchedCallCount { get; private set; }
+
+        public Task AddAsync(IEnumerable<OutboxEnvelope> envelopes, CancellationToken cancellationToken = default)
+            => _inner.AddAsync(envelopes, cancellationToken);
+
+        public Task<IReadOnlyList<OutboxEnvelope>> ClaimDueAsync(int batchSize, TimeSpan lease, CancellationToken cancellationToken = default)
+            => _inner.ClaimDueAsync(batchSize, lease, cancellationToken);
+
+        public Task<OutboxEnvelope?> ClaimAsync(string id, TimeSpan lease, CancellationToken cancellationToken = default)
+            => _inner.ClaimAsync(id, lease, cancellationToken);
+
+        public Task<bool> MarkDispatchedAsync(string id, string leaseToken, CancellationToken cancellationToken = default)
+        {
+            MarkDispatchedCallCount++;
+            if (_remainingThrows > 0)
+            {
+                _remainingThrows--;
+                throw new InvalidOperationException("simulated transient store failure settling MarkDispatchedAsync");
+            }
+
+            return _inner.MarkDispatchedAsync(id, leaseToken, cancellationToken);
+        }
+
+        public Task<bool> RescheduleAsync(string id, int attemptCount, TimeSpan delay, string error, string leaseToken, CancellationToken cancellationToken = default)
+            => _inner.RescheduleAsync(id, attemptCount, delay, error, leaseToken, cancellationToken);
+
+        public Task<bool> ParkAsync(string id, string error, string leaseToken, CancellationToken cancellationToken = default)
+            => _inner.ParkAsync(id, error, leaseToken, cancellationToken);
+
+        public Task<int> DeleteDispatchedBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken = default)
+            => _inner.DeleteDispatchedBeforeAsync(cutoff, cancellationToken);
+    }
+
+    [Fact]
+    public async Task DispatchOneAsync_MarkDispatchedAsyncThrowsOnce_RetriesAndStillReportsDispatched_NoDuplicateResendDriven()
+    {
+        // #254: a settle-call throw AFTER a successful send must not be treated like a failed send -
+        // that would reschedule/park an already-delivered envelope, guaranteeing a duplicate. One retry
+        // clears a routine transient failure and the outcome is still Dispatched.
+        var now = DateTimeOffset.UtcNow;
+        var innerStore = new InMemoryOutboxStore(() => now);
+        await innerStore.AddAsync([NewEnvelope()]);
+        var throwingStore = new ThrowsOnMarkDispatchedStore(innerStore, throwCount: 1);
+
+        var sendCount = 0;
+        var factory = BuildFactoryOnStore(throwingStore, routing => routing
+            .Route("test:topic", pipeline => pipeline.OnRequest(ctx =>
+            {
+                Interlocked.Increment(ref sendCount);
+                ctx.Response = BenzeneResult.Accepted<Void>();
+            })));
+
+        var loggerFactory = new FakeLoggerFactory();
+        var dispatcher = new OutboxDispatcher(
+            throwingStore, factory, new OutboxOptions(), logger: loggerFactory.CreateLogger("Dispatcher"));
+
+        var outcome = await dispatcher.DispatchOneAsync("env-1");
+
+        Assert.Equal(OutboxDispatchOutcome.Dispatched, outcome);
+        Assert.Equal(2, throwingStore.MarkDispatchedCallCount); // threw once, retried once, succeeded.
+        Assert.Equal(1, sendCount); // exactly one send - no duplicate resend was driven by the settle throw.
+        Assert.Contains(loggerFactory.Collector.Entries, e =>
+            e.Level == LogLevel.Error && e.Message.Contains("threw on attempt"));
+
+        // Genuinely dispatched - no longer claimable/recoverable via the sweeper.
+        Assert.Empty(await innerStore.ClaimDueAsync(10, TimeSpan.FromMinutes(1)));
+
+        factory.Dispose();
+    }
+
+    [Fact]
+    public async Task DispatchOneAsync_MarkDispatchedAsyncThrowsOnBothAttempts_ReturnsSentButUnsettled_EnvelopeStaysRecoverable()
+    {
+        // #254: if the settle call still fails after the one retry, the envelope must be left claimed
+        // (not rescheduled/parked as a failed send) so the sweeper can reclaim it once its lease lapses -
+        // it must remain visible/recoverable, not silently lost.
+        var now = DateTimeOffset.UtcNow;
+        var innerStore = new InMemoryOutboxStore(() => now);
+        await innerStore.AddAsync([NewEnvelope()]);
+        var throwingStore = new ThrowsOnMarkDispatchedStore(innerStore, throwCount: 2);
+
+        var sendCount = 0;
+        var factory = BuildFactoryOnStore(throwingStore, routing => routing
+            .Route("test:topic", pipeline => pipeline.OnRequest(ctx =>
+            {
+                Interlocked.Increment(ref sendCount);
+                ctx.Response = BenzeneResult.Accepted<Void>();
+            })));
+
+        var loggerFactory = new FakeLoggerFactory();
+        var dispatcher = new OutboxDispatcher(
+            throwingStore, factory, new OutboxOptions { ClaimLease = TimeSpan.FromMinutes(1) },
+            logger: loggerFactory.CreateLogger("Dispatcher"), now: () => now);
+
+        var outcome = await dispatcher.DispatchOneAsync("env-1");
+
+        Assert.Equal(OutboxDispatchOutcome.SentButUnsettled, outcome);
+        Assert.Equal(2, throwingStore.MarkDispatchedCallCount); // one attempt + one retry, both threw.
+        Assert.Equal(1, sendCount); // the send itself only happened once - not treated as a failed send.
+        Assert.Contains(loggerFactory.Collector.Entries, e =>
+            e.Level == LogLevel.Error && e.Message.Contains("SENT-BUT-UNSETTLED"));
+
+        // Not immediately reclaimable - the original lease is still outstanding (it was neither settled
+        // nor released), exactly like any other still-live claim.
+        Assert.Null(await innerStore.ClaimAsync("env-1", TimeSpan.FromMinutes(1)));
+
+        // But once that lease naturally lapses, the sweeper reclaims it exactly like any other lost
+        // claim - proving the envelope was left recoverable, not silently lost.
+        now = now.AddMinutes(2);
+        var reclaimed = await innerStore.ClaimAsync("env-1", TimeSpan.FromMinutes(1));
+        Assert.NotNull(reclaimed);
+        Assert.Equal(OutboxStatus.Pending, reclaimed!.Status);
+
+        factory.Dispose();
+    }
+
     [Fact]
     public async Task DispatchOneAsync_UnknownEnvelope_ReturnsClaimRefused()
     {

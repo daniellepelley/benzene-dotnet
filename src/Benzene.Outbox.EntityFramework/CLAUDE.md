@@ -83,6 +83,15 @@ the current lease (reclaimed by another claimant, or already settled) finds no r
 `false` — nothing is written. See `Benzene.Outbox/CLAUDE.md`'s "Claim fencing" section for the full
 contract and what it does/doesn't close.
 
+**The narrower race, and why it's also `false`, never an exception.** The `leaseToken` WHERE-clause
+read above only fences out a reclaim that happened *before* the read. A reclaim landing *between* that
+read and the settle method's own `SaveChangesAsync` trips EF's own `OutboxRecord.RowVersion`
+optimistic-concurrency check, throwing `DbUpdateConcurrencyException` — all three settle methods route
+their `SaveChangesAsync` through a shared `TrySaveSettleAsync` helper that catches exactly that
+exception and returns `false` instead of letting it escape, so the two race windows (before-read,
+between-read-and-save) collapse to the identical, documented outcome: another claimant won, nothing was
+written, `IOutboxStore`'s strictly-`true`/`false` contract holds either way.
+
 ## Retention — real deletes, no TTL
 Unlike `Benzene.Outbox.DynamoDb` (native TTL, `DeleteDispatchedBeforeAsync` is a no-op),
 `EntityFrameworkOutboxStore<TDbContext>.DeleteDispatchedBeforeAsync` performs a real, immediate
@@ -210,6 +219,10 @@ services.AddSingleton<IHostedService>(resolver =>
   `IDbContextFactory`/`DbContext`) sharing one underlying database, for both `ClaimAsync` and
   `ClaimDueAsync`. Every test in this file exercises the **optimistic-concurrency fallback path**
   specifically, since the test project's only registered provider (EF Core InMemory) doesn't support
-  `ExecuteUpdateAsync` — see "Claim atomicity" above.
+  `ExecuteUpdateAsync` — see "Claim atomicity" above. A `RacyOutboxDbContext`/`RacyOutboxDbContextFactory`
+  test double (a `SaveChangesAsync` override that runs a one-shot hook before the base call) injects a
+  reclaim landing exactly between `MarkDispatchedAsync`'s own `SELECT` and its `SaveChangesAsync`,
+  proving that race returns `false` rather than an escaping `DbUpdateConcurrencyException` — see "Claim
+  fencing" above.
 - `test/Benzene.Core.Test/Outbox/EntityFramework/ModelBuilderExtensionsTest.cs` — default table name,
   the `(Status, NextAttemptAtUtc)` index, and the table name override.

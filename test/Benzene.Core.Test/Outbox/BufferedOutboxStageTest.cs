@@ -37,6 +37,29 @@ public class BufferedOutboxStageTest
     }
 
     [Fact]
+    public async Task Peek_ReturnsEverythingStaged_WithoutClearingTheBuffer()
+    {
+        var stage = new BufferedOutboxStage();
+        await stage.StageAsync(NewEnvelope("env-1"));
+        await stage.StageAsync(NewEnvelope("env-2"));
+
+        var peeked = stage.Peek();
+
+        Assert.Equal(2, peeked.Count);
+        Assert.Equal(2, stage.StagedCount);
+        Assert.Equal(2, stage.Peek().Count);
+        Assert.Equal(2, stage.DrainStaged().Count);
+    }
+
+    [Fact]
+    public void Peek_WithNothingStaged_ReturnsEmpty()
+    {
+        var stage = new BufferedOutboxStage();
+
+        Assert.Empty(stage.Peek());
+    }
+
+    [Fact]
     public void Dispose_WithNoStagedEnvelopes_DoesNotLog()
     {
         var mockLogger = new Mock<ILogger>();

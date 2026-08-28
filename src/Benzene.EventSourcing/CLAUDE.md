@@ -7,8 +7,11 @@ optimistic concurrency. Benzene ships no heavy aggregate framework — this is t
 ## Shape
 
 - `IEventStore` — `AppendAsync(streamId, expectedVersion, events)` (optimistic concurrency; throws
-  `EventStoreConcurrencyException` if the stream moved) and `ReadAsync(streamId, fromVersion=0)`
-  (ordered events). One stream per aggregate; a stream's version is its event count.
+  `EventStoreConcurrencyException` if the stream moved, or `ArgumentOutOfRangeException` for a
+  negative `expectedVersion` — both `InMemoryEventStore` and the sibling DynamoDB store throw the same
+  exception type for the same caller mistake, so app/test code sees identical behavior against either)
+  and `ReadAsync(streamId, fromVersion=0)` (ordered events). One stream per aggregate; a stream's
+  version is its event count.
 - `EventEnvelope` (append) / `StoredEvent` (read) — serialization-agnostic: the caller serializes a
   domain event into `Payload` + an `EventType` discriminator, and deserializes on read. No JSON
   opinion baked in.

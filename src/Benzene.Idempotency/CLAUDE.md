@@ -68,6 +68,18 @@ On a duplicate of a completed key, the middleware sets a **synthetic** successfu
 than looping. Note this is a fresh success signal — the original first-attempt response/payload is
 **not** stored or replayed; a duplicate HTTP-style caller does not get the original body back.
 
+**A settle-call failure never masks the original handler exception.** The `throw`/failed-result paths
+above both go through a private `ReleaseAsync` helper that wraps `_store.ReleaseAsync` in its own
+try/catch: if the store itself throws (a real store failure, not the fenced `false` "reclaimed by
+another worker" case), that failure is logged at error level and swallowed **inside the helper only**
+— it never propagates out of `ReleaseAsync`, so the caller's own `catch { await ReleaseAsync(...);
+throw; }` always reaches its `throw;` and rethrows the *original* handler exception, not the store's.
+Without this, a store failure during release would replace the actual reason the message failed with
+an unrelated exception — the same bug class earlier rounds fixed for `BenzeneServiceBusWorker`'s
+`AbandonMessageAsync` handling, landing on its last sibling here. `CompleteAsync` (the success path)
+is not wrapped the same way — it is not inside a `catch` block (there is no original exception to
+mask if it throws), so this specific hazard does not apply there.
+
 ## Claim fencing (`ClaimToken`)
 Every winning `TryClaimAsync` mints a fresh opaque `ClaimResult.ClaimToken`, non-null exactly when
 `Claimed` is `true`. `CompleteAsync`/`ReleaseAsync` **require** that token back
@@ -160,6 +172,8 @@ default header/body-hash strategy (resolving the transport's `IMessageHeadersGet
   rather than invent an outcome).
 - `test/Benzene.Core.Test/Idempotency/IdempotencyMiddlewareTest.cs` — first-time processes+records;
   duplicate short-circuits; completed-duplicate replays a successful result; throw/failed-result
-  release the claim; no-key passes through; in-progress duplicate skip vs. throw.
+  release the claim; no-key passes through; in-progress duplicate skip vs. throw; `_store.ReleaseAsync`
+  throwing during exception handling still propagates the *original* handler exception, not the
+  store's (see "How the outcome is decided" above).
 - `test/Benzene.Core.Test/Idempotency/HeaderOrBodyHashIdempotencyKeyStrategyTest.cs` — header key
   preferred, prefix applied, deterministic body hash, disabling body-hash returns null.

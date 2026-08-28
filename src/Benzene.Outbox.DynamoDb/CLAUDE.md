@@ -69,6 +69,21 @@ is reported back as `false` (nothing written) rather than silently succeeding or
 holder. See `Benzene.Outbox/CLAUDE.md`'s "Claim fencing" section for the full contract and what it
 does/doesn't close.
 
+## Commit atomicity — non-destructive peek, drain only after success
+`DynamoDbOutboxTransaction.CommitAsync` builds its transact-item list from `BufferedOutboxStage.Peek()`
+(non-destructive) rather than `DrainStaged()` (destructive), and only calls `DrainStaged()` **after**
+`TransactWriteItemsAsync` has actually returned successfully. Before this fix, the stage was drained
+first: the two purely-local validation throws (nothing-to-commit, over-100-items) were already ordered
+before the drain (proven by an existing test), but the real DynamoDB call was not — a thrown (not just
+oversized) `TransactWriteItemsAsync` (throttling, a conditional-check failure) had already emptied the
+buffer, so the staged envelope(s) were silently and permanently lost, undermining the package's
+"atomic, all-or-nothing" claim under exactly the failure mode DynamoDB transactions are meant to be
+resilient against. With the fix, a thrown commit leaves the staged envelopes in place, and a caller's
+retry (with the failure condition cleared) commits them normally — see
+`DynamoDbOutboxTransactionTest.Commit_TransactWriteItemsAsyncThrows_LeavesTheStagedEnvelopesInPlace_SoARetryStillCommitsThem`
+(the thrown-write sibling of the existing `Commit_MoreThanOneHundredItems_LeavesTheStagedEnvelopesInPlace_...`
+test, which already proved the same discipline for the local-validation throws).
+
 ## Key types
 - `DynamoDbOutboxStore : IOutboxStore` — see "Table shape", "Claim atomicity", and "Claim fencing"
   above. `MarkDispatchedAsync`/`RescheduleAsync`/`ParkAsync` return `Task<bool>`: `false` for an
@@ -79,7 +94,8 @@ does/doesn't close.
   own application `TransactWriteItem`s, and issues exactly one `TransactWriteItemsAsync`. Throws
   `InvalidOperationException` for a combined item count over DynamoDB's 100-item transaction limit,
   and for a commit with nothing staged and no application items (a caller-side no-op is treated as a
-  misconfiguration to surface loudly, not silently swallowed).
+  misconfiguration to surface loudly, not silently swallowed). See "Commit atomicity" above for the
+  non-destructive-peek discipline the actual `TransactWriteItemsAsync` call follows too.
 - `OutboxStreamImage` — the deserialization target for a DynamoDB Streams `NewImage`, as unmarshalled
   to plain JSON by `Benzene.Aws.Lambda.DynamoDb`'s `DynamoDbMessageBodyGetter` (AttributeValue JSON
   → plain JSON). This package owns the item schema, so the mapping lives here — the eventual Lambda
@@ -160,7 +176,9 @@ FluentAssertions — the `DynamoDbIdempotencyStoreTest`/`DynamoDbEventStoreTest`
 - `DynamoDbOutboxTransactionTest.cs` — commit combines application items + drained staged envelopes
   into one `TransactWriteItemsAsync` call; the stage is drained (a second commit only sees newly
   staged envelopes); combined count over 100 throws without calling DynamoDB; nothing staged and no
-  application items throws; staged-only (no application items) still commits.
+  application items throws; staged-only (no application items) still commits; a thrown
+  `TransactWriteItemsAsync` leaves the staged envelopes in place and a retry (with the failure
+  removed) still commits them — see "Commit atomicity" above.
 - `OutboxStreamImageTest.cs` — deserializes a store-shaped plain-JSON item (as
   `Benzene.Aws.Lambda.DynamoDb` would hand a handler) including the optional `nextAttemptAtUtc`/
   `lastError` fields; `ToEnvelope()` maps every field; an unrecognized `status` string falls back to

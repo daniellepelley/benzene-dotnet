@@ -30,6 +30,14 @@ public class InMemoryEventStore : IEventStore
     {
         cancellationToken.ThrowIfCancellationRequested();
 
+        if (expectedVersion < 0)
+        {
+            // Mirrors DynamoDbEventStore's guard (round 11's #121 fix) - without it, a negative
+            // expectedVersion falls through to a mismatched-version EventStoreConcurrencyException
+            // instead, a test-vs-prod divergence in exception type for the same caller mistake.
+            throw new ArgumentOutOfRangeException(nameof(expectedVersion), expectedVersion, "Expected version cannot be negative.");
+        }
+
         if (events.Count > MaxEventsPerAppend)
         {
             throw new ArgumentException(

@@ -45,9 +45,16 @@ Saga  ── ordered ──▶  Stage  ── concurrent ──▶  Step (forwar
   `Benzene.Results` names its type `BenzeneResult`, not `Results`.)
 - `SagaContext` — typed result bag; steps publish their result after their stage succeeds.
 - `SagaResult` — `Outcome` (`Succeeded` / `RolledBack` / `PartiallyRolledBack`), `IsSuccess`,
-  `FailedStageIndex`, `Failure` (the failing step's result), `FailureException`, and
-  `CompensationFailures` — `IReadOnlyList<SagaStepOutcome>`, the run-scoped outcomes of steps whose
-  compensation itself failed (orphaned effects to attend to).
+  `FailedStageIndex`, `Failure` (the failing step's result, first-item for compatibility — see
+  `Failures` below), `FailureException`, and `CompensationFailures` — `IReadOnlyList<SagaStepOutcome>`,
+  the run-scoped outcomes of steps whose compensation itself failed (orphaned effects to attend to).
+  Two additive members: `Failures` — `IReadOnlyList<SagaStepOutcome>`, every step that failed within
+  the failing stage (non-empty entries beyond the first exactly when more than one step in that stage
+  failed concurrently — a normal outcome, since a stage's steps all run concurrently and are all
+  awaited before the stage is judged failed; `Failure`/`FailureException` mirror `Failures[0]` and stay
+  populated exactly as before). `StateStoreFailure` — `Exception?`, the exception a configured
+  `ISagaStateStore` call threw during this attempt, or `null` if none did — see "State-store failure
+  handling" below.
 - `SagaStepOutcome` — an immutable, per-run snapshot of one step's outcome (`Step`, `State`, `Result`,
   `Exception`), returned by `ISagaStep.ExecuteAsync`/`CompensateAsync` instead of being stored on the
   step. This is the run-scoped state object the immutability/concurrency-safety contract above depends
@@ -66,6 +73,27 @@ Saga  ── ordered ──▶  Stage  ── concurrent ──▶  Step (forwar
   (in-memory step closures can't be serialized/rehydrated). `InMemorySagaStateStore` (event list +
   `EventsFor(sagaId)`) is the built-in test double; a durable adapter is a 3-method copy-paste (see
   the cookbook). `SagaRunInfo`/`SagaStateEvent`/`SagaStateEventKind` are the data model.
+
+## State-store failure handling
+A configured `ISagaStateStore` call throwing — `RecordStartedAsync`, `RecordStageCompletedAsync`, or
+`RecordFinishedAsync`, at any point during `RunOnceAsync` — is caught and never allowed to abort the
+run, skip rollback, or replace the saga's real outcome with a raw exception; it is surfaced instead via
+the additive `SagaResult.StateStoreFailure` (only the first failure this attempt is kept, but every
+store call is still attempted regardless of an earlier one having failed):
+- **A throw after an effect-producing stage completes** no longer aborts with zero rollback attempt —
+  compensation for every completed stage still runs exactly as it would if the store had succeeded, and
+  the resulting `RolledBack`/`PartiallyRolledBack` result carries `StateStoreFailure` alongside the real
+  `CompensationFailures`.
+- **A throw from the final `RecordFinishedAsync` after every stage genuinely succeeded** no longer
+  discards the entire successful `SagaResult` in favor of a raw exception — the caller still gets back
+  `Outcome == Succeeded` (with `StateStoreFailure` populated), so a caller that reasonably retries on any
+  thrown exception can no longer re-run an already-succeeded saga with no compensation and no dedup. The
+  same symmetric handling applies to `RecordFinishedAsync` on the failure path, so a store failure there
+  can't silently drop `CompensationFailures` visibility either.
+
+A populated `StateStoreFailure` says nothing about whether the saga's own steps succeeded — always read
+it alongside `Outcome`/`Failures`/`CompensationFailures`, which reflect the saga's real forward/rollback
+progress independent of whether the store durably recorded it.
 
 ## Design decisions (from `work/archive/saga-design-2026-07.md` §7)
 - **Await-all within a stage** (not fail-fast) — deterministic; every step's outcome is known
@@ -106,11 +134,18 @@ Saga  ── ordered ──▶  Stage  ── concurrent ──▶  Step (forwar
   reference to shared state.
 - Test coverage lives in `test/Benzene.Core.Test/Saga/` — `SagaTest.cs` (happy path, mid-stage
   failure + rollback, cross-stage LIFO rollback, compensation-failure → `PartiallyRolledBack`,
-  forward-throws, and a 300-concurrent-`RunAsync()` stress test on one built `Saga` asserting zero
-  cross-run contamination), `SagaStepTest.cs` (a step instance returns an independent outcome per call,
-  even under concurrent calls) and `SagaRetryAndStateStoreTest.cs` (retry recovers a flaky step,
-  exhausts to `RolledBack`, refuses to retry `PartiallyRolledBack`; state store records
-  start/stage/finish, only completed stages on failure, one `Started` per retry attempt, and generates
-  an id when none given).
+  forward-throws, a 300-concurrent-`RunAsync()` stress test on one built `Saga` asserting zero
+  cross-run contamination, and — `#209` — two steps in the same stage failing concurrently surfaces
+  both in `SagaResult.Failures` while `Failure`/`FailureException` still mirror the first),
+  `SagaStepTest.cs` (a step instance returns an independent outcome per call, even under concurrent
+  calls) and `SagaRetryAndStateStoreTest.cs` (retry recovers a flaky step, exhausts to `RolledBack`,
+  refuses to retry `PartiallyRolledBack`; state store records start/stage/finish, only completed
+  stages on failure, one `Started` per retry attempt, and generates an id when none given; a
+  `ThrowingSagaStateStore` test double exercises "State-store failure handling" above — `#208`: a
+  throw right after an effect-producing stage completes still rolls back and surfaces
+  `StateStoreFailure`, and a throw from `RecordFinishedAsync` after rollback still returns
+  `CompensationFailures`; `#257`: a throw from `RecordFinishedAsync` after full success still returns
+  `Outcome == Succeeded` with `StateStoreFailure` populated, and a configured retry policy correctly
+  does not re-run it).
 - Vocabulary note: the legacy code called the forward+compensation unit a "Part" and the parallel
   group a "Step"; this package renames them **Step** and **Stage** respectively.
