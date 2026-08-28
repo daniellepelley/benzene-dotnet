@@ -293,6 +293,39 @@ public class BoundedConcurrentDispatcherTest
             $"DrainLanesAsync should return promptly after the lane died, not burn the timeout; took {sw.ElapsedMilliseconds}ms.");
     }
 
+    /// <summary>
+    /// Pins the documented behaviour of <c>handle</c>'s <see cref="CancellationToken"/> parameter
+    /// (round 15's finding #227's sibling coverage debt item for this class): the dispatcher itself
+    /// never populates it with a live token - every lane always calls <c>handle</c> with
+    /// <see cref="CancellationToken.None"/>, even when <see cref="BoundedConcurrentDispatcher{T}.EnqueueAsync"/>
+    /// was itself given a real, non-default, uncancelled token. If a future change starts threading a
+    /// live token through, this test (and the ctor doc it mirrors) must change too - it exists so that
+    /// change can't happen silently.
+    /// </summary>
+    [Fact]
+    public async Task Dispatch_HandleIsAlwaysInvokedWithCancellationTokenNone_RegardlessOfTheEnqueueToken()
+    {
+        var logger = CreateLogger(out _);
+        CancellationToken? seenToken = null;
+
+        var dispatcher = new BoundedConcurrentDispatcher<int>(laneCount: 1, (item, ct) =>
+        {
+            seenToken = ct;
+            return Task.CompletedTask;
+        }, logger);
+
+        using var enqueueCts = new CancellationTokenSource();
+        // A real, live, non-default, uncancelled token - if the dispatcher ever started forwarding it,
+        // seenToken below would be this one, not CancellationToken.None.
+        await dispatcher.EnqueueAsync(1, enqueueCts.Token);
+
+        await dispatcher.DrainAsync(TimeSpan.FromSeconds(5));
+
+        Assert.NotNull(seenToken);
+        Assert.Equal(CancellationToken.None, seenToken.Value);
+        Assert.NotEqual(enqueueCts.Token, seenToken.Value);
+    }
+
     [Fact]
     public async Task DrainLanesAsync_ReturnsOnTimeoutWhenWorkNeverFinishes()
     {
