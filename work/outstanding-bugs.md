@@ -132,6 +132,82 @@ first). **[PERF]** performance hygiene, not a correctness bug. **[RESOLVED]** ve
 >   a CQRS example meant to be copied; the write side calls `Tenants.Add`/`Users.Add` directly instead.
 >   Deleted the file.
 
+> **Tracked findings rounds 14–15 (WP-C — the cancellation-threading sweep, #225, #231, #236, #237,
+> #238, #268, #270) — fixed.** Design decisions, rationale, and rejected alternatives are ruled in
+> [`bug-fix-rulings-round14-15-2026-08.md`](bug-fix-rulings-round14-15-2026-08.md) §2 (the cancellation
+> idiom principle) and §3 WP-C; consult it before touching this code again. Evidence for every item is
+> in [`bug-fix-designs-round15-2026-08.md`](bug-fix-designs-round15-2026-08.md) §1/§4/§11. One shared
+> idiom across all sites: resolve `ICancellationTokenAccessor` (constructor-optional, the
+> `HttpBenzeneMessageClient` idiom) and thread its token into the underlying I/O call instead of an
+> implicit/hardcoded `CancellationToken.None`. Every site's fix is paired with a test that asserts the
+> *actual* token instance reaches the mocked transport (never `It.IsAny<CancellationToken>()`),
+> mirroring `test/Benzene.Core.Test/Google/PubSubCancellationTest.cs`. The other rounds-14/15 work
+> packages (WP-A/B/D through WP-L) land separately and are not covered by this entry.
+> - **[RESOLVED] #225** — `MiddlewareRouter<TRequest,TContext>.HandleAsync` had no way to forward the
+>   ambient cancellation token into the nested application it dispatches to, so envelope-routed
+>   messages on Azure Event Hub/Queue Storage (`BenzeneMessageEventHubHandler`/
+>   `BenzeneMessageQueueStorageHandler`) silently ran their inner pipeline with `CancellationToken.None`
+>   even though the outer per-message scope had the real host cancellation token seeded. Fixed with a
+>   new `protected virtual HandleFunction(TRequest, TContext, IServiceResolverFactory,
+>   CancellationToken)` overload whose default implementation delegates to the existing token-less
+>   abstract 3-arg overload (ignoring the token) — a non-breaking seam: a pre-existing (including
+>   third-party) `MiddlewareRouter` subclass that only implements the required 3-arg member keeps
+>   compiling and behaves unchanged. `HandleAsync` resolves `ICancellationTokenAccessor` from the
+>   `IServiceResolver` it already holds (`TryGetService`, so a bare `NullServiceResolver` still works)
+>   and passes the token through. Both concrete Azure handlers now override the new 4-arg member and
+>   forward the token into `BenzeneMessageResultApplication`'s existing 3-arg,
+>   token-accepting `HandleAsync` overload. Test:
+>   `test/Benzene.Core.Test/Core/Middleware/CancellationTokenSeedingTest.cs`'s
+>   `MiddlewareRouter_HandleAsync_*` cases (router-based nested dispatch, the suite's previously-missing
+>   coverage that let this survive 15 rounds) — including a case pinning that a legacy 3-arg-only
+>   subclass still compiles and runs unchanged.
+> - **[RESOLVED] #236** — `RabbitMqClientMiddleware` never resolved `ICancellationTokenAccessor` and
+>   always passed `CancellationToken.None` into `PublishMandatoryAsync`'s `mandatory: true` path, even
+>   though `RabbitMqMandatoryPublishCoordinator` was already hardened to honor a real token (round
+>   7-10 WP-A) — the cancellation support that hardening built was unreachable in production. Added the
+>   constructor-optional accessor and wired it through both `UseRabbitMqClient` overloads. Test:
+>   `test/Benzene.Core.Test/RabbitMq/RabbitMqClientMiddlewareCancellationTest.cs`.
+> - **[RESOLVED] #237** — `KafkaClientMiddleware` never resolved the accessor and always produced with
+>   an implicit `CancellationToken.None`, inconsistent with the same package's dead-letter producer
+>   (`BenzeneKafkaWorker.ProduceToDeadLetterAsync`), which already threaded a real token. Fixed the same
+>   way, wired through both `UseKafkaClient` overloads. Test:
+>   `test/Benzene.Core.Test/Kafka/KafkaClientMiddlewareCancellationTest.cs`.
+> - **[RESOLVED] #238** — `BenzeneKafkaWorker.StopAsync` ignored its own `cancellationToken` parameter
+>   (the host's stop-timeout token) entirely, so a hung `DrainAsync`/`IConsumer.Close()` had no way to
+>   be aborted from the caller's side — contrast `RabbitMqWorker.StopAsync`, which already threads its
+>   token into its own shutdown calls. Now awaits the consume loop's background task via
+>   `_runTask.WaitAsync(cancellationToken)` instead of a bare `await _runTask`. Test:
+>   `test/Benzene.Core.Test/Kafka/BenzeneKafkaWorkerStopAsyncCancellationTest.cs` (a fake
+>   `IConsumer.Close()` hangs; an already-cancelled `StopAsync` token unblocks the caller).
+> - **[RESOLVED] #268** — none of the nine single-send outbound `*ClientMiddleware` classes
+>   (Sns/Sqs/EventBridge/AwsLambda/EventGrid/EventHub/QueueStorage/ServiceBus, plus the two F1 siblings
+>   `Http`/`Grpc` already fixed) resolved `ICancellationTokenAccessor`, so wrapping any of these sends in
+>   `.UseTimeout(...)` had zero effect on the in-flight SDK call. Fixed all eight remaining classes with
+>   the same constructor-optional-accessor idiom, wired through each `UseXClient` DI extension (both the
+>   DI-resolved and given-instance overloads). Tests (one per client, each asserting the *actual* token
+>   reaches the mocked SDK call): `SnsClientMiddlewareCancellationTest.cs`,
+>   `SqsClientMiddlewareCancellationTest.cs`, `EventBridgeClientMiddlewareCancellationTest.cs`,
+>   `AwsLambdaClientMiddlewareCancellationTest.cs` (all under
+>   `test/Benzene.Core.Test/Clients/Aws/**`), `EventGridClientMiddlewareCancellationTest.cs`,
+>   `EventHubClientMiddlewareCancellationTest.cs`, `QueueStorageClientMiddlewareCancellationTest.cs`,
+>   `ServiceBusClientMiddlewareCancellationTest.cs` (all under `test/Benzene.Core.Test/Clients/Azure/**`).
+> - **[RESOLVED] #270** — `Benzene.Clients.Http`'s given-instance `UseHttpClient(httpClient)` overload
+>   constructed `HttpClientMiddleware` via its no-accessor constructor, silently dropping cancellation
+>   forwarding on that documented first-class path even though the DI-resolved sibling overload already
+>   picked up the accessor via constructor injection. Now resolves it from the pipeline's service
+>   resolver, matching the sibling overload. Test:
+>   `test/Benzene.Core.Test/Clients/Http/HttpClientMiddlewareCancellationTest.cs`.
+> - **[DECISION: deferred] #231** — `Benzene.Aws.Sqs.Client.SqsMessageClient.PublishAsync`
+>   (`src/Benzene.Aws.Sqs/Client/SqsMessageClient.cs`) takes no `CancellationToken`, unlike every
+>   `*BenzeneMessageClient`. The ruling defers this deliberately: the package's own docs frame it as a
+>   documented-minimal raw client (a different, self-hosted-worker package, not the
+>   `Benzene.Clients.Aws.Sqs` family #268 fixed) — revisit only if it's ever promoted to a first-class
+>   path. Not silently dropped; recorded here per the ruling's instruction.
+>
+> Rejected for the whole WP (per the ruling): adding `CancellationToken` parameters to
+> `IBenzeneMessageClient`/`IMiddleware` signatures — the ambient-accessor idiom exists precisely so
+> public shapes don't churn; nothing here needed a breaking signature change.
+
 ---
 
 ## Resolved since the prior triage (verified in current source)

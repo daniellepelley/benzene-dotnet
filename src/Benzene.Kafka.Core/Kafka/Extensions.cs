@@ -1,4 +1,5 @@
-﻿using Benzene.Abstractions.Messages.BenzeneClient;
+﻿using Benzene.Abstractions.DI;
+using Benzene.Abstractions.Messages.BenzeneClient;
 using Benzene.Abstractions.Middleware;
 using Benzene.Clients;
 using Benzene.Core.Middleware;
@@ -17,7 +18,7 @@ public static class Extensions
     public static IMiddlewarePipelineBuilder<KafkaSendMessageContext> UseKafkaClient(
         this IMiddlewarePipelineBuilder<KafkaSendMessageContext> app, IProducer<string, string> producer)
     {
-        return app.Use(_ => new KafkaClientMiddleware(producer));
+        return app.Use(serviceResolver => new KafkaClientMiddleware(producer, serviceResolver.TryGetService<ICancellationTokenAccessor>()));
     }
 
     /// <summary>Adds a <see cref="KafkaClientMiddleware"/> resolved from the service container to the pipeline.</summary>

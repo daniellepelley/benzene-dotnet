@@ -12,7 +12,13 @@ of `Benzene.Azure.Function.QueueStorage` (release plan Tier 2.2, §5.2). This pa
   is null, so a null-logger construction can't make the `catch` block's own `LogError` call throw and
   mask the real send failure (#192, a P8 sweep across all nine `Benzene.Clients.*` message clients).
 - `QueueStorageClientMiddleware` / `QueueStorageSendMessageContext` — terminal send middleware and its
-  context (a plain string body — this transport has no properties/attributes bag).
+  context (a plain string body — this transport has no properties/attributes bag). **Resolves the
+  ambient `ICancellationTokenAccessor` (#268, fixed 2026-08)** — a constructor-optional parameter, the
+  `HttpBenzeneMessageClient` idiom, wired through both `UseQueueStorageClient` overloads. Its token is
+  passed into `SendMessageAsync`. Before this fix the middleware never resolved the accessor and always
+  sent with `CancellationToken.None`. Covered by
+  `test/Benzene.Core.Test/Clients/Azure/QueueStorage/QueueStorageClientMiddlewareCancellationTest.cs`
+  (asserts the *actual* token reaches `SendMessageAsync`, not `It.IsAny<CancellationToken>()`).
 - `QueueStorageContextConverter<T>` — `IBenzeneClientContext<T, Void>` → send context.
 - `OutboundQueueStorageContextConverter` — the `Benzene.Clients.OutboundContext` counterpart, used by
   the `OutboundContext` overloads of `.UseQueueStorage(...)` for `AddOutboundRouting(...).Route(topic, …)`.

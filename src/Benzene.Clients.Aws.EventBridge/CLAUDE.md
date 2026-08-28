@@ -17,7 +17,12 @@ Outbound EventBridge client for a Benzene app: put events on an EventBridge bus.
   null, so a null-logger construction can't make the `catch` block's own `LogError` call throw and
   mask the real send failure (#192, a P8 sweep across all nine `Benzene.Clients.*` message clients).
 - `EventBridgeClientMiddleware` / `EventBridgeSendMessageContext` — terminal put-events middleware
-  and its context.
+  and its context. **Resolves the ambient `ICancellationTokenAccessor` (#268, fixed 2026-08)** — a
+  constructor-optional parameter, the `HttpBenzeneMessageClient` idiom, wired through both
+  `UseEventBridgeClient` overloads. Its token is passed into `PutEventsAsync`. Before this fix the
+  middleware never resolved the accessor and always published with `CancellationToken.None`. Covered
+  by `test/Benzene.Core.Test/Clients/Aws/EventBridge/EventBridgeClientMiddlewareCancellationTest.cs`
+  (asserts the *actual* token reaches `PutEventsAsync`, not `It.IsAny<CancellationToken>()`).
 - `EventBridgeContextConverter<T>` — `IBenzeneClientContext<T, Void>` → put-events context.
 - `EventBridgeBatchMessageClient` — `IBenzeneBatchMessageClient` (from `Benzene.Clients`); puts a
   collection via `PutEvents` (≤10/call). Reuses `EventBridgeContextConverter<T>` per entry, chunks

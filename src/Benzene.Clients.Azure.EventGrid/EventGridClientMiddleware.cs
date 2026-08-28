@@ -1,6 +1,8 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using Azure.Messaging.EventGrid;
+using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Middleware;
 
 namespace Benzene.Clients.Azure.EventGrid;
@@ -12,14 +14,23 @@ namespace Benzene.Clients.Azure.EventGrid;
 public class EventGridClientMiddleware : IMiddleware<EventGridSendMessageContext>, ITerminalMiddleware
 {
     private readonly EventGridPublisherClient _publisherClient;
+    private readonly ICancellationTokenAccessor? _cancellation;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="EventGridClientMiddleware"/> class.
     /// </summary>
     /// <param name="publisherClient">The Event Grid publisher client used to send the event.</param>
-    public EventGridClientMiddleware(EventGridPublisherClient publisherClient)
+    /// <param name="cancellation">
+    /// Supplies the ambient cancellation token to pass into the send call (the
+    /// <c>HttpBenzeneMessageClient</c> constructor-optional accessor idiom); null observes no
+    /// cancellation. Resolved automatically from the container on the DI-registered
+    /// <c>UseEventGridClient()</c> path; the explicit-client <c>UseEventGridClient(publisherClient)</c>
+    /// overload resolves it from the pipeline's service resolver and passes it through.
+    /// </param>
+    public EventGridClientMiddleware(EventGridPublisherClient publisherClient, ICancellationTokenAccessor? cancellation = null)
     {
         _publisherClient = publisherClient;
+        _cancellation = cancellation;
     }
 
     /// <summary>
@@ -37,13 +48,15 @@ public class EventGridClientMiddleware : IMiddleware<EventGridSendMessageContext
     /// <param name="next">Unused; this middleware does not delegate further down the pipeline.</param>
     public async Task HandleAsync(EventGridSendMessageContext context, Func<Task> next)
     {
+        var cancellationToken = _cancellation?.CancellationToken ?? CancellationToken.None;
+
         if (context.CloudEvent != null)
         {
-            await _publisherClient.SendEventAsync(context.CloudEvent);
+            await _publisherClient.SendEventAsync(context.CloudEvent, cancellationToken);
         }
         else
         {
-            await _publisherClient.SendEventAsync(context.EventGridEvent!);
+            await _publisherClient.SendEventAsync(context.EventGridEvent!, cancellationToken);
         }
 
         context.IsSent = true;

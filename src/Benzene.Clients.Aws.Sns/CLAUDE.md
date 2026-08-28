@@ -15,6 +15,14 @@ Outbound SNS client for a Benzene app: publish messages to an SNS topic. Pins **
   construction can't make the `catch` block's own `LogError` call throw and mask the real publish
   failure (#192, a P8 sweep across all nine `Benzene.Clients.*` message clients).
 - `SnsClientMiddleware` / `SnsSendMessageContext` — terminal publish middleware and its context.
+  **Resolves the ambient `ICancellationTokenAccessor` (#268, fixed 2026-08)** — a constructor-optional
+  parameter, the `HttpBenzeneMessageClient` idiom, wired through both `UseSnsClient` overloads (the
+  DI-resolved one via constructor injection; the given-client overload resolves it explicitly from the
+  pipeline's service resolver). Its token is passed into `PublishAsync`. Before this fix the middleware
+  never resolved the accessor and always published with `CancellationToken.None`, so wrapping the send
+  in `.UseTimeout(...)` had no effect on the in-flight SDK call. Covered by
+  `test/Benzene.Core.Test/Clients/Aws/Sns/SnsClientMiddlewareCancellationTest.cs` (asserts the *actual*
+  token reaches `PublishAsync`, not `It.IsAny<CancellationToken>()`).
 - `SnsBatchMessageClient` — `IBenzeneBatchMessageClient` (from `Benzene.Clients`); publishes a
   collection via `PublishBatch` (≤10/call). Reuses `SnsContextConverter<T>` per entry (message +
   attributes + FIFO group/dedup ids), chunks with `BatchSend.Chunk`, and maps `response.Failed` back

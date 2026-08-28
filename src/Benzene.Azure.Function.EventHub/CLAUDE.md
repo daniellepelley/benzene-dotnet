@@ -90,7 +90,14 @@ Covered by `test/Benzene.Core.Test/Azure/EventHubFailureHandlingTest.cs`. The fa
   `EventHubMessageProcessingException` — the failure-handling knobs and the escalation exception (see
   "Failure handling" above). `EventHubContext` implements `IHasMessageResult` to carry the result
   `RaiseOnFailureStatus` reads.
-- `BenzeneMessageEventHubHandler` — the envelope router used by `UseBenzeneMessage`.
+- `BenzeneMessageEventHubHandler` — the envelope router used by `UseBenzeneMessage`. **Forwards the
+  outer scope's ambient cancellation token into the inner envelope pipeline's own DI scope (#225, fixed
+  2026-08)**, by overriding `MiddlewareRouter`'s new cancellation-aware `HandleFunction` overload and
+  passing the token into `BenzeneMessageResultApplication`'s 3-arg `HandleAsync(request, factory,
+  token)` overload. Before this fix the inner pipeline (a second, independent DI scope
+  `UseBenzeneMessage(...)` creates) always ran with `CancellationToken.None`, even though the outer
+  per-message scope had the real host cancellation token seeded - see
+  `Benzene.Core.Middleware/CLAUDE.md`'s `MiddlewareRouter` entry for the shared mechanism.
 - `EventHubMessageHeadersGetter : IMessageHeadersGetter<EventHubContext>` — reads string-typed
   `EventData.Properties` back as headers (same shape `EventHubContextConverter`/
   `OutboundEventHubContextConverter` in `Benzene.Clients.Azure.EventHub` write: `eventData

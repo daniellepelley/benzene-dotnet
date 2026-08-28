@@ -104,7 +104,18 @@ reasoning and why this overturns a written decision rather than filling a gap.
   dictionary onto `BasicProperties.Headers` (UTF-8 encoded).
 - `RabbitMqClientMiddleware` / `.UseRabbitMqClient(channel)` - the publish middleware
   (`BasicPublishAsync`); `.UseRabbitMq<T>(exchange, ...)` is the `OutboundRoutingBuilder` conversion
-  entry point, mirroring Kafka's `.UseKafka<T>(...)`.
+  entry point, mirroring Kafka's `.UseKafka<T>(...)`. **Resolves the ambient
+  `ICancellationTokenAccessor` (#236, fixed 2026-08)** - a constructor-optional parameter, the
+  `HttpBenzeneMessageClient` idiom, wired through both `UseRabbitMqClient` overloads (the DI-resolved
+  and the given-channel one). Its token is threaded into `PublishMandatoryAsync`'s `cancellationToken`
+  parameter on the `mandatory: true` path (the non-mandatory `BasicPublishAsync` fire-and-forget path
+  has nothing to wait on, so it's unaffected). Before this fix the middleware never resolved the
+  accessor at all and always passed `CancellationToken.None`, so a `.UseTimeout(...)`-wrapped mandatory
+  send was held for the coordinator's own `publishConfirmTimeout` regardless of the outer, tighter
+  deadline - the cancellation-support this same package's WP-A hardening built was unreachable in
+  production. Covered by `test/Benzene.Core.Test/RabbitMq/RabbitMqClientMiddlewareCancellationTest.cs`
+  (asserts the *actual* token reaches `IChannel.GetNextPublishSequenceNumberAsync`, not
+  `It.IsAny<CancellationToken>()`).
 - Publish is **persistent by default** (delivery mode 2) so a message on a durable queue survives a
   broker restart; pass `.UseRabbitMqClient(channel, persistent: false)` for transient delivery. This
   is a behavioral change from earlier versions, which always published transient.

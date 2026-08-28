@@ -25,7 +25,7 @@ public static class Extensions
     public static IMiddlewarePipelineBuilder<QueueStorageSendMessageContext> UseQueueStorageClient(
         this IMiddlewarePipelineBuilder<QueueStorageSendMessageContext> app, QueueClient queueClient)
     {
-        return app.Use(_ => new QueueStorageClientMiddleware(queueClient));
+        return app.Use(serviceResolver => new QueueStorageClientMiddleware(queueClient, serviceResolver.TryGetService<ICancellationTokenAccessor>()));
     }
 
     /// <summary>

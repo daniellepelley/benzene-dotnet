@@ -54,7 +54,13 @@ returns null, and routing comes from exactly two places:
 1. **A Benzene message envelope in the body** — `queue.UseBenzeneMessage(direct =>
    direct.UseMessageHandlers())`, via `BenzeneMessageQueueStorageHandler` (mirrors
    `BenzeneMessageEventHubHandler`: deserializes the text into a `BenzeneMessageRequest`, defers
-   to the next middleware if it isn't one).
+   to the next middleware if it isn't one). **Forwards the outer scope's ambient cancellation token
+   into the inner envelope pipeline's own DI scope (#225, fixed 2026-08)**, by overriding
+   `MiddlewareRouter`'s new cancellation-aware `HandleFunction` overload and passing the token into
+   `BenzeneMessageResultApplication`'s 3-arg `HandleAsync(request, factory, token)` overload - see
+   `Benzene.Core.Middleware/CLAUDE.md`'s `MiddlewareRouter` entry for the shared mechanism. Before this
+   fix the inner pipeline always ran with `CancellationToken.None`, even though the outer per-message
+   scope had the real host cancellation token seeded.
 2. **A fixed per-queue topic** — `queue.UsePresetTopic("orders.created").UseMessageHandlers()`,
    for queues whose producer isn't a Benzene client (a queue usually carries one message type
    anyway). Works because `AddAzureQueueStorage` wraps the null topic getter in

@@ -13,6 +13,12 @@ only `Azure.Messaging.EventHubs` (5.11.5, matching the ingress packages' `.Proce
   mask the real send failure (#192, a P8 sweep across all nine `Benzene.Clients.*` message clients).
 - `EventHubClientMiddleware` / `EventHubSendMessageContext` — terminal send middleware and its context;
   the middleware sends the event as a single-event batch (`CreateBatchAsync` + `TryAdd` + `SendAsync`).
+  **Resolves the ambient `ICancellationTokenAccessor` (#268, fixed 2026-08)** — a constructor-optional
+  parameter, the `HttpBenzeneMessageClient` idiom, wired through both `UseEventHubClient` overloads.
+  Its token is passed into both `CreateBatchAsync` and `SendAsync`. Before this fix the middleware
+  never resolved the accessor and always called both with `CancellationToken.None`. Covered by
+  `test/Benzene.Core.Test/Clients/Azure/EventHub/EventHubClientMiddlewareCancellationTest.cs` (asserts
+  the *actual* token reaches both calls, not `It.IsAny<CancellationToken>()`).
 - `EventHubContextConverter<T>` — `IBenzeneClientContext<T, Void>` → send context.
 - `OutboundEventHubContextConverter` — the `Benzene.Clients.OutboundContext` counterpart, used by
   the `OutboundContext` overloads of `.UseEventHub(...)` for `AddOutboundRouting(...).Route(topic, …)`.

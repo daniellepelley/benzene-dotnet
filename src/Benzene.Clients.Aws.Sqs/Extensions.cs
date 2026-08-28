@@ -25,7 +25,7 @@ public static class Extensions
     public static IMiddlewarePipelineBuilder<SqsSendMessageContext> UseSqsClient(
         this IMiddlewarePipelineBuilder<SqsSendMessageContext> app, IAmazonSQS amazonSqs)
     {
-        return app.Use(_ => new SqsClientMiddleware(amazonSqs));
+        return app.Use(serviceResolver => new SqsClientMiddleware(amazonSqs, serviceResolver.TryGetService<ICancellationTokenAccessor>()));
     }
 
     /// <summary>

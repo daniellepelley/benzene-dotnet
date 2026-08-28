@@ -10,6 +10,18 @@ consumer, or any SQS target), plus an SQS health check. Pins **only** `AWSSDK.SQ
   construction can't make the `catch` block's own `LogError` call throw and mask the real send
   failure (#192, a P8 sweep across all nine `Benzene.Clients.*` message clients).
 - `SqsClientMiddleware` / `SqsSendMessageContext` — terminal send middleware and its context.
+  **Resolves the ambient `ICancellationTokenAccessor` (#268, fixed 2026-08)** — a constructor-optional
+  parameter, the `HttpBenzeneMessageClient` idiom, wired through both `UseSqsClient` overloads (the
+  DI-resolved one via constructor injection; the given-client overload resolves it explicitly from the
+  pipeline's service resolver). Its token is passed into `SendMessageAsync`. Before this fix the
+  middleware never resolved the accessor and always sent with `CancellationToken.None`, so wrapping the
+  send in `.UseTimeout(...)` had no effect on the in-flight SDK call. Covered by
+  `test/Benzene.Core.Test/Clients/Aws/Sqs/SqsClientMiddlewareCancellationTest.cs` (asserts the *actual*
+  token reaches `SendMessageAsync`, not `It.IsAny<CancellationToken>()`).
+  **Deliberately NOT extended to `Benzene.Aws.Sqs.Client.SqsMessageClient`** — a different package
+  (the self-hosted-worker `Benzene.Aws.Sqs`'s own minimal raw client, not this one). Ruling #231 defers
+  that client's cancellation support as a documented-minimal-client tradeoff, revisited only if it's
+  ever promoted to a first-class path — out of this fix's scope, recorded in `outstanding-bugs.md`.
 - `SqsContextConverter<T>` — `IBenzeneClientContext<T, Void>` → send context.
 - `OutboundSqsContextConverter` — the `Benzene.Clients.OutboundContext` counterpart, used by the
   `OutboundContext` overloads of `.UseSqs(queueUrl, …)` for `AddOutboundRouting(...).Route(topic, …)`.

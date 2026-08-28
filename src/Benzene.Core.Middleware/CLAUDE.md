@@ -104,7 +104,24 @@ cancellation to always propagate *as cancellation*, drive it from a real linked 
   `Name` (used in tracing) defaults to the concrete router's own type name (`GetType().Name`), not a
   fixed `"MiddlewareRouter"`, so each flavour (`SqsLambdaHandler`, `ApiGatewayLambdaHandler`, ...) is
   distinguishable in traces without any per-inheritor change; `Name` is `virtual` so an inheritor can
-  still override it
+  still override it. **Forwards the scope's ambient cancellation token into its nested dispatch (#225,
+  fixed 2026-08).** `HandleAsync` resolves `ICancellationTokenAccessor` from the `IServiceResolver` it
+  already holds (`TryGetService` - a no-op `CancellationToken.None` fallback when none is
+  registered/seeded, so a bare `NullServiceResolver` still works unchanged) and passes the token to a
+  new `protected virtual HandleFunction(TRequest, TContext, IServiceResolverFactory, CancellationToken)`
+  overload. That overload's **default implementation delegates to the existing token-less abstract
+  3-arg `HandleFunction` overload**, ignoring the token - so a pre-existing (including third-party)
+  subclass that only ever implemented the required 3-arg member keeps compiling and behaves
+  byte-for-byte as before, with no override required. A subclass whose nested dispatch should observe
+  cancellation (e.g. one that forwards into `MiddlewareApplication.HandleAsync(request, factory,
+  token)`'s 3-arg, token-accepting overload - see below) overrides the new 4-arg member instead.
+  Before this fix, envelope-routed messages on Azure Event Hub/Queue Storage
+  (`BenzeneMessageEventHubHandler`/`BenzeneMessageQueueStorageHandler`, both now updated to override
+  the 4-arg overload) always ran their inner pipeline with `CancellationToken.None`, even though the
+  outer per-message scope had the real host cancellation token seeded - a second, independent DI scope
+  the envelope routing creates was unconditionally seeded with `CancellationToken.None`. Covered by
+  `test/Benzene.Core.Test/Core/Middleware/CancellationTokenSeedingTest.cs`'s router-based nested
+  dispatch cases (`MiddlewareRouter_HandleAsync_*`).
 - `ExceptionHandlerMiddleware<TContext>` - Centralized exception handling
 - `StreamContext<TItem>` / `StreamMiddlewareApplication<...>` / `IStreamCheckpointer<TItem>` /
   `NullStreamCheckpointer<TItem>` - stream-record processing (used by `.UseStream()`)
