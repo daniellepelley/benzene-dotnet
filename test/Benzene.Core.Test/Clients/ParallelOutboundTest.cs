@@ -15,12 +15,33 @@ namespace Benzene.Test.Clients;
 public class ParallelOutboundTest
 {
     private static IBenzeneMessageSender SenderFor(Action<OutboundRoutingBuilder> configure)
+        => SenderFor(configure, ambientCancellationToken: null);
+
+    /// <summary>
+    /// As the parameterless overload, but also seeds a fixed <see cref="ICancellationTokenAccessor"/>
+    /// singleton reporting <paramref name="ambientCancellationToken"/> - the seam
+    /// <c>ParallelOutboundMiddleware</c> resolves to distinguish "the ambient token actually fired"
+    /// (#269) from an unrelated <see cref="OperationCanceledException"/>.
+    /// </summary>
+    private static IBenzeneMessageSender SenderFor(Action<OutboundRoutingBuilder> configure, CancellationToken? ambientCancellationToken)
     {
         var services = new ServiceCollection();
+        if (ambientCancellationToken is { } token)
+        {
+            services.AddSingleton<ICancellationTokenAccessor>(new FixedCancellationTokenAccessor(token));
+        }
+
         var container = new MicrosoftBenzeneServiceContainer(services);
         container.AddOutboundRouting(configure);
         var resolver = new MicrosoftServiceResolverAdapter(services.BuildServiceProvider());
         return resolver.GetService<IBenzeneMessageSender>();
+    }
+
+    private sealed class FixedCancellationTokenAccessor : ICancellationTokenAccessor
+    {
+        public FixedCancellationTokenAccessor(CancellationToken cancellationToken) => CancellationToken = cancellationToken;
+
+        public CancellationToken CancellationToken { get; }
     }
 
     [Fact]
@@ -104,5 +125,60 @@ public class ParallelOutboundTest
 
         Assert.False(result.IsSuccessful);
         Assert.Contains(result.Errors, e => e.Message.Contains("sns"));
+    }
+
+    [Fact]
+    public async Task UseParallel_BranchObservesAmbientCancellation_AggregatesToDistinctCancelledOutcome()
+    {
+        // Simulates an Http/Grpc branch (the two clients that correctly observe
+        // ICancellationTokenAccessor per WP-C's fix): its own OperationCanceledException fires
+        // because the ambient token - not some branch-local timeout - was cancelled mid-flight.
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var sender = SenderFor(routing => routing.Route("order:create", p => p.UseParallel(
+            ("grpc", b => b.Use("grpc", resolver => async (ctx, _) =>
+            {
+                var token = resolver.TryGetService<ICancellationTokenAccessor>()!.CancellationToken;
+                await Task.Yield();
+                throw new OperationCanceledException(token);
+            })))), cts.Token);
+
+        var result = await sender.SendAsync<string, Void>("order:create", "payload");
+
+        Assert.False(result.IsSuccessful);
+        // #269: the aggregate names the branch as cancelled, not folded into the generic
+        // UnexpectedError/exception-type text an ordinary failure gets.
+        Assert.Contains(result.Errors, e => e.Message == "grpc: Cancelled");
+        Assert.DoesNotContain(result.Errors, e => e.Message.Contains(nameof(OperationCanceledException)));
+    }
+
+    [Fact]
+    public async Task UseParallel_OneBranchCancelledAndOneBranchActuallyFails_DistinguishesTheTwoInTheAggregate_ButStillRunsBoth()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var sqsRan = false;
+
+        var sender = SenderFor(routing => routing.Route("order:create", p => p.UseParallel(
+            ("grpc", b => b.Use("grpc", resolver => async (ctx, _) =>
+            {
+                var token = resolver.TryGetService<ICancellationTokenAccessor>()!.CancellationToken;
+                await Task.Yield();
+                throw new OperationCanceledException(token);
+            })),
+            ("sqs", b => b.Use("sqs", _ => async (ctx, _) =>
+            {
+                await Task.Yield();
+                sqsRan = true;
+                throw new InvalidOperationException("access denied");
+            })))), cts.Token);
+
+        var result = await sender.SendAsync<string, Void>("order:create", "payload");
+
+        Assert.False(result.IsSuccessful);
+        Assert.True(sqsRan); // the cancelled branch must not abort the fan-out for the others
+        Assert.Contains(result.Errors, e => e.Message == "grpc: Cancelled");
+        Assert.Contains(result.Errors, e => e.Message.Contains("sqs") && e.Message.Contains("access denied"));
     }
 }

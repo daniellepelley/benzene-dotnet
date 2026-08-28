@@ -7,6 +7,7 @@ using Benzene.Clients;
 using Benzene.Core.Middleware;
 using Benzene.Results;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using RabbitMQ.Client;
 using Void = Benzene.Abstractions.Results.Void;
 
@@ -60,7 +61,9 @@ public class RabbitMqBenzeneMessageClient : IBenzeneMessageClient
         string topicHeaderKey = RabbitMqConstants.DefaultTopicHeader, TimeSpan? publishConfirmTimeout = null)
     {
         _serviceResolver = serviceResolver;
-        _logger = logger;
+        // #266: a null logger must not make the catch block's own LogError throw and mask the real
+        // publish failure - fall back to a no-op logger (mechanical P8 sweep of the #192 fix).
+        _logger = logger ?? NullLogger<RabbitMqBenzeneMessageClient>.Instance;
         _exchange = exchange;
         _topicHeaderKey = topicHeaderKey;
 
@@ -82,7 +85,7 @@ public class RabbitMqBenzeneMessageClient : IBenzeneMessageClient
         string topicHeaderKey = RabbitMqConstants.DefaultTopicHeader)
     {
         _serviceResolver = serviceResolver;
-        _logger = logger;
+        _logger = logger ?? NullLogger<RabbitMqBenzeneMessageClient>.Instance;
         _exchange = exchange;
         _topicHeaderKey = topicHeaderKey;
         _middlewarePipeline = middlewarePipeline;

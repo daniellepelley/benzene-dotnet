@@ -2554,6 +2554,78 @@ every fix here changes what happens to data under failure); underlying evidence 
   seed, never calls the sender); the `reduce` delegate itself throwing mid-fold (propagates directly,
   not folded into `FailedShards`); and `MaxDegreeOfParallelism` actually bounding concurrency end to
   end through `ScatterGatherAsync` (deterministic via a shared gate every admitted worker parks on).
+### Tracked findings rounds 14–15, WP-I — Clients null-logger completion + parallel middleware (done)
+Ruled in [`bug-fix-rulings-round14-15-2026-08.md`](bug-fix-rulings-round14-15-2026-08.md) §3 WP-I
+(evidence in [`bug-fix-designs-round15-2026-08.md`](bug-fix-designs-round15-2026-08.md) §11, and the
+prior fix this completes in [`bug-fix-rulings-round12-13-2026-08.md`](bug-fix-rulings-round12-13-2026-08.md)
+§2 WP-3). This is the first rounds-14/15 entry landing in this tracker - see the methodology-gap note
+below for why the fix footprint ended up wider than the ruling's own four-file count.
+- **[RESOLVED] #266 — the null-logger hazard (constructor stores a raw `ILogger`/`ILogger<T>`, the
+  failure-path `catch` block's own `LogError` throws on a null logger and masks the real failure) in
+  the three siblings WP-3 named but left unfixed: `RabbitMqBenzeneMessageClient`,
+  `KafkaBenzeneMessageClient`, `GrpcBenzeneMessageClient`.** Same mechanical fix as WP-3's nine:
+  `logger ?? NullLogger<T>.Instance` in every constructor. `Microsoft.Extensions.Logging.Abstractions`
+  confirmed reachable transitively in all three packages via their `Benzene.Abstractions`/`Benzene.Core`
+  reference chain (not a new dependency).
+- **[RESOLVED] #267 — the same hazard in `StepFunctionsClient` (+ `StepFunctionsClientFactory`,
+  which stores and forwards the logger to every client it creates), which WP-3's own name-based
+  (`*BenzeneMessageClient`) scoping grep couldn't have caught.** Same fix in both types.
+- **Methodology gap, closed as instructed:** re-ran the search by *shape* (a constructor-stored
+  `ILogger`/`ILogger<T>` field with no `?? NullLogger` fallback, used inside a `catch` block via
+  `.LogError`/`.LogWarning`/`.LogCritical`) across all of `src/`, not by class name. Result: **the
+  shape re-grep found the hazard live in all eight of WP-3's remaining nine `Benzene.Clients.*`
+  `*BenzeneMessageClient` classes** (`SnsBenzeneMessageClient`, `SqsBenzeneMessageClient`,
+  `ServiceBusBenzeneMessageClient`, `QueueStorageBenzeneMessageClient`, `EventHubBenzeneMessageClient`,
+  `EventGridBenzeneMessageClient`, `EventBridgeBenzeneMessageClient`, `AwsLambdaBenzeneMessageClient`)
+  - this WP's implementing agent worked from a worktree that had forked before WP-3 (round 12-13)
+  landed on this branch, so its own checkout showed the eight as unfixed and it re-implemented the
+  identical mechanical change. **Correction on merge:** WP-3's #192 fix was in fact already present
+  on the real branch tip for all eight (verified directly against `HEAD` at merge time, not the
+  agent's stale worktree) - re-implementing it was redundant, not a landing of a previously-missing
+  fix, and the merge kept the pre-existing code unchanged rather than the agent's re-derivation
+  (functionally identical either way). `HttpBenzeneMessageClient` (the ninth) was already safe
+  (nullable `ILogger?`, used via `?.` throughout). This is the same worktree-stale-base class of
+  issue as elsewhere in this fix round; the WP's genuine new fixes are #266/#267/#269 below and the
+  coverage debt, not the eight siblings. **The re-grep also found the identical hazard shape in twelve classes outside the
+  `Benzene.Clients.*` outbound-client family** - a different set of packages other rounds-14/15 work
+  packages own, so left unfixed here per this WP's file scope, but recorded for a follow-up sweep:
+  `Benzene.Core.MessageHandlers.MessageHandler`, `Benzene.CodeGen.Cli.Core`'s `AwsLambdaSpecClient`
+  and `HealthCheckClient`, `Benzene.Clients.InProcess.InProcessFanOutClientMiddleware`,
+  `Benzene.Mesh.Auth.Oidc.OidcCallbackMiddleware`, `Benzene.RabbitMq.RabbitMqWorker`,
+  `Benzene.Kafka.Core.BenzeneKafkaWorker`, `Benzene.Cache.Core.CacheHealthCheck`,
+  `Benzene.Azure.Function.AspNet.AspNetMessageBodyGetter` and its `Benzene.AspNet.Core` sibling (the
+  sibling uses `LogDebug`, not `LogError`/`LogWarning`/`LogCritical`, so is a near-miss on the strict
+  shape but the same hazard in practice), `Benzene.Aws.Lambda.Core.AwsLambdaHost` (resolves its
+  logger via `scope.GetService<ILogger<T>>()` at construction rather than a constructor parameter,
+  but the same no-fallback/used-in-catch shape), and `Benzene.Auth.OAuth2.OAuth2BearerMiddleware`.
+  **[DECISION: deferred, tracked here rather than silently dropped]** - not fixed in this WP (out of
+  its declared file scope; several are owned by other in-flight rounds-14/15 work packages) but is a
+  real, live gap, not a false positive - a follow-up sweep should apply the same mechanical fix to
+  all twelve.
+- **[RESOLVED] #269 — `ParallelOutboundMiddleware` misclassified a cancelled branch as an ordinary
+  business failure**, with no `OperationCanceledException` carve-out ahead of the per-branch
+  `catch (Exception ex)` (unlike `HealthCheckError.Classify`/`GrpcHealthCheck`'s own
+  ambient-vs-budget distinction elsewhere in this family). **Ruling's refined design implemented as
+  specified** (not a bare rethrow, which would abandon the other branches' results): a branch whose
+  exception is `OperationCanceledException` *and* the ambient `ICancellationTokenAccessor` token is
+  actually cancelled (not some branch-local timeout) is recorded as a distinct `BranchOutcome.IsCancelled`
+  outcome; `FormatError` renders it as `"{branch}: Cancelled"` instead of folding it into the generic
+  exception-type text an ordinary failure gets. All branches still run to completion and aggregate
+  as before (all-must-succeed); only the per-branch error text is classified differently. New tests
+  in `ParallelOutboundTest`: a single cancelled branch (previously zero cancellation coverage in this
+  suite) and a mixed cancelled+genuinely-failed fan-out asserting the aggregate names each distinctly
+  while still running both branches to completion.
+- **Coverage debt (required in this WP, completed):** `EventGridBenzeneMessageClientTest`,
+  `EventHubBenzeneMessageClientTest`, `QueueStorageBenzeneMessageClientTest`,
+  `ServiceBusBenzeneMessageClientTest` - the four outbound clients WP-3 patched but never directly
+  unit-tested - now cover success, transport-throws-mapped-to-`ServiceUnavailable`, and
+  null-logger-doesn't-throw, mirroring `SnsBenzeneMessageClientTest`'s conventions. Fixed
+  `test/Benzene.Grpc.Test/GrpcBenzeneMessageClientTest.cs`'s `BuildClient` helper, which previously
+  defaulted every omitted `logger` argument to `NullLogger<GrpcBenzeneMessageClient>.Instance`
+  inside the helper itself - silently masking the real constructor's null-logger handling in every
+  existing test in the file. `logger` now passes straight through (default `null`), and a new
+  `SendMessageAsync_NullLogger_DoesNotThrow_AndStillReturnsServiceUnavailable` test pins the real
+  behavior explicitly.
 
 ## Open — maintainer decisions (the real remaining backlog)
 

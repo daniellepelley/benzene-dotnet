@@ -14,6 +14,12 @@ Functions health check. Pins **only** `AWSSDK.StepFunctions`.
   treated as an idempotent success (`Accepted`), not a failure. The no-name overload is unchanged
   (AWS generates a UUID name).
 - `StepFunctionsClientFactory` — builds a client for a given state-machine ARN.
+- **Null-logger safety (#267, WP-I).** `StepFunctionsClient` and `StepFunctionsClientFactory` both
+  fall back to `NullLogger<StepFunctionsClient>.Instance` when `logger` is null, so a null-logger
+  construction can't make a `catch` block's own `LogError`/`LogWarning` call throw and mask the real
+  failure. This class isn't named `*BenzeneMessageClient` despite carrying the identical hazard the
+  #192/#266 sweep fixed on that family — a reminder that the family name was never the actual scope
+  boundary; the hazard *shape* is.
 - `StepFunctionsHealthCheck` — verifies a state machine; reports `HealthCheckDependency`
   (`Kind = "StateMachine"`, `Name` = ARN). Default `HealthCheckMode.Reachability` is a
   **non-destructive** read-only `DescribeStateMachine` call (`Type = "StepFunctions"`);

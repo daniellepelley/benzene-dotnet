@@ -47,13 +47,24 @@ internal class ParallelOutboundMiddleware : IMiddleware<OutboundContext>, ITermi
             try
             {
                 await branch.Pipeline.HandleAsync(branchContext, _serviceResolver);
-                return new BranchOutcome(branch.Name, branchContext.Response as IBenzeneResult, null);
+                return new BranchOutcome(branch.Name, branchContext.Response as IBenzeneResult, null, isCancelled: false);
+            }
+            catch (OperationCanceledException oce) when (IsAmbientCancellation())
+            {
+                // #269: an OCE that fires because the ambient token (ICancellationTokenAccessor) is
+                // actually cancelled is a routine shutdown/timeout outcome, not this branch's transport
+                // failing - the same ambient-vs-budget distinction HealthCheckError.Classify/
+                // GrpcHealthCheck already apply. Recorded as its own classified outcome (below) rather
+                // than falling into the generic catch-all, so the aggregate can tell "this branch was
+                // cancelled" apart from "this branch actually failed" - without rethrowing, which would
+                // abandon the other branches' still-in-flight results.
+                return new BranchOutcome(branch.Name, null, oce, isCancelled: true);
             }
             catch (Exception ex)
             {
                 // Catch per branch rather than let the first failure abort the fan-out - every branch
                 // still runs, and the aggregate can then name all of the ones that failed.
-                return new BranchOutcome(branch.Name, null, ex);
+                return new BranchOutcome(branch.Name, null, ex, isCancelled: false);
             }
         }, _maxDegreeOfParallelism);
 
@@ -71,9 +82,22 @@ internal class ParallelOutboundMiddleware : IMiddleware<OutboundContext>, ITermi
         context.Response = BenzeneResult.SetFailed<Void>(BenzeneResultStatus.UnexpectedError, errors);
     }
 
-    private static string FormatError(BranchOutcome outcome) => outcome.Exception is not null
-        ? $"{outcome.Name}: {outcome.Exception.GetType().Name}: {outcome.Exception.Message}"
-        : $"{outcome.Name}: {outcome.Result?.Status ?? "no response"}";
+    /// <summary>
+    /// Whether the ambient <see cref="ICancellationTokenAccessor"/> token (not some other, unrelated
+    /// <see cref="OperationCanceledException"/> source) is the one that actually fired - the
+    /// ambient-vs-budget distinction <c>HealthCheckError.Classify</c>/<c>GrpcHealthCheck</c> apply. No
+    /// accessor registered, or its token not (yet) cancelled, means the OCE came from something else
+    /// (e.g. a branch's own internal timeout) and should fall through to the generic failure path.
+    /// </summary>
+    private bool IsAmbientCancellation()
+        => _serviceResolver.TryGetService<ICancellationTokenAccessor>()?.CancellationToken.IsCancellationRequested == true;
+
+    private static string FormatError(BranchOutcome outcome) => outcome switch
+    {
+        { IsCancelled: true } => $"{outcome.Name}: Cancelled",
+        { Exception: not null } => $"{outcome.Name}: {outcome.Exception.GetType().Name}: {outcome.Exception.Message}",
+        _ => $"{outcome.Name}: {outcome.Result?.Status ?? "no response"}"
+    };
 
     /// <summary>One transport's send: its display name and the (single-transport) pipeline that runs it.</summary>
     internal sealed class Branch
@@ -90,15 +114,24 @@ internal class ParallelOutboundMiddleware : IMiddleware<OutboundContext>, ITermi
 
     private sealed class BranchOutcome
     {
-        public BranchOutcome(string name, IBenzeneResult? result, Exception? exception)
+        public BranchOutcome(string name, IBenzeneResult? result, Exception? exception, bool isCancelled)
         {
             Name = name;
             Result = result;
             Exception = exception;
+            IsCancelled = isCancelled;
         }
 
         public string Name { get; }
         public IBenzeneResult? Result { get; }
         public Exception? Exception { get; }
+
+        /// <summary>
+        /// True when <see cref="Exception"/> is an <see cref="OperationCanceledException"/> that fired
+        /// because the ambient <see cref="ICancellationTokenAccessor"/> token was actually cancelled
+        /// (#269) - a distinct, classified outcome from an ordinary transport failure. Never true
+        /// together with a successful <see cref="Result"/>.
+        /// </summary>
+        public bool IsCancelled { get; }
     }
 }

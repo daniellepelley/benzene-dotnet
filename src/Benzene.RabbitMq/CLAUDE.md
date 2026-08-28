@@ -97,7 +97,11 @@ reasoning and why this overturns a written decision rather than filling a gap.
 - `RabbitMqBenzeneMessageClient : IBenzeneMessageClient` - publishes so business logic depends only
   on `IBenzeneMessageSender`/`IBenzeneMessageClient`. Mirrors `KafkaBenzeneMessageClient`, including
   the shared static `ISerializer` (a fresh `JsonSerializer` per send would defeat System.Text.Json's
-  per-options converter cache) and the second (prebuilt-pipeline) constructor for testing.
+  per-options converter cache) and the second (prebuilt-pipeline) constructor for testing. Both
+  constructors fall back to `NullLogger<RabbitMqBenzeneMessageClient>.Instance` when `logger` is null
+  (#266, WP-I, the P8 sweep landing the `Benzene.Clients.*` outbound-client family's #192 null-logger
+  fix on this sibling), so a null-logger construction can't make the `catch` block's own `LogError`
+  call throw and mask the real publish failure.
 - `RabbitMqContextConverter<T>` - the request `Topic` becomes the AMQP **routing key** and is also
   carried as a `"topic"` **header**, so a Benzene consumer routes by header (portable, matching every
   other transport) with the routing key as the idiomatic fallback. Forwards the Benzene header

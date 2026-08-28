@@ -13,6 +13,7 @@ using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Void = Benzene.Abstractions.Results.Void;
 
 namespace Benzene.Grpc.Client;
@@ -43,7 +44,9 @@ public class GrpcBenzeneMessageClient : IBenzeneMessageClient
     {
         _adapter = adapter;
         _statusReverseMapper = statusReverseMapper;
-        _logger = logger;
+        // #266: a null logger must not make the catch block's own LogError throw and mask the real
+        // send failure - fall back to a no-op logger (mechanical P8 sweep of the #192 fix).
+        _logger = logger ?? NullLogger<GrpcBenzeneMessageClient>.Instance;
         _serviceResolver = serviceResolver;
 
         var benzeneServiceContainer = new NullBenzeneServiceContainer();
@@ -65,7 +68,7 @@ public class GrpcBenzeneMessageClient : IBenzeneMessageClient
         _middlewarePipeline = middlewarePipeline;
         _adapter = adapter;
         _statusReverseMapper = statusReverseMapper;
-        _logger = logger;
+        _logger = logger ?? NullLogger<GrpcBenzeneMessageClient>.Instance;
         _serviceResolver = serviceResolver;
     }
 
