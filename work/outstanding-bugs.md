@@ -253,6 +253,58 @@ are tracked separately as their own agents land; this section covers WP-5 only.)
   disposed" vs. "the rate limiter has already been disposed"); both still fail CLOSED (#143/#134's
   decision is not reopened - diagnostic accuracy only). See WP-5.
 
+### Tracked findings rounds 14–15, WP-B — RateLimiting disposal regression + Polly cancellation (done)
+Decisions, rationale, and the rejected alternatives for all four are ruled in
+[`bug-fix-rulings-round14-15-2026-08.md`](bug-fix-rulings-round14-15-2026-08.md) §"WP-B — RateLimiting
+disposal regression + Polly cancellation (#249, #250, #251, #252)"; the underlying evidence is in
+[`bug-fix-designs-round15-2026-08.md`](bug-fix-designs-round15-2026-08.md) §7.
+- **[RESOLVED] #249 — WP-5's #200 fix reintroduced #133's own `Timer` leak for all three built-in
+  rate-limiting entry points: the fix's disposal path was unreachable via any public API.** A fresh
+  `RateLimitingMiddleware<TContext>` is constructed per message and none of `UseFixedWindowRateLimiting`/
+  `UseTokenBucketRateLimiting`/`UsePayloadSizeRateLimiting` ever returned a handle to it, so
+  `ownsLimiter: true` + the middleware's own `DisposeAsync` (#200's fix) was structurally unreachable.
+  **Fix:** the limiter stays captured directly in the middleware's closure for use
+  (`ownsLimiter: false` now, restoring #200's collision-proofing), and is separately wrapped in a new
+  `OwnedRateLimiter : IAsyncDisposable` registered as a DI **factory** singleton
+  (`x.AddSingleton<OwnedRateLimiter>(_ => owned)`) - a factory registration is disposed by the
+  container it was created by, a pre-built-instance registration never is (verified against both the
+  Microsoft and Autofac DI adapters). The middleware factory forces that singleton's resolution once
+  (`resolver.GetServices<OwnedRateLimiter>()`, gated so it isn't paid per message), which is what makes
+  the container actually construct - and thus disposal-track - it. Validated with a disposal test that
+  builds a pipeline via the public `UseFixedWindowRateLimiting` alone (no `pipeline.GetItems()`,
+  no builder reach-in), disposes the DI container, and proves the same closure-captured limiter now
+  fails CLOSED on the next message (`RateLimitingPipelineTest.InternallyCreatedLimiter_ReachableViaPublicApi_IsDisposedWhenTheContainerIsDisposed`).
+- **[RESOLVED] #250 — `PollyResilienceMiddleware` never threaded any `CancellationToken` into Polly,
+  and discarded the per-attempt token Polly itself supplies.** (a) The middleware now resolves
+  `ICancellationTokenAccessor` (constructor-optional, the `HttpBenzeneMessageClient` idiom) and passes
+  its token into `ResiliencePipeline.ExecuteAsync`'s overall `cancellationToken` - upstream
+  cancellation now reaches Polly's strategies, where before it was always `CancellationToken.None`.
+  (b) The package `CLAUDE.md`'s incorrect claim that this already happened is corrected. (c) The
+  candidate fix of also re-seeding the scope's ambient accessor with a linked (ambient + per-attempt)
+  token before `next()` - so a Polly `Timeout` would genuinely cancel the wrapped work - was
+  evaluated and **deliberately not implemented**: it is safe for a strategy that invokes its callback
+  once per attempt sequentially, but breaks under Polly's `Hedging` strategy (which this same
+  middleware is documented to support), which can run several attempts concurrently against one
+  scope-shared mutable accessor - a genuine data race whose failure mode is a downstream reader
+  observing (or missing) an unrelated attempt's cancellation, worse than the pre-existing gap.
+  Documented honestly instead (XML doc + `CLAUDE.md`): compose `Benzene.Resilience`'s `.UseTimeout(...)`
+  inside the Polly-wrapped pipeline for a deadline that genuinely cancels downstream work. Both the
+  ambient-cancellation-reaches-Polly behaviour and the documented Timeout-does-not-cancel-`next`
+  behaviour are pinned by new tests in `PollyResilienceMiddlewareTest.cs`.
+- **[RESOLVED] #251 — `src/Benzene.Resilience/CLAUDE.md` described the pre-#61 `TimeoutMiddleware`
+  exception filter (`ex.CancellationToken == cts.Token && ...`), which round 7-10's #61 fix
+  deliberately simplified away** (comparing against `cts.Token` breaks under nested `.UseTimeout(...)`
+  composition - an outer deadline firing while inside an inner wrap always carries the *inner* layer's
+  token, not the outer's). The doc bullet now matches the actual guard
+  (`when (!original.IsCancellationRequested)`) and explains why, pointing at `TimeoutMiddleware.cs`'s
+  own XML remarks as the source of truth.
+- **[RESOLVED] #252 — `RedisWildcardActions.InvalidateEntryAsync` reported `false` ("invalidate
+  failed") whenever a pattern legitimately matched zero keys, producing a spurious "cache may serve
+  stale data" warning on every routine no-op invalidate.** Now returns `true` for "ran to completion,
+  zero matches"; a genuine Redis exception still returns `false` and warns, as before. Test: a
+  zero-match `KEYS` result produces no `SyncCacheAfterWriteAsync` warning
+  (`RedisCacheServiceTest.CacheWildcard_PatternMatchesZeroKeys_ReturnsTrue_AndProducesNoStaleDataWarning`).
+
 ### Tracked findings round 7–10, WP-B — DynamoDB idempotency phantom win + fencing consistency (done)
 Decisions, rationale, and the rejected "won-but-unverified" alternative are ruled in
 [`bug-fix-designs-round7-10-2026-08.md`](archive/bug-fix-designs-round7-10-2026-08.md) §"WP-B — DynamoDB

@@ -282,42 +282,64 @@ public class RateLimitingPipelineTest
     }
 
     [Fact]
-    public async Task InternallyCreatedLimiter_DisposingTheMiddlewareInstance_DisposesTheLimiter()
+    public async Task InternallyCreatedLimiter_ReachableViaPublicApi_IsDisposedWhenTheContainerIsDisposed()
     {
-        // #200: the internally-created limiter is no longer registered with the DI container - that
-        // registration is exactly what collided across sibling pipelines sharing one container (see
-        // Extensions.cs's UseInternallyOwnedRateLimiting for the full story), so it was removed.
-        // Disposal ownership now lives on the middleware itself (ownsLimiter: true) - proven here by
-        // disposing the middleware instance directly (the same thing a caller managing its own
-        // lifetime would do) and observing the next message fail CLOSED with the disposed-limiter
-        // message (#202), exactly like a caller-disposed BYO limiter already does.
+        // #249: #200's fix captured the limiter directly in the middleware's closure and made the
+        // middleware's own DisposeAsync (ownsLimiter: true) the only disposal path - but
+        // MiddlewarePipeline<TContext> builds a fresh middleware instance from the factory on EVERY
+        // message and never retains one, and none of the three public UseXRateLimiting methods
+        // return any handle to the middleware or the limiter, so no caller using only the documented
+        // public API could ever reach that DisposeAsync. This test proves disposal is reachable
+        // again, entirely through the public API: build a pipeline via UseFixedWindowRateLimiting
+        // alone (no pipeline.GetItems(), no reaching into the builder anywhere below), dispose the DI
+        // container/service provider - the caller's ordinary shutdown path, e.g. an ASP.NET Core host
+        // disposing its root IServiceProvider - and prove the limiter's Timer is actually torn down.
+        //
+        // Verification technique mirrors BringYourOwnLimiter_AlreadyDisposed_FailsClosedInsteadOfCrashing
+        // above: a disposed RateLimiter throws ObjectDisposedException from AttemptAcquire, which
+        // #202's catch turns into a fail-CLOSED TooManyRequests naming the limiter, not a crash and
+        // not silent continued acceptance. The two HandleAsync calls share ONE resolver scope opened
+        // before the container is disposed (a scope's own lifetime is independent of the root
+        // provider it was created from), because the pipeline's own scope-per-message plumbing
+        // (BenzeneMessageApplication.HandleAsync) would otherwise open a NEW scope for the second
+        // message from an already-disposed root provider and throw ObjectDisposedException there
+        // instead - a real host doesn't do that (it disposes the container once, at shutdown, after
+        // which it stops sending it new messages entirely), and that's not what this test is
+        // measuring: it measures whether the LIMITER a message-processing scope already holds a
+        // reference to gets disposed, not whether a brand-new scope can still be opened afterwards.
         var serviceCollection = ServiceResolverMother.CreateServiceCollection();
         serviceCollection.UsingBenzene(x => x.AddBenzeneMessage());
 
-        var pipeline = new MiddlewarePipelineBuilder<BenzeneMessageContext>(
+        var pipelineBuilder = new MiddlewarePipelineBuilder<BenzeneMessageContext>(
             new MicrosoftBenzeneServiceContainer(serviceCollection));
-        pipeline.UseFixedWindowRateLimiting(10, TimeSpan.FromMinutes(1));
-        pipeline.UseMessageHandlers();
-        var app = new BenzeneMessageApplication(pipeline.Build());
-        var resolverFactory = new MicrosoftServiceResolverFactory(serviceCollection.BuildServiceProvider());
+        pipelineBuilder.UseFixedWindowRateLimiting(10, TimeSpan.FromMinutes(1));
+        pipelineBuilder.UseMessageHandlers();
+        var builtPipeline = pipelineBuilder.Build();
 
-        var first = await app.HandleAsync(CreateRequest(), resolverFactory);
-        Assert.Equal(BenzeneResultStatus.Ok, first.StatusCode);
+        var provider = serviceCollection.BuildServiceProvider();
+        var resolverFactory = new MicrosoftServiceResolverFactory(provider);
 
-        // The rate-limiting middleware is the first item the pipeline builder holds - construct the
-        // exact same instance the pipeline would for a message, and dispose it directly, the way a
-        // caller managing a RateLimitingMiddleware<TContext> instance's own lifetime would.
-        using (var scope = resolverFactory.CreateScope())
-        {
-            var middlewareFactory = pipeline.GetItems()[0];
-            var middleware = Assert.IsType<RateLimitingMiddleware<BenzeneMessageContext>>(middlewareFactory(scope));
-            await middleware.DisposeAsync();
-        }
+        // Opened while the container is alive - this is what forces the OwnedRateLimiter factory
+        // singleton to actually be constructed (and disposal-tracked) the first time a message flows
+        // through (Extensions.cs's UseInternallyOwnedRateLimiting), and it's kept open across the
+        // container's disposal below so a second message can still be dispatched afterwards.
+        using var scope = resolverFactory.CreateScope();
 
-        var second = await app.HandleAsync(CreateRequest(), resolverFactory);
+        var firstContext = new BenzeneMessageContext(CreateRequest());
+        await builtPipeline.HandleAsync(firstContext, scope);
+        Assert.Equal(BenzeneResultStatus.Ok, firstContext.BenzeneMessageResponse.StatusCode);
 
-        Assert.Equal(BenzeneResultStatus.TooManyRequests, second.StatusCode);
-        Assert.Contains("the rate limiter has already been disposed", second.Body, StringComparison.OrdinalIgnoreCase);
+        // The caller's ordinary shutdown path. This is the ONLY trigger for disposal in this test -
+        // reachable entirely through UseFixedWindowRateLimiting (public API) plus disposing the
+        // provider it was registered on.
+        await provider.DisposeAsync();
+
+        var secondContext = new BenzeneMessageContext(CreateRequest());
+        await builtPipeline.HandleAsync(secondContext, scope);
+
+        Assert.Equal(BenzeneResultStatus.TooManyRequests, secondContext.BenzeneMessageResponse.StatusCode);
+        Assert.Contains("the rate limiter has already been disposed", secondContext.BenzeneMessageResponse.Body,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

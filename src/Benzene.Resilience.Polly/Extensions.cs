@@ -1,3 +1,4 @@
+using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Middleware;
 using Polly;
 
@@ -20,7 +21,8 @@ public static class Extensions
     public static IMiddlewarePipelineBuilder<TContext> UseResiliencePipeline<TContext>(
         this IMiddlewarePipelineBuilder<TContext> app, ResiliencePipeline pipeline)
     {
-        return app.Use(_ => new PollyResilienceMiddleware<TContext>(pipeline));
+        return app.Use(resolver => new PollyResilienceMiddleware<TContext>(
+            pipeline, cancellation: resolver.TryGetService<ICancellationTokenAccessor>()));
     }
 
     /// <summary>
@@ -38,7 +40,8 @@ public static class Extensions
     public static IMiddlewarePipelineBuilder<TContext> UseResiliencePipeline<TContext>(
         this IMiddlewarePipelineBuilder<TContext> app, ResiliencePipeline pipeline, Func<TContext, bool> isFailure)
     {
-        return app.Use(_ => new PollyResilienceMiddleware<TContext>(pipeline, isFailure));
+        return app.Use(resolver => new PollyResilienceMiddleware<TContext>(
+            pipeline, isFailure, resolver.TryGetService<ICancellationTokenAccessor>()));
     }
 
     /// <summary>

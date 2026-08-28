@@ -48,7 +48,24 @@ internal class RedisWildcardActions : CacheInvalidateActions
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "Error deleting keys from cache");
+            // #252: a genuine failure is the ONLY case that reports false below - the caller
+            // (CacheInvalidateActions.SyncCacheAfterWriteAsync) logs a "cache may serve stale data"
+            // warning for a false return, and a pattern that legitimately matches zero keys (the
+            // prefix was never populated, or everything under it already expired) is not that: it ran
+            // to completion and correctly invalidated everything the pattern currently matches, which
+            // is nothing. Returning early here (rather than falling through to `deletedKeys > 0`) is
+            // what keeps that distinction: only this catch, reached on a genuine Redis exception,
+            // reports failure now.
+            return false;
         }
-        return deletedKeys > 0;
+
+        // Ran to completion without exception - success, regardless of how many keys the pattern
+        // matched. Unlike RedisMultiKeyActions (a caller-supplied, presumed-existing key set, where
+        // zero-deleted plausibly means the caller's assumption was wrong), a wildcard PATTERN
+        // legitimately matching nothing is the normal, expected outcome for plenty of calls (a
+        // per-tenant/per-entity prefix that was never populated, or whose entries already expired) -
+        // not a failure to report upstream.
+        Logger.LogDebug("{pattern} matched {deletedKeys} key(s); reporting success.", _pattern, deletedKeys);
+        return true;
     }
 }

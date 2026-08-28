@@ -84,9 +84,20 @@ where retry/timeout fit and when to reach for `Benzene.Resilience.Polly` (circui
 - **The timeout-vs-cancellation line is load-bearing.** A fired *timer* becomes a
   `TimeoutException` → `BenzeneResultStatus.Timeout` failure result. A fired *host* token (the
   original, pre-existing ambient token) must keep propagating as an untouched
-  `OperationCanceledException` — do not weaken the `when (ex.CancellationToken == cts.Token &&
-  !original.IsCancellationRequested)` filter in `TimeoutMiddleware.HandleAsync`, it's what tells the
-  two apart.
+  `OperationCanceledException` — do not weaken the `when (!original.IsCancellationRequested)` filter
+  in `TimeoutMiddleware.HandleAsync`, it's what tells the two apart. **#61 deliberately dropped the
+  `ex.CancellationToken == cts.Token` half this filter used to carry** (round 7-10) — comparing the
+  exception's token against *this layer's own* `cts.Token` breaks under nested `.UseTimeout(...)`
+  composition: when an OUTER deadline fires while execution is inside an INNER wrap, the exception
+  that unwinds through the inner layer always carries the *inner* layer's linked token (its own
+  linked source observed its parent — the outer layer's `cts.Token` — being cancelled and reports
+  itself as the source), never the outer layer's. Requiring an exact `cts.Token` match here would let
+  that case slip past this layer's catch entirely, as a raw, untranslated
+  `OperationCanceledException`, when a timer — just not *this* layer's own — is exactly what fired.
+  Comparing only against `original` (the true, never-timer-cancelled host/pre-existing token) is what
+  correctly separates "some timer in this nesting fired" from "the host cancelled" in every nesting
+  depth. See the type's own XML remarks (`TimeoutMiddleware.cs`) for the full worked example — they
+  are the source of truth if this bullet and the code ever again disagree.
 
 ## Dependencies on other Benzene packages
 - **Benzene.Abstractions.Middleware** — `IMiddleware<TContext>`, `IMiddlewarePipelineBuilder<TContext>`
