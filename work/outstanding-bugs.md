@@ -2438,6 +2438,55 @@ evidence in [`bug-fix-designs-round15-2026-08.md`](bug-fix-designs-round15-2026-
   `.WithSecurity(MessagePackSecurity.UntrustedData)` itself if the payload source is untrusted. See
   WP-G.
 
+### Tracked findings rounds 14–15, WP-L — Core seams (`Filters.AddFilters`, `MessageHandlersList`, `MicrosoftBenzeneServiceContainer.Reopen`)
+Round 14's #204–#223 and round 15's #225–#275 were absent from this tracker (round 15 §13 flagged
+this for #210–#213 explicitly; the gap was broader). Ruling, rationale, and rejected alternatives for
+WP-L's three items are in
+[`bug-fix-rulings-round14-15-2026-08.md`](bug-fix-rulings-round14-15-2026-08.md) §3 "WP-L — Core seams
++ bookkeeping", with the underlying evidence in
+[`bug-fix-designs-round15-2026-08.md`](bug-fix-designs-round15-2026-08.md) §1 (#225–#228). This entry
+covers only WP-L's own three items (#226, #227, #228) — the rest of rounds 14–15's findings are
+tracked by their own work packages' entries as those land.
+- **[RESOLVED] #226 — `Filters.DependencyExtensions.AddFilters` crashed with
+  `AmbiguousMatchException` for any class implementing `IFilter<T>` against more than one `T`**
+  (`src/Benzene.Core.MessageHandlers/Filters/DependencyExtensions.cs`): `filterType.GetInterface(
+  "IFilter\`1")` matched by simple interface name only, so a legitimate multi-topic filter class
+  (`class OrderFilters : IFilter<Created>, IFilter<Updated>`) had two interfaces sharing that simple
+  name and threw at process startup — not a Benzene exception, no actionable message. Fixed by
+  replacing the string-keyed lookup with the same closed-interface enumeration the method already uses
+  to select `filterTypes` (`GetInterfaces().Where(i => i.IsGenericType && i.GetGenericTypeDefinition()
+  == typeof(IFilter<>))`), registering each closed `IFilter<T>` interface separately for the class.
+  Regression tests in `FiltersPipelineTest` (expanded from its prior single scenario): a class
+  implementing `IFilter<T>` for two distinct `T`s routes correctly for both, the zero-registered-filters
+  case, and the multiple-distinct-filter-classes case.
+- **[RESOLVED] #227 — `MessageHandlersList` was a plain, non-thread-safe `List<T>` despite
+  `MessageHandlerDefinitionIndex`'s own remarks explicitly documenting post-startup runtime mutation
+  (via `IMessageHandlersList.Add`) as a supported scenario** — that documented case is exactly what the
+  index's version-stamp invalidation mechanism exists for, but `Add`/`FindDefinitions` had no
+  synchronization. **Ruling: made the documented contract actually safe** (rejected: weakening the doc
+  to "startup only", which would leave the index's own invalidation mechanism dead code and contradict
+  its remarks). Fixed: `Add` takes a lock; `FindDefinitions`' `ToArray()` snapshot happens under the
+  same lock, so a concurrent `Add` can never produce a torn/incomplete read. `IMessageHandlersList`'s
+  doc comment ("built up at startup") is realigned with `MessageHandlerDefinitionIndex`'s "can also
+  happen at runtime" framing, and now states the concurrency contract explicitly. New direct unit tests
+  in `MessageHandlersListTest` (the class had none before), including a stress test: many concurrent
+  `Add` calls racing many concurrent `FindDefinitions` reads — neither throws, and the final count
+  exactly matches every addition.
+- **[RESOLVED] #228 — `MicrosoftBenzeneServiceContainer.Reopen()`'s `_services = new ServiceCollection
+  { _services };` was flagged as looks-like-it-shouldn't-compile, per gate G2, since this environment
+  has no .NET SDK to build with.** Resolved by reading, not by execution: `ServiceCollection`'s own
+  instance `Add` is `Add(ServiceDescriptor)`, which `_services` (declared type `IServiceCollection`)
+  cannot bind to — but a collection initializer's `Add` also considers extension methods in scope, and
+  `Microsoft.Extensions.DependencyInjection.Extensions` (already `using`'d in the file) declares
+  `ServiceCollectionDescriptorExtensions.Add(this IServiceCollection, IEnumerable<ServiceDescriptor>)`.
+  `_services` satisfies that parameter directly (`IServiceCollection : IList<ServiceDescriptor>` is an
+  `IEnumerable<ServiceDescriptor>`), and no other `Add` candidate is applicable, so that overload is the
+  only match — confirmed against the actual
+  `Microsoft.Extensions.DependencyInjection.Abstractions` source, not assumed. Net effect: `Reopen()`
+  copies every existing descriptor, in order, into a fresh, independently-mutable `ServiceCollection`
+  — not an empty one. A one-line code comment at the call site now names the exact overload and why it
+  binds, so the next reader isn't stopped by the same puzzle. No behavior change; comment-only.
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 ### Tracked findings rounds 14-15, WP-K — Examples, mesh-example CI, Helm lint (done)

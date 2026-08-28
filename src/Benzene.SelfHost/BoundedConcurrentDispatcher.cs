@@ -45,7 +45,16 @@ public sealed class BoundedConcurrentDispatcher<T>
 
     /// <summary>Initializes a new instance of the <see cref="BoundedConcurrentDispatcher{T}"/> class.</summary>
     /// <param name="laneCount">The maximum number of items handled concurrently.</param>
-    /// <param name="handle">The async handler each dispatched item is passed to.</param>
+    /// <param name="handle">
+    /// The async handler each dispatched item is passed to. The <see cref="CancellationToken"/>
+    /// parameter is <b>not</b> populated with a live token by the dispatcher itself - every lane's
+    /// consume loop always invokes <paramref name="handle"/> with <see cref="CancellationToken.None"/>,
+    /// regardless of the token passed to <see cref="EnqueueAsync"/> (which only ever cancels the
+    /// enqueue/backpressure wait, not the handler run it precedes). Every current caller ignores this
+    /// parameter and closes over its own token (e.g. the worker's stop token) instead. If a future
+    /// caller instead starts relying on a real, live token arriving here, this doc note - and the
+    /// pinning test in <c>BoundedConcurrentDispatcherTest</c> - must be updated in the same change.
+    /// </param>
     /// <param name="logger">Logs a fault from <paramref name="handle"/>, regardless of <paramref name="catchExceptions"/>.</param>
     /// <param name="keySelector">
     /// When provided, routes items sharing the same key to the same lane, preserving per-key order.

@@ -189,4 +189,40 @@ public class HandlerPipelineBuilderCachingTest
         // Every record resolved its own scoped ScopeMarker: no shared/captured scope, no cross-record bleed.
         Assert.Equal(recordCount, observed.Distinct().Count());
     }
+
+    /// <summary>
+    /// Coverage debt this class's remarks call out by name: <see cref="HandlerPipelineBuilder"/>'s own
+    /// "known limitation" documents that <see cref="HandlerPipelineBuilder.Add"/> replaces the backing
+    /// builder-set array wholesale (never mutated in place) rather than growing it in place, precisely
+    /// so an already-cached structure's key (the OLD array reference) stays untouched by a later Add.
+    /// Exercises exactly that: a second <c>Add</c> call after the first builder set was already used to
+    /// build (and cache) a structure. Not a behaviour fix - the ruling asks for coverage of the
+    /// documented shape, not a change to it.
+    /// </summary>
+    [Fact]
+    public async Task Add_AfterFirstBuild_NewMiddlewareOnlyAppliesToPipelinesCreatedAfterward()
+    {
+        var sink = new ConcurrentQueue<string>();
+        var resolver = new MicrosoftServiceResolverFactory(new ServiceCollection()).CreateScope();
+        var handler = new StubHandler();
+
+        var builder = new HandlerPipelineBuilder(new IHandlerMiddlewareBuilder[] { new TagMiddlewareBuilder("A", sink) });
+
+        // First build, before any incremental registration - caches a structure keyed on the original
+        // one-element builder array. Only "A" runs.
+        var beforeAdd = builder.Create(handler, resolver);
+        await beforeAdd.HandleAsync(new MessageHandlerContext<Req, Res>(new Topic("topic"), new Req()), resolver);
+        Assert.Equal(new[] { "A" }, sink.ToArray());
+
+        // The incremental-registration-after-first-build path under test.
+        builder.Add(new TagMiddlewareBuilder("B", sink));
+
+        // A pipeline Created from the SAME HandlerPipelineBuilder AFTER Add sees both middlewares: Add's
+        // replacement array is a distinct cache key, so this Create call gets a freshly-built structure
+        // rather than the structure cached before Add ran.
+        var afterAdd = builder.Create(handler, resolver);
+        await afterAdd.HandleAsync(new MessageHandlerContext<Req, Res>(new Topic("topic"), new Req()), resolver);
+
+        Assert.Equal(new[] { "A", "A", "B" }, sink.ToArray());
+    }
 }

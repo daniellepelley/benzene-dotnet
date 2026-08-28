@@ -28,4 +28,10 @@
 		<ProjectReference Include="..\Benzene.Microsoft.Dependencies\Benzene.Microsoft.Dependencies.csproj" />
 	</ItemGroup>
 
+	<ItemGroup>
+		<!-- Lets the test suite construct BenzeneLambdaServer directly (it is internal - never a public
+		     type, only ever reached via IServer) to pin its documented StartAsync ordering guarantee. -->
+		<InternalsVisibleTo Include="Benzene.Test" />
+	</ItemGroup>
+
 </Project>

@@ -57,14 +57,26 @@ public static class DependencyExtensions
     /// <returns>The same container, for chaining.</returns>
     public static IBenzeneServiceContainer AddFilters(this IBenzeneServiceContainer services, Type[] types)
     {
-        var filterTypes = types
-            .Where(t => t.GetInterfaces().Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IFilter<>)) && !t.IsAbstract)
-            .ToArray();
+        bool IsFilterInterface(Type i) => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IFilter<>);
 
+        var filterTypes = types
+            .Where(t => t.GetInterfaces().Any(IsFilterInterface) && !t.IsAbstract)
+            .ToArray();
 
         foreach (var filterType in filterTypes)
         {
-            services.AddSingleton(filterType.GetInterface("IFilter`1"), filterType);
+            // A class can legitimately implement IFilter<T> for more than one T (e.g. a multi-topic
+            // filter class). filterType.GetInterface("IFilter`1") matched by simple interface name
+            // only, so it threw AmbiguousMatchException whenever more than one closed IFilter<T> was
+            // present. Enumerate every closed IFilter<T> interface (the same predicate used above to
+            // select filterTypes) and register each one separately, keyed by its own closed interface
+            // type, so FiltersMiddleware can resolve IFilter<T> for whichever T the request happens to be.
+            var filterInterfaces = filterType.GetInterfaces().Where(IsFilterInterface);
+
+            foreach (var filterInterface in filterInterfaces)
+            {
+                services.AddSingleton(filterInterface, filterType);
+            }
         }
 
         return services;
