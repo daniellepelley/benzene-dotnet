@@ -63,6 +63,38 @@ first). **[PERF]** performance hygiene, not a correctness bug. **[RESOLVED]** ve
 > archived, stamped with the landing commits and the re-verified baseline); consult it before touching
 > any of this code again so a decision made here doesn't get silently re-litigated.
 
+> **Tracked findings, rounds 14-15 (2026-08-28).** The round-14/15 review passes produced a fresh batch
+> of evidence-backed findings, ruled and split into parallel work packages in
+> **[`bug-fix-rulings-round14-15-2026-08.md`](bug-fix-rulings-round14-15-2026-08.md)** §3, with the
+> underlying evidence in
+> **[`bug-fix-designs-round15-2026-08.md`](bug-fix-designs-round15-2026-08.md)**. Entries below are
+> added as each work package lands; consult the ruling doc before touching any of this code again so a
+> decision made there doesn't get silently re-litigated.
+>
+> - **[RESOLVED] #229 — `Benzene.Aws.Lambda.Kafka`'s `AddKafka()` used plain `AddScoped`/
+>   `AddHeaderMessageVersionGetter` for its message-handler-seam registrations
+>   (`IMessageTopicGetter<KafkaContext>`, `IMessageHeadersGetter<KafkaContext>`,
+>   `IMessageBodyGetter<KafkaContext>`, `IMessageHandlerResultSetter<KafkaContext>`, and the version
+>   getter), so a caller's own custom getter registered before `.AddKafka()` was silently shadowed —
+>   the same defect class round 11's #160 fixed for S3/DynamoDb/EventBridge/PubSub, but Kafka was
+>   never in that fix's scope. Fixed (WP-D, round 14-15): converted to `TryAddScoped`/
+>   `TryAddHeaderMessageVersionGetter`, matching the already-correct `Benzene.Aws.Lambda.Sns`/`.Sqs`
+>   reference pattern. Regression: a Kafka case added to
+>   `test/Benzene.Core.Test/Customization/AwsGoogleTransportGetterOverrideTest.cs`.
+> - **[RESOLVED] #234 — the seven Azure Functions packages (`QueueStorage`/`EventGrid`/`EventHub`/
+>   `Kafka`/`ServiceBus`/`Timer`/`AspNet`) registered their message-handler seams with plain
+>   `AddScoped`/`AddHeaderMessageVersionGetter`, silently shadowing a caller's own registration —
+>   identical defect class to #229/#160, never carried to the Functions-triggered Azure family (the
+>   self-hosted Azure workers `Benzene.Azure.ServiceBus`/`.EventHub` were already correct). Fixed
+>   (WP-D, round 14-15): converted to `TryAddScoped`/`TryAddHeaderMessageVersionGetter` in all seven
+>   packages' `DependencyInjectionExtensions.cs`, including `AspNet`'s extra
+>   `IMessageVersionGetter<AspNetContext>` registration (the one package in the family with its own
+>   version getter instead of the shared header-based one). `Benzene.Aws.Lambda.ApiGateway`'s
+>   deliberately-multi-registration `IRequestEnricher`/`IResponseHandler` chains (round 12) were left
+>   untouched, as ruled. Regression: new
+>   `test/Benzene.Core.Test/Azure/AzureFunctionTransportGetterOverrideTest.cs`, one test class covering
+>   all seven packages (plus the AspNet version-getter case) rather than seven scattered one-offs.
+
 ---
 
 ## Resolved since the prior triage (verified in current source)

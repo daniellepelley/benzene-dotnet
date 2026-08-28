@@ -42,12 +42,14 @@ public static class DependencyInjectionExtensions
         services.TryAddScoped<JsonSerializer>();
         services.TryAddScoped<PresetTopicHolder>();
 
-        services.AddScoped<IMessageTopicGetter<ServiceBusContext>>(resolver =>
+        // TryAdd: a user registration made earlier (ConfigureServices runs before Configure, where
+        // UseServiceBus calls this) wins over these per-context defaults.
+        services.TryAddScoped<IMessageTopicGetter<ServiceBusContext>>(resolver =>
             new PresetTopicMessageTopicGetter<ServiceBusContext>(new ServiceBusMessageTopicGetter(topicPropertyKey), resolver.GetService<PresetTopicHolder>()));
-        services.AddHeaderMessageVersionGetter<ServiceBusContext>();
-        services.AddScoped<IMessageHeadersGetter<ServiceBusContext>, ServiceBusMessageHeadersGetter>();
-        services.AddScoped<IMessageBodyGetter<ServiceBusContext>, ServiceBusMessageBodyGetter>();
-        services.AddScoped<IMessageHandlerResultSetter<ServiceBusContext>, ServiceBusMessageHandlerResultSetter>();
+        services.TryAddHeaderMessageVersionGetter<ServiceBusContext>();
+        services.TryAddScoped<IMessageHeadersGetter<ServiceBusContext>, ServiceBusMessageHeadersGetter>();
+        services.TryAddScoped<IMessageBodyGetter<ServiceBusContext>, ServiceBusMessageBodyGetter>();
+        services.TryAddScoped<IMessageHandlerResultSetter<ServiceBusContext>, ServiceBusMessageHandlerResultSetter>();
 
         services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.ServiceBus));
         return services;

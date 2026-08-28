@@ -30,12 +30,14 @@ public static class DependencyInjectionExtensions
         services.TryAddScoped<JsonSerializer>();
         services.TryAddScoped<PresetTopicHolder>();
 
-        services.AddScoped<IMessageTopicGetter<EventGridContext>>(resolver =>
+        // TryAdd: a user registration made earlier (ConfigureServices runs before Configure, where
+        // UseEventGrid calls this) wins over these per-context defaults.
+        services.TryAddScoped<IMessageTopicGetter<EventGridContext>>(resolver =>
             new PresetTopicMessageTopicGetter<EventGridContext>(new EventGridMessageTopicGetter(), resolver.GetService<PresetTopicHolder>()));
-        services.AddHeaderMessageVersionGetter<EventGridContext>();
-        services.AddScoped<IMessageHeadersGetter<EventGridContext>, EventGridMessageHeadersGetter>();
-        services.AddScoped<IMessageBodyGetter<EventGridContext>, EventGridMessageBodyGetter>();
-        services.AddScoped<IMessageHandlerResultSetter<EventGridContext>, EventGridMessageHandlerResultSetter>();
+        services.TryAddHeaderMessageVersionGetter<EventGridContext>();
+        services.TryAddScoped<IMessageHeadersGetter<EventGridContext>, EventGridMessageHeadersGetter>();
+        services.TryAddScoped<IMessageBodyGetter<EventGridContext>, EventGridMessageBodyGetter>();
+        services.TryAddScoped<IMessageHandlerResultSetter<EventGridContext>, EventGridMessageHandlerResultSetter>();
 
         services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.EventGrid));
         return services;

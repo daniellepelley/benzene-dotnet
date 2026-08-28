@@ -30,12 +30,14 @@ public static class DependencyInjectionExtensions
         services.TryAddScoped<JsonSerializer>();
         services.TryAddScoped<PresetTopicHolder>();
 
-        services.AddScoped<IMessageTopicGetter<QueueStorageContext>>(resolver =>
+        // TryAdd: a user registration made earlier (ConfigureServices runs before Configure, where
+        // UseQueueStorage calls this) wins over these per-context defaults.
+        services.TryAddScoped<IMessageTopicGetter<QueueStorageContext>>(resolver =>
             new PresetTopicMessageTopicGetter<QueueStorageContext>(new QueueStorageMessageTopicGetter(), resolver.GetService<PresetTopicHolder>()));
-        services.AddHeaderMessageVersionGetter<QueueStorageContext>();
-        services.AddScoped<IMessageHeadersGetter<QueueStorageContext>, QueueStorageMessageHeadersGetter>();
-        services.AddScoped<IMessageBodyGetter<QueueStorageContext>, QueueStorageMessageBodyGetter>();
-        services.AddScoped<IMessageHandlerResultSetter<QueueStorageContext>, QueueStorageMessageHandlerResultSetter>();
+        services.TryAddHeaderMessageVersionGetter<QueueStorageContext>();
+        services.TryAddScoped<IMessageHeadersGetter<QueueStorageContext>, QueueStorageMessageHeadersGetter>();
+        services.TryAddScoped<IMessageBodyGetter<QueueStorageContext>, QueueStorageMessageBodyGetter>();
+        services.TryAddScoped<IMessageHandlerResultSetter<QueueStorageContext>, QueueStorageMessageHandlerResultSetter>();
 
         services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.QueueStorage));
         return services;
