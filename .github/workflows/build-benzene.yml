@@ -9,15 +9,18 @@ on:
   pull_request:
     branches: [ "main" ]
 
+permissions:
+  contents: read
+
 jobs:
   build:
 
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Setup .NET
-      uses: actions/setup-dotnet@v3
+      uses: actions/setup-dotnet@v4
       with:
         dotnet-version: 10.0.x
     - name: Restore dependencies
@@ -45,9 +48,9 @@ jobs:
     needs: build
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Setup .NET
-      uses: actions/setup-dotnet@v3
+      uses: actions/setup-dotnet@v4
       with:
         dotnet-version: 10.0.x
     - name: Ensure docker-compose CLI is resolvable (FluentDocker looks for this binary name; ubuntu-latest only ships the "docker compose" v2 plugin)
@@ -119,9 +122,9 @@ jobs:
     needs: build
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Setup .NET
-      uses: actions/setup-dotnet@v3
+      uses: actions/setup-dotnet@v4
       with:
         dotnet-version: 10.0.x
     - name: Ensure docker-compose CLI is resolvable (FluentDocker looks for this binary name; ubuntu-latest only ships the "docker compose" v2 plugin)
@@ -149,9 +152,9 @@ jobs:
     needs: build
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Setup .NET
-      uses: actions/setup-dotnet@v3
+      uses: actions/setup-dotnet@v4
       with:
         dotnet-version: 10.0.x
     - name: Ensure docker-compose CLI is resolvable (FluentDocker looks for this binary name; ubuntu-latest only ships the "docker compose" v2 plugin)
@@ -174,9 +177,9 @@ jobs:
     needs: build
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Setup .NET
-      uses: actions/setup-dotnet@v3
+      uses: actions/setup-dotnet@v4
       with:
         dotnet-version: 10.0.x
     - name: Ensure docker-compose CLI is resolvable (FluentDocker looks for this binary name; ubuntu-latest only ships the "docker compose" v2 plugin)
