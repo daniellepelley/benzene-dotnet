@@ -63,6 +63,30 @@ public class GrpcRouteFinderTest
         Assert.Throws<BenzeneException>(() => methodFinder.FindDefinitions());
     }
 
+    [Fact]
+    public void ReflectionGrpcMethodFinder_WhenTwoHandlersShareAGrpcMethod_DifferingOnlyByCase_ThrowsBenzeneException()
+    {
+        // #261: the duplicate check must case-fold the same way GrpcRouteFinder's OrdinalIgnoreCase
+        // lookup does, so a case-variant duplicate is caught here (as a clear BenzeneException) rather
+        // than reaching GrpcRouteFinder's ToDictionary(..., StringComparer.OrdinalIgnoreCase) and
+        // crashing with an opaque ArgumentException instead.
+        var definitionA = new Mock<IMessageHandlerDefinition>();
+        definitionA.Setup(x => x.HandlerType).Returns(typeof(HandlerCasedLower));
+        definitionA.Setup(x => x.Topic).Returns(new Topic("topic-a"));
+
+        var definitionB = new Mock<IMessageHandlerDefinition>();
+        definitionB.Setup(x => x.HandlerType).Returns(typeof(HandlerCasedUpper));
+        definitionB.Setup(x => x.Topic).Returns(new Topic("topic-b"));
+
+        var messageHandlersFinder = new Mock<IMessageHandlersFinder>();
+        messageHandlersFinder.Setup(x => x.FindDefinitions())
+            .Returns(new[] { definitionA.Object, definitionB.Object });
+
+        var methodFinder = new ReflectionGrpcMethodFinder(messageHandlersFinder.Object);
+
+        Assert.Throws<BenzeneException>(() => methodFinder.FindDefinitions());
+    }
+
     private static GrpcRouteFinder CreateRouteFinder(params IGrpcMethodDefinition[] definitions)
     {
         var methodFinder = new Mock<IGrpcMethodFinder>();
@@ -78,6 +102,16 @@ public class GrpcRouteFinderTest
 
     [GrpcMethod("/pkg.Service/SharedMethod")]
     private class HandlerB
+    {
+    }
+
+    [GrpcMethod("/pkg.Service/SharedMethod")]
+    private class HandlerCasedLower
+    {
+    }
+
+    [GrpcMethod("/PKG.SERVICE/SHAREDMETHOD")]
+    private class HandlerCasedUpper
     {
     }
 }

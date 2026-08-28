@@ -2350,6 +2350,42 @@ path traversal (#242) — LAND FIRST, ALONE"; full evidence in
   (not just asserting in prose) that the flat-namespace stores' `Key()` never treats `..` as anything
   but a literal key-name character sequence.
 
+### Tracked findings rounds 14-15, WP-G — Serialization + gRPC (done)
+Ruled in [`bug-fix-rulings-round14-15-2026-08.md`](bug-fix-rulings-round14-15-2026-08.md) §3 WP-G;
+evidence in [`bug-fix-designs-round15-2026-08.md`](bug-fix-designs-round15-2026-08.md) §9.
+- **[RESOLVED] #260 — `Benzene.Xml.XmlSerializer.Deserialize` had no nesting-depth guard, the identical
+  bug class as Avro's #56 left unfixed here: a self-referencing/deeply-nested request DTO (a comment
+  tree, category tree, org chart) drove `System.Xml.Serialization.XmlSerializer`'s generated
+  deserializer into unbounded CLR recursion and an *uncatchable* `StackOverflowException`.** Added
+  `XmlOptions` (new - the package had no options type at all) with `MaxDepth` (default 32) and a
+  hand-rolled `DepthGuardedXmlReader` - an `XmlReader` decorator that forwards every member to the
+  wrapped reader unchanged except `Read()`, which checks the wrapped reader's own (BCL-correct) `Depth`
+  against `MaxDepth` whenever the current node is an element start, throwing `BenzeneException` once
+  exceeded (matching the exception type the package's other error paths use, since `Benzene.Xml` had no
+  custom exception type to reuse). `Deserialize` now wraps the raw `XmlReader.Create(...)` result in
+  this before handing it to the BCL deserializer. `AddXml`/`AddXml<TContext>`/`UseXml<TContext>` gained
+  an optional `Action<XmlOptions>? configure` parameter, wired the same shape as `Benzene.Avro`'s
+  `AddAvro`/`UseAvro`. Serialization (writing a response) is deliberately not guarded - not
+  attacker-controlled, out of the ruling's scope. See WP-G; tests in
+  `test/Benzene.Core.Test/Plugins/Xml/XmlDepthGuardTest.cs`.
+- **[RESOLVED] #261 — `ReflectionGrpcMethodFinder`'s duplicate-gRPC-method check was case-sensitive
+  (default `GroupBy` equality) while `GrpcRouteFinder`'s lookup it must agree with is deliberately
+  `StringComparer.OrdinalIgnoreCase` - a case-variant duplicate (`"/pkg.Service/Method"` vs
+  `"/pkg.Service/METHOD"`) passed the finder's check silently and then crashed with a generic,
+  far-less-actionable `ArgumentException` from inside `GrpcRouteFinder`'s
+  `.ToDictionary(..., StringComparer.OrdinalIgnoreCase)` instead of the finder's intended, clearer
+  `BenzeneException`.** `ReflectionGrpcMethodFinder.FindDefinitions()`'s `GroupBy` now case-folds via
+  `StringComparer.OrdinalIgnoreCase`, so the case-variant pair is caught at the finder and never reaches
+  the route finder. See WP-G; test:
+  `GrpcRouteFinderTest.ReflectionGrpcMethodFinder_WhenTwoHandlersShareAGrpcMethod_DifferingOnlyByCase_ThrowsBenzeneException`.
+- **[RESOLVED] #262 (minor) — `MessagePackSerializer`'s custom-options constructor's doc-comment
+  example (`MessagePackSerializerOptions.Standard.WithResolver(...)`) suggested a pattern that, if
+  followed literally, silently reintroduces the `MessagePackSecurity.TrustedData` DoS exposure the
+  default constructor's `UntrustedData` setting exists to prevent, with zero warning about the
+  trade-off.** Added a doc-comment warning: a caller-supplied `options` must call
+  `.WithSecurity(MessagePackSecurity.UntrustedData)` itself if the payload source is untrusted. See
+  WP-G.
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.

@@ -27,6 +27,20 @@ public class XmlSerializer : ISerializer
     // that repeated overhead for a type once it's been serialized/deserialized once.
     private static readonly ConcurrentDictionary<Type, System.Xml.Serialization.XmlSerializer> SerializersByType = new();
 
+    private readonly int _maxDepth;
+
+    /// <summary>Initializes a new instance with default options (<see cref="XmlOptions.DefaultMaxDepth"/>).</summary>
+    public XmlSerializer() : this(new XmlOptions())
+    {
+    }
+
+    /// <summary>Initializes a new instance from options.</summary>
+    /// <param name="options">The XML options controlling deserialize behavior.</param>
+    public XmlSerializer(XmlOptions options)
+    {
+        _maxDepth = options.MaxDepth;
+    }
+
     /// <summary>Serializes <paramref name="payload"/> as <paramref name="type"/> to an XML string.</summary>
     /// <param name="type">The runtime type of the object to serialize.</param>
     /// <param name="payload">The object to serialize; <c>null</c> serializes to an empty string.</param>
@@ -90,7 +104,11 @@ public class XmlSerializer : ISerializer
 
         using var stringReader = new StringReader(payload);
         using var xmlReader = XmlReader.Create(stringReader, SafeReaderSettings);
-        return GetSerializer(type).Deserialize(xmlReader);
+        // Guard against unbounded recursion (#260): a self-referencing/very-deeply-nested request DTO
+        // shape would otherwise drive the reflection-generated deserializer into a CLR stack overflow.
+        // See DepthGuardedXmlReader/XmlOptions.MaxDepth.
+        using var depthGuardedReader = new DepthGuardedXmlReader(xmlReader, _maxDepth);
+        return GetSerializer(type).Deserialize(depthGuardedReader);
     }
 
     /// <summary>Deserializes an XML string to a strongly-typed object.</summary>
