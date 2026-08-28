@@ -131,7 +131,17 @@ public abstract class AzureFunctionBatchApplicationBase<TContext, TState>
     /// Runs inside the <c>catch (Exception ex) when (catchExceptions)</c> block, before the exception
     /// is logged. Default no-op. Service Bus overrides this to abandon a not-yet-settled message.
     /// </summary>
-    protected virtual Task OnExceptionCaughtAsync(TContext context, TState state, Exception exception) => Task.CompletedTask;
+    /// <param name="serviceResolver">
+    /// A scope created (and disposed) around this call and the failure-log line that follows it -
+    /// lets an override resolve its own logger to report a failure <em>inside</em> this hook (e.g.
+    /// Service Bus's fallback-abandon itself throwing) without needing to carry a resolver of its
+    /// own. An override should guard its own risky work in its own try/catch-and-log too (see
+    /// <c>ServiceBusBatchApplication.OnExceptionCaughtAsync</c>) rather than relying solely on
+    /// <see cref="ProcessItemAsync"/>'s own guard around this call - that guard exists so a future
+    /// transport's hook can't reintroduce the masking this parameter and guard exist to prevent, not
+    /// as a substitute for guarding the hook itself.
+    /// </param>
+    protected virtual Task OnExceptionCaughtAsync(TContext context, TState state, Exception exception, IServiceResolver serviceResolver) => Task.CompletedTask;
 
     /// <summary>
     /// Whether an exception NOT swallowed under <c>catchExceptions</c> should still run
@@ -145,7 +155,11 @@ public abstract class AzureFunctionBatchApplicationBase<TContext, TState>
     /// Cleanup run immediately before an unhandled exception is rethrown, when
     /// <see cref="ShouldCleanUpBeforeRethrow"/> is true.
     /// </summary>
-    protected virtual Task CleanUpBeforeRethrowAsync(TContext context, TState state) => Task.CompletedTask;
+    /// <param name="serviceResolver">
+    /// A scope created (and disposed) around this call, for the same reason
+    /// <see cref="OnExceptionCaughtAsync"/> receives one - see that parameter's own doc comment.
+    /// </param>
+    protected virtual Task CleanUpBeforeRethrowAsync(TContext context, TState state, IServiceResolver serviceResolver) => Task.CompletedTask;
 
     /// <summary>
     /// Runs every <c>(context, state)</c> entry in <paramref name="entries"/> through the pipeline
@@ -193,11 +207,28 @@ public abstract class AzureFunctionBatchApplicationBase<TContext, TState>
         }
         catch (Exception ex) when (_catchExceptions)
         {
-            await OnExceptionCaughtAsync(context, state, ex);
-
             using (var loggingScope = serviceResolverFactory.CreateScope())
             {
                 var logger = GetLogger(loggingScope);
+
+                // Guarded in its own try/catch so a failure inside the hook (e.g. Service Bus's
+                // fallback-abandon throwing because the lock already expired) can never replace or
+                // suppress logging `ex` below - the original processing failure this whole catch
+                // block exists to report. Mirrors BenzeneServiceBusWorker.HandleMessageAsync's guard
+                // (see its own comment, the spec for this fix); guarded here on top of whatever an
+                // override does itself so this masking failure mode can't be reintroduced by a
+                // future transport's hook forgetting to guard its own risky work.
+                try
+                {
+                    await OnExceptionCaughtAsync(context, state, ex, loggingScope);
+                }
+                catch (Exception hookEx)
+                {
+                    logger.LogError(hookEx,
+                        "OnExceptionCaughtAsync failed while handling {logId}; the original failure is still logged below, not masked by this one",
+                        GetLogId(context));
+                }
+
                 logger.LogError(ex, BenzeneFailure.IsInfrastructure(ex)
                     ? BenzeneFailure.InfrastructureLogPrefix + " " + FailureLogMessageTemplate + " — this service is mis-wired; the message is not at fault"
                     : FailureLogMessageTemplate, GetLogId(context));
@@ -205,7 +236,23 @@ public abstract class AzureFunctionBatchApplicationBase<TContext, TState>
         }
         catch (Exception) when (ShouldCleanUpBeforeRethrow(context, state))
         {
-            await CleanUpBeforeRethrowAsync(context, state);
+            // Same guard and rationale as the OnExceptionCaughtAsync branch above: a failure inside
+            // the cleanup hook must never replace the exception the `throw;` below is about to
+            // rethrow.
+            using (var loggingScope = serviceResolverFactory.CreateScope())
+            {
+                try
+                {
+                    await CleanUpBeforeRethrowAsync(context, state, loggingScope);
+                }
+                catch (Exception cleanupEx)
+                {
+                    GetLogger(loggingScope).LogError(cleanupEx,
+                        "CleanUpBeforeRethrowAsync failed while handling {logId}; the original exception is still rethrown, not masked by this one",
+                        GetLogId(context));
+                }
+            }
+
             throw;
         }
     }

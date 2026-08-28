@@ -116,6 +116,18 @@ buildTransitive). The hand-written form still works. See `docs/azure-functions.m
   `ServiceBusMessageHandlerResultSetter` DOES record the outcome onto
   `ServiceBusContext.MessageResult` (it's not a no-op) - that's what both `RaiseOnFailureStatus` and
   `AckMode = Explicit` read to decide a message's outcome.
+- **Fallback-abandon never masks the original failure (round 14-15, #232).**
+  `ServiceBusBatchApplication.OnExceptionCaughtAsync`/`CleanUpBeforeRethrowAsync` (the two hooks that
+  abandon a not-yet-settled message under `AckMode = Explicit` when something already went wrong) each
+  wrap their `AbandonMessageAsync` call in its own try/catch-and-log, mirroring
+  `Benzene.Azure.ServiceBus.BenzeneServiceBusWorker.HandleMessageAsync`'s guard (that method's own
+  comment is the spec this was ported from) - if the abandon itself throws (plausible, since it only
+  runs because the message is already in trouble - e.g. the lock has already expired), the abandon
+  failure is logged distinctly rather than replacing/masking the real cause. Both hooks now take an
+  `IServiceResolver` parameter to resolve their own logger for this.
+  `AzureFunctionBatchApplicationBase.ProcessItemAsync`'s own call sites for these two hooks are
+  *additionally* guarded the same way, so this protection doesn't depend on this package's override
+  remembering to guard itself - see `Benzene.Azure.Function.Core/CLAUDE.md`.
 - **Exception/failure-status handling is configurable via `ServiceBusOptions`**
   (`UseServiceBus(..., configure)`). A handler exception cascades and fails the whole trigger
   invocation; a non-exception failure result is **escalated** into a thrown
@@ -137,7 +149,11 @@ buildTransitive). The hand-written form still works. See `docs/azure-functions.m
 
 ## Tests
 - `test/Benzene.Core.Test/Azure/ServiceBusPipelineTest.cs` - full pipeline happy path.
-- `test/Benzene.Core.Test/Azure/ServiceBus/` - `ServiceBusMessageTopicGetter`/`ServiceBusMessageHeadersGetter`.
+- `test/Benzene.Core.Test/Azure/ServiceBus/` - `ServiceBusMessageTopicGetter`/
+  `ServiceBusMessageHeadersGetter`/`ServiceBusMessageBodyGetter` (the last added round 14-15, coverage
+  seeding alongside #235: a malformed-input case proving an invalid UTF-8 byte sequence in the body
+  does not throw - `BinaryData.ToString()`'s replacement-character fallback, matching Kafka's and
+  Event Hub's body getters - already correct, no bug found, gap closed).
 - `test/Benzene.Core.Test/Azure/ServiceBusFailureHandlingTest.cs` - `ServiceBusOptions`'
   `CatchExceptions`/`RaiseOnFailureStatus` combinations against `ServiceBusBatchApplication` directly,
   plus `AckMode = Explicit` complete/abandon behavior (success completes, failure result abandons, an
@@ -145,7 +161,10 @@ buildTransitive). The hand-written form still works. See `docs/azure-functions.m
   `ServiceBusReceivedMessage[]` overload never touches `ServiceBusMessageActions` even when `AckMode`
   is `Explicit`) - dispatches through `IMiddlewareApplication<ServiceBusTriggerBatch>` directly with
   a mocked `Microsoft.Azure.Functions.Worker.ServiceBusMessageActions` (mockable: non-sealed, virtual
-  methods, protected constructor Moq's proxy can call).
+  methods, protected constructor Moq's proxy can call). Also covers #232's double-fault case (the
+  primary settle AND the fallback abandon both throw) under both `CatchExceptions` settings, proving
+  the original settle failure - not the fallback abandon's own exception - is what propagates/is
+  logged.
 
 ## Claim-check hydration
 Not wired here yet: `Benzene.ClaimCheck`'s hydrate middleware needs an

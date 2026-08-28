@@ -60,4 +60,33 @@ public class EventHubGettersTest
 
         Assert.Equal("abc-123", headers["correlation-id"]);
     }
+
+    // No coverage existed for EventHubMessageBodyGetter at all before round 14-15's #235 pass flagged
+    // the broad malformed-input coverage gap across test/Benzene.Core.Test/Azure/ (see
+    // work/bug-fix-designs-round15-2026-08.md §3).
+    [Fact]
+    public void GetBody_ReturnsTheEventBodyAsAString()
+    {
+        var context = CreateContext("hello");
+
+        Assert.Equal("hello", new EventHubMessageBodyGetter().GetBody(context));
+    }
+
+    // Malformed-input coverage gap, closed: an invalid UTF-8 byte sequence in the event body (a
+    // poison payload, not merely absent data). Confirms current behavior rather than fixing anything -
+    // BinaryData.ToString() decodes as UTF-8 with replacement-character fallback, not a throwing
+    // decoder (matching Kafka's and Service Bus's body getters - see their equivalent cases), so this
+    // does NOT throw. No latent bug found here.
+    [Fact]
+    public void GetBody_InvalidUtf8Bytes_DoesNotThrow_ReturnsReplacementCharacters()
+    {
+        // 0xC3 alone is a lead byte for a 2-byte UTF-8 sequence with no continuation byte - invalid.
+        var eventData = new EventData(new BinaryData(new byte[] { 0xC3, 0x28 }));
+        var context = EventHubContext.CreateInstance(eventData);
+
+        var body = new EventHubMessageBodyGetter().GetBody(context);
+
+        Assert.NotNull(body);
+        Assert.Contains('\uFFFD', body);
+    }
 }

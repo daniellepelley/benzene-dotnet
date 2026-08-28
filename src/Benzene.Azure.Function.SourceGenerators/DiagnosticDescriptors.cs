@@ -159,5 +159,27 @@ namespace Benzene.Azure.Function.SourceGenerators
             category: Category,
             defaultSeverity: DiagnosticSeverity.Warning,
             isEnabledByDefault: true);
+
+        /// <summary>
+        /// A <c>[assembly: BenzeneServiceBusTrigger(...)]</c> declaration is binding to a topic (no
+        /// <c>QueueName</c> set - see <see cref="ServiceBusAmbiguousQueueAndTopic"/> for the
+        /// queue-also-set case, which wins and makes this moot) but sets only one of
+        /// <c>TopicName</c>/<c>SubscriptionName</c>, not both. A Service Bus topic trigger needs
+        /// both together; either alone produces no usable binding - e.g. <c>TopicName = "audit"</c>
+        /// with <c>SubscriptionName</c> omitted previously passed every existing check and silently
+        /// generated <c>[ServiceBusTrigger("audit", "")]</c>, syntactically valid but broken at
+        /// deployment (round 14-15 #233).
+        /// </summary>
+        public static readonly DiagnosticDescriptor ServiceBusTopicSubscriptionMismatch = new(
+            id: "BENZ0010",
+            title: "ServiceBus trigger sets topic without subscription (or vice versa)",
+            messageFormat:
+                "[assembly: BenzeneServiceBusTrigger(Name = {0}, ...)] sets TopicName without " +
+                "SubscriptionName, or SubscriptionName without TopicName. A Service Bus topic trigger " +
+                "must set both together - set both TopicName and SubscriptionName, or use QueueName " +
+                "instead.",
+            category: Category,
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
     }
 }

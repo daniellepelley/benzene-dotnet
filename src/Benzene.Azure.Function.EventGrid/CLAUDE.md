@@ -25,6 +25,27 @@ escalated-and-retried event somewhere to land. Enforced via the
 `AzureFunctionBatchApplicationBase.EscalateUnestablishedOutcome` hook (default `true`, not overridden
 here - see `Benzene.Azure.Function.Core/CLAUDE.md`). See `work/settlement-consistency-fix-plan.md`.
 
+**A malformed delivery is an ordinary per-event failure too (round 14-15, #235).** `EventGridTriggerEvent
+.Parse` used to run eagerly - as a method argument in `Extensions.HandleEventGridEvent(string)` -
+before dispatch even started, so a `JsonException` from malformed JSON was an unguarded throw that
+bypassed `EventGridOptions.CatchExceptions` entirely (and the base class's own catch/escalate/log
+machinery, since it was never reached). `EventGridContext` now has a **raw-JSON constructor** that
+defers `Parse` to the first `Event` property access - which happens once that context's item reaches
+the pipeline, inside `AzureFunctionBatchApplicationBase.ProcessItemAsync`'s own guarded try, not
+before it. The result (success or failure) is cached, so a retried access after a failed parse throws
+the *same* exception instance rather than reparsing or, worse, silently succeeding on a second
+attempt. `HandleEventGridEvent(string)` now dispatches raw JSON to a **second entry point** -
+`EventGridBatchApplication` implements `IMiddlewareApplication<string[]>` alongside its existing
+`IMiddlewareApplication<EventGridTriggerEvent[]>`, and `UseEventGrid(...)` registers both over the
+*same* `EventGridBatchApplication`/`EventGridOptions` instance (mirroring
+`Benzene.Azure.Function.ServiceBus`'s two-request-shape pattern for `ServiceBusReceivedMessage[]` +
+`ServiceBusTriggerBatch`) - so a malformed delivery is now caught/logged under `CatchExceptions = true`
+or left to cascade (Event Grid's own retry/dead-letter engages) under the default `false`, exactly
+like any other per-event failure, matching this transport's retain-on-failure settlement default
+above. `GetLogId`/`CreateProcessingException` are defensive against `Event` itself throwing (falling
+back to `null`/`"unknown"`) so logging a malformed-payload failure can't itself throw a second time
+and defeat `CatchExceptions`.
+
 ## Zero dependencies — deliberately
 References only `Benzene.Azure.Function.Core` + `Benzene.Core.MessageHandlers` — no
 `Azure.Messaging.EventGrid`, no Functions extension package; the event payload rides as a BCL
@@ -62,9 +83,18 @@ buildTransitive). The hand-written form still works. See `docs/azure-functions.m
   `Source`, `EventTime`, `DataVersion`, `Data` as `JsonElement?`) + `Parse(string)` covering both
   schemas.
 - `EventGridContext : IHasMessageResult` — result is diagnostics-only; a thrown exception is what
-  drives Event Grid's own retry/dead-letter machinery.
+  drives Event Grid's own retry/dead-letter machinery. Two constructors: `EventGridContext
+  (EventGridTriggerEvent)` for an already-parsed event (`Event` never throws), and
+  `EventGridContext(string rawJson)` for a not-yet-parsed raw delivery (`Event` parses - and caches
+  the result or the failure - on first access; see "A malformed delivery is an ordinary per-event
+  failure too" above).
 - `EventGridApplication` — `EntryPointMiddlewareApplication<EventGridTriggerEvent[]>`, fan-out,
   transport tag `"event-grid"`; array shape covers batched ("many"-cardinality) triggers and tests.
+  Kept for API-surface compatibility (like `Benzene.Azure.Function.ServiceBus.ServiceBusApplication`)
+  but not what `UseEventGrid(...)` actually wires up any more - see `EventGridBatchApplication` below.
+- `EventGridBatchApplication` — implements both `IMiddlewareApplication<EventGridTriggerEvent[]>`
+  (already-parsed events) and `IMiddlewareApplication<string[]>` (raw JSON, round 14-15 #235) over one
+  shared instance, registered as two entry points by `UseEventGrid(...)`.
 - `UseEventGrid(action, Action<EventGridOptions> configure = null, string name = null)` (both
   builders, no-op off-Azure), `AddAzureEventGrid()`, `EventGridRegistrations`,
   `HandleEventGridEvents(params ...)`, `HandleEventGridEvent(string)`. Fan-out concurrency is bounded
@@ -78,7 +108,14 @@ buildTransitive). The hand-written form still works. See `docs/azure-functions.m
 
 ## Tests
 - `test/Benzene.Core.Test/Azure/EventGridPipelineTest.cs` — end-to-end routing for both schemas,
-  `Parse` field mapping for both schemas, headers surface, empty-data body fallback.
+  `Parse` field mapping for both schemas, headers surface, empty-data body fallback, and (round 14-15
+  #235) malformed JSON through the real trigger-dispatch path (`app.HandleEventGridEvent(json)`)
+  under both `CatchExceptions` settings, a well-formed-JSON regression guard on the same raw-JSON
+  dispatch path, and a focused `EventGridContext` unit test proving a failed parse is cached (the same
+  exception instance on every subsequent `Event` access, not reparsed or silently different).
+- `test/Benzene.Core.Test/Azure/EventGridFailureHandlingTest.cs` — `EventGridOptions`'
+  `CatchExceptions`/`RaiseOnFailureStatus` combinations against `EventGridBatchApplication` directly
+  (via the already-parsed-events overload, with a mocked pipeline).
 
 ## Claim-check hydration
 Not wired here yet: `Benzene.ClaimCheck`'s hydrate middleware needs an

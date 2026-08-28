@@ -37,6 +37,25 @@ namespace Benzene.Azure.Function.SourceGenerators
                 var subscription = AttributeReading.NamedString(a, "SubscriptionName", "");
                 var connection = AttributeReading.NamedString(a, "Connection", "ServiceBusConnection");
 
+                // #233 (BENZ0010): queue not set (a set queue always wins over topic/subscription -
+                // see the BENZ0009 check below, which makes an asymmetric topic/subscription moot in
+                // that case) and exactly one of topic/subscription is set, not both. Checked before
+                // BENZ0003 below so e.g. SubscriptionName alone (no TopicName, no QueueName) reports
+                // this specific, more helpful diagnostic rather than the generic "sets neither
+                // QueueName nor TopicName" one - BENZ0003 doesn't even mention SubscriptionName.
+                // Blocking, like BENZ0003: neither topic nor subscription alone is a usable binding -
+                // without this check, TopicName alone (SubscriptionName omitted) passed every existing
+                // check and silently generated [ServiceBusTrigger("audit", "")], syntactically valid
+                // but broken at deployment.
+                if (queue.Length == 0 && (topic.Length > 0) != (subscription.Length > 0))
+                {
+                    builder.Add(TriggerInfo.ForDiagnostic(
+                        AttributeReading.Literal(name),
+                        location,
+                        new PendingDiagnosticInfo(DiagnosticDescriptors.ServiceBusTopicSubscriptionMismatch, AttributeReading.Literal(name))));
+                    continue;
+                }
+
                 // #39 (BENZ0003): neither a queue nor a topic set - nothing to bind to.
                 if (queue.Length == 0 && topic.Length == 0)
                 {

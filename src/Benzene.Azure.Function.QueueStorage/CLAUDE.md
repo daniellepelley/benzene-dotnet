@@ -116,6 +116,11 @@ would deliver it.
   routing of raw payloads (also proves the `AddAzureQueueStorage` registration set is complete
   for `.UseMessageHandlers()`), non-envelope deferral, exception propagation, metadata flow, and
   envelope-path `RaiseOnFailureStatus` escalation + opt-out (`EnvelopeHandlerReturnsFailure_*`).
+- `test/Benzene.Core.Test/Azure/QueueStorageGettersTest.cs` (added round 14-15, coverage seeding
+  alongside #235) — the three getters in isolation, including a malformed-input case:
+  `QueueStorageMessageBodyGetter` passes malformed/truncated JSON text straight through unparsed and
+  unrejected, since it does no parsing of its own (the body is opaque text at this layer - any
+  envelope validation happens downstream). Already correct, no bug found, gap closed.
 
 ## Claim-check hydration
 Not wired here yet: `Benzene.ClaimCheck`'s hydrate middleware needs an

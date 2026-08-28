@@ -8,6 +8,7 @@ using Benzene.Azure.Function.Core;
 using Benzene.Core.MessageHandlers;
 using Benzene.Core.MessageHandlers.Info;
 using Benzene.Core.MessageHandlers.Serialization;
+using Benzene.Core.Middleware;
 
 namespace Benzene.Azure.Function.EventGrid;
 
@@ -59,7 +60,23 @@ public static class DependencyInjectionExtensions
         action(pipeline);
         var options = new EventGridOptions();
         configure?.Invoke(options);
-        app.Add(name, serviceResolverFactory => new EventGridApplication(pipeline.Build(), serviceResolverFactory, options));
+
+        // Registered directly (not wrapped in the public EventGridApplication class) so the SAME
+        // EventGridBatchApplication instance - and so the same EventGridOptions - backs both request
+        // shapes below, mirroring Benzene.Azure.Function.ServiceBus's DependencyInjectionExtensions
+        // (ServiceBusReceivedMessage[] + ServiceBusTriggerBatch over one ServiceBusBatchApplication).
+        var batchApplication = new EventGridBatchApplication(pipeline.Build(), options);
+
+        // The already-parsed-events shape - HandleEventGridEvents(params EventGridTriggerEvent[]).
+        app.Add(name, serviceResolverFactory => new EntryPointMiddlewareApplication<EventGridTriggerEvent[]>(batchApplication, serviceResolverFactory));
+
+        // The raw-JSON shape - HandleEventGridEvent(string) - round 14-15 #235: a distinct request
+        // type (rather than parsing here and reusing the shape above) so EventGridTriggerEvent.Parse
+        // runs inside EventGridBatchApplication's own guarded per-item pipeline execution, not before
+        // dispatch - see EventGridContext's raw-JSON constructor and EventGridBatchApplication's
+        // string[] HandleAsync overload for the full rationale.
+        app.Add(name, serviceResolverFactory => new EntryPointMiddlewareApplication<string[]>(batchApplication, serviceResolverFactory));
+
         return app;
     }
 

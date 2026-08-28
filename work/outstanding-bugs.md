@@ -411,6 +411,69 @@ disposal regression + Polly cancellation (#249, #250, #251, #252)"; the underlyi
   zero matches"; a genuine Redis exception still returns `false` and warns, as before. Test: a
   zero-match `KEYS` result produces no `SyncCacheAfterWriteAsync` warning
   (`RedisCacheServiceTest.CacheWildcard_PatternMatchesZeroKeys_ReturnsTrue_AndProducesNoStaleDataWarning`).
+### Tracked findings rounds 14-15, WP-E — Azure transport correctness (#232, #233, #235) (done)
+Decisions, rationale, and rejected alternatives for all three are ruled in
+[`bug-fix-rulings-round14-15-2026-08.md`](bug-fix-rulings-round14-15-2026-08.md) §3 "WP-E — Azure
+transport correctness (#232, #233, #235)"; the underlying evidence is in
+[`bug-fix-designs-round15-2026-08.md`](bug-fix-designs-round15-2026-08.md) §3. WP-D (Azure Functions
+DI extensions) and WP-C (EventHub/QueueStorage handlers) are tracked separately in the same rulings
+doc and are **not** covered by this entry.
+- **[RESOLVED] #232 — `ServiceBusApplication`'s fallback-abandon could mask the original failure: no
+  try/catch around it, unlike its self-hosted sibling `BenzeneServiceBusWorker.HandleMessageAsync`,
+  which was deliberately guarded for exactly this.** Both hook implementations
+  (`ServiceBusBatchApplication.OnExceptionCaughtAsync`/`CleanUpBeforeRethrowAsync`) now wrap the
+  fallback `AbandonMessageAsync` call in its own try/catch-and-log, mirroring the self-hosted worker's
+  guard and comment. Additionally, `AzureFunctionBatchApplicationBase.ProcessItemAsync`'s own call
+  sites for these two hooks are now guarded the same way, so a future transport's hook override can't
+  reintroduce the masking even if it forgets to guard itself — both hooks gained an `IServiceResolver`
+  parameter so an override can log its own guarded failure. **Breaking API change (flagged on merge,
+  not called out in the original WP-E report): `AzureFunctionBatchApplicationBase`'s `protected
+  virtual OnExceptionCaughtAsync`/`CleanUpBeforeRethrowAsync` hook signatures both changed — any
+  subclass overriding either needs its override signature updated to match** (in-repo:
+  `ServiceBusBatchApplication`, already updated as part of this fix). Tests: the double-fault case (both the
+  primary settle and the fallback abandon throw) for the Functions package
+  (`ServiceBusFailureHandlingTest.cs`, both `CatchExceptions` on and off), plus a regression pin for
+  the self-hosted worker proving it was already correct
+  (`BenzeneServiceBusWorkerSettlementCancellationTest.HandlerSucceeds_SettleThrows_AbandonAlsoThrows_OriginalSettleExceptionStillPropagates`,
+  alongside the pre-existing `HandlerThrows_AbandonAlsoThrows_OriginalExceptionStillPropagates`).
+- **[RESOLVED] #233 — the trigger source generator let a Service Bus topic trigger declare
+  `TopicName` without `SubscriptionName` (or vice versa), silently emitting a broken binding**
+  (`[ServiceBusTrigger("audit", "")]` — syntactically valid, broken at deployment).
+  `MessagingTransports.cs`'s `ServiceBus.Read` only checked "neither set" (BENZ0003) and "both queue
+  and topic/subscription set" (BENZ0009); the asymmetric topic-XOR-subscription case (with no queue)
+  fell through both checks. New `BENZ0010` diagnostic (blocking, like BENZ0003) fires on `(topic.Length
+  > 0) != (subscription.Length > 0)` when no queue is set, following BENZ0003/BENZ0009's exact
+  pattern. Tests: `ServiceBus_TopicWithoutSubscription_ReportsBENZ0010`,
+  `ServiceBus_SubscriptionWithoutTopic_ReportsBENZ0010`, plus a regression guard proving a queue set
+  alongside an asymmetric topic/subscription still takes the existing BENZ0009 path, not BENZ0010
+  (`AzureFunctionTriggerGeneratorTest.cs`).
+- **[RESOLVED] #235 — `EventGridTriggerEvent.Parse` threw uncaught on malformed JSON, bypassing
+  `EventGridOptions.CatchExceptions` entirely** — `Parse` was called as a method argument in
+  `Extensions.cs`, before `AzureFunctionBatchApplicationBase.ProcessItemAsync`'s own catch clause
+  (governed by `CatchExceptions`) was ever reached. `EventGridContext` now has a raw-JSON constructor
+  that defers `Parse` to the first `Event` property access (cached, success or failure) — which
+  happens while that context's item is running through the pipeline, inside the base class's own
+  guarded try, not before dispatch. `EventGridBatchApplication` gained a second `string[]` entry point
+  (registered alongside the existing `EventGridTriggerEvent[]` one over the same
+  `EventGridBatchApplication`/`EventGridOptions` instance, mirroring
+  `Benzene.Azure.Function.ServiceBus`'s two-request-shape pattern) so `HandleEventGridEvent(string)`
+  routes raw JSON through it instead of parsing eagerly. A malformed delivery now becomes an ordinary
+  per-event failure: caught and logged under `CatchExceptions = true`, or left to cascade (Event
+  Grid's own retry/dead-letter machinery engages) under the default `false` — matching this
+  transport's retain-on-failure settlement default per
+  [`settlement-consistency-fix-plan.md`](settlement-consistency-fix-plan.md). `GetLogId`/
+  `CreateProcessingException` were made defensive against `Event` itself throwing, so logging a
+  malformed-payload failure can't itself throw and defeat `CatchExceptions`. Test: malformed JSON
+  through the real trigger-dispatch path (`app.HandleEventGridEvent(json)`) is now caught and handled
+  per `CatchExceptions`, not an unhandled crash (`EventGridPipelineTest.cs`).
+- **Coverage seeding (round 15's broader malformed-input gap)** — one malformed-input test each added
+  for the Kafka (`KafkaMessageBodyGetter`, invalid UTF-8 bytes), QueueStorage
+  (`QueueStorageMessageBodyGetter`, malformed/truncated JSON text), ServiceBus
+  (`ServiceBusMessageBodyGetter`, invalid UTF-8 bytes), and EventHub (`EventHubMessageBodyGetter`,
+  invalid UTF-8 bytes) message getters. All four getters were already correct — no latent bug found;
+  each getter's body decoding uses replacement-character UTF-8 fallback (Kafka/ServiceBus/EventHub) or
+  does no parsing at all (QueueStorage), so none throw on malformed input. Closes the gap round 15
+  flagged: essentially no getter across `test/Benzene.Core.Test/Azure/` had a malformed-input test.
 
 ### Tracked findings round 7–10, WP-B — DynamoDB idempotency phantom win + fencing consistency (done)
 Decisions, rationale, and the rejected "won-but-unverified" alternative are ruled in

@@ -42,7 +42,7 @@ public class EventGridApplication : EntryPointMiddlewareApplication<EventGridTri
 /// in the Event Grid-specific bits - Event Grid uses no extra per-item state, so <c>TState</c> is
 /// <c>object?</c>.
 /// </summary>
-public class EventGridBatchApplication : AzureFunctionBatchApplicationBase<EventGridContext, object?>, IMiddlewareApplication<EventGridTriggerEvent[]>
+public class EventGridBatchApplication : AzureFunctionBatchApplicationBase<EventGridContext, object?>, IMiddlewareApplication<EventGridTriggerEvent[]>, IMiddlewareApplication<string[]>
 {
     public EventGridBatchApplication(IMiddlewarePipeline<EventGridContext> pipeline, EventGridOptions? options = null)
         : base(pipeline, TransportNames.EventGrid, (options ??= new EventGridOptions()).CatchExceptions, options.RaiseOnFailureStatus, options.MaxDegreeOfParallelism)
@@ -59,12 +59,71 @@ public class EventGridBatchApplication : AzureFunctionBatchApplicationBase<Event
     public Task HandleAsync(EventGridTriggerEvent[] @event, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
         => HandleBatchAsync(@event.Select(item => (new EventGridContext(item), (object?)null)), serviceResolverFactory, cancellationToken);
 
-    /// <inheritdoc/>
-    protected override Exception CreateProcessingException(EventGridContext context)
-        => new EventGridMessageProcessingException(context.Event.Id ?? context.Event.EventType ?? "unknown");
+    public Task HandleAsync(string[] @event, IServiceResolverFactory serviceResolverFactory)
+        => HandleAsync(@event, serviceResolverFactory, CancellationToken.None);
+
+    /// <summary>
+    /// Round 14-15 #235: the raw-JSON delivery path (<c>[EventGridTrigger] string</c> binding, via
+    /// <c>Extensions.HandleEventGridEvent(string)</c>). Unlike the already-parsed-events overload
+    /// above, each <see cref="EventGridContext"/> here is built from the raw JSON directly
+    /// (<see cref="EventGridContext(string)"/>) rather than from a pre-parsed
+    /// <see cref="EventGridTriggerEvent"/> - <see cref="EventGridTriggerEvent.Parse"/> only runs once
+    /// this context's item reaches the pipeline inside the base class's own guarded
+    /// <c>ProcessItemAsync</c>, so a <see cref="System.Text.Json.JsonException"/> from malformed input
+    /// becomes an ordinary per-event failure - caught and logged under
+    /// <see cref="EventGridOptions.CatchExceptions"/>, or left to cascade (Event Grid's own
+    /// retry/dead-letter machinery engages, the same as any other unhandled handler exception) when
+    /// it's off, matching this transport's retain-on-failure settlement default. Registered as a
+    /// second entry point over the same request shape's dispatch, alongside the array-of-events
+    /// overload - see <c>DependencyInjectionExtensions.UseEventGrid</c>.
+    /// </summary>
+    public Task HandleAsync(string[] @event, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
+        => HandleBatchAsync(@event.Select(json => (new EventGridContext(json), (object?)null)), serviceResolverFactory, cancellationToken);
 
     /// <inheritdoc/>
-    protected override object? GetLogId(EventGridContext context) => context.Event.Id;
+    protected override Exception CreateProcessingException(EventGridContext context)
+    {
+        // Unreachable for a malformed-JSON context in practice (the pipeline itself would already
+        // have thrown from inside context.Event before this line, per the settlement checks in
+        // AzureFunctionBatchApplicationBase.ProcessItemAsync - this only runs after the pipeline
+        // completed successfully) - guarded anyway, on the same principle as GetLogId below, rather
+        // than relying on that being true forever.
+        string? id;
+        try
+        {
+            id = context.Event.Id ?? context.Event.EventType;
+        }
+        catch
+        {
+            id = null;
+        }
+
+        return new EventGridMessageProcessingException(id ?? "unknown");
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <see cref="EventGridContext.Event"/> can itself throw (a raw-JSON context whose delivery is
+    /// malformed - see that constructor's own doc comment) - reading <c>context.Event.Id</c> directly
+    /// here would then throw again while merely trying to log/report the ORIGINAL parse failure this
+    /// method exists to identify, which - called as it is from inside the
+    /// <c>catch (Exception ex) when (catchExceptions)</c> block's own log-argument evaluation - would
+    /// itself escape uncaught and defeat <c>CatchExceptions</c> for exactly the malformed-input case
+    /// #235 exists to fix. Falls back to null (matching this method's existing nullable contract -
+    /// unchanged from before #235 for every other, non-malformed case) rather than throw a second
+    /// time.
+    /// </remarks>
+    protected override object? GetLogId(EventGridContext context)
+    {
+        try
+        {
+            return context.Event.Id;
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     /// <inheritdoc/>
     protected override string FailureLogMessageTemplate => "Processing Event Grid event {id} failed";

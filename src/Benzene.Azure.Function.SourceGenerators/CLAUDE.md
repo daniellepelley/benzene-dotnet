@@ -40,8 +40,18 @@ packaging. Design: `work/archive/azure-functions-trigger-codegen-design-2026-08.
   string/bool/enum/type/array args, identifier sanitization, the shared `Name` validation above).
   `AttributeLocation` deliberately builds an *external* `Location` (file path + span, no `SyntaxTree`)
   rather than returning `SyntaxNode.GetLocation()` directly - see WP-C, #38.
-- `DiagnosticDescriptors` - `BENZ0001` (cross-transport Function-name collision) through `BENZ0009`
-  (see that file's doc comments for the full table).
+- `DiagnosticDescriptors` - `BENZ0001` (cross-transport Function-name collision) through `BENZ0010`
+  (see that file's doc comments for the full table). `BENZ0010` (round 14-15, #233): a ServiceBus
+  trigger setting exactly one of `TopicName`/`SubscriptionName` (with no `QueueName` set) - either
+  half alone previously passed both `BENZ0003` (only checked "neither queue nor topic") and
+  `BENZ0009` (only checked "queue plus topic/subscription") and silently generated a broken binding
+  (`[ServiceBusTrigger("audit", "")]`). Blocking (error, like `BENZ0003`), checked before `BENZ0003`
+  so e.g. `SubscriptionName` alone (no `TopicName`, no `QueueName`) reports this more specific
+  diagnostic instead of `BENZ0003`'s "sets neither QueueName nor TopicName" (which doesn't even
+  mention `SubscriptionName`). Guarded to only fire when no queue is set - a queue set alongside an
+  asymmetric topic/subscription pair still takes the existing `BENZ0009` path unchanged, since the
+  queue wins and the topic/subscription pair is discarded wholesale regardless of its own
+  (a)symmetry.
 
 ## The two hard Azure constraints (both load-bearing)
 1. **Worker indexing must be off.** The Functions SDK's worker-indexing source generators (metadata +
