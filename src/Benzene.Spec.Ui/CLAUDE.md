@@ -1,10 +1,38 @@
 # Benzene.Spec.Ui
 
+## `spec-ui.html` is a vendored build output — read this before touching anything below
+
+**`spec-ui.html` is NOT hand-written code that lives in this repo.** It is a minified React +
+Redux Toolkit production bundle, built by the external
+[`benzene-ui`](https://github.com/daniellepelley/benzene-ui) repo and committed here **verbatim**
+as vendored output — the same trade `test/conformance-fixtures/` makes for the spec fixtures
+(source of truth elsewhere, a byte-for-byte copy here because this repo's consumers aren't a
+Node.js toolchain). It is **byte-identical** to `src/Benzene.Mesh.Ui/mesh-spec-ui.html` — both are
+the same `benzene-ui` build output vendored into two packages — and CI's
+`.github/workflows/mesh-ui-drift-check.yml` enforces that: on every push/PR/weekly schedule it
+fetches `benzene-ui`'s canonical `build/mesh-spec-ui.html`, discovers every committed HTML page over
+100KB by scanning for the page's opening-tag fingerprint, and fails the build if any of them isn't a
+byte-for-byte match. There is no path allowlist to fall out of date — any new vendored copy
+(another package, another example) is covered automatically.
+
+**Never hand-edit `spec-ui.html` directly.** A local edit survives exactly until the next drift-check
+run (or the next `benzene-ui` re-vendor overwrites it), and in the meantime CI is red. A change to
+what the viewer does, looks like, or fetches belongs in `benzene-ui` — implement it there, run
+`npm run build`, and re-vendor the output:
+```
+cp <benzene-ui>/build/mesh-spec-ui.html <this repo>/src/Benzene.Spec.Ui/spec-ui.html
+cp <benzene-ui>/build/mesh-spec-ui.html <this repo>/src/Benzene.Mesh.Ui/mesh-spec-ui.html
+```
+(`benzene-ui`'s single `build/mesh-spec-ui.html` output is vendored into both consuming locations —
+see `Benzene.Mesh.Ui/CLAUDE.md` for the sibling copy and why it exists there too.) This package's own
+C# (`SpecUiPage`, `SpecUiMiddleware`, `SpecUiExtensions`) is real, hand-written, freely editable code —
+only the embedded `.html` resource itself is off-limits.
+
 ## What this package does
-Serves a self-contained, Swagger-UI-style web viewer for the **Benzene message spec** — the
-`benzene`-format spec produced by `Benzene.Schema.OpenApi`'s `UseSpec` (topics, request/response
-payloads, broadcast events, and validation rules). It is the Benzene equivalent of `UseSwaggerUI`,
-but topic-centric rather than path-centric.
+Serves a Swagger-UI-style web viewer for the **Benzene message spec** — the `benzene`-format spec
+produced by `Benzene.Schema.OpenApi`'s `UseSpec` (topics, request/response payloads, broadcast
+events, and validation rules). It is the Benzene equivalent of `UseSwaggerUI`, but topic-centric
+rather than path-centric.
 
 This package renders the spec; it does **not** generate it. Generation lives in
 `Benzene.Schema.OpenApi` (the `spec` topic / `GET /spec?type=benzene`).
@@ -29,9 +57,11 @@ directly — `SetStatusCode("200")` → `SetContentType("text/html")` → `SetBo
 `application/json` on ASP.NET. This is the same short-circuit shape as `CorsMiddleware<TContext>`
 and works identically on API Gateway, Azure Functions, ASP.NET Core, and self-host.
 
-## The viewer (`spec-ui.html`)
-- A single self-contained HTML file (inline CSS + vanilla JS, no external requests) embedded as a
-  resource (`LogicalName` `Benzene.Spec.Ui.spec-ui.html`).
+## What the shipped bundle does (`spec-ui.html`)
+Below is what the vendored `benzene-ui` React bundle actually renders, embedded as a resource
+(`LogicalName` `Benzene.Spec.Ui.spec-ui.html`) — useful for understanding behavior from this side of
+the repo split, but a description of the shipped output, not a spec for code that lives here. To
+change any of it, change `benzene-ui` and re-vendor (see above).
 - Resolves `$ref`s into `components.schemas`; renders each topic as an expandable "operation" with
   its request/response payload tables, required-field emphasis, and validation constraint chips
   (`format`, `enum`, `minLength`/`maxLength`, `minimum`/`maximum`, `pattern`, `nullable`).
@@ -71,6 +101,8 @@ and works identically on API Gateway, Azure Functions, ASP.NET Core, and self-ho
 ## Conventions
 - Point the UI at the `benzene` spec type (`/spec?type=benzene`) — it is designed around the
   topic/payload/validation shape of that format, not `openapi`/`asyncapi`.
+- `spec-ui.html` itself is not a convention to keep in mind while editing — it isn't edited here at
+  all. See the vendoring section at the top of this file.
 
 ## Tests
 - `test/Benzene.Core.Test/SpecUi/SpecUiPageTest.cs` — `GetHtml()`/`GetHtml(specUrl)`: embedded
@@ -80,5 +112,5 @@ and works identically on API Gateway, Azure Functions, ASP.NET Core, and self-ho
   method or path falls through to `next`; path normalization (case, leading/trailing slash).
   Uses a trivial `FakeHttpContext : IHttpContext` (the interface is a pure marker) with Moq'd
   `IHttpRequestAdapter`/`IBenzeneResponseAdapter` — no real transport needed.
-- Keep the viewer dependency-free and self-contained (no CDN/webfont/script references) so it works
-  offline and behind strict CSPs, and can be embedded as a single resource.
+- `mesh-ui-drift-check.yml` is this package's real test for `spec-ui.html` itself: it doesn't check
+  behavior, it checks that the embedded bundle hasn't drifted from what `benzene-ui` actually built.

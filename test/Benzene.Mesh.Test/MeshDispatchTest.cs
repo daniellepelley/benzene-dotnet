@@ -334,6 +334,42 @@ public class HttpMeshServiceDispatcherTest
         Assert.Equal(100 + HttpMeshServiceDispatcher.TruncatedMarker.Length, result.Body!.Length);
     }
 
+    // --- #246: the truncation point backs off to the last COMPLETE UTF-8 sequence at or before the
+    // byte cap, so a response cut mid-multi-byte-character never decodes into a dangling lead/
+    // continuation byte (which Encoding.UTF8.GetString would otherwise silently render as U+FFFD
+    // right before TruncatedMarker). -------------------------------------------------------------
+
+    [Fact]
+    public async Task DispatchAsync_ResponseExceedsCap_MidMultiByteCharacter_BacksOffToLastCompleteCharacter()
+    {
+        // 'é' (U+00E9) is a 2-byte UTF-8 sequence (0xC3 0xA9). 60 of them is 120 bytes; a 101-byte cap
+        // lands exactly one byte into the 51st character's sequence - a genuine mid-character cut.
+        var body = new string('é', 60);
+        var dispatcher = new HttpMeshServiceDispatcher(new HttpClient(new FixedBodyHttpMessageHandler(body)), maxResponseBytes: 101);
+
+        var result = await dispatcher.DispatchAsync(HttpEntry(),
+            new MeshDispatchEnvelope("t", new Dictionary<string, string>(), "{}"), CancellationToken.None);
+
+        // Backs off to the 50 complete characters (100 bytes), dropping the dangling lead byte -
+        // never a U+FFFD replacement glyph ahead of the marker.
+        Assert.Equal(new string('é', 50) + HttpMeshServiceDispatcher.TruncatedMarker, result.Body);
+        Assert.DoesNotContain('�', result.Body!);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_ResponseExceedsCap_AtCleanMultiByteCharacterBoundary_TruncatesExactlyAtCap()
+    {
+        // Same multi-byte body, but a cap (100) that already lands exactly on a character boundary -
+        // the fix must not over-trim a genuinely clean cut.
+        var body = new string('é', 60);
+        var dispatcher = new HttpMeshServiceDispatcher(new HttpClient(new FixedBodyHttpMessageHandler(body)), maxResponseBytes: 100);
+
+        var result = await dispatcher.DispatchAsync(HttpEntry(),
+            new MeshDispatchEnvelope("t", new Dictionary<string, string>(), "{}"), CancellationToken.None);
+
+        Assert.Equal(new string('é', 50) + HttpMeshServiceDispatcher.TruncatedMarker, result.Body);
+    }
+
     [Fact]
     public void DefaultMaxResponseBytes_MatchesTheRequestSideCapDefault()
     {

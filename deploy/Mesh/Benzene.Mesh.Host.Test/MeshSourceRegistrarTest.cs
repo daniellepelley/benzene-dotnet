@@ -317,4 +317,231 @@ public class MeshSourceRegistrarTest
 
         Assert.Equal("Unknown topology source 'kiali'. Valid values: none, tempo.", exception.Message);
     }
+
+    // --- #247/#248: fleet.options' searchConcurrency/correlationSearchLimit actually reach the built
+    // TempoTraceSourceOptions/JaegerTraceSourceOptions instance, not just parse without throwing. -------
+
+    [Fact]
+    public void RegisterFleet_SourceTempo_SearchConcurrencyAndCorrelationSearchLimit_ReachTheBuiltOptions()
+    {
+        var container = NewContainer();
+        var config = new MeshFleetConfig
+        {
+            Source = "tempo",
+            Options = new Dictionary<string, string>
+            {
+                ["url"] = "http://tempo:3200",
+                ["searchConcurrency"] = "4",
+                ["correlationSearchLimit"] = "50",
+            },
+        };
+
+        MeshSourceRegistrar.RegisterFleet(container, config);
+        var options = container.CreateServiceResolverFactory().CreateScope()
+            .GetService<Benzene.Mesh.Fleet.Tempo.TempoTraceSourceOptions>();
+
+        Assert.Equal(4, options.SearchConcurrency);
+        Assert.Equal(50, options.CorrelationSearchLimit);
+    }
+
+    [Fact]
+    public void RegisterFleet_SourceTempo_SearchConcurrencyUnset_KeepsTheTypesOwnDefault()
+    {
+        var container = NewContainer();
+        var config = new MeshFleetConfig { Source = "tempo", Options = new Dictionary<string, string> { ["url"] = "http://tempo:3200" } };
+
+        MeshSourceRegistrar.RegisterFleet(container, config);
+        var options = container.CreateServiceResolverFactory().CreateScope()
+            .GetService<Benzene.Mesh.Fleet.Tempo.TempoTraceSourceOptions>();
+
+        Assert.Equal(8, options.SearchConcurrency);
+        Assert.Equal(100, options.CorrelationSearchLimit);
+    }
+
+    [Fact]
+    public void RegisterFleet_SourceTempo_SearchConcurrencyAboveCeiling_ThrowsNamingTheKey()
+    {
+        var container = NewContainer();
+        var config = new MeshFleetConfig
+        {
+            Source = "tempo",
+            Options = new Dictionary<string, string> { ["url"] = "http://tempo:3200", ["searchConcurrency"] = "101" },
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(() => MeshSourceRegistrar.RegisterFleet(container, config));
+
+        Assert.Contains("searchConcurrency", exception.Message);
+        Assert.Contains("tempo", exception.Message);
+    }
+
+    [Fact]
+    public void RegisterFleet_SourceTempo_SearchConcurrencyZeroOrNegative_NeverRejected()
+    {
+        // The documented "unbounded" value (TempoTraceSourceOptions.SearchConcurrency's remarks) - the
+        // ceiling check only ever rejects a value ABOVE the ceiling, never a low/negative one.
+        foreach (var value in new[] { "0", "-1" })
+        {
+            var container = NewContainer();
+            var config = new MeshFleetConfig
+            {
+                Source = "tempo",
+                Options = new Dictionary<string, string> { ["url"] = "http://tempo:3200", ["searchConcurrency"] = value },
+            };
+
+            MeshSourceRegistrar.RegisterFleet(container, config);
+        }
+    }
+
+    [Fact]
+    public void RegisterFleet_SourceTempo_CorrelationSearchLimitZero_ThrowsNamingTheKey()
+    {
+        // Unlike searchConcurrency, 0 has no special meaning for correlationSearchLimit (it's the
+        // /api/search `limit` parameter) - it must be a genuine positive limit.
+        var container = NewContainer();
+        var config = new MeshFleetConfig
+        {
+            Source = "tempo",
+            Options = new Dictionary<string, string> { ["url"] = "http://tempo:3200", ["correlationSearchLimit"] = "0" },
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(() => MeshSourceRegistrar.RegisterFleet(container, config));
+
+        Assert.Contains("correlationSearchLimit", exception.Message);
+    }
+
+    [Fact]
+    public void RegisterFleet_SourceJaeger_SearchConcurrency_ReachesTheBuiltOptions()
+    {
+        var container = NewContainer();
+        var config = new MeshFleetConfig
+        {
+            Source = "jaeger",
+            Options = new Dictionary<string, string> { ["url"] = "http://jaeger:16686", ["searchConcurrency"] = "3" },
+        };
+
+        MeshSourceRegistrar.RegisterFleet(container, config);
+        var options = container.CreateServiceResolverFactory().CreateScope()
+            .GetService<Benzene.Mesh.Fleet.Jaeger.JaegerTraceSourceOptions>();
+
+        Assert.Equal(3, options.SearchConcurrency);
+    }
+
+    [Fact]
+    public void RegisterFleet_SourceJaeger_SearchConcurrencyAboveCeiling_ThrowsNamingTheKey()
+    {
+        var container = NewContainer();
+        var config = new MeshFleetConfig
+        {
+            Source = "jaeger",
+            Options = new Dictionary<string, string> { ["url"] = "http://jaeger:16686", ["searchConcurrency"] = "101" },
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(() => MeshSourceRegistrar.RegisterFleet(container, config));
+
+        Assert.Contains("searchConcurrency", exception.Message);
+        Assert.Contains("jaeger", exception.Message);
+    }
+
+    // --- #247/#248: dispatch's guard-bound and response-cap mapping -------------------------------
+
+    [Fact]
+    public void BuildDispatchGuardOptions_AllFieldsUnset_KeepsMeshDispatchGuardOptionsOwnDefaults()
+    {
+        var result = MeshSourceRegistrar.BuildDispatchGuardOptions(new MeshDispatchConfig());
+        var defaults = new Benzene.Mesh.Dispatch.MeshDispatchGuardOptions();
+
+        Assert.Equal(defaults.MaxRequestBytes, result.MaxRequestBytes);
+        Assert.Equal(defaults.MaxPerMinutePerIdentity, result.MaxPerMinutePerIdentity);
+        Assert.Equal(defaults.MaxPerMinutePerTarget, result.MaxPerMinutePerTarget);
+        // Path/Topic/HeaderName are untouched by this mapping - the two callers keep sharing one
+        // instance so the guard's path and the envelope it guards can never drift apart.
+        Assert.Equal(defaults.Path, result.Path);
+    }
+
+    [Fact]
+    public void BuildDispatchGuardOptions_AllFieldsSet_AppliesEveryOne()
+    {
+        var config = new MeshDispatchConfig { MaxRequestBytes = 1000, MaxPerMinutePerIdentity = 3, MaxPerMinutePerTarget = 9 };
+
+        var result = MeshSourceRegistrar.BuildDispatchGuardOptions(config);
+
+        Assert.Equal(1000, result.MaxRequestBytes);
+        Assert.Equal(3, result.MaxPerMinutePerIdentity);
+        Assert.Equal(9, result.MaxPerMinutePerTarget);
+    }
+
+    [Fact]
+    public void BuildDispatchGuardOptions_MaxRequestBytesZero_Throws()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => MeshSourceRegistrar.BuildDispatchGuardOptions(new MeshDispatchConfig { MaxRequestBytes = 0 }));
+
+        Assert.Contains("dispatch.maxRequestBytes", exception.Message);
+    }
+
+    [Fact]
+    public void BuildDispatchGuardOptions_MaxRequestBytesAboveTheKestrelCeiling_Throws()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(() => MeshSourceRegistrar.BuildDispatchGuardOptions(
+            new MeshDispatchConfig { MaxRequestBytes = Benzene.Mesh.Dispatch.MeshDispatchGuardOptions.DefaultMaxRequestBytes + 1 }));
+
+        Assert.Contains("dispatch.maxRequestBytes", exception.Message);
+    }
+
+    [Fact]
+    public void BuildDispatchGuardOptions_MaxRequestBytesAtTheKestrelCeiling_DoesNotThrow()
+    {
+        var result = MeshSourceRegistrar.BuildDispatchGuardOptions(
+            new MeshDispatchConfig { MaxRequestBytes = Benzene.Mesh.Dispatch.MeshDispatchGuardOptions.DefaultMaxRequestBytes });
+
+        Assert.Equal(Benzene.Mesh.Dispatch.MeshDispatchGuardOptions.DefaultMaxRequestBytes, result.MaxRequestBytes);
+    }
+
+    [Fact]
+    public void BuildDispatchGuardOptions_MaxPerMinutePerIdentityZero_DoesNotThrow()
+    {
+        var result = MeshSourceRegistrar.BuildDispatchGuardOptions(new MeshDispatchConfig { MaxPerMinutePerIdentity = 0 });
+        Assert.Equal(0, result.MaxPerMinutePerIdentity);
+    }
+
+    [Fact]
+    public void BuildDispatchGuardOptions_MaxPerMinutePerTargetNegative_Throws()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => MeshSourceRegistrar.BuildDispatchGuardOptions(new MeshDispatchConfig { MaxPerMinutePerTarget = -1 }));
+
+        Assert.Contains("dispatch.maxPerMinutePerTarget", exception.Message);
+    }
+
+    [Fact]
+    public void ResolveMaxResponseBytes_Unset_ReturnsHttpMeshServiceDispatcherDefault()
+    {
+        var result = MeshSourceRegistrar.ResolveMaxResponseBytes(new MeshDispatchConfig());
+        Assert.Equal(Benzene.Mesh.Dispatch.HttpMeshServiceDispatcher.DefaultMaxResponseBytes, result);
+    }
+
+    [Fact]
+    public void ResolveMaxResponseBytes_Set_ReturnsTheConfiguredValue()
+    {
+        var result = MeshSourceRegistrar.ResolveMaxResponseBytes(new MeshDispatchConfig { MaxResponseBytes = 500_000 });
+        Assert.Equal(500_000, result);
+    }
+
+    [Fact]
+    public void ResolveMaxResponseBytes_Zero_Throws()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => MeshSourceRegistrar.ResolveMaxResponseBytes(new MeshDispatchConfig { MaxResponseBytes = 0 }));
+
+        Assert.Contains("dispatch.maxResponseBytes", exception.Message);
+    }
+
+    [Fact]
+    public void ResolveMaxResponseBytes_AboveCeiling_Throws()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => MeshSourceRegistrar.ResolveMaxResponseBytes(new MeshDispatchConfig { MaxResponseBytes = 999_999_999 }));
+
+        Assert.Contains("dispatch.maxResponseBytes", exception.Message);
+    }
 }

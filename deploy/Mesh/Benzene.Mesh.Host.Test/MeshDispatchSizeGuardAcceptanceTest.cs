@@ -48,12 +48,18 @@ public class MeshDispatchSizeGuardAcceptanceTest
         }
     }
 
-    private static async Task<TestHost> StartHostAsync()
+    private static Task<TestHost> StartHostAsync() => StartHostAsync(maxRequestBytes: null);
+
+    private static async Task<TestHost> StartHostAsync(int? maxRequestBytes)
     {
-        var meshJson = """
+        // #247/#248: maxRequestBytes is null by default (today's behavior, unchanged) - a value here
+        // lets a test prove mesh.json's dispatch.maxRequestBytes actually TIGHTENS the guard below its
+        // 128 KiB compile-time default, not just that the default itself still works.
+        var maxRequestBytesLine = maxRequestBytes.HasValue ? $"\"maxRequestBytes\": {maxRequestBytes.Value}," : string.Empty;
+        var meshJson = $$"""
             {
               "services": [],
-              "dispatch": { "enabled": true },
+              "dispatch": { "enabled": true, {{maxRequestBytesLine}} "maxPerMinutePerTarget": 0, "maxPerMinutePerIdentity": 0 },
               "auth": {
                 "mode": "proxy",
                 "proxy": {
@@ -140,6 +146,46 @@ public class MeshDispatchSizeGuardAcceptanceTest
 
         // Not the size guard's 413 - the request reached MeshDispatchMessageHandler, which reports its
         // own business outcome (no service named "orders-api" is registered; services: [] above).
+        Assert.NotEqual(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+        Assert.Contains("No service named", body);
+    }
+
+    // --- #247/#248: dispatch.maxRequestBytes actually reaches this host's real guard, not just the
+    // options object MeshSourceRegistrarTest exercises in isolation. ------------------------------
+
+    [Fact]
+    public async Task ConfiguredMaxRequestBytes_TightensTheGuard_BelowTheCompileTimeDefault()
+    {
+        // A body comfortably under the 128 KiB DEFAULT cap, but over a small CONFIGURED one - passes
+        // today's default guard, must be refused once dispatch.maxRequestBytes is configured smaller.
+        const int configuredMaxRequestBytes = 1_000;
+        const int bodyBytes = 5_000;
+
+        await using var host = await StartHostAsync(configuredMaxRequestBytes);
+        var request = ChunkedDispatchRequest(bodyBytes);
+
+        var response = await host.Client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+        Assert.Contains("\"statusCode\":\"bad-request\"", body);
+        // MeshDispatchGuardMiddleware's own deny message formats the cap with "N0" (thousands
+        // separators) - "1,000", not "1000" - confirming the CONFIGURED value (not the 128 KiB
+        // default) is what the guard is actually enforcing.
+        Assert.Contains(configuredMaxRequestBytes.ToString("N0"), body);
+    }
+
+    [Fact]
+    public async Task ConfiguredMaxRequestBytes_StillAllowsARequestWithinTheConfiguredCap()
+    {
+        const int configuredMaxRequestBytes = 10_000;
+
+        await using var host = await StartHostAsync(configuredMaxRequestBytes);
+        var request = ChunkedDispatchRequest(100); // well under the configured cap
+
+        var response = await host.Client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
         Assert.NotEqual(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
         Assert.Contains("No service named", body);
     }

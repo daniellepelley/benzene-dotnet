@@ -42,6 +42,13 @@ public static class MeshConfigValidator
         // with an empty trustedProxies list) - catch a config that would under-protect the host before
         // a deploy, not after one.
         MeshAuthGate.Validate(config.Auth, config.Dispatch.Enabled);
+        // #247/#248: exercise the dispatch guard/response-cap config bounds too - a config mistake here
+        // (negative, implausibly large, a request cap above what Kestrel's own hardcoded limit in
+        // Program.cs could ever deliver) fails --validate-config, not a live host's first real dispatch
+        // attempt. Results are discarded here (Startup builds and actually wires the same values) - this
+        // call is for its InvalidOperationException side effect alone, same as the registrar calls above.
+        MeshSourceRegistrar.BuildDispatchGuardOptions(config.Dispatch);
+        MeshSourceRegistrar.ResolveMaxResponseBytes(config.Dispatch);
 
         return config;
     }

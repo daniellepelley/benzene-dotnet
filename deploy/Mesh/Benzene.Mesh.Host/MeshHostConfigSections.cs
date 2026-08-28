@@ -82,6 +82,45 @@ public class MeshDispatchConfig
     /// unset environment counts as Production).
     /// </summary>
     public bool AllowInProduction { get; set; }
+
+    /// <summary>
+    /// #247/#248: the largest <c>mesh:dispatch</c> request body accepted, in bytes. Null (the default)
+    /// keeps <c>Benzene.Mesh.Dispatch.MeshDispatchGuardOptions.DefaultMaxRequestBytes</c> (128 KiB - one
+    /// human iterating on a test payload, this guard's whole design point; see that type's remarks).
+    /// </summary>
+    /// <remarks>
+    /// This can only ever TIGHTEN the cap below the compile-time default, never widen it:
+    /// <c>Program.cs</c> pins Kestrel's own <c>MaxRequestBodySize</c> to that same constant, for the
+    /// whole host, at process startup - a value configured ABOVE it would be silently unreachable
+    /// (Kestrel answers <c>413</c> before the guard, or the dispatch handler, ever sees the request).
+    /// <see cref="MeshSourceRegistrar.BuildDispatchGuardOptions"/> enforces this as a config-time bound.
+    /// </remarks>
+    public int? MaxRequestBytes { get; set; }
+
+    /// <summary>
+    /// #247/#248: requests per minute one identity may dispatch. Null (the default) keeps
+    /// <c>Benzene.Mesh.Dispatch.MeshDispatchGuardOptions.DefaultMaxPerMinutePerIdentity</c>. <c>0</c> is a
+    /// legitimate configured value - it disables the per-identity limit, per that type's own remarks -
+    /// and is never rejected; only a negative or implausibly large value is.
+    /// </summary>
+    public int? MaxPerMinutePerIdentity { get; set; }
+
+    /// <summary>
+    /// #247/#248: requests per minute all identities together may aim at one target service. Null (the
+    /// default) keeps <c>Benzene.Mesh.Dispatch.MeshDispatchGuardOptions.DefaultMaxPerMinutePerTarget</c>.
+    /// Same <c>0</c>-disables/negative-rejected shape as <see cref="MaxPerMinutePerIdentity"/>.
+    /// </summary>
+    public int? MaxPerMinutePerTarget { get; set; }
+
+    /// <summary>
+    /// #247/#248: the largest response body accepted FROM a dispatched-to service, in bytes - see
+    /// <c>Benzene.Mesh.Dispatch.HttpMeshServiceDispatcher.MaxResponseBytes</c>. Null (the default) keeps
+    /// <c>HttpMeshServiceDispatcher.DefaultMaxResponseBytes</c>. Unlike <see cref="MaxRequestBytes"/>,
+    /// this is NOT bounded by Kestrel (it caps a response read FROM a target, not a request INTO this
+    /// host), so it has its own, independent ceiling - see
+    /// <see cref="MeshSourceRegistrar.ResolveMaxResponseBytes"/>.
+    /// </summary>
+    public int? MaxResponseBytes { get; set; }
 }
 
 /// <summary>

@@ -407,11 +407,32 @@ public class Startup
                 // place that check can actually work.
                 if (_config.Dispatch.Enabled)
                 {
-                    // Defaults only (Path "/mesh/dispatch", Topic benzene:mesh:dispatch) - one instance
-                    // shared with the envelope below so the guard's path and the envelope it guards can
-                    // never drift apart, and equal to MeshAuthGate.DispatchPath (see its remarks).
-                    var dispatchGuardOptions = new MeshDispatchGuardOptions();
+                    // #247/#248: Path/Topic stay the defaults ("/mesh/dispatch"/benzene:mesh:dispatch) -
+                    // one instance shared with the envelope below so the guard's path and the envelope it
+                    // guards can never drift apart, and equal to MeshAuthGate.DispatchPath (see its
+                    // remarks) - but MaxRequestBytes/MaxPerMinutePerIdentity/MaxPerMinutePerTarget now
+                    // come from mesh.json's dispatch section (BuildDispatchGuardOptions falls back to
+                    // this type's own defaults for anything left unset, and bounds-checks anything that
+                    // isn't - the exact same call MeshConfigValidator.Validate runs).
+                    var dispatchGuardOptions = MeshSourceRegistrar.BuildDispatchGuardOptions(_config.Dispatch);
                     asp.UseMeshDispatchGuard(dispatchGuardOptions);
+
+                    // #247/#248: HttpMeshServiceDispatcher.MaxResponseBytes has the identical gap -
+                    // UseMeshDispatch (Benzene.Mesh.Dispatch.Extensions) always builds its "Http"
+                    // dispatcher at HttpMeshServiceDispatcher.DefaultMaxResponseBytes, with no options
+                    // hook to override it. Rather than change that package (out of this fix's scope),
+                    // register OUR OWN "Http" IMeshServiceDispatcher - built with the config-resolved cap
+                    // - BEFORE calling UseMeshDispatch below. MeshDispatchMessageHandler resolves
+                    // IEnumerable<IMeshServiceDispatcher> and picks the FIRST entry whose Key matches the
+                    // target's Source (FirstOrDefault); Microsoft.Extensions.DependencyInjection resolves
+                    // IEnumerable<T> in registration order, so registering first here makes ours win -
+                    // UseMeshDispatch's own "Http" registration a few lines below becomes a harmless,
+                    // never-reached second entry with the same Key. Pinned by
+                    // MeshDispatchResponseCapAcceptanceTest.
+                    var maxResponseBytes = MeshSourceRegistrar.ResolveMaxResponseBytes(_config.Dispatch);
+                    asp.Register(x => x.AddSingleton<IMeshServiceDispatcher>(
+                        resolver => new HttpMeshServiceDispatcher(resolver.GetService<HttpClient>(), maxResponseBytes)));
+
                     asp.UseMeshDispatch(new MeshDispatchOptions { AllowInProduction = _config.Dispatch.AllowInProduction });
                     asp.UseBenzeneMessage(
                         new BenzeneMessageHttpOptions

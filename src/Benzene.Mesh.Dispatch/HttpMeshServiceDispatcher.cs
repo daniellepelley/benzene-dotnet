@@ -112,8 +112,66 @@ public class HttpMeshServiceDispatcher : IMeshServiceDispatcher
             }
         }
 
-        var text = Encoding.UTF8.GetString(buffer.ToArray());
+        var bufferBytes = buffer.ToArray();
+        var length = bufferBytes.Length;
+        if (truncated)
+        {
+            // #246: back the truncation point off to the end of the last COMPLETE UTF-8 sequence at
+            // or before the byte cap. Without this, a response cut mid-multi-byte-character (a
+            // realistic case: the cap can land anywhere in a UTF-8 body) leaves a dangling lead or
+            // continuation byte at the end of the buffer, and Encoding.UTF8.GetString silently
+            // substitutes a U+FFFD replacement glyph for it - right before TruncatedMarker, in what
+            // this package calls the audit-visible record of what happened.
+            length = LastCompleteUtf8SequenceEnd(bufferBytes, length);
+        }
+
+        var text = Encoding.UTF8.GetString(bufferBytes, 0, length);
         return truncated ? text + TruncatedMarker : text;
+    }
+
+    /// <summary>
+    /// Given <paramref name="length"/> raw bytes of (possibly cut-off) UTF-8 in
+    /// <paramref name="bytes"/>, returns the largest prefix length &lt;= <paramref name="length"/>
+    /// that ends on a complete UTF-8 sequence boundary - i.e. never inside a multi-byte character.
+    /// Scans backward from the cap for at most 3 bytes (the longest UTF-8 sequence is 4 bytes, so a
+    /// sequence start can be at most 3 bytes before the cut) looking for a lead byte whose declared
+    /// sequence length would run past <paramref name="length"/>; if found, the cut lands before that
+    /// lead byte. A cap that lands cleanly on a boundary (the common case for ASCII-heavy bodies, and
+    /// always true when the cap wasn't actually reached mid-character) returns <paramref name="length"/>
+    /// unchanged.
+    /// </summary>
+    private static int LastCompleteUtf8SequenceEnd(byte[] bytes, int length)
+    {
+        var scanFloor = Math.Max(0, length - 3);
+        for (var i = length - 1; i >= scanFloor; i--)
+        {
+            var b = bytes[i];
+            if ((b & 0b1100_0000) == 0b1000_0000)
+            {
+                // A UTF-8 continuation byte (10xxxxxx) - not a sequence start, keep scanning backward.
+                continue;
+            }
+
+            // b is either a single-byte ASCII character (0xxxxxxx) or the lead byte of a multi-byte
+            // sequence (11xxxxxx) - this is where the last sequence in the buffer starts.
+            var sequenceLength = b switch
+            {
+                <= 0x7F => 1,
+                >= 0xC0 and <= 0xDF => 2,
+                >= 0xE0 and <= 0xEF => 3,
+                >= 0xF0 and <= 0xF7 => 4,
+                // 0xF8-0xFF is not a valid UTF-8 lead byte at all (0x80-0xBF, the continuation-byte
+                // range, never reaches here - the loop above already skips past those) - there is no
+                // well-formed sequence to back off to; leave the cut where it was rather than guessing.
+                _ => 0,
+            };
+
+            return sequenceLength > 0 && i + sequenceLength > length ? i : length;
+        }
+
+        // No sequence start found within the last 3 bytes (an implausibly long continuation-byte
+        // run) - leave the cut where it was; this isn't the mid-character-cut case this guards.
+        return length;
     }
 
     private static string ResolveInvokeUrl(MeshServiceRegistryEntry entry)

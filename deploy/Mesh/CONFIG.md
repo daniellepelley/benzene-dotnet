@@ -86,6 +86,8 @@ An empty/omitted `usage` array means no usage feed — honestly empty, not fabri
 | `fleet.options.recentFlowsServiceEnrichmentMax` | int | `20` | Optional, `xray` only | Caps how many recent-flow entries get per-service enrichment (0 disables enrichment). |
 | `fleet.options.services` | string (comma-separated) | discover all | Optional, `jaeger` only | Pins the search to specific service names instead of discovering them from Jaeger. |
 | `fleet.options.searchLimitPerService` | int | `20` | Optional, `jaeger` only | Caps how many traces are searched per service. |
+| `fleet.options.searchConcurrency` | int | `8` | Optional, `tempo`/`jaeger` only | How many per-trace (`tempo`) or per-service (`jaeger`) fetches run concurrently while hydrating a search. `0` or negative means unbounded (every fetch at once) — a deliberate value, never rejected; a positive value above `100` is rejected as an implausible units mistake. |
+| `fleet.options.correlationSearchLimit` | int | `100` | Optional, `tempo` only | The `limit` passed to Tempo's `/api/search` for a correlation search — Tempo has no further paging beyond it, so a search that returns exactly this many matches may have missed some (logged as a warning). Must be a positive integer, at most `10,000`. |
 
 When `fleet.source` is anything but `none`, the host also wires the read-only `mesh:query:*`
 handlers over an inner `/benzene/invoke` BenzeneMessage endpoint and points the mesh UI's live Fleet
@@ -105,14 +107,25 @@ plane at it.
 |---|---|---|---|---|
 | `dispatch.enabled` | bool | `false` | Always applies | Wires `mesh:dispatch` (invokes a registered service's **real** handler with a chosen payload — real side-effects execute). Off by default: this is a deliberate, non-default choice. |
 | `dispatch.allowInProduction` | bool | `false` | Only checked when `dispatch.enabled` is `true` | The second gate: even with `enabled: true`, dispatch refuses to run in a Production environment (an unset environment counts as Production) unless this is also `true`. |
+| `dispatch.maxRequestBytes` | int? | `null` (→ `131,072`, 128 KiB) | Optional | Largest `mesh:dispatch` request body accepted, in bytes — see below for the guard this tunes. **Ceiling: `131,072`.** A value above the compile-time default is rejected outright, not silently ignored: `Program.cs` pins Kestrel's own `MaxRequestBodySize` to that same constant, host-wide, so anything larger would be dropped by Kestrel before this guard, or `mesh:dispatch` itself, ever saw the request. This key can only ever *tighten* the cap, never widen it. |
+| `dispatch.maxPerMinutePerIdentity` | int? | `null` (→ `10`) | Optional | Requests per minute one identity may dispatch. `0` is a legitimate configured value — it disables the per-identity limit — and is never rejected; only a negative or implausibly large (`> 100,000`) value is. |
+| `dispatch.maxPerMinutePerTarget` | int? | `null` (→ `30`) | Optional | Requests per minute *all* identities together may aim at one target service. Same `0`-disables/negative-rejected shape as `maxPerMinutePerIdentity`. |
+| `dispatch.maxResponseBytes` | int? | `null` (→ `131,072`, 128 KiB) | Optional | Largest response body accepted **from** a dispatched-to service, in bytes — an oversized response is truncated (with a marker appended), not thrown away. Unlike `maxRequestBytes`, this is **not** bounded by Kestrel (it caps a response read from a target, not a request into this host), so it has its own independent ceiling: `10,000,000` (10 MB). |
 
-When `dispatch.enabled` is `true`, `UseMeshDispatchGuard` (mounted automatically, no config knob)
-bounds a dispatch request's body at 128 KiB (`MeshDispatchGuardOptions.DefaultMaxRequestBytes`) — the
-check measures the request's ACTUAL byte count (not the caller-supplied `Content-Length` header, which
-a chunked `Transfer-Encoding` request omits entirely), so a chunked oversized body can't bypass it.
-`Program.cs` also sets Kestrel's own `MaxRequestBodySize` to the same value, host-wide, as
-defence-in-depth against the buffering itself running unbounded (see `work/archive/bug-fix-designs-round7-10-2026-08.md`'s
-"WP-D", #35).
+When `dispatch.enabled` is `true`, `UseMeshDispatchGuard` (mounted automatically — `maxRequestBytes`/
+`maxPerMinutePerIdentity`/`maxPerMinutePerTarget` above are its only config knobs; everything else,
+including its path and CSRF header name, stays fixed) bounds a dispatch request's body — the check
+measures the request's ACTUAL byte count (not the caller-supplied `Content-Length` header, which a
+chunked `Transfer-Encoding` request omits entirely), so a chunked oversized body can't bypass it.
+`Program.cs` also sets Kestrel's own `MaxRequestBodySize` to the compile-time default (128 KiB),
+host-wide, as defence-in-depth against the buffering itself running unbounded (see
+`work/archive/bug-fix-designs-round7-10-2026-08.md`'s "WP-D", #35) — which is exactly why
+`maxRequestBytes` can only ever tighten the request cap, never raise it, until that Kestrel limit is
+itself made configurable.
+
+`--validate-config` runs these same bounds checks (`MeshSourceRegistrar.BuildDispatchGuardOptions`/
+`.ResolveMaxResponseBytes`) — a config mistake here (negative, above a ceiling) fails before a deploy,
+not on a live host's first dispatch attempt.
 
 ## `auth` — who may reach the dashboard
 
