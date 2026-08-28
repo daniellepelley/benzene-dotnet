@@ -24,6 +24,23 @@ public class KafkaGettersTest
         Assert.Null(new KafkaMessageBodyGetter().GetBody(context));
     }
 
+    // Round 14-15 #235 coverage gap: essentially no getter across the Azure Functions transports had
+    // a malformed-input test. Closing it for Kafka's body getter - an invalid UTF-8 byte sequence in
+    // the record value (a poison payload, not merely absent data like the null case above).
+    // Confirms current behavior rather than fixing anything: Encoding.UTF8.GetString uses replacement
+    // fallback (U+FFFD), not a throwing decoder, so this does NOT throw - no latent bug found here.
+    [Fact]
+    public void KafkaMessageBodyGetter_InvalidUtf8Bytes_DoesNotThrow_ReturnsReplacementCharacters()
+    {
+        // 0xC3 alone is a lead byte for a 2-byte UTF-8 sequence with no continuation byte - invalid.
+        var context = new KafkaContext(new KafkaRecord { Value = new byte[] { 0xC3, 0x28 } });
+
+        var body = new KafkaMessageBodyGetter().GetBody(context);
+
+        Assert.NotNull(body);
+        Assert.Contains('\uFFFD', body);
+    }
+
     [Fact]
     public void KafkaMessageTopicGetter_ReturnsTheRecordTopic()
     {

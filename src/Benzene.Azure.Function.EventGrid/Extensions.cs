@@ -68,8 +68,12 @@ public static class Extensions
 
     /// <summary>
     /// Dispatches a raw Event Grid delivery - the <c>[EventGridTrigger] string</c> binding - to the
-    /// Azure Function app's Event Grid entry point application, parsing either the Event Grid schema
-    /// or CloudEvents 1.0 (see <see cref="EventGridTriggerEvent.Parse"/>).
+    /// Azure Function app's Event Grid entry point application. Parsing (either the Event Grid schema
+    /// or CloudEvents 1.0 - see <see cref="EventGridTriggerEvent.Parse"/>) happens inside the
+    /// dispatched entry point's own per-event pipeline execution, not here - round 14-15 #235: a
+    /// malformed <paramref name="eventJson"/> now surfaces as an ordinary per-event failure governed
+    /// by <see cref="EventGridOptions.CatchExceptions"/>, rather than an unguarded throw before
+    /// dispatch even starts. See <see cref="EventGridContext"/>'s raw-JSON constructor.
     /// </summary>
     /// <param name="source">The built Azure Function app to dispatch to.</param>
     /// <param name="eventJson">The event JSON as delivered to the trigger.</param>
@@ -81,12 +85,13 @@ public static class Extensions
     /// <returns>A task that completes when the event has been handled.</returns>
     public static Task HandleEventGridEvent(this IAzureFunctionApp source, string eventJson, CancellationToken cancellationToken = default)
     {
-        return source.HandleEventGridEvents(cancellationToken, EventGridTriggerEvent.Parse(eventJson));
+        return source.HandleAsync(new[] { eventJson }, cancellationToken: cancellationToken);
     }
 
     /// <summary>
     /// Dispatches a raw Event Grid delivery to the <paramref name="name"/>-keyed entry point - use
-    /// when more than one Event Grid function is registered.
+    /// when more than one Event Grid function is registered. See the unkeyed overload's doc comment
+    /// for why parsing happens inside the dispatched entry point rather than here (round 14-15 #235).
     /// </summary>
     /// <param name="source">The built Azure Function app to dispatch to.</param>
     /// <param name="name">The discriminator name matching the registered <c>UseEventGrid(..., name)</c>.</param>
@@ -99,6 +104,6 @@ public static class Extensions
     /// <returns>A task that completes when the event has been handled.</returns>
     public static Task HandleEventGridEvent(this IAzureFunctionApp source, string name, string eventJson, CancellationToken cancellationToken = default)
     {
-        return source.HandleEventGridEvents(name, cancellationToken, EventGridTriggerEvent.Parse(eventJson));
+        return source.HandleAsync(new[] { eventJson }, name, cancellationToken);
     }
 }

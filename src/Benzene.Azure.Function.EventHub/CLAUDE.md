@@ -156,7 +156,11 @@ buildTransitive). The hand-written form still works. See `docs/azure-functions.m
   headers are useful independent of routing (W3C trace context, correlation), so it's registered on
   its own by `AddAzureEventHub()`.
 - Coverage: `EventHubPipelineTest.cs` (fan-out + envelope routing), `EventHubGettersTest.cs`
-  (`EventHubMessageHeadersGetter`), `EventHubW3CTraceContextTest.cs` (in
+  (`EventHubMessageHeadersGetter`, and - added round 14-15, coverage seeding alongside #235 -
+  `EventHubMessageBodyGetter`, including a malformed-input case: an invalid UTF-8 byte sequence in
+  the event body does not throw, `BinaryData.ToString()`'s replacement-character fallback matching
+  Kafka's and Service Bus's body getters - already correct, no bug found, gap closed),
+  `EventHubW3CTraceContextTest.cs` (in
   `test/Benzene.Core.Test/Diagnostics/` - `.UseW3CTraceContext<EventHubContext>()` end to end).
   Streaming shares the engine tests in `Core/Middleware/Streaming/`.
 

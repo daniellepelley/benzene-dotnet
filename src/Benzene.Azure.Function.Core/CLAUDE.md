@@ -59,6 +59,17 @@ is picked up by the reflection metadata/executor rather than the SDK's worker-in
     flip this base class's default blanket, and do not remove either override without reading
     `work/settlement-consistency-fix-plan.md` — this is exactly the base class the plan calls out as
     "mixing flip rows and carve-out rows in one place".
+  - **A hook can never mask the original failure by throwing itself (round 14-15, #232).**
+    `ProcessItemAsync`'s calls to `OnExceptionCaughtAsync`/`CleanUpBeforeRethrowAsync` are each
+    wrapped in their own try/catch-and-log — a failure inside either hook (e.g. Service Bus's
+    fallback-abandon itself throwing because the lock already expired) is logged distinctly and never
+    replaces or suppresses the original exception the hook was reacting to. Both hooks take an
+    `IServiceResolver` scope parameter (created for the duration of the call, alongside the
+    surrounding log line) precisely so an override can resolve its own logger and guard its own risky
+    work the same way — see each parameter's own doc comment. This guard exists at the base class so
+    a future transport's hook override can't reintroduce the masking even if it forgets to guard
+    itself; `Benzene.Azure.Function.ServiceBus`'s override additionally guards the same call itself
+    (see that package's `CLAUDE.md`), so the two layers are independent, not one relying on the other.
 
 ## When to use this package
 - Referenced directly by any project hosting Benzene on Azure Functions (it's the base every

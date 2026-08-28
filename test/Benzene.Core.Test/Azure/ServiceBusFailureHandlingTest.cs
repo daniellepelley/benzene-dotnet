@@ -24,6 +24,9 @@ public class ServiceBusFailureHandlingTest
     }
 
     private static (Mock<IServiceResolver> Resolver, Mock<IServiceResolverFactory> ResolverFactory) CreateResolver()
+        => CreateResolverWithLogger().Resolvers;
+
+    private static ((Mock<IServiceResolver> Resolver, Mock<IServiceResolverFactory> ResolverFactory) Resolvers, Mock<ILogger<ServiceBusApplication>> Logger) CreateResolverWithLogger()
     {
         var mockLogger = new Mock<ILogger<ServiceBusApplication>>();
         var mockResolver = new Mock<IServiceResolver>();
@@ -31,7 +34,7 @@ public class ServiceBusFailureHandlingTest
         mockResolver.Setup(x => x.GetService<ILogger<ServiceBusApplication>>()).Returns(mockLogger.Object);
         var mockResolverFactory = new Mock<IServiceResolverFactory>();
         mockResolverFactory.Setup(x => x.CreateScope()).Returns(mockResolver.Object);
-        return (mockResolver, mockResolverFactory);
+        return ((mockResolver, mockResolverFactory), mockLogger);
     }
 
     [Fact]
@@ -274,6 +277,105 @@ public class ServiceBusFailureHandlingTest
 
         mockActions.Verify(x => x.CompleteMessageAsync(message, It.IsAny<CancellationToken>()), Times.Once);
         mockActions.Verify(x => x.AbandonMessageAsync(message, null, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // Round 14-15 #232: the fallback-abandon in CleanUpBeforeRethrowAsync used to have no try/catch
+    // of its own - if it threw too (e.g. the lock already expired by the time the fallback runs,
+    // very plausible since it only runs because something already went wrong), that new exception
+    // replaced CompleteMessageAsync's original failure, masking the real cause. Double-fault case:
+    // both the primary settle (CompleteMessageAsync) AND the fallback abandon throw.
+    [Fact]
+    public async Task HandleAsync_ExplicitAckMode_CompleteMessageThrowsAndFallbackAbandonAlsoThrows_OriginalExceptionStillPropagates()
+    {
+        var mockPipeline = new Mock<IMiddlewarePipeline<ServiceBusContext>>();
+        mockPipeline.Setup(x => x.HandleAsync(It.IsAny<ServiceBusContext>(), It.IsAny<IServiceResolver>()))
+            .Callback<ServiceBusContext, IServiceResolver>((context, _) => context.MessageResult = BenzeneResult.Ok())
+            .Returns(Task.CompletedTask);
+
+        var (resolvers, logger) = CreateResolverWithLogger();
+        var mockActions = new Mock<ServiceBusMessageActions>();
+        var message = CreateEvent()[0];
+        var completeException = new InvalidOperationException("Service Bus is unavailable");
+        mockActions
+            .Setup(x => x.CompleteMessageAsync(message, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(completeException);
+        mockActions
+            .Setup(x => x.AbandonMessageAsync(message, null, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("abandon also failed - lock already expired"));
+
+        // CatchExceptions off (the default) so the settle failure cascades through
+        // ShouldCleanUpBeforeRethrow / CleanUpBeforeRethrowAsync, whose own fallback abandon also
+        // fails here.
+        var application = new ServiceBusBatchApplication(mockPipeline.Object, new ServiceBusOptions { AckMode = ServiceBusAckMode.Explicit });
+
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            ((IMiddlewareApplication<ServiceBusTriggerBatch>)application)
+                .HandleAsync(new ServiceBusTriggerBatch(mockActions.Object, [message]), resolvers.ResolverFactory.Object));
+
+        // The original CompleteMessageAsync failure - not the fallback abandon's own exception - is
+        // what propagates; the fallback abandon failure never masks it.
+        Assert.Same(completeException, thrown);
+
+        mockActions.Verify(x => x.CompleteMessageAsync(message, It.IsAny<CancellationToken>()), Times.Once);
+        mockActions.Verify(x => x.AbandonMessageAsync(message, null, It.IsAny<CancellationToken>()), Times.Once);
+
+        // The fallback abandon's own failure is logged distinctly rather than silently swallowed.
+        logger.Verify(x => x.Log(
+            LogLevel.Error,
+            It.IsAny<EventId>(),
+            It.Is<It.IsAnyType>((state, _) => true),
+            It.Is<Exception>(ex => ex != null && ex.Message == "abandon also failed - lock already expired"),
+            It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
+    }
+
+    // Same double-fault shape as above, but with CatchExceptions = true so the failure is routed
+    // through OnExceptionCaughtAsync (the base class's other guarded call site) instead of
+    // CleanUpBeforeRethrowAsync - both hooks call the same fallback-abandon and both needed the
+    // guard.
+    [Fact]
+    public async Task HandleAsync_ExplicitAckModeAndCatchExceptionsTrue_CompleteMessageThrowsAndFallbackAbandonAlsoThrows_ExceptionIsSwallowedNotMasked()
+    {
+        var mockPipeline = new Mock<IMiddlewarePipeline<ServiceBusContext>>();
+        mockPipeline.Setup(x => x.HandleAsync(It.IsAny<ServiceBusContext>(), It.IsAny<IServiceResolver>()))
+            .Callback<ServiceBusContext, IServiceResolver>((context, _) => context.MessageResult = BenzeneResult.Ok())
+            .Returns(Task.CompletedTask);
+
+        var (resolvers, logger) = CreateResolverWithLogger();
+        var mockActions = new Mock<ServiceBusMessageActions>();
+        var message = CreateEvent()[0];
+        var completeException = new InvalidOperationException("Service Bus is unavailable");
+        mockActions
+            .Setup(x => x.CompleteMessageAsync(message, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(completeException);
+        mockActions
+            .Setup(x => x.AbandonMessageAsync(message, null, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("abandon also failed - lock already expired"));
+
+        var application = new ServiceBusBatchApplication(mockPipeline.Object,
+            new ServiceBusOptions { AckMode = ServiceBusAckMode.Explicit, CatchExceptions = true });
+
+        // Reaching the end without throwing proves neither the original settle failure nor the
+        // fallback abandon failure cascades under CatchExceptions - and, per the guard, the abandon
+        // failure never masks the original settle failure in what gets logged.
+        await ((IMiddlewareApplication<ServiceBusTriggerBatch>)application)
+            .HandleAsync(new ServiceBusTriggerBatch(mockActions.Object, [message]), resolvers.ResolverFactory.Object);
+
+        mockActions.Verify(x => x.CompleteMessageAsync(message, It.IsAny<CancellationToken>()), Times.Once);
+        mockActions.Verify(x => x.AbandonMessageAsync(message, null, It.IsAny<CancellationToken>()), Times.Once);
+
+        logger.Verify(x => x.Log(
+            LogLevel.Error,
+            It.IsAny<EventId>(),
+            It.Is<It.IsAnyType>((state, _) => true),
+            It.Is<Exception>(ex => ex == completeException),
+            It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
+
+        logger.Verify(x => x.Log(
+            LogLevel.Error,
+            It.IsAny<EventId>(),
+            It.Is<It.IsAnyType>((state, _) => true),
+            It.Is<Exception>(ex => ex != null && ex.Message == "abandon also failed - lock already expired"),
+            It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
     }
 
     [Fact]

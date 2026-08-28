@@ -340,4 +340,50 @@ namespace App { public class OrderDoc { } }
 
         Assert.Empty(diagnostics);
     }
+
+    // Round 14-15 #233: TopicName set with SubscriptionName omitted (no QueueName either) passed both
+    // BENZ0003 (queue and topic both empty - false, topic is set) and BENZ0009 (queue set - false, no
+    // queue) and previously silently generated [ServiceBusTrigger("audit", "")], syntactically valid
+    // but broken at deployment. Blocking, like BENZ0003/BENZ0002: nothing is emitted.
+    [Fact]
+    public void ServiceBus_TopicWithoutSubscription_ReportsBENZ0010()
+    {
+        var (output, diagnostics) = GenerateResult(
+            @"[assembly: Benzene.Azure.Function.ServiceBus.BenzeneServiceBusTrigger(Name = ""sb"", TopicName = ""audit"")]");
+
+        Assert.DoesNotContain("ServiceBusTrigger", output);
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal("BENZ0010", diagnostic.Id);
+        Assert.Equal(DiagnosticSeverity.Error, diagnostic.Severity);
+    }
+
+    // The symmetric case: SubscriptionName set with TopicName omitted (no QueueName either). Before
+    // this fix, this tripped BENZ0003 ("sets neither QueueName nor TopicName") - technically blocking,
+    // but a misleading message that never mentions the SubscriptionName the caller actually set. Now
+    // reports the more specific BENZ0010 instead.
+    [Fact]
+    public void ServiceBus_SubscriptionWithoutTopic_ReportsBENZ0010()
+    {
+        var (output, diagnostics) = GenerateResult(
+            @"[assembly: Benzene.Azure.Function.ServiceBus.BenzeneServiceBusTrigger(Name = ""sb"", SubscriptionName = ""svc"")]");
+
+        Assert.DoesNotContain("ServiceBusTrigger", output);
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal("BENZ0010", diagnostic.Id);
+        Assert.Equal(DiagnosticSeverity.Error, diagnostic.Severity);
+    }
+
+    // A queue set alongside an asymmetric topic/subscription pair must still take the existing
+    // BENZ0009 (ambiguous queue+topic) path, not the new BENZ0010 check - the queue always wins and
+    // the topic/subscription pair is discarded wholesale, so its internal (a)symmetry is moot.
+    [Fact]
+    public void ServiceBus_QueueSetWithTopicButNoSubscription_ReportsBENZ0009NotBENZ0010()
+    {
+        var (output, diagnostics) = GenerateResult(
+            @"[assembly: Benzene.Azure.Function.ServiceBus.BenzeneServiceBusTrigger(Name = ""sb"", QueueName = ""orders"", TopicName = ""audit"")]");
+
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal("BENZ0009", diagnostic.Id);
+        Assert.Contains(@"global::Microsoft.Azure.Functions.Worker.ServiceBusTrigger(""orders"", Connection = ""ServiceBusConnection"")", output);
+    }
 }

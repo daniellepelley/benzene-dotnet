@@ -157,11 +157,11 @@ public class ServiceBusBatchApplication : AzureFunctionBatchApplicationBase<Serv
     protected override bool ShouldEscalateFailure(ServiceBusContext context, AckState state) => !state.ExplicitAck;
 
     /// <inheritdoc/>
-    protected override async Task OnExceptionCaughtAsync(ServiceBusContext context, AckState state, Exception exception)
+    protected override async Task OnExceptionCaughtAsync(ServiceBusContext context, AckState state, Exception exception, IServiceResolver serviceResolver)
     {
         if (state.ExplicitAck && !state.Acked)
         {
-            await state.MessageActions!.AbandonMessageAsync(context.Message);
+            await AbandonAfterFailureAsync(context, state, serviceResolver);
         }
     }
 
@@ -170,8 +170,36 @@ public class ServiceBusBatchApplication : AzureFunctionBatchApplicationBase<Serv
         => state.ExplicitAck && !state.Acked;
 
     /// <inheritdoc/>
-    protected override Task CleanUpBeforeRethrowAsync(ServiceBusContext context, AckState state)
-        => state.MessageActions!.AbandonMessageAsync(context.Message);
+    protected override Task CleanUpBeforeRethrowAsync(ServiceBusContext context, AckState state, IServiceResolver serviceResolver)
+        => AbandonAfterFailureAsync(context, state, serviceResolver);
+
+    /// <summary>
+    /// The fallback-abandon shared by <see cref="OnExceptionCaughtAsync"/> and
+    /// <see cref="CleanUpBeforeRethrowAsync"/>: both run only because a message is not yet settled
+    /// after something already went wrong (a thrown exception, or - via
+    /// <see cref="ShouldCleanUpBeforeRethrow"/> - one about to cascade). Guarded in its own
+    /// try/catch-and-log, mirroring <c>BenzeneServiceBusWorker.HandleMessageAsync</c>'s guard (see
+    /// that method's own comment - the spec for this fix): abandoning can itself throw (e.g. the
+    /// lock already expired, which is exactly when this fallback fires), and letting that new
+    /// exception replace the original failure would mask the real cause. Logged here, at the point
+    /// of the actual call, so the abandon failure is diagnosable even though the base class
+    /// (<see cref="AzureFunctionBatchApplicationBase{TContext, TState}.ProcessItemAsync"/>) also
+    /// guards this call - the two layers are independent, not one relying on the other.
+    /// </summary>
+    private async Task AbandonAfterFailureAsync(ServiceBusContext context, AckState state, IServiceResolver serviceResolver)
+    {
+        try
+        {
+            await state.MessageActions!.AbandonMessageAsync(context.Message);
+        }
+        catch (Exception abandonEx)
+        {
+            GetLogger(serviceResolver).LogError(abandonEx,
+                "Abandoning Service Bus message {messageId} after a processing failure also failed; " +
+                "the message will remain locked until the lock expires and then be redelivered",
+                context.Message.MessageId);
+        }
+    }
 
     /// <inheritdoc/>
     protected override Exception CreateProcessingException(ServiceBusContext context)

@@ -91,7 +91,11 @@ buildTransitive). The hand-written form still works. See `docs/azure-functions.m
   than the pool allows. Purely additive/opt-in; routed through `Benzene.Core.Middleware`'s
   `BoundedFanOut`.
 - Coverage: `KafkaPipelineTest.cs`, `KafkaGettersTest.cs`, `KafkaFailureHandlingTest.cs`,
-  `KafkaBatchAndNoOpTest.cs`, `KafkaW3CTraceContextTest.cs`.
+  `KafkaBatchAndNoOpTest.cs`, `KafkaW3CTraceContextTest.cs`. `KafkaGettersTest.cs` also covers a
+  malformed-input case (round 14-15, coverage seeding alongside #235):
+  `KafkaMessageBodyGetter`'s UTF-8 decode does not throw on an invalid byte sequence
+  (`Encoding.UTF8`'s replacement-character fallback, not a throwing decoder) - already correct, no bug
+  found, gap closed.
 
 ## Claim-check hydration
 Not wired here yet: `Benzene.ClaimCheck`'s hydrate middleware needs an
