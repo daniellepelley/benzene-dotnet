@@ -81,6 +81,25 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ inputs.region }}
 
+      # variables.tf's google_oauth_client_id/google_oauth_client_secret have no default and are
+      # interpolated into a Lambda resource's environment block (main.tf), so Terraform must resolve
+      # them to build a destroy plan too, not just an apply — without a value here `terraform destroy`
+      # fails outright with "No value for required variable". Same split as the deploy workflow: the
+      # client ID is a Variable (not sensitive), the secret is a Secret.
+      - name: Verify Google OAuth credentials are available
+        env:
+          CLIENT_ID: ${{ vars.GOOGLE_OAUTH_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+        run: |
+          missing=0
+          [ -z "$CLIENT_ID" ] && { echo "::error::GOOGLE_OAUTH_CLIENT_ID is empty."; missing=1; }
+          [ -z "$CLIENT_SECRET" ] && { echo "::error::GOOGLE_OAUTH_CLIENT_SECRET is empty."; missing=1; }
+          if [ "$missing" = "1" ]; then
+            echo "::error::In the 'test' GitHub Environment (Settings -> Environments -> test): set GOOGLE_OAUTH_CLIENT_ID as a Variable and GOOGLE_OAUTH_CLIENT_SECRET as a Secret. terraform destroy needs these to evaluate the same config the deploy applied - it doesn't need to match the deployed value, just be non-empty."
+            exit 1
+          fi
+          echo "Both Google OAuth credentials are present."
+
       # Point at the same remote state the deploy wrote. If the bucket is missing there is nothing
       # deployed (or it was deployed to another region) — say so plainly rather than creating one.
       - name: Terraform init (remote S3 state)
@@ -117,6 +136,9 @@ jobs:
 
       - name: Terraform destroy
         working-directory: examples/AwsMesh/deploy
+        env:
+          TF_VAR_google_oauth_client_id: ${{ vars.GOOGLE_OAUTH_CLIENT_ID }}
+          TF_VAR_google_oauth_client_secret: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
         run: |
           terraform destroy -input=false -auto-approve -var "region=${{ inputs.region }}"
 
