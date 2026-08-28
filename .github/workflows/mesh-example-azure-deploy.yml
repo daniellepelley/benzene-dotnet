@@ -2,7 +2,7 @@ name: Mesh Example Azure Deploy
 
 # Manual-only: deploys examples/AzureMesh (3 Cloud Service Web Apps + the mesh Web App) to Azure via
 # Terraform. Needs an Azure service principal in the "test" GitHub Environment: AZURE_CREDENTIALS
-# (azure/login JSON) or the OIDC trio, plus ARM_SUBSCRIPTION_ID. Nothing here runs on push.
+# (azure/login JSON, used below). Nothing here runs on push.
 on:
   workflow_dispatch:
     inputs:

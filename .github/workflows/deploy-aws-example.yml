@@ -11,6 +11,8 @@ jobs:
   deploy:
     environment: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     env:
       AWS_ACCESS_KEY_ID: ${{ vars.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}

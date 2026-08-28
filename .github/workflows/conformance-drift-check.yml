@@ -14,6 +14,9 @@ on:
     - cron: '0 6 * * 1'   # weekly, catches drift introduced on the benzene side
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   drift:
     runs-on: ubuntu-latest
