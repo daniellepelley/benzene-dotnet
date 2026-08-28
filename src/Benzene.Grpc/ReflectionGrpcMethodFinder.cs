@@ -24,15 +24,20 @@ public class ReflectionGrpcMethodFinder : IGrpcMethodFinder
             .SelectMany(MapHandlers)
             .ToArray();
 
+        // Case-fold the grouping key so this duplicate check agrees with GrpcRouteFinder's lookup,
+        // which is built OrdinalIgnoreCase from this same source (#261). Without this, a case-variant
+        // duplicate ("/pkg.Service/Method" vs "/pkg.Service/METHOD") passed this check silently and
+        // then crashed with an opaque ArgumentException from inside GrpcRouteFinder's
+        // ToDictionary(..., StringComparer.OrdinalIgnoreCase) instead of the clear BenzeneException below.
         var duplicates = handlers
-            .GroupBy(x => new { x.Method})
+            .GroupBy(x => x.Method, StringComparer.OrdinalIgnoreCase)
             .Where(x => x.Count() > 1)
             .ToArray();
 
         if (duplicates.Any())
         {
             throw new BenzeneException(
-                $"Grpc method '{duplicates[0].Key.Method}' has been assigned to more than one message handler, this is not permitted");
+                $"Grpc method '{duplicates[0].Key}' has been assigned to more than one message handler, this is not permitted");
         }
 
         return handlers;

@@ -50,7 +50,17 @@ public class MessagePackSerializer : IPayloadSerializer
     /// Initializes a new instance of the <see cref="MessagePackSerializer"/> class with custom
     /// options (e.g. to use attributed types with the default/standard resolver instead).
     /// </summary>
-    /// <param name="options">The <see cref="global::MessagePack.MessagePackSerializerOptions"/> to use.</param>
+    /// <param name="options">
+    /// The <see cref="global::MessagePack.MessagePackSerializerOptions"/> to use. <b>Warning:</b> unlike
+    /// the parameterless constructor, this does NOT apply <c>MessagePackSecurity.UntrustedData</c> for
+    /// you - <paramref name="options"/> is used exactly as supplied. A common-looking pattern such as
+    /// <c>MessagePackSerializerOptions.Standard.WithResolver(...)</c> defaults to
+    /// <c>MessagePackSecurity.TrustedData</c>, silently reintroducing the deep-recursion/hash-collision
+    /// DoS exposure the default constructor's <c>UntrustedData</c> setting exists to prevent (see its
+    /// remarks). If <paramref name="options"/> deserializes payloads from an untrusted source (e.g. a
+    /// negotiated <c>application/msgpack</c> request body), call
+    /// <c>.WithSecurity(MessagePackSecurity.UntrustedData)</c> on it yourself before passing it in.
+    /// </param>
     public MessagePackSerializer(global::MessagePack.MessagePackSerializerOptions options)
     {
         _options = options;
