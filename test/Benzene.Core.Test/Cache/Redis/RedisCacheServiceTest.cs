@@ -508,6 +508,40 @@ public class RedisCacheServiceTest
     }
 
     [Fact]
+    public async Task CacheWildcard_PatternMatchesZeroKeys_ReturnsTrue_AndProducesNoStaleDataWarning()
+    {
+        // #252: a wildcard pattern that legitimately matches zero keys (nothing was ever cached under
+        // it, or everything under it already expired) is a routine no-op, not a failure - it must
+        // report success (true), not the deletedKeys > 0 false this used to return, which made
+        // CacheInvalidateActions.SyncCacheAfterWriteAsync log a spurious "cache may serve stale data"
+        // warning on every such call. Only a genuine Redis exception (CacheWildcardTest above) should
+        // still report false and warn.
+        var connectionFactory = new MockConnectionFactory();
+        connectionFactory.DataBaseMock.Setup(x => x.ExecuteAsync("KEYS", It.IsAny<string>()))
+            .ReturnsAsync(RedisResult.Create(System.Array.Empty<RedisResult>()));
+
+        var mockLogger = new Mock<ILogger<RedisCacheService>>();
+        var service = new TestRedisCacheService(mockLogger.Object, new DebugTimerFactory(), connectionFactory);
+        var actions = service.GetTestWildcardActions();
+
+        Assert.True(await actions.InvalidateAsync());
+
+        // The write-through path is what actually produces the "cache may serve stale data" warning
+        // (CacheInvalidateActions.SyncCacheAfterWriteAsync) on a false return - exercise it directly,
+        // not just the raw InvalidateAsync() above, to prove no warning is logged end-to-end.
+        var writeThroughResult = await actions.WriteThroughInvalidateAsync(() => Task.FromResult(BenzeneResult.Deleted()));
+        Assert.Equal(BenzeneResultStatus.Deleted, writeThroughResult.Status);
+
+        mockLogger.Verify(x => x.Log(
+            LogLevel.Warning,
+            It.IsAny<EventId>(),
+            It.IsAny<It.IsAnyType>(),
+            It.IsAny<Exception>(),
+            (Func<It.IsAnyType, Exception, string>)It.IsAny<object>()),
+            Times.Never);
+    }
+
+    [Fact]
     public async Task DisposeAsync_ThenCanConnectAsync_ThrowsObjectDisposedException_RatherThanLeakingANewConnection()
     {
         // #146: a late call after disposal used to silently open (and leak) a brand new

@@ -63,6 +63,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   registration.** `DefaultBenzeneMessageSender` now falls back to the same JSON default every outbound
   converter uses when nothing is registered, instead of throwing on the message path in a container
   that never called `AddBenzene()`. Register your own `ISerializer` to override, as before.
+- **Shutdown disposal restored for internally-created rate limiters (#249).** `UseFixedWindowRateLimiting`/
+  `UseTokenBucketRateLimiting`/`UsePayloadSizeRateLimiting`'s limiter `Timer` had become
+  structurally undisposable through any public API: `MiddlewarePipeline<TContext>` constructs a
+  fresh middleware instance per message and never retains one, so the `DisposeAsync` path the prior
+  fix (#200) relied on was unreachable. The limiter is now wrapped in a new `OwnedRateLimiter` and
+  registered as a DI **factory** singleton, giving the DI container disposal ownership again without
+  reopening #200's cross-pipeline collision (the limiter itself is still captured directly in the
+  middleware's closure for use). Disposing the DI container/service provider - a caller's ordinary
+  shutdown path - now disposes the limiter, same as before #200, with no public-API reach-in
+  required. `RateLimitingMiddleware<TContext>`'s own `ownsLimiter: true`/`DisposeAsync` path remains
+  available for a caller that constructs the middleware directly, outside `UseXRateLimiting`.
+- **`PollyResilienceMiddleware` now threads the ambient `CancellationToken` into Polly (#250).**
+  `ResiliencePipeline.ExecuteAsync` was always called with `CancellationToken.None`, so a `Timeout`/
+  `Hedging` strategy's own cancellation attempt could not be triggered by, and never combined with,
+  the pipeline's own ambient cancellation (`ICancellationTokenAccessor`, resolved the same
+  constructor-optional way `HttpBenzeneMessageClient` does). Package `CLAUDE.md` corrected to match
+  (it previously claimed this token flow already existed).
+- **`RedisWildcardActions.InvalidateEntryAsync` no longer reports a legitimate zero-match invalidate
+  as a failure (#252).** A pattern matching no keys is a routine no-op, not an error; it now returns
+  `true` (a real deletion failure still returns `false`/throws), removing a spurious "cache may serve
+  stale data" warning downstream on every no-op invalidate.
 
 ### Changed
 - **BREAKING (mesh.md's 2026-08 revision): the mesh producer/consumer graph is now declared, never

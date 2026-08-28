@@ -220,13 +220,18 @@ public class RateLimitingMiddleware<TContext> : RateLimitingMiddlewareBase<TCont
     /// Whether this middleware owns <paramref name="rateLimiter"/>'s disposal. <c>false</c> (the
     /// default) for a caller-supplied (bring-your-own) limiter — its disposal always belongs to the
     /// caller, never to this middleware, so a shared BYO limiter is never disposed out from under
-    /// another consumer of it. <c>true</c> only for a limiter this package created on the caller's
-    /// behalf (the <c>UseFixedWindowRateLimiting</c>/<c>UseTokenBucketRateLimiting</c>/
-    /// <c>UsePayloadSizeRateLimiting</c> convenience entry points), where nothing else could ever
-    /// dispose it otherwise (see #133 in <c>work/outstanding-bugs.md</c>) — since #200, disposal
-    /// ownership for that case lives entirely on this flag/this type's <see cref="DisposeAsync"/>,
-    /// not on any DI container registration (see <c>Extensions.cs</c>'s
-    /// <c>UseInternallyOwnedRateLimiting</c>).
+    /// another consumer of it. <b>Since #249, the built-in <c>UseFixedWindowRateLimiting</c>/
+    /// <c>UseTokenBucketRateLimiting</c>/<c>UsePayloadSizeRateLimiting</c> convenience entry points
+    /// also pass <c>false</c></b> — the DI container owns disposal of the limiter they create, via a
+    /// tiny <c>OwnedRateLimiter</c> wrapper registered as a factory singleton (see
+    /// <c>Extensions.cs</c>'s <c>UseInternallyOwnedRateLimiting</c>), because a fresh middleware
+    /// instance is constructed per message (see <c>MiddlewarePipeline&lt;TContext&gt;</c>) and none
+    /// of those three entry points return any handle a caller could ever call <see cref="DisposeAsync"/>
+    /// on — <c>true</c> here was structurally unreachable through the public API (#133's leak, back
+    /// again after #200). <c>true</c> remains available for a caller who constructs this middleware
+    /// directly (bypassing the <c>UseXRateLimiting</c> convenience entry points, e.g. a bespoke
+    /// pipeline whose container doesn't support registration) and wants the middleware instance
+    /// itself — not any container — to own the limiter's disposal.
     /// </param>
     /// <param name="logger">Optional; logs a warning naming the limiter and cost when a message is rejected.</param>
     public RateLimitingMiddleware(RateLimiter rateLimiter, Func<IServiceResolver, TContext, int> permitCost,
@@ -251,16 +256,20 @@ public class RateLimitingMiddleware<TContext> : RateLimitingMiddlewareBase<TCont
     /// Disposes the limiter this middleware owns (<see cref="_ownsLimiter"/>); a no-op for a
     /// caller-supplied limiter, which the caller always owns. Nothing in the pipeline calls this
     /// automatically - a fresh middleware instance is constructed per message (see
-    /// <c>MiddlewarePipeline&lt;TContext&gt;</c>), so this is meant for a caller that manages a
-    /// <see cref="RateLimitingMiddleware{TContext}"/> instance's own lifetime directly (or the
-    /// underlying <see cref="RateLimiter"/> it was constructed with, which is what actually matters -
-    /// the middleware instance itself carries no state worth keeping alive). Before #200 the built-in
-    /// <c>UseXRateLimiting</c> entry points instead registered the internally-created limiter with
-    /// the DI container so its disposal piggy-backed on the container's own; that registration
-    /// collided across sibling pipelines sharing one container (see <c>Extensions.cs</c>'s
-    /// <c>UseInternallyOwnedRateLimiting</c> for the full story) and was removed. Disposal ownership
-    /// for an internally-created limiter (<c>ownsLimiter: true</c>) now lives on this member alone -
-    /// it is the one place that decides whether the limiter's disposal is this middleware's to do.
+    /// <c>MiddlewarePipeline&lt;TContext&gt;</c>), so this is meant for a caller that constructs a
+    /// <see cref="RateLimitingMiddleware{TContext}"/> instance directly and manages its own lifetime
+    /// (or the underlying <see cref="RateLimiter"/> it was constructed with, which is what actually
+    /// matters - the middleware instance itself carries no state worth keeping alive).
+    /// <b>The built-in <c>UseXRateLimiting</c> entry points do NOT use this path any more (#249)</b> -
+    /// see #133/#200/#249 in <c>Extensions.cs</c>'s <c>UseInternallyOwnedRateLimiting</c> for the
+    /// full three-act history: pre-#200 the container disposed the limiter via a DI registration that
+    /// collided across sibling pipelines; #200 fixed the collision by moving disposal here
+    /// (<c>ownsLimiter: true</c>), but nothing could ever reach it through the public API, so the
+    /// limiter leaked again; #249 moved disposal back onto the container, this time via a factory
+    /// singleton wrapper (<c>OwnedRateLimiter</c>) instead of registering <see cref="RateLimiter"/>
+    /// directly, so the pre-#200 collision cannot recur. <c>ownsLimiter: true</c> (and therefore this
+    /// method actually doing something) is now reachable only by a caller who builds this middleware
+    /// directly, bypassing <c>UseXRateLimiting</c> entirely.
     /// </summary>
     public async ValueTask DisposeAsync()
     {

@@ -232,7 +232,8 @@ public static class Extensions
 
     /// <summary>
     /// Wires an internally-created limiter (one of the <c>UseXRateLimiting</c> convenience entry
-    /// points, never a caller-supplied BYO one) with the middleware owning its disposal directly.
+    /// points, never a caller-supplied BYO one) so the DI container owns its disposal, without
+    /// reopening the DI-collision #200 fixed.
     /// </summary>
     /// <remarks>
     /// #200: this used to register the limiter as a DI singleton keyed on the abstract
@@ -246,20 +247,62 @@ public static class Extensions
     /// pipeline's limiter instead of its own. The guard this method used to carry (throwing when a
     /// second internal limiter was registered) only detected the collision - it didn't fix the
     /// architecture that caused it, and it rejected the legitimate multi-pipeline case along with
-    /// the genuine mistake.
+    /// the genuine mistake. #200's fix: capture <paramref name="rateLimiter"/> directly in the
+    /// middleware factory's closure (instead of resolving it from DI) for USE, so which limiter a
+    /// message is charged against can never again collide across pipelines. That part is unchanged
+    /// below and stays exactly this way - the closure capture is what makes stacking multiple
+    /// internally-created limiters, on one pipeline or across siblings sharing a container, fully
+    /// supported.
     /// <para>
-    /// The fix is the same one the BYO <c>UseRateLimiting(RateLimiter, ...)</c> overload above
-    /// already uses: capture <paramref name="rateLimiter"/> directly in the middleware factory's
-    /// closure (<c>ownsLimiter: true</c> here, vs. <c>false</c> there) instead of resolving it from
-    /// DI. Nothing is registered with the container, so the collision is now structurally
-    /// impossible - each middleware instance only ever sees the exact limiter its own
-    /// <c>UseXRateLimiting</c> call created. Stacking multiple internally-created limiters, on one
-    /// pipeline or across siblings sharing a container, is fully supported. Disposal ownership -
-    /// #133's actual point - now lives on the middleware itself (<see cref="RateLimitingMiddleware{TContext}.DisposeAsync"/>,
-    /// <c>ownsLimiter: true</c>) rather than being borrowed from the DI container's singleton
-    /// disposal; a caller that wants the limiter's <c>Timer</c> torn down calls that directly (or manages
-    /// the middleware's lifetime itself), the same as any other <see cref="IAsyncDisposable"/> a
-    /// caller constructs.
+    /// #249: #200 also moved disposal onto the middleware itself
+    /// (<see cref="RateLimitingMiddleware{TContext}.DisposeAsync"/>, <c>ownsLimiter: true</c>) -
+    /// but <c>MiddlewarePipeline&lt;TContext&gt;.CreateChain</c> constructs a fresh middleware
+    /// instance from this factory on <em>every message</em> and never retains or disposes one, and
+    /// none of the three public <c>UseXRateLimiting</c> methods return any handle to the created
+    /// limiter or middleware - so there was no way for a caller using only the documented public API
+    /// to ever reach that <c>DisposeAsync</c>. Every doc example's limiter leaked its <c>Timer</c>
+    /// for the process's life (#133, again, worse than before: pre-#200 at least disposed on
+    /// container shutdown via the collision-prone DI registration).
+    /// </para>
+    /// <para>
+    /// The fix restores reachable disposal without reopening #200's collision: <paramref name="rateLimiter"/>
+    /// is still captured directly in the closure for USE (<c>ownsLimiter: false</c> now - the
+    /// container owns disposal, not the middleware; see <see cref="RateLimitingMiddleware{TContext}"/>'s
+    /// constructor doc), so which limiter a given call's messages are charged against stays exactly
+    /// as collision-proof as #200 left it. Separately, <paramref name="rateLimiter"/> is wrapped in a
+    /// tiny <see cref="OwnedRateLimiter"/> and registered as a DI <b>factory</b> singleton -
+    /// <c>x.AddSingleton&lt;OwnedRateLimiter&gt;(_ =&gt; owned)</c>, deliberately a factory
+    /// registration and not a pre-built-instance one. This is exactly the distinction the pre-#200
+    /// code (round 11's #133 fix, <c>x.AddSingleton&lt;RateLimiter&gt;(_ =&gt; rateLimiter)</c>) relied
+    /// on for disposal: Microsoft.Extensions.DependencyInjection (and Autofac) only container-dispose
+    /// a singleton <em>they constructed</em> (via a type or factory registration) - never an
+    /// already-built instance handed to <c>AddSingleton(instance)</c>, since the container didn't
+    /// create it and can't assume it owns it (<c>MicrosoftBenzeneServiceContainer.AddSingleton&lt;TService&gt;(TService)</c>
+    /// vs. <c>AddSingleton&lt;TService&gt;(Func&lt;IServiceResolver,TService&gt;)</c> - only the
+    /// latter is a factory registration under the covers). A bare <c>OwnedRateLimiter</c> instance
+    /// registration would have the exact same unreachable-disposal problem this fixes.
+    /// </para>
+    /// <para>
+    /// A factory singleton is only actually instantiated - and therefore disposal-tracked by the
+    /// container - once something resolves it; registering it alone changes nothing. Nothing in the
+    /// documented public API resolves an <see cref="OwnedRateLimiter"/> on its own, so the middleware
+    /// factory closure below forces it once: the first time this registration's factory constructs a
+    /// middleware instance (i.e. the first message that reaches it - gated by <c>forced</c> so it
+    /// isn't paid on every message), it calls <c>resolver.GetServices&lt;OwnedRateLimiter&gt;()</c>
+    /// purely for the side effect of making the container construct (and thus disposal-track) every
+    /// <see cref="OwnedRateLimiter"/> registered on it so far - safe even when other
+    /// <c>UseXRateLimiting</c> calls share the same container, since both DI adapters resolve
+    /// <em>every</em> registration of a type through their <c>IEnumerable&lt;T&gt;</c>/<c>GetServices</c>
+    /// path, not just this call's own. Verified against both adapters directly:
+    /// <c>MicrosoftServiceResolverAdapter.GetServices&lt;T&gt;()</c> is a bare
+    /// <c>_serviceProvider.GetServices&lt;T&gt;()</c> (a factory-registered singleton it resolves is
+    /// tracked by the root <c>ServiceProvider</c> for disposal regardless of which scope resolved it -
+    /// singletons always resolve through the root); <c>AutofacServiceResolverAdapter.GetServices&lt;T&gt;()</c>
+    /// is <c>_container.Resolve&lt;IEnumerable&lt;T&gt;&gt;()</c>, and Autofac disposes every
+    /// <c>SingleInstance()</c> component it constructed (the container's default ownership) when the
+    /// owning lifetime scope is disposed. See the disposal test in
+    /// <c>RateLimitingPipelineTest.cs</c> (public-API-only: builds via <c>UseFixedWindowRateLimiting</c>,
+    /// disposes the DI container, and proves the SAME closure-captured limiter now fails CLOSED).
     /// </para>
     /// </remarks>
     private static IMiddlewarePipelineBuilder<TContext> UseInternallyOwnedRateLimiting<TContext>(
@@ -267,10 +310,29 @@ public static class Extensions
         Func<IServiceResolver, TContext, int> permitCost)
         where TContext : class
     {
-        return app.Use(resolver => new RateLimitingMiddleware<TContext>(
-            rateLimiter, permitCost, resolver,
-            ownsLimiter: true,
-            logger: resolver.TryGetService<ILogger<RateLimitingMiddleware<TContext>>>()));
+        var owned = new OwnedRateLimiter(rateLimiter);
+        app.Register(x => x.AddSingleton<OwnedRateLimiter>(_ => owned));
+
+        // Forces resolution (and therefore construction + disposal-tracking) of the OwnedRateLimiter
+        // factory singleton exactly once - on the first message this registration's middleware
+        // factory runs for, not on every message. A plain int/Interlocked flag is enough: at worst, a
+        // race under concurrent first messages calls GetServices<OwnedRateLimiter>() an extra time or
+        // two, which is harmless (resolving an already-constructed singleton is a cheap no-op) - this
+        // is a per-message-cost optimisation, not a correctness requirement.
+        var forced = 0;
+
+        return app.Use(resolver =>
+        {
+            if (Interlocked.Exchange(ref forced, 1) == 0)
+            {
+                _ = resolver.GetServices<OwnedRateLimiter>();
+            }
+
+            return new RateLimitingMiddleware<TContext>(
+                rateLimiter, permitCost, resolver,
+                ownsLimiter: false,
+                logger: resolver.TryGetService<ILogger<RateLimitingMiddleware<TContext>>>());
+        });
     }
 
     private static TokenBucketRateLimiter CreateTokenBucket(int tokenLimit, int tokensPerPeriod,
