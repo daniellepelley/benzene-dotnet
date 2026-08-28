@@ -110,12 +110,32 @@ public class IdempotencyMiddleware<TContext> : IMiddleware<TContext>
 
     private async Task ReleaseAsync(string key, string claimToken)
     {
-        var released = await _store.ReleaseAsync(key, claimToken, Token);
-        if (!released)
+        // Every caller of this helper is itself inside a `catch { await ReleaseAsync(...); throw; }`
+        // (see HandleAsync's throw/failed-result paths) - the `throw;` after this call is what
+        // rethrows the ORIGINAL handler exception (or simply resumes after a failed-result release,
+        // where there is no exception to protect but the principle still applies uniformly). If
+        // `_store.ReleaseAsync` itself throws (a real store failure, not a fenced `false`), that new
+        // exception would otherwise propagate from here and the caller's `throw;` would never run -
+        // silently replacing the actual reason the message failed with an unrelated store exception.
+        // Catch and log it here instead, so this method never throws and the caller's own `throw;`
+        // always executes. This mirrors the established settle-never-masks rule elsewhere in the
+        // codebase (see e.g. BenzeneServiceBusWorker.HandleMessageAsync's AbandonMessageAsync try/catch).
+        try
         {
-            _logger.LogWarning(
-                "Idempotency claim for key {Key} was reclaimed by another worker before this attempt " +
-                "could release it; outcome recorded by the new holder.", key);
+            var released = await _store.ReleaseAsync(key, claimToken, Token);
+            if (!released)
+            {
+                _logger.LogWarning(
+                    "Idempotency claim for key {Key} was reclaimed by another worker before this attempt " +
+                    "could release it; outcome recorded by the new holder.", key);
+            }
+        }
+        catch (Exception releaseEx)
+        {
+            _logger.LogError(releaseEx,
+                "Releasing idempotency claim for key {Key} failed after a processing failure; the claim " +
+                "may remain held until it naturally expires, at which point a redelivery can reclaim it.",
+                key);
         }
     }
 

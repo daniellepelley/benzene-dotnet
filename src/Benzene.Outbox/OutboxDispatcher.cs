@@ -53,6 +53,7 @@ public class OutboxDispatcher : IOutboxDispatcher
         var dispatched = 0;
         var rescheduled = 0;
         var parked = 0;
+        var sentButUnsettled = 0;
 
         foreach (var envelope in due)
         {
@@ -67,12 +68,15 @@ public class OutboxDispatcher : IOutboxDispatcher
                 case OutboxDispatchOutcome.Parked:
                     parked++;
                     break;
+                case OutboxDispatchOutcome.SentButUnsettled:
+                    sentButUnsettled++;
+                    break;
             }
         }
 
         var deleted = await _store.DeleteDispatchedBeforeAsync(_now() - _options.RetentionPeriod, cancellationToken);
 
-        return new OutboxDispatchResult(dispatched, rescheduled, parked, deleted);
+        return new OutboxDispatchResult(dispatched, rescheduled, parked, deleted, sentButUnsettled);
     }
 
     /// <inheritdoc />
@@ -111,19 +115,12 @@ public class OutboxDispatcher : IOutboxDispatcher
             var sender = scope.GetService<IBenzeneMessageSender>();
             await sender.SendAsync<object, Void>(envelope.Topic, payload, new Dictionary<string, string>(envelope.Headers));
 
-            var settled = await _store.MarkDispatchedAsync(envelope.Id, leaseToken, cancellationToken);
-            if (!settled)
-            {
-                // The lease was reclaimed by another worker before this send's settle wrote - that
-                // worker's own claim/dispatch/settle now owns this envelope's fate. Warn, don't error:
-                // this is the fencing contract working as designed under contention, not a failure of
-                // this attempt's send (which did happen).
-                _logger.LogWarning(
-                    "Outbox envelope {EnvelopeId} for topic {Topic} was reclaimed by another worker before " +
-                    "this attempt's dispatch could be recorded; outcome recorded by the new holder.",
-                    envelope.Id, envelope.Topic);
-            }
-            return OutboxDispatchOutcome.Dispatched;
+            // The send above genuinely happened. From here on a settle failure must NEVER be routed
+            // through the catch block below - that block's reschedule/park logic exists for a send that
+            // failed, and applying it to a settle-call throw after a real send would guarantee a
+            // duplicate delivery on a routine transient store error (the bug this split fixes). See
+            // MarkDispatchedWithRetryAsync's remarks for the dedicated handling.
+            return await MarkDispatchedWithRetryAsync(envelope, leaseToken, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -162,6 +159,67 @@ public class OutboxDispatcher : IOutboxDispatcher
             }
             return OutboxDispatchOutcome.Rescheduled;
         }
+    }
+
+    /// <summary>
+    /// Settles a genuinely successful send. A <see cref="IOutboxStore.MarkDispatchedAsync"/> that
+    /// returns <see langword="false"/> (reclaimed by another worker) is handled exactly as before - a
+    /// warning, since the new lease holder now owns the outcome. A <see cref="IOutboxStore.MarkDispatchedAsync"/>
+    /// that <em>throws</em> (a routine transient store error - throttling, a network blip) is a
+    /// different failure mode entirely from a failed send, and must never be treated like one: doing so
+    /// would reschedule/park an envelope that was already delivered, guaranteeing a duplicate. Instead:
+    /// log at error level, retry the settle once, and if it still throws, deliberately do nothing further
+    /// - the envelope stays exactly as claimed (still <see cref="OutboxStatus.Pending"/> in the store,
+    /// lease outstanding) so the next sweep's <see cref="IOutboxStore.ClaimDueAsync"/> reclaims it once
+    /// that lease naturally lapses, the same recovery path any other lost/stalled claim already uses.
+    /// This method never throws - a settle failure must remain visible/recoverable, never swallowed
+    /// silently and never allowed to escape as a raw exception either.
+    /// </summary>
+    private async Task<OutboxDispatchOutcome> MarkDispatchedWithRetryAsync(OutboxEnvelope envelope, string leaseToken, CancellationToken cancellationToken)
+    {
+        const int maxSettleAttempts = 2;
+        Exception? lastError = null;
+
+        for (var attempt = 1; attempt <= maxSettleAttempts; attempt++)
+        {
+            try
+            {
+                var settled = await _store.MarkDispatchedAsync(envelope.Id, leaseToken, cancellationToken);
+                if (!settled)
+                {
+                    // The lease was reclaimed by another worker before this send's settle wrote - that
+                    // worker's own claim/dispatch/settle now owns this envelope's fate. Warn, don't
+                    // error: this is the fencing contract working as designed under contention, not a
+                    // failure of this attempt's send (which did happen).
+                    _logger.LogWarning(
+                        "Outbox envelope {EnvelopeId} for topic {Topic} was reclaimed by another worker before " +
+                        "this attempt's dispatch could be recorded; outcome recorded by the new holder.",
+                        envelope.Id, envelope.Topic);
+                }
+                return OutboxDispatchOutcome.Dispatched;
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+                _logger.LogError(ex,
+                    "Outbox envelope {EnvelopeId} for topic {Topic} was sent successfully, but settling it " +
+                    "(MarkDispatchedAsync) threw on attempt {Attempt}/{MaxAttempts} - this is a store failure, " +
+                    "not a failed send.",
+                    envelope.Id, envelope.Topic, attempt, maxSettleAttempts);
+            }
+        }
+
+        // Both settle attempts threw. Do NOT drive the reschedule/park path (it would treat "sent" as
+        // "failed to send", guaranteeing a duplicate resend), and do NOT swallow the failure (the
+        // envelope must remain visible/recoverable) - leave it claimed for the sweeper, marked
+        // sent-but-unsettled so an operator/the sweeper can tell this apart from a send that actually
+        // failed.
+        _logger.LogError(lastError,
+            "Outbox envelope {EnvelopeId} for topic {Topic} is SENT-BUT-UNSETTLED: the send succeeded but " +
+            "its dispatched state could not be recorded after a retry. Leaving it claimed for the sweeper to " +
+            "reclaim once its lease lapses, rather than rescheduling/parking it as a failed send.",
+            envelope.Id, envelope.Topic);
+        return OutboxDispatchOutcome.SentButUnsettled;
     }
 
     private TimeSpan ComputeBackoff(int attempt)

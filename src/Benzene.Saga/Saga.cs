@@ -74,10 +74,21 @@ public class Saga
     private async Task<SagaResult> RunOnceAsync(SagaRunOptions options, int attempt, string? sagaId = null)
     {
         var store = options.StateStore;
+
+        // #208/#257: a state-store call failing must never abort the saga's own execution, never skip
+        // rollback for effects already applied, and never replace a genuinely successful/rolled-back
+        // result with a raw exception - it is surfaced on the returned SagaResult instead (see
+        // StateStoreFailure's remarks). Every store call below goes through RecordSafelyAsync for
+        // exactly that reason. Only the FIRST failure this attempt is kept (a store failing once is
+        // usually failing consistently; the earliest failure is the most informative), but every call
+        // is still attempted regardless of an earlier one having failed.
+        Exception? stateStoreFailure = null;
+
         if (store != null)
         {
             sagaId ??= options.SagaId ?? Guid.NewGuid().ToString();
-            await store.RecordStartedAsync(new SagaRunInfo(sagaId, options.Name, attempt, _stages.Count));
+            var ex = await RecordSafelyAsync(() => store.RecordStartedAsync(new SagaRunInfo(sagaId, options.Name, attempt, _stages.Count)));
+            stateStoreFailure ??= ex;
         }
 
         // Run-scoped: lives only for this one attempt, so nothing here is ever shared across
@@ -96,7 +107,8 @@ public class Saga
                 completedStages.Add((stage, outcomes));
                 if (store != null)
                 {
-                    await store.RecordStageCompletedAsync(sagaId!, attempt, i);
+                    var ex = await RecordSafelyAsync(() => store.RecordStageCompletedAsync(sagaId!, attempt, i));
+                    stateStoreFailure ??= ex;
                 }
 
                 continue;
@@ -104,34 +116,61 @@ public class Saga
 
             // Stage i failed. Roll back this stage's concurrently-succeeded steps first, then every
             // completed stage newest-first, so effects are undone in the reverse of the order they
-            // were created.
+            // were created. Runs unconditionally - even if a state-store call already failed above -
+            // so a store outage can never suppress compensation for effects genuinely applied (#208).
             var (rollbackClean, failedStageOutcomes, compensationFailures) =
                 await RollBackAsync(context, completedStages, stage, outcomes);
 
-            var failedOutcome = failedStageOutcomes.FirstOrDefault(o => o.State == SagaStepState.Failed);
-
-            var failure = new SagaResult(
-                rollbackClean ? SagaOutcome.RolledBack : SagaOutcome.PartiallyRolledBack,
-                i,
-                failedOutcome?.Result,
-                failedOutcome?.Exception,
-                compensationFailures);
+            var allFailedOutcomes = failedStageOutcomes.Where(o => o.State == SagaStepState.Failed).ToArray();
+            var failedOutcome = allFailedOutcomes.FirstOrDefault();
+            var outcome = rollbackClean ? SagaOutcome.RolledBack : SagaOutcome.PartiallyRolledBack;
 
             if (store != null)
             {
-                await store.RecordFinishedAsync(sagaId!, attempt, failure);
+                // Hand the store the outcome as known so far (any earlier store hiccup this attempt
+                // included); if THIS call also throws, that's folded into the returned result below
+                // rather than propagated - #208's failure-path variant: RecordFinishedAsync itself
+                // failing after rollback already ran must not lose CompensationFailures visibility.
+                var recordEx = await RecordSafelyAsync(() => store.RecordFinishedAsync(
+                    sagaId!, attempt,
+                    new SagaResult(outcome, i, failedOutcome?.Result, failedOutcome?.Exception, compensationFailures, allFailedOutcomes, stateStoreFailure)));
+                stateStoreFailure ??= recordEx;
             }
 
-            return failure;
+            return new SagaResult(outcome, i, failedOutcome?.Result, failedOutcome?.Exception, compensationFailures, allFailedOutcomes, stateStoreFailure);
         }
 
-        var success = new SagaResult(SagaOutcome.Succeeded, null, null, null, Array.Empty<SagaStepOutcome>());
         if (store != null)
         {
-            await store.RecordFinishedAsync(sagaId!, attempt, success);
+            var recordEx = await RecordSafelyAsync(() => store.RecordFinishedAsync(
+                sagaId!, attempt,
+                new SagaResult(SagaOutcome.Succeeded, null, null, null, Array.Empty<SagaStepOutcome>(), Array.Empty<SagaStepOutcome>(), stateStoreFailure)));
+            stateStoreFailure ??= recordEx;
         }
 
-        return success;
+        // #257: even if RecordFinishedAsync just threw (or an earlier store call did), every stage
+        // genuinely succeeded - return that success, with the store failure surfaced, rather than
+        // letting a raw exception replace it (which would risk a caller retrying an already-succeeded
+        // saga with no compensation and no dedup).
+        return new SagaResult(SagaOutcome.Succeeded, null, null, null, Array.Empty<SagaStepOutcome>(), Array.Empty<SagaStepOutcome>(), stateStoreFailure);
+    }
+
+    /// <summary>
+    /// Runs a state-store call, catching any exception it throws instead of letting it propagate -
+    /// see <see cref="RunOnceAsync"/>'s remarks on why a store failure must never abort the saga's own
+    /// execution or replace its real outcome.
+    /// </summary>
+    private static async Task<Exception?> RecordSafelyAsync(Func<Task> storeCall)
+    {
+        try
+        {
+            await storeCall();
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return ex;
+        }
     }
 
     private static async Task<(bool Clean, IReadOnlyList<SagaStepOutcome> FailedStageOutcomes, IReadOnlyList<SagaStepOutcome> CompensationFailures)> RollBackAsync(

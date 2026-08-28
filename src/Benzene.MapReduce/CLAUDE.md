@@ -25,3 +25,18 @@ is that composition, packaged so apps don't hand-roll it each time.
   (`BoundedFanOut`). Keep it minimal: one method, options, and a result — not a framework.
 - For very large fan-outs, shard hierarchically (a coordinator scatters to partition workers that each
   scatter and reduce locally) — the same call at each level.
+- An empty `shards` collection reduces cleanly to `seed`, reports `IsComplete == true`, and never
+  calls the sender at all. The `reduce` delegate itself throwing (it runs synchronously, after every
+  shard has already completed, outside the per-shard try/catch) propagates that exception directly —
+  it is not folded into `FailedShards`/`ScatterGatherPartialFailureException`, since every worker call
+  genuinely succeeded.
+
+## Tests
+`test/Benzene.Core.Test/MapReduce/ScatterGatherTest.cs` — all-succeed reduces to the sum;
+`ThrowOnAnyFailure`/`BestEffort` failure handling (result and thrown-exception shards, including a
+`OperationCanceledException` propagating as cancellation rather than a reported failure, and five
+concurrently-thrown distinct exception types each individually preserved); an empty `shards`
+collection (`#259`); the `reduce` delegate itself throwing mid-fold (`#259`); and
+`MaxDegreeOfParallelism` actually bounding how many worker calls are in flight at once, end to end
+through `ScatterGatherAsync` — deterministic via a shared gate every admitted worker parks on, not a
+timing-based approximation (`#259`).

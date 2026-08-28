@@ -45,8 +45,19 @@ public class BufferedOutboxStage : IOutboxStage, IDisposable
     public int StagedCount => _staged.Count;
 
     /// <summary>
+    /// Returns every envelope staged so far <b>without</b> clearing the buffer - unlike
+    /// <see cref="DrainStaged"/>. Lets a caller that must perform a fallible write (e.g. a single SDK
+    /// call that can itself throw) build that write's item list from the staged envelopes and only
+    /// consume the buffer (<see cref="DrainStaged"/>) once the write has actually succeeded, so a
+    /// thrown write leaves the envelopes in place for a retry instead of losing them.
+    /// </summary>
+    public IReadOnlyList<OutboxEnvelope> Peek() => _staged.Count == 0 ? Array.Empty<OutboxEnvelope>() : _staged.ToArray();
+
+    /// <summary>
     /// Returns every envelope staged so far and clears the buffer. Called by the outbox-aware unit
-    /// of work as part of building its single atomic write.
+    /// of work as part of building its single atomic write, only once that write has actually
+    /// succeeded - see <see cref="Peek"/> for the non-destructive equivalent used to build the write
+    /// itself.
     /// </summary>
     public IReadOnlyList<OutboxEnvelope> DrainStaged()
     {

@@ -127,6 +127,37 @@ public class DynamoDbOutboxTransactionTest
     }
 
     [Fact]
+    public async Task Commit_TransactWriteItemsAsyncThrows_LeavesTheStagedEnvelopesInPlace_SoARetryStillCommitsThem()
+    {
+        // The SDK call itself can throw (throttling, a conditional-check failure, ...), not just the
+        // local size/nothing-to-commit validation. That must not destructively drain the stage first -
+        // a caller retrying CommitAsync (with the failure condition removed) must still get the
+        // previously-staged envelopes committed, not "nothing to commit" or a silently smaller commit.
+        var dynamo = MockDynamo();
+        dynamo.Setup(x => x.TransactWriteItemsAsync(It.IsAny<TransactWriteItemsRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new AmazonDynamoDBException("throttled"));
+
+        var stage = new BufferedOutboxStage();
+        await stage.StageAsync(NewEnvelope("env-1"));
+        var transaction = new DynamoDbOutboxTransaction(dynamo.Object, stage, "outbox");
+
+        await Assert.ThrowsAsync<AmazonDynamoDBException>(() => transaction.CommitAsync([AppItem("order-1")]));
+
+        Assert.Equal(1, stage.StagedCount);
+
+        TransactWriteItemsRequest? captured = null;
+        dynamo.Setup(x => x.TransactWriteItemsAsync(It.IsAny<TransactWriteItemsRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<TransactWriteItemsRequest, CancellationToken>((r, _) => captured = r)
+            .ReturnsAsync(new TransactWriteItemsResponse());
+
+        await transaction.CommitAsync([AppItem("order-1")]);
+
+        Assert.Equal(2, captured!.TransactItems.Count);
+        Assert.Contains(captured.TransactItems, i => i.Put.TableName == "outbox" && i.Put.Item["id"].S == "env-1");
+        Assert.Equal(0, stage.StagedCount);
+    }
+
+    [Fact]
     public async Task Commit_OnlyStagedEnvelopes_NoApplicationItems_Succeeds()
     {
         var dynamo = MockDynamo();
