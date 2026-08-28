@@ -117,6 +117,27 @@ public class FileSystemMeshArtifactStoreTest : IDisposable
             () => store.PublishAsync(relativePath, "{}"));
     }
 
+    [Theory]
+    [InlineData("services/../manifest.json")]
+    [InlineData("services/../topics.json")]
+    [InlineData("services/./../manifest.json")]
+    public async Task PublishAsync_PathEscapesIntendedSubtreeButStaysInsideRoot_IsRejected(string relativePath)
+    {
+        // #242: "services/../manifest.json" normalizes to "{root}/manifest.json" - still *inside*
+        // the store root, so the older root-containment-only check in ResolveWithinRoot let this
+        // through. A caller building "services/{name}.json" from an untrusted push-report name
+        // (ArtifactStoreMeshReportPublisher) could use it to overwrite manifest.json (or any other
+        // top-level artifact) despite only ever being meant to touch the services/ subtree. This is
+        // the exact gap the class's own doc comment claimed to close but didn't - pinned here at the
+        // store level, independent of whichever caller-side validation exists further up the stack.
+        var store = new FileSystemMeshArtifactStore(_rootDirectory);
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(
+            () => store.PublishAsync(relativePath, "{\"attacker\":\"controlled\"}"));
+
+        Assert.Null(await store.TryReadAsync("manifest.json"));
+    }
+
     [Fact]
     public async Task TryReadAsync_PathEscapingRoot_IsRejected()
     {

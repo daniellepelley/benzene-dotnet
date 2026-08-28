@@ -64,8 +64,29 @@ public class FileSystemMeshArtifactStore : IMeshArtifactStore
     /// read or overwrite an arbitrary file. Resolving to a full path and checking containment closes
     /// that traversal at the storage boundary, protecting every caller.
     /// </summary>
+    /// <remarks>
+    /// #242: root-containment alone is too coarse. <see cref="Path.Combine(string, string)"/> plus
+    /// <see cref="Path.GetFullPath(string)"/> happily normalize <c>"services/../manifest.json"</c>
+    /// down to <c>"{root}/manifest.json"</c> - still inside the root, so a caller that only ever
+    /// meant to touch the <c>services/</c> subtree (<see cref="ArtifactStoreMeshReportPublisher"/>,
+    /// keying on an untrusted report name) could overwrite any sibling top-level artifact
+    /// (<c>manifest.json</c>, <c>topics.json</c>, ...). Rejecting any literal <c>"."</c>/<c>".."</c>
+    /// path segment up front, before any combining or normalizing happens, closes that regardless of
+    /// which subtree (if any) the caller intended - a resolved path can now never land outside the
+    /// directory its own literal segments name. Kept on top of (not instead of) the root-containment
+    /// check below, which still catches a rooted/absolute <paramref name="relativePath"/>.
+    /// </remarks>
     private string ResolveWithinRoot(string relativePath)
     {
+        foreach (var segment in relativePath.Split('/', '\\'))
+        {
+            if (segment is "." or "..")
+            {
+                throw new System.UnauthorizedAccessException(
+                    $"The artifact path '{relativePath}' contains a '.' or '..' segment and was rejected.");
+            }
+        }
+
         var rootFull = Path.GetFullPath(_rootDirectory);
         var combined = Path.GetFullPath(Path.Combine(rootFull, relativePath));
 

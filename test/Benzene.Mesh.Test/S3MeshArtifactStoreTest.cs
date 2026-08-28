@@ -28,6 +28,10 @@ public class S3MeshArtifactStoreTest
     [InlineData("manifest.json", "mesh/", "mesh/manifest.json")] // trailing slash on the prefix is not doubled
     [InlineData("/manifest.json", "mesh", "mesh/manifest.json")] // leading slash on the path is stripped
     [InlineData("services\\orders.json", "mesh/", "mesh/services/orders.json")] // backslashes normalized to /
+    // #242 regression pin: unlike FileSystemMeshArtifactStore, Key() does no path normalization at
+    // all - a ".." segment stays a literal character sequence in the object key, not a traversal
+    // instruction, so this store's immunity to the finding is asserted, not assumed.
+    [InlineData("services/../manifest.json", "", "services/../manifest.json")]
     public async Task PublishAsync_NormalizesTheObjectKey(string relativePath, string prefix, string expectedKey)
     {
         var mock = new Mock<IAmazonS3>();
