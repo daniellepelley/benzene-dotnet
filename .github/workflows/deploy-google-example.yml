@@ -26,6 +26,8 @@ jobs:
   deploy:
     environment: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     env:
       GCP_PROJECT: ${{ vars.GCP_PROJECT }}
       GCP_REGION: ${{ vars.GCP_REGION }}
