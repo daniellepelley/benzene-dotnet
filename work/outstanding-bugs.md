@@ -2069,6 +2069,46 @@ top-of-file summary blockquote).
   scheme specifically) to record this explicitly as a `[DECISION]` in place, rather than leaving it
   silently misleading. Left for a future round to decide whether/how to carry the scheme onto the wire.
 
+### Tracked findings rounds 14–15, WP-A — mesh:report path traversal (done)
+Ruling, evidence, and rejected alternatives are in
+[`bug-fix-rulings-round14-15-2026-08.md`](bug-fix-rulings-round14-15-2026-08.md) §3 "WP-A — mesh:report
+path traversal (#242) — LAND FIRST, ALONE"; full evidence in
+[`bug-fix-designs-round15-2026-08.md`](bug-fix-designs-round15-2026-08.md) §5.
+- **[RESOLVED] #242 — `mesh:report`'s untrusted `MeshServiceReport.Name` could overwrite sibling
+  top-level artifacts (including the fleet-wide `manifest.json`) on the default filesystem store, not
+  just create a bogus `services/*.json` entry.** `ArtifactStoreMeshReportPublisher.PublishAsync` built
+  the key as `$"services/{report.Name}.json"` with no validation anywhere on the path from the wire;
+  `FileSystemMeshArtifactStore.ResolveWithinRoot` only checked that the *resolved* path stayed inside
+  the store *root*, not that it stayed inside the `services/` subtree the caller intended — for
+  `report.Name = "../manifest"`, `"services/../manifest.json"` normalizes to `{root}/manifest.json`,
+  still inside root, so the old check passed. Anyone able to call the documented, opt-in
+  `POST /mesh/report` endpoint with `{"name":"../manifest",...}` could overwrite `manifest.json` with
+  attacker-chosen JSON. Fixed at two independent layers (defense in depth), matching the ruling:
+  1. **Boundary validation** — `MeshReportMessageHandler` now rejects a `report.Name` that is
+     null/empty/whitespace, contains a path separator (`/` or `\`), or is a bare `.`/`..` segment,
+     returning a `BadRequest` result rather than reaching the publisher at all (the same posture
+     `MeshAnnotationsMessageHandler` already applies to its own inputs). This changed the handler's
+     implemented interface from the fire-and-forget `IMessageHandler<MeshServiceReport>` to
+     `IMessageHandler<MeshServiceReport, Void>` so it can report a validation failure as a result
+     instead of always succeeding — a pre-1.0 breaking API change, flagged in
+     `src/Benzene.Mesh.Aggregator/CLAUDE.md`; the success path still returns `Accepted` with no body,
+     so the observable HTTP/status-code shape for a *valid* report is unchanged.
+  2. **Store hardening** — `FileSystemMeshArtifactStore.ResolveWithinRoot` now rejects any literal
+     `.`/`..` path segment in the requested relative path outright, before any combining/normalizing,
+     on top of the existing root-containment check. This closes the gap regardless of caller (not just
+     the mesh:report path), and is what the method's own doc comment already claimed to do.
+  New tests: `FileSystemMeshArtifactStoreTest.PublishAsync_PathEscapesIntendedSubtreeButStaysInsideRoot_IsRejected`
+  (store level — `"services/../manifest.json"` etc. rejected, `manifest.json` unaffected);
+  `MeshReportMessageHandlerTest.HandleAsync_InvalidName_RejectedWithoutReachingThePublisher` (every
+  invalid-name shape, including `"../manifest"`, never reaches the publisher) and
+  `HandleAsync_ReportNameEscapesServicesSubtree_LeavesManifestUntouched_EndToEnd` (the real handler +
+  real `ArtifactStoreMeshReportPublisher`/`FileSystemMeshArtifactStore`, fed the exact attack payload
+  from the finding, leaves a pre-seeded `manifest.json` byte-for-byte untouched); a new
+  `services/../manifest.json` case added to the existing `PublishAsync_NormalizesThe{ObjectKey,BlobName,ObjectName}`
+  theories in `S3MeshArtifactStoreTest`/`BlobMeshArtifactStoreTest`/`GcsMeshArtifactStoreTest`, pinning
+  (not just asserting in prose) that the flat-namespace stores' `Key()` never treats `..` as anything
+  but a literal key-name character sequence.
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.

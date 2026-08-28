@@ -76,11 +76,24 @@ already runs, not a bespoke standalone tool.
   (via `MeshSnapshotBuilder`, same as a pulled fetch) and writes it straight into the shared
   `IMeshArtifactStore` - fits a reporter colocated with the aggregator's own storage (e.g. a shared
   mounted volume). `MeshReportMessageHandler` (`[HttpEndpoint("POST", "/mesh/report")]`/
-  `[Message("mesh:report")]`) is the ingestion endpoint - a thin wrapper resolving whichever
-  `IMeshReportPublisher` is registered and calling it, only reachable if the host's own
-  `.AddMessageHandlers()` discovers it (opt-in, same as every other Benzene handler - an aggregator
-  deployment that never wires this up has no write surface at all). A reporter that isn't colocated
-  posts here via `Benzene.Mesh.Reporting.HttpMeshReportPublisher` instead of writing directly.
+  `[Message("mesh:report")]`) is the ingestion endpoint - resolving whichever `IMeshReportPublisher`
+  is registered and calling it, only reachable if the host's own `.AddMessageHandlers()` discovers it
+  (opt-in, same as every other Benzene handler - an aggregator deployment that never wires this up
+  has no write surface at all). A reporter that isn't colocated posts here via
+  `Benzene.Mesh.Reporting.HttpMeshReportPublisher` instead of writing directly.
+  - **`report.Name` validation (#242, 2026-08-28):** `Name` is untrusted wire input that
+    `ArtifactStoreMeshReportPublisher` keys straight into an artifact path
+    (`services/{Name}.json`) - an unvalidated `"../manifest"` let a push report overwrite the
+    fleet-wide `manifest.json` (or any other top-level artifact), since
+    `FileSystemMeshArtifactStore.ResolveWithinRoot` only asserted containment within the store
+    *root*, not the `services/` subtree the caller intended. Fixed at two independent layers:
+    `MeshReportMessageHandler` now rejects a null/empty/whitespace `Name`, one containing a path
+    separator (`/` or `\`), or a bare `.`/`..` segment, as a `BenzeneResultStatus.BadRequest`
+    result - the same boundary-validation posture `MeshAnnotationsMessageHandler` applies to its
+    own inputs - before a publisher/store ever sees it; `FileSystemMeshArtifactStore.ResolveWithinRoot`
+    independently rejects any `.`/`..` path segment in *any* relative path it's asked to resolve,
+    regardless of caller (see its own remarks). See `work/outstanding-bugs.md`'s "Tracked findings
+    rounds 14–15, WP-A" entry for the full writeup.
 
 ## Structural topology (`topology.json`)
 Each run also derives a **structural** ("designed to call") topology and publishes it as
@@ -233,6 +246,16 @@ and an older `manifest.json` without it deserializes to `null`. `RunOnceAsync` t
 same treatment as `OwningTeam`/`Transports`; the aggregator does **not** compute staleness (per the
 `work/service-mesh-roadmap-1.0.md` 2026-07-20 ruling, staleness is a read-time UI derivation over
 this raw timestamp, not a status). Consumed by `Benzene.Mesh.Ui`'s issue inbox.
+
+**2026-08-28, `MeshReportMessageHandler` (#242 security fix):** changed from implementing the
+fire-and-forget `IMessageHandler<MeshServiceReport>` (which always succeeds - see
+`MessageHandlerNoResultWrapper`) to `IMessageHandler<MeshServiceReport, Void>`, so an invalid
+`report.Name` can be rejected as a `BenzeneResult.BadRequest<Void>(...)` result instead of always
+reaching the publisher. Any code constructing this handler and awaiting `HandleAsync` directly (not
+through message-handler discovery, which adapts either shape transparently) now gets
+`Task<IBenzeneResult<Void>>` back instead of a bare `Task`. The success path is unchanged:
+`BenzeneResult.Accepted<Void>()`, the same status the old fire-and-forget wrapper always produced -
+so a valid report's observable HTTP/transport response is identical to before.
 
 ### Run-over-run catalog diff (drift substance, 2026-07-22)
 Each run also diffs the fresh catalog against the store's own previous `topics.json`
