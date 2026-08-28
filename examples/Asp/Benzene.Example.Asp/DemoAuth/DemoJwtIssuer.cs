@@ -18,6 +18,14 @@ namespace Benzene.Example.Asp.DemoAuth;
 public sealed class DemoJwtIssuer
 {
     public const string KeyId = "demo-key-1";
+
+    // #219: this MUST match the base URL this app is actually listening on - Startup.cs builds the
+    // JWKS lookup URL (and OAuth2BearerOptions.ValidIssuers) directly from this constant. If Kestrel
+    // ends up on a different port (a busy 5000, an explicit --urls, launchSettings.json, or
+    // ASPNETCORE_URLS overriding it), every /protected/* request fails with a bare 401 and no other
+    // clue why: the token's "iss" claim no longer matches ValidIssuers, and/or the JWKS fetch 404s.
+    // If GET /protected/ping 401s and curl http://localhost:5000/demo-token works, check the port
+    // your server actually bound (the console startup banner logs it) and update this constant.
     public const string Issuer = "http://localhost:5000/";
     public const string Audience = "benzene-example-asp";
 

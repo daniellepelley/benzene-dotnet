@@ -31,7 +31,7 @@ public static class MeshServiceWiring
     /// in the spec's <c>events</c> (→ the mesh topology) and wires the runtime Pub/Sub route.
     /// </summary>
     public static void ConfigureServices(IServiceCollection services, string serviceName, Type[] handlers,
-        Action<IBenzeneServiceContainer>? configureBenzene = null)
+        Action<IBenzeneServiceContainer> configureBenzene = null)
     {
         services.AddLogging();
 

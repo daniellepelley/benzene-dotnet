@@ -112,6 +112,39 @@ jobs:
         dotnet test examples/Google/Benzene.Examples.Google.Tests/Benzene.Examples.Google.Tests.csproj --no-build --verbosity normal
         dotnet test examples/Versioning/Benzene.Examples.Versioning.Tests/Benzene.Examples.Versioning.Tests.csproj --no-build --verbosity normal
 
+  # Build-only gate for the four mesh-topology examples (AwsMesh, AzureMesh, GoogleCloudMesh,
+  # AzureFunctionsMesh) - #272/#214. Each has its own per-folder `.sln` (like Benzene.Examples.sln's
+  # siblings) rather than being folded into Benzene.Examples.sln, deliberately: doing that would drag
+  # AWS/Azure/GCP cloud-SDK restore into every contributor's default `dotnet build`. Before this job
+  # existed, a compile break in any of these ~9 projects (7 AwsMesh + 1 AzureMesh, plus whichever of
+  # GoogleCloudMesh/AzureFunctionsMesh regressed) was invisible to every build gate in the repo,
+  # automatic or manual - each `.sln` existed but nothing built it (#272's core finding). Build-only,
+  # same rationale as examples-build: actually deploying these needs cloud credentials this repo
+  # doesn't wire up (their own deploy workflows are workflow_dispatch-only).
+  mesh-examples-build:
+
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 10.0.x
+    # AwsMesh/Orders generates its payments client at build time with the published `benzene` CLI,
+    # pinned as a local tool in .config/dotnet-tools.json (same as examples-build's AwsMesh build).
+    - name: Restore local tools
+      run: dotnet tool restore
+    - name: Build AwsMesh
+      run: dotnet build examples/AwsMesh/Benzene.Examples.AwsMesh.sln
+    - name: Build AzureMesh
+      run: dotnet build examples/AzureMesh/Benzene.Examples.AzureMesh.sln
+    - name: Build GoogleCloudMesh
+      run: dotnet build examples/GoogleCloudMesh/Benzene.Examples.GoogleCloudMesh.sln
+    - name: Build AzureFunctionsMesh
+      run: dotnet build examples/AzureFunctionsMesh/Benzene.Example.AzureFunctionsMesh.sln
+
   # Real-dependency tier for the AWS example: runs its SQS egress demo end-to-end against a real
   # LocalStack SQS queue (Benzene.Examples.Aws.Dev.Test). Mirrors the library-level
   # aws-integration-tests job. The .Dev.Test project is deliberately NOT in Benzene.Examples.sln

@@ -45,12 +45,17 @@ public class Startup
 
     public void ConfigureServices(IServiceCollection services)
     {
+        // #218: instrumentation key comes from config (config.json / env), never hardcoded - the
+        // shipped config.json value is an obvious placeholder GUID, not a real key. Replace it (or
+        // set the APPINSIGHTS_INSTRUMENTATIONKEY environment variable) with your own before this
+        // sink actually delivers telemetry anywhere.
+        var appInsightsKey = Configuration["APPINSIGHTS_INSTRUMENTATIONKEY"] ?? "00000000-0000-0000-0000-000000000000";
         Log.Logger = new LoggerConfiguration()
             .MinimumLevel.Debug()
             .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
             .Enrich.FromLogContext()
             .WriteTo.Console(new CustomJsonFormatter())
-            .WriteTo.ApplicationInsights(new TelemetryConfiguration("3f72a47f-1aba-4e7a-913e-b3aa3161e6c6"),
+            .WriteTo.ApplicationInsights(new TelemetryConfiguration(appInsightsKey),
                 TelemetryConverter.Traces)
             .CreateLogger();
 
@@ -90,8 +95,6 @@ public class Startup
         app.UseHttpsRedirection();
 
         app.UseRouting();
-
-        app.UseAuthorization();
 
         app.UseBenzene(benzene => benzene
             .UseHttp(asp => asp
@@ -152,6 +155,12 @@ public class Startup
             slowApp.UseEndpoints(endpoints => { });
         });
 
+        // ASP0001: UseAuthorization() belongs immediately before endpoint mapping, not earlier in the
+        // chain - the app.Map("/protected", ...) / app.Map("/slow", ...) branches above sit between
+        // routing and this app's own endpoints, and each guards itself with Benzene's own auth
+        // (UseOAuth2Bearer) rather than ASP.NET Core's UseAuthorization(), which only applies to
+        // MapControllers() below.
+        app.UseAuthorization();
         app.UseEndpoints(endpoints => { endpoints.MapControllers(); });
     }
 }
