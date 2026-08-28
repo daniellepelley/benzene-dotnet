@@ -1,3 +1,4 @@
+using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Messages.BenzeneClient;
 using Benzene.Abstractions.Middleware;
 using Benzene.Clients;
@@ -47,7 +48,8 @@ public static class Extensions
             RabbitMqMandatoryPublishCoordinator.GetOrCreate(channel);
         }
 
-        return app.Use(_ => new RabbitMqClientMiddleware(channel, mandatory, persistent, publishConfirmTimeout));
+        return app.Use(serviceResolver => new RabbitMqClientMiddleware(channel, mandatory, persistent,
+            publishConfirmTimeout, serviceResolver.TryGetService<ICancellationTokenAccessor>()));
     }
 
     /// <summary>

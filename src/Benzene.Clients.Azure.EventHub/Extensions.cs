@@ -25,7 +25,7 @@ public static class Extensions
     public static IMiddlewarePipelineBuilder<EventHubSendMessageContext> UseEventHubClient(
         this IMiddlewarePipelineBuilder<EventHubSendMessageContext> app, EventHubProducerClient producerClient)
     {
-        return app.Use(_ => new EventHubClientMiddleware(producerClient));
+        return app.Use(serviceResolver => new EventHubClientMiddleware(producerClient, serviceResolver.TryGetService<ICancellationTokenAccessor>()));
     }
 
     /// <summary>

@@ -1,6 +1,8 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using Amazon.SQS;
+using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Middleware;
 
 namespace Benzene.Clients.Aws.Sqs;
@@ -12,14 +14,23 @@ namespace Benzene.Clients.Aws.Sqs;
 public class SqsClientMiddleware : IMiddleware<SqsSendMessageContext>, ITerminalMiddleware
 {
     private readonly IAmazonSQS _amazonSqs;
+    private readonly ICancellationTokenAccessor? _cancellation;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SqsClientMiddleware"/> class.
     /// </summary>
     /// <param name="amazonSqs">The SQS client used to send the message.</param>
-    public SqsClientMiddleware(IAmazonSQS amazonSqs)
+    /// <param name="cancellation">
+    /// Supplies the ambient cancellation token to pass into the send call (the
+    /// <c>HttpBenzeneMessageClient</c> constructor-optional accessor idiom); null observes no
+    /// cancellation. Resolved automatically from the container on the DI-registered
+    /// <c>UseSqsClient()</c> path; the explicit-client <c>UseSqsClient(amazonSqs)</c> overload
+    /// resolves it from the pipeline's service resolver and passes it through.
+    /// </param>
+    public SqsClientMiddleware(IAmazonSQS amazonSqs, ICancellationTokenAccessor? cancellation = null)
     {
         _amazonSqs = amazonSqs;
+        _cancellation = cancellation;
     }
 
     /// <summary>
@@ -35,6 +46,7 @@ public class SqsClientMiddleware : IMiddleware<SqsSendMessageContext>, ITerminal
     /// <param name="next">Unused; this middleware does not delegate further down the pipeline.</param>
     public async Task HandleAsync(SqsSendMessageContext context, Func<Task> next)
     {
-        context.Response = await _amazonSqs.SendMessageAsync(context.Request);
+        var cancellationToken = _cancellation?.CancellationToken ?? CancellationToken.None;
+        context.Response = await _amazonSqs.SendMessageAsync(context.Request, cancellationToken);
     }
 }

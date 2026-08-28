@@ -67,7 +67,12 @@ public static class Extensions
     public static IMiddlewarePipelineBuilder<HttpSendMessageContext> UseHttpClient(
         this IMiddlewarePipelineBuilder<HttpSendMessageContext> app, HttpClient httpClient)
     {
-        return app.Use(_ => new HttpClientMiddleware(httpClient));
+        // #270: wire the accessor the same way the DI-resolved sibling overload below does (its
+        // resolved HttpClientMiddleware picks up ICancellationTokenAccessor via constructor
+        // injection) - this given-instance overload used to construct via the no-accessor
+        // constructor, silently losing cancellation forwarding on an otherwise-documented first-class
+        // path.
+        return app.Use(serviceResolver => new HttpClientMiddleware(httpClient, serviceResolver.TryGetService<ICancellationTokenAccessor>()));
     }
 
     /// <summary>Adds an <see cref="HttpClientMiddleware"/> resolved from the service container to the pipeline.</summary>

@@ -38,12 +38,20 @@ row for the `IHttpClientFactory`/lifetime story (yours to own on both paths).
   substitution), serializes the request body as `application/json` (UTF-8), and copies
   `contextIn.Request.Headers` onto the request. `MapResponseAsync` reads the response body and maps the
   `HttpStatusCode` to a Benzene result.
-- `HttpClientMiddleware` - the transport step: its `HandleAsync` is just
-  `context.Response = await _httpClient.SendAsync(context.Request)`. Nothing more (no retry, no header
-  logic of its own).
+- `HttpClientMiddleware` - the transport step: its `HandleAsync` is
+  `context.Response = await _httpClient.SendAsync(context.Request, cancellationToken)`, where
+  `cancellationToken` comes from the constructor-optional `ICancellationTokenAccessor` (the
+  `HttpBenzeneMessageClient` idiom) or `CancellationToken.None` when none was supplied. Nothing more
+  (no retry, no header logic of its own).
 - `Extensions` - `UseHttpClient(...)` (with a passed `HttpClient`, or resolving a DI-registered scoped
   `HttpClientMiddleware`), `Convert(...)`, and the `UseHttp<TRequest,TResponse>(verb, path, ...)` helpers
-  that wire the converter + client middleware together (the **plain REST** flavour).
+  that wire the converter + client middleware together (the **plain REST** flavour). **Both
+  `UseHttpClient` overloads wire the ambient cancellation accessor** (#270, fixed 2026-08) - the
+  given-instance overload (`UseHttpClient(httpClient)`) used to construct `HttpClientMiddleware` via
+  its no-accessor constructor, silently dropping cancellation forwarding on that path even though it's
+  a documented first-class way to configure the send pipeline; it now resolves
+  `ICancellationTokenAccessor` from the pipeline's service resolver, exactly as the DI-resolved
+  sibling overload already did via constructor injection.
 - `HttpBenzeneMessageClient` - `IBenzeneMessageClient`; POSTs the `{ topic, headers, body }` envelope to a
   configured URL and maps the `{ statusCode, headers, body }` response. Optional `ILogger`; observes the
   ambient cancellation token via `ICancellationTokenAccessor`. `url` is used verbatim as the request URI

@@ -1,5 +1,6 @@
 using System;
 using Amazon.Lambda;
+using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Messages.BenzeneClient;
 using Benzene.Abstractions.Middleware;
 using Benzene.Core.Middleware;
@@ -23,7 +24,7 @@ public static class Extensions
     public static IMiddlewarePipelineBuilder<LambdaSendMessageContext> UseAwsLambdaClient(
         this IMiddlewarePipelineBuilder<LambdaSendMessageContext> app, IAmazonLambda amazonLambda)
     {
-        return app.Use(_ => new AwsLambdaClientMiddleware(amazonLambda));
+        return app.Use(serviceResolver => new AwsLambdaClientMiddleware(amazonLambda, serviceResolver.TryGetService<ICancellationTokenAccessor>()));
     }
 
     /// <summary>

@@ -20,6 +20,12 @@ fixed during the Tier 2.1 split).
   `InvokeResponse.StatusCode` isn't 2xx (e.g. a throttling/validation error surfaced synchronously by
   the Invoke API). Both flow through `AwsLambdaBenzeneMessageClient`'s catch as `ServiceUnavailable`.
 - `AwsLambdaClientMiddleware` / `LambdaSendMessageContext` — terminal invoke middleware and context.
+  **Resolves the ambient `ICancellationTokenAccessor` (#268, fixed 2026-08)** — a constructor-optional
+  parameter, the `HttpBenzeneMessageClient` idiom, wired through both `UseAwsLambdaClient` overloads.
+  Its token is passed into `InvokeAsync`. Before this fix the middleware never resolved the accessor
+  and always invoked with `CancellationToken.None`. Covered by
+  `test/Benzene.Core.Test/Clients/Aws/Lambda/AwsLambdaClientMiddlewareCancellationTest.cs` (asserts the
+  *actual* token reaches `InvokeAsync`, not `It.IsAny<CancellationToken>()`).
 - `LambdaContextConverter<T>` (in `SqsContextConverter.cs` — historically misnamed file) —
   `IBenzeneClientContext<T, Void>` → invoke context, used by `UseAwsLambda()`.
 - `AwsLambdaHealthCheck` — verifies a function; reports `HealthCheckDependency` (`Kind = "Lambda"`).

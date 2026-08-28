@@ -483,13 +483,20 @@ public class BenzeneKafkaWorker<TKey, TValue> : IBenzeneWorker, IDisposable
     /// Signals the consume loop to stop, then waits for it to drain in-flight messages
     /// (up to <see cref="BenzeneKafkaConfig.DrainTimeout"/>) and close the consumer.
     /// </summary>
+    /// <param name="cancellationToken">
+    /// The host's stop-timeout token. Threaded into the wait for the consume loop's drain/close
+    /// (mirroring <c>RabbitMqWorker.StopAsync</c>) so a hung <c>DrainAsync</c>/<c>IConsumer.Close()</c>
+    /// cannot block shutdown forever - if this token fires first, the wait is abandoned and
+    /// <see cref="StopAsync"/> throws <see cref="OperationCanceledException"/> instead of hanging;
+    /// the loop's own finally block still runs to completion on its background task, best-effort.
+    /// </param>
     public async Task StopAsync(CancellationToken cancellationToken)
     {
         _stoppingCts.Cancel();
 
         if (_runTask != null)
         {
-            await _runTask;
+            await _runTask.WaitAsync(cancellationToken);
         }
     }
 

@@ -24,7 +24,7 @@ public static class Extensions
     public static IMiddlewarePipelineBuilder<ServiceBusSendMessageContext> UseServiceBusClient(
         this IMiddlewarePipelineBuilder<ServiceBusSendMessageContext> app, ServiceBusSender sender)
     {
-        return app.Use(_ => new ServiceBusClientMiddleware(sender));
+        return app.Use(serviceResolver => new ServiceBusClientMiddleware(sender, serviceResolver.TryGetService<ICancellationTokenAccessor>()));
     }
 
     /// <summary>

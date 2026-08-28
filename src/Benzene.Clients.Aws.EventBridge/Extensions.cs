@@ -19,7 +19,7 @@ public static class Extensions
     public static IMiddlewarePipelineBuilder<EventBridgeSendMessageContext> UseEventBridgeClient(
         this IMiddlewarePipelineBuilder<EventBridgeSendMessageContext> app, IAmazonEventBridge amazonEventBridge)
     {
-        return app.Use(_ => new EventBridgeClientMiddleware(amazonEventBridge));
+        return app.Use(serviceResolver => new EventBridgeClientMiddleware(amazonEventBridge, serviceResolver.TryGetService<ICancellationTokenAccessor>()));
     }
 
     public static IMiddlewarePipelineBuilder<EventBridgeSendMessageContext> UseEventBridgeClient(

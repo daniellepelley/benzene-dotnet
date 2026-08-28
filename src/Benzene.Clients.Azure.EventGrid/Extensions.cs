@@ -24,7 +24,7 @@ public static class Extensions
     public static IMiddlewarePipelineBuilder<EventGridSendMessageContext> UseEventGridClient(
         this IMiddlewarePipelineBuilder<EventGridSendMessageContext> app, EventGridPublisherClient publisherClient)
     {
-        return app.Use(_ => new EventGridClientMiddleware(publisherClient));
+        return app.Use(serviceResolver => new EventGridClientMiddleware(publisherClient, serviceResolver.TryGetService<ICancellationTokenAccessor>()));
     }
 
     /// <summary>

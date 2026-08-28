@@ -15,6 +15,12 @@ plan Tier 2.2, §5.2). Pins only `Azure.Messaging.ServiceBus` (7.18.2, matching 
   `test/Benzene.Core.Test/Clients/Azure/ServiceBus/ServiceBusBenzeneMessageClientTest.cs` — previously
   zero direct coverage.
 - `ServiceBusClientMiddleware` / `ServiceBusSendMessageContext` — terminal send middleware and its context.
+  **Resolves the ambient `ICancellationTokenAccessor` (#268, fixed 2026-08)** — a constructor-optional
+  parameter, the `HttpBenzeneMessageClient` idiom, wired through both `UseServiceBusClient` overloads.
+  Its token is passed into `SendMessageAsync`. Before this fix the middleware never resolved the
+  accessor and always sent with `CancellationToken.None`. Covered by
+  `test/Benzene.Core.Test/Clients/Azure/ServiceBus/ServiceBusClientMiddlewareCancellationTest.cs`
+  (asserts the *actual* token reaches `SendMessageAsync`, not `It.IsAny<CancellationToken>()`).
 - `ServiceBusContextConverter<T>` — `IBenzeneClientContext<T, Void>` → send context.
 - `OutboundServiceBusContextConverter` — the `Benzene.Clients.OutboundContext` counterpart, used by
   the `OutboundContext` overloads of `.UseServiceBus(...)` for `AddOutboundRouting(...).Route(topic, …)`.

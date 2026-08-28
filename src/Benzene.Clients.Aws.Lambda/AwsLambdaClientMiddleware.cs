@@ -1,6 +1,8 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using Amazon.Lambda;
+using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Middleware;
 
 namespace Benzene.Clients.Aws.Lambda;
@@ -12,14 +14,23 @@ namespace Benzene.Clients.Aws.Lambda;
 public class AwsLambdaClientMiddleware : IMiddleware<LambdaSendMessageContext>, ITerminalMiddleware
 {
     private readonly IAmazonLambda _amazonLambda;
+    private readonly ICancellationTokenAccessor? _cancellation;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AwsLambdaClientMiddleware"/> class.
     /// </summary>
     /// <param name="amazonLambda">The Lambda client used to invoke the function.</param>
-    public AwsLambdaClientMiddleware(IAmazonLambda amazonLambda)
+    /// <param name="cancellation">
+    /// Supplies the ambient cancellation token to pass into the invoke call (the
+    /// <c>HttpBenzeneMessageClient</c> constructor-optional accessor idiom); null observes no
+    /// cancellation. Resolved automatically from the container on the DI-registered
+    /// <c>UseAwsLambdaClient()</c> path; the explicit-client <c>UseAwsLambdaClient(amazonLambda)</c>
+    /// overload resolves it from the pipeline's service resolver and passes it through.
+    /// </param>
+    public AwsLambdaClientMiddleware(IAmazonLambda amazonLambda, ICancellationTokenAccessor? cancellation = null)
     {
         _amazonLambda = amazonLambda;
+        _cancellation = cancellation;
     }
 
     /// <summary>
@@ -35,6 +46,7 @@ public class AwsLambdaClientMiddleware : IMiddleware<LambdaSendMessageContext>, 
     /// <param name="next">Unused; this middleware does not delegate further down the pipeline.</param>
     public async Task HandleAsync(LambdaSendMessageContext context, Func<Task> next)
     {
-        context.Response = await _amazonLambda.InvokeAsync(context.Request);
+        var cancellationToken = _cancellation?.CancellationToken ?? CancellationToken.None;
+        context.Response = await _amazonLambda.InvokeAsync(context.Request, cancellationToken);
     }
 }

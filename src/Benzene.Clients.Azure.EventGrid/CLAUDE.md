@@ -16,7 +16,13 @@ introduces `Azure.Messaging.EventGrid` (5.0.0) fresh — the ingress package is 
   `.UseEventGridEventSchema(...)`. Builds an `EventGridEvent` with both `Subject` and `EventType`
   set to the Benzene topic. Prefer the CloudEvents path for new code.
 - Both share `EventGridSendMessageContext` (holds exactly one of `CloudEvent`/`EventGridEvent`) and
-  `EventGridClientMiddleware` (dispatches to whichever is set).
+  `EventGridClientMiddleware` (dispatches to whichever is set). **Resolves the ambient
+  `ICancellationTokenAccessor` (#268, fixed 2026-08)** — a constructor-optional parameter, the
+  `HttpBenzeneMessageClient` idiom, wired through both `UseEventGridClient` overloads. Its token is
+  passed into `SendEventAsync`. Before this fix the middleware never resolved the accessor and always
+  sent with `CancellationToken.None`. Covered by
+  `test/Benzene.Core.Test/Clients/Azure/EventGrid/EventGridClientMiddlewareCancellationTest.cs`
+  (asserts the *actual* token reaches `SendEventAsync`, not `It.IsAny<CancellationToken>()`).
 - `EventGridBenzeneMessageClient` — `IBenzeneMessageClient`; sends via a caller-supplied
   `EventGridPublisherClient` (CloudEvents path). Both constructors fall back to
   `NullLogger<EventGridBenzeneMessageClient>.Instance` when `logger` is null (#192/#266, the P8 sweep

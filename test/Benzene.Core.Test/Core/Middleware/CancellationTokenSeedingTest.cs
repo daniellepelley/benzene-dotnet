@@ -266,4 +266,103 @@ public class CancellationTokenSeedingTest
         Assert.Equal(3, pipeline.Observed.Count);
         Assert.All(pipeline.Observed, token => Assert.Equal(cts.Token, token));
     }
+
+    // --- #225: MiddlewareRouter forwards the ambient token into its nested dispatch -----------------
+
+    /// <summary>
+    /// A router that mirrors <c>BenzeneMessageEventHubHandler</c>/<c>BenzeneMessageQueueStorageHandler</c>'s
+    /// shape: it overrides the new cancellation-aware 4-arg <c>HandleFunction</c> overload and forwards
+    /// the token into a nested <see cref="MiddlewareApplication{TEvent,TContext}"/> dispatch via its own
+    /// 3-arg <c>HandleAsync</c> overload.
+    /// </summary>
+    private sealed class NestedDispatchRouter : MiddlewareRouter<string, string>
+    {
+        private readonly MiddlewareApplication<string, string> _nestedApplication;
+
+        public NestedDispatchRouter(IServiceResolver serviceResolver, MiddlewareApplication<string, string> nestedApplication)
+            : base(serviceResolver)
+        {
+            _nestedApplication = nestedApplication;
+        }
+
+        protected override bool CanHandle(string request) => true;
+
+        protected override string TryExtractRequest(string context) => context;
+
+        protected override Task HandleFunction(string request, string context, IServiceResolverFactory serviceResolverFactory)
+            => HandleFunction(request, context, serviceResolverFactory, CancellationToken.None);
+
+        protected override Task HandleFunction(string request, string context, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
+            => _nestedApplication.HandleAsync(request, serviceResolverFactory, cancellationToken);
+    }
+
+    /// <summary>
+    /// A router written before the #225 seam existed - it only ever overrides the required abstract
+    /// 3-arg <c>HandleFunction</c>. Proves the new virtual 4-arg overload's default implementation
+    /// (delegating to the 3-arg one, ignoring the token) keeps such a subclass compiling and behaving
+    /// unchanged even when the outer scope has a real ambient token seeded.
+    /// </summary>
+    private sealed class LegacyRouter : MiddlewareRouter<string, string>
+    {
+        public int Calls { get; private set; }
+
+        public LegacyRouter(IServiceResolver serviceResolver) : base(serviceResolver) { }
+
+        protected override bool CanHandle(string request) => true;
+
+        protected override string TryExtractRequest(string context) => context;
+
+        protected override Task HandleFunction(string request, string context, IServiceResolverFactory serviceResolverFactory)
+        {
+            Calls++;
+            return Task.CompletedTask;
+        }
+    }
+
+    [Fact]
+    public async Task MiddlewareRouter_HandleAsync_ForwardsTheAmbientTokenIntoNestedDispatch()
+    {
+        using var cts = new CancellationTokenSource();
+        var innerPipeline = new CapturingPipeline<string>();
+        var nestedApplication = new MiddlewareApplication<string, string>(innerPipeline, e => e);
+
+        var outerResolver = CreateFactory().CreateScope();
+        outerResolver.SeedCancellationToken(cts.Token);
+
+        var router = new NestedDispatchRouter(outerResolver, nestedApplication);
+
+        await router.HandleAsync("event", () => Task.CompletedTask);
+
+        Assert.Equal(cts.Token, innerPipeline.Observed);
+        Assert.True(innerPipeline.Observed.CanBeCanceled);
+    }
+
+    [Fact]
+    public async Task MiddlewareRouter_HandleAsync_WithoutAmbientToken_NestedDispatchObservesNone()
+    {
+        var innerPipeline = new CapturingPipeline<string>();
+        var nestedApplication = new MiddlewareApplication<string, string>(innerPipeline, e => e);
+
+        var outerResolver = CreateFactory().CreateScope();
+
+        var router = new NestedDispatchRouter(outerResolver, nestedApplication);
+
+        await router.HandleAsync("event", () => Task.CompletedTask);
+
+        Assert.Equal(CancellationToken.None, innerPipeline.Observed);
+    }
+
+    [Fact]
+    public async Task MiddlewareRouter_HandleAsync_LegacySubclass_DimDefault_DelegatesToTheThreeArgOverload_AndCompiles()
+    {
+        using var cts = new CancellationTokenSource();
+        var outerResolver = CreateFactory().CreateScope();
+        outerResolver.SeedCancellationToken(cts.Token);
+
+        var router = new LegacyRouter(outerResolver);
+
+        await router.HandleAsync("event", () => Task.CompletedTask);
+
+        Assert.Equal(1, router.Calls);
+    }
 }

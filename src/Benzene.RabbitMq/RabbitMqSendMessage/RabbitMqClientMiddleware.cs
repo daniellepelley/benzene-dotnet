@@ -1,3 +1,4 @@
+using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Middleware;
 using RabbitMQ.Client;
 
@@ -15,6 +16,7 @@ public class RabbitMqClientMiddleware : IMiddleware<RabbitMqSendMessageContext>,
     private readonly bool _persistent;
     private readonly TimeSpan? _publishConfirmTimeout;
     private readonly RabbitMqMandatoryPublishCoordinator? _coordinator;
+    private readonly ICancellationTokenAccessor? _cancellation;
 
     /// <summary>Initializes a new instance of the <see cref="RabbitMqClientMiddleware"/> class.</summary>
     /// <param name="channel">The RabbitMQ channel to publish on.</param>
@@ -40,17 +42,24 @@ public class RabbitMqClientMiddleware : IMiddleware<RabbitMqSendMessageContext>,
     /// (task board #45). Defaults to <see cref="RabbitMqMandatoryPublishCoordinator.DefaultPublishConfirmTimeout"/>
     /// (30 seconds) when not given.
     /// </param>
+    /// <param name="cancellation">
+    /// Supplies the ambient cancellation token for a <paramref name="mandatory"/> publish's wait on the
+    /// broker's confirmation; null observes no cancellation (mirrors <c>HttpBenzeneMessageClient</c>'s
+    /// constructor-optional accessor idiom). Not consulted on the non-mandatory (fire-and-forget) path,
+    /// which has nothing to wait on.
+    /// </param>
     /// <exception cref="InvalidOperationException">
     /// <paramref name="mandatory"/> is <c>true</c> and <paramref name="channel"/> does not have publisher
     /// confirmations enabled.
     /// </exception>
     public RabbitMqClientMiddleware(IChannel channel, bool mandatory = false, bool persistent = true,
-        TimeSpan? publishConfirmTimeout = null)
+        TimeSpan? publishConfirmTimeout = null, ICancellationTokenAccessor? cancellation = null)
     {
         _channel = channel;
         _mandatory = mandatory;
         _persistent = persistent;
         _publishConfirmTimeout = publishConfirmTimeout;
+        _cancellation = cancellation;
 
         // Fail fast here too (not only in Extensions.UseRabbitMqClient) so a caller constructing this
         // middleware directly - bypassing the extension method - gets the same guarantee. Memoized per
@@ -80,9 +89,10 @@ public class RabbitMqClientMiddleware : IMiddleware<RabbitMqSendMessageContext>,
             // MessageId (e.g. one carrying business meaning) is preserved.
             properties.MessageId ??= Guid.NewGuid().ToString();
 
+            var cancellationToken = _cancellation?.CancellationToken ?? CancellationToken.None;
             context.Published = await _coordinator!
                 .PublishMandatoryAsync(context.Exchange, context.RoutingKey, properties, context.Body,
-                    CancellationToken.None, _publishConfirmTimeout)
+                    cancellationToken, _publishConfirmTimeout)
                 .ConfigureAwait(false);
             return;
         }

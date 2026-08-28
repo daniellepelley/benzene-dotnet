@@ -52,14 +52,30 @@ public class BenzeneMessageQueueStorageHandler : MiddlewareRouter<BenzeneMessage
     /// Handles the message by running it through the direct-message application and surfacing the inner
     /// handler's result onto the outer <see cref="QueueStorageContext.MessageResult"/>, so
     /// <see cref="QueueStorageOptions.RaiseOnFailureStatus"/> escalation sees a failure that occurred
-    /// inside the (response-suppressed) envelope pipeline.
+    /// inside the (response-suppressed) envelope pipeline. Delegates to the cancellation-aware overload
+    /// below with <see cref="CancellationToken.None"/>, kept for direct callers of the abstract 3-arg
+    /// member.
     /// </summary>
     /// <param name="request">The deserialized Benzene message request.</param>
     /// <param name="context">The Queue Storage context for this invocation.</param>
     /// <param name="serviceResolverFactory">The service resolver factory for the current invocation.</param>
-    protected override async Task HandleFunction(BenzeneMessageRequest request, QueueStorageContext context, IServiceResolverFactory serviceResolverFactory)
+    protected override Task HandleFunction(BenzeneMessageRequest request, QueueStorageContext context, IServiceResolverFactory serviceResolverFactory)
+        => HandleFunction(request, context, serviceResolverFactory, CancellationToken.None);
+
+    /// <summary>
+    /// Handles the message, additionally forwarding the outer scope's ambient cancellation token (#225)
+    /// into the inner envelope pipeline's own DI scope via
+    /// <see cref="BenzeneMessageResultApplication"/>'s 3-arg <c>HandleAsync</c> overload, so a component
+    /// resolved inside the (previously always-<see cref="CancellationToken.None"/>) nested dispatch
+    /// observes the real host cancellation signal.
+    /// </summary>
+    /// <param name="request">The deserialized Benzene message request.</param>
+    /// <param name="context">The Queue Storage context for this invocation.</param>
+    /// <param name="serviceResolverFactory">The service resolver factory for the current invocation.</param>
+    /// <param name="cancellationToken">The outer scope's ambient cancellation token.</param>
+    protected override async Task HandleFunction(BenzeneMessageRequest request, QueueStorageContext context, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
     {
-        context.MessageResult = await _directMessageApplication.HandleAsync(request, serviceResolverFactory);
+        context.MessageResult = await _directMessageApplication.HandleAsync(request, serviceResolverFactory, cancellationToken);
     }
 
     /// <summary>

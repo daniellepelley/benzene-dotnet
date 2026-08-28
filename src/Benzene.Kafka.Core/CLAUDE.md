@@ -175,6 +175,29 @@ producer support. This is one of the "self-hosted worker" startup modes document
   every call (rather than a fresh `JsonSerializer()`/`JsonSerializerOptions` per send) so
   System.Text.Json's per-`JsonSerializerOptions` converter/metadata cache isn't defeated on every
   outbound message.
+- **`KafkaClientMiddleware` resolves the ambient `ICancellationTokenAccessor` (#237, fixed 2026-08)** -
+  a constructor-optional parameter, the `HttpBenzeneMessageClient` idiom, wired through both
+  `UseKafkaClient` overloads (the DI-resolved one picks it up via constructor injection since it's
+  registered by `Benzene.Core.MessageHandlers`; the given-producer overload resolves it explicitly from
+  the pipeline's service resolver). Its token is passed into `IProducer.ProduceAsync`'s
+  `cancellationToken` parameter - previously always omitted (defaulting to `CancellationToken.None`),
+  inconsistent with this same package's dead-letter producer (`BenzeneKafkaWorker.cs`'s
+  `ProduceToDeadLetterAsync`), which already passed a real token. Bounded only by
+  `delivery.timeout.ms` (Confluent.Kafka default 5 minutes) before the fix - a stuck broker silently
+  blocked up to 5 minutes with no way to observe pipeline cancellation. Covered by
+  `test/Benzene.Core.Test/Kafka/KafkaClientMiddlewareCancellationTest.cs` (asserts the *actual* token
+  reaches `ProduceAsync`, not `It.IsAny<CancellationToken>()` - the pre-existing mapper test in
+  `KafkaCoreMappersTest.cs` only ever asserted the call's shape).
+- **`BenzeneKafkaWorker.StopAsync` threads its own `cancellationToken` into the wait for the consume
+  loop (#238, fixed 2026-08)** - `await _runTask.WaitAsync(cancellationToken)` instead of a bare
+  `await _runTask`, mirroring `RabbitMqWorker.StopAsync`'s already-token-threaded shutdown. Before this,
+  the method's own `cancellationToken` parameter (the host's stop-timeout token) was ignored entirely,
+  so a hung `DrainAsync`/`IConsumer.Close()` had no way to be aborted from the caller's side - the host
+  would block on `StopAsync` for as long as the hang lasted. The loop's own background task still runs
+  its `finally` cleanup to completion regardless (best-effort, unobserved) if the wait is abandoned.
+  Covered by `test/Benzene.Core.Test/Kafka/BenzeneKafkaWorkerStopAsyncCancellationTest.cs` (a fake
+  `IConsumer.Close()` hangs; an already-cancelled `StopAsync` token unblocks the caller instead of
+  hanging alongside it).
 - Getters/converters (`KafkaMessage/*Getter*`, `Kafka/*Getter*`, `KafkaMessageContextConverter`,
   `KafkaClientMiddleware`) operate on already-constructed Confluent.Kafka objects and need no live
   broker - now unit-tested directly in `test/Benzene.Core.Test/Kafka/KafkaCoreMappersTest.cs`
