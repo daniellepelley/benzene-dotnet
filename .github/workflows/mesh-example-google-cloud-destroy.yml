@@ -36,7 +36,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 env:
   NAME_PREFIX: benzene-gcpmesh
