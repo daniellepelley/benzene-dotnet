@@ -16,8 +16,6 @@ host example (Asp, Aws, Azure, Google, Grpc, Kafka). A host example is then most
 that wires this shared domain onto one transport. When adding a demo capability, prefer putting the
 handler/logic in `Benzene.Examples.App` and wiring it from the hosts, rather than duplicating it.
 
-`App/Benzene.Examples.App.Data` is a small companion data project.
-
 ## Layout (one folder per host/transport)
 - **`App/`** — shared handlers/validators/services (above); the reused core.
 - **`Asp/`** — ASP.NET Core host. Two projects:
@@ -108,11 +106,27 @@ handler/logic in `Benzene.Examples.App` and wiring it from the hosts, rather tha
   tagged Function Apps are found identically to Web Apps. Own `.sln`, `README.md`, and Terraform `deploy/`
   (zip-deployed Function Apps + Service Bus/Event Hub/Event Grid, no container registry; Event Grid
   subscriptions wired in a second apply after publish). Does **not** use the shared `App` domain.
+- **`GoogleCloudMesh/`** — the Google Cloud counterpart of `AwsMesh`/`AzureFunctionsMesh`: **four**
+  domain services (`orders`/`payments`/`shipping`/`notifications`) deployed as **Cloud Functions
+  Gen2**, wired with **Pub/Sub**. A Gen2 function has exactly one trigger, so each service is deployed
+  as two functions sharing one `Startup` (`Shared/MeshServiceWiring`) — an HTTP function serving the
+  Cloud Service Profile the mesh polls, and a Pub/Sub function consuming events — each a no-op on the
+  host it doesn't apply to. Inter-service messaging uses one Pub/Sub "inbox" topic per consumer (the
+  Cloud-Functions-friendly analogue of AwsMesh's one-SQS-queue-per-service). Discovery is static
+  (`Mesh/MeshRegistry.FromEnvironment` reads per-service `MESH_*_URL` vars — Google Cloud has no mesh
+  discovery provider yet); the mesh function persists the catalog to **GCS**
+  (`Benzene.Mesh.GoogleCloud.Storage`) and serves the Mesh UI, with aggregation driven by `POST
+  /mesh/refresh` (Cloud Scheduler hits it periodically, since Cloud Functions has no timer trigger).
+  Has its own `.sln` (`Benzene.Examples.GoogleCloudMesh.sln` — build it directly; it is not a member of
+  the root `Benzene.Examples.sln`), `README.md`, and Terraform `deploy/` + a `gcloud functions deploy`
+  workflow. Does **not** use the shared `App` domain.
 
 ## How these build (important)
 - Examples build via **`Benzene.Examples.sln`** at the repo root — **not** the main `Benzene.sln`.
   Several folders also have their own solution (`Benzene.Example.Asp.sln`, `Benzene.Examples.Aws.sln`,
-  `Benzene.Example.Azure.sln`, `Benzene.Example.Grpc.sln`, `Benzene.Example.Kafka.sln`).
+  `Benzene.Example.Azure.sln`, `Benzene.Example.Grpc.sln`, `Benzene.Example.Kafka.sln`,
+  `Benzene.Examples.GoogleCloudMesh.sln` — the latter is not a member of `Benzene.Examples.sln` at all,
+  so it must be built directly).
 - **The examples are NOT part of the primary CI gate.** `build-benzene.yml` builds `Benzene.sln` and the
   library tests only. The examples are exercised by the deploy workflows
   (`.github/workflows/deploy-asp-example.yml`, `deploy-aws-example.yml`) and otherwise by building

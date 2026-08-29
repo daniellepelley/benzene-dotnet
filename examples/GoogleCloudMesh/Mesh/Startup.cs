@@ -45,7 +45,7 @@ public class Startup : BenzeneStartUp
         services.AddSingleton(provider => new MeshAggregationPass(
             provider.GetRequiredService<IMeshArtifactStore>(),
             provider.GetRequiredService<MeshAggregator>(),
-            _ => Task.FromResult(MeshServiceRegistry.FromEnvironment())));
+            _ => Task.FromResult(MeshRegistry.FromEnvironment())));
     }
 
     public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration)
