@@ -381,4 +381,58 @@ public class MeshCollectorStoreTest
         Assert.Equal("corr-1", okPayload.CorrelationId);
         Assert.Single(okPayload.Traces);
     }
+
+    // ---- #234: no missing feed ever fails ingestion (spec §6), for whole wire-supplied lists ----
+    //
+    // A wire payload can deserialize an explicit-null list into an actual null (nullable-reference
+    // annotations aren't enforced at runtime) - matching how Go's encoding/json marshals a nil slice.
+    // Before the fix, Register/AddEvents/AddIssues all threw NullReferenceException on this; the spec's
+    // collector contract requires it be accepted as empty instead.
+
+    [Fact]
+    public void Register_NullTopicsAndProduces_IsAcceptedAsAnEmptyDeclaredGraph()
+    {
+        var descriptor = System.Text.Json.JsonSerializer.Deserialize<MeshServiceDescriptor>(
+            "{\"service\":\"svc\",\"topics\":null,\"produces\":null}", MeshJson.Options)!;
+        var store = new MeshCollectorStore();
+
+        store.Register(descriptor);
+
+        var view = store.Service("svc");
+        Assert.NotNull(view);
+        Assert.Equal(0, view!.Topics); // Descriptor.Topics.Count read back with no NRE
+        Assert.NotNull(view.Descriptor);
+        Assert.Empty(view.Descriptor!.Topics);
+        Assert.Empty(view.Descriptor.Produces);
+    }
+
+    [Fact]
+    public void AddEvents_NullEventsList_IsAcceptedAsANoOpBatch()
+    {
+        var batch = System.Text.Json.JsonSerializer.Deserialize<MeshTraceBatch>(
+            "{\"events\":null}", MeshJson.Options)!;
+        var store = new MeshCollectorStore();
+
+        var accepted = store.AddEvents(batch.Events);
+
+        Assert.Equal(0, accepted);
+    }
+
+    [Fact]
+    public void AddIssues_NullIssuesList_IsAcceptedAsALivenessOnlyBatch_AndMarksTheFeedWired()
+    {
+        var store = new MeshCollectorStore();
+        // A service with failing traffic and no issues batch yet would report "issues" as a missing
+        // feed (ServiceSummaryLocked) - the null-tolerant liveness batch below must still clear that.
+        store.AddEvents(new[] { Event("trace-1", "span-1", "svc", "topic", DateTimeOffset.UtcNow, status: "unexpected-error") });
+
+        var batch = System.Text.Json.JsonSerializer.Deserialize<MeshIssueBatch>(
+            "{\"service\":\"svc\",\"issues\":null}", MeshJson.Options)!;
+        var accepted = store.AddIssues(batch);
+
+        Assert.Equal(0, accepted);
+        var fleet = store.Fleet();
+        var summary = Assert.Single(fleet.Services, s => s.Service == "svc");
+        Assert.DoesNotContain("issues", summary.MissingFeeds);
+    }
 }
