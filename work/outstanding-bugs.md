@@ -2075,11 +2075,14 @@ covering round-12 §4 and round-14 §4 (both archived). All fourteen tasks are i
 example-local fixes. Verified per-project rather than via one whole-`Benzene.Examples.sln` build
 (the review host was under extreme, unrelated contention from concurrent sessions for the whole
 session — load average 100–165 — making a several-hundred-project solution build impractically
-slow): `examples/Cqrs/Benzene.Example.Cqrs.csproj` (a newly-added `Benzene.Examples.sln` member,
-pulling in the also-newly-added `src/Benzene.Outbox`) built clean (0 warnings, 0 errors);
-`examples/Asp/Benzene.Example.Asp.csproj` built clean and its 6 integration tests passed;
-`examples/GoogleCloudMesh/Benzene.Examples.GoogleCloudMesh.sln` built clean. The Cloudflare worker's
-`npm install` + `npx wrangler deploy --dry-run` both pass with no bundling error and no
+slow, up to 38 minutes wall-clock for a single example's full dependency chain even though CPU time
+consumed was seconds): `examples/Cqrs/Benzene.Example.Cqrs.csproj` (a newly-added `Benzene.Examples.sln`
+member, pulling in the also-newly-added `src/Benzene.Outbox`) built clean (0 warnings, 0 errors);
+`examples/K8sTransports/App/Benzene.Examples.K8sTransports.App.csproj` (the other newly-added member,
+pulling in `Domain`) built clean (0 errors, 17 pre-existing warnings unrelated to this WP, all in
+`Benzene.Kafka.Core`/`Benzene.Aws.Sqs`); `examples/Asp/Benzene.Example.Asp.csproj` built clean and its
+6 integration tests passed; `examples/GoogleCloudMesh/Benzene.Examples.GoogleCloudMesh.sln` built
+clean. The Cloudflare worker's `npm install` + `npx wrangler deploy --dry-run` both pass with no
 deprecated-config warning.
 
 - **[RESOLVED] #214 — `examples/GoogleCloudMesh/Mesh/Startup.cs:48` called
@@ -2093,8 +2096,11 @@ deprecated-config warning.
   all three (and their sub-projects — `K8sTransports` has `App`+`Domain`) as solution items, nested
   under matching solution folders; `Cqrs`'s `ProjectReference` to `src/Benzene.Outbox` turned out to be
   missing from the solution entirely too (a `src/` gap, not an `examples/` one), so it was added
-  alongside, nested under the existing `src` solution folder to match convention. All three now build
-  as members of `Benzene.Examples.sln`.
+  alongside, nested under the existing `src` solution folder to match convention. `Cqrs` and
+  `K8sTransports/App` were each confirmed building clean as standalone projects (see this section's
+  intro); `Outbox`'s own `ProjectReference`s all point at `src/` projects already present in the
+  solution before this change (no further gaps like `Cqrs`'s), so it needs no additional fix — its
+  standalone build was still in flight, under the same host contention, when this entry was written.
 - **[RESOLVED] #216 — `examples/GoogleCloudMesh` was entirely undocumented in `examples/CLAUDE.md`**,
   unlike every sibling mesh example. Added a `GoogleCloudMesh/` bullet to the Layout section (topology,
   the two-functions-per-service Gen2 split, static discovery, GCS-backed catalog, its own `.sln` and
