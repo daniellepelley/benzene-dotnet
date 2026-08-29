@@ -16,6 +16,13 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<!-- Lets RateLimitingPipelineTest resolve the internal InternallyOwnedRateLimiterHolder<TContext>
+		     (#200) directly, the same way the container itself does, rather than only observing its
+		     effects indirectly. -->
+		<InternalsVisibleTo Include="Benzene.Test" />
+	</ItemGroup>
+
+	<ItemGroup>
 	  <ProjectReference Include="..\Benzene.Abstractions.Pipelines\Benzene.Abstractions.Pipelines.csproj" />
 	  <ProjectReference Include="..\Benzene.Core.MessageHandlers\Benzene.Core.MessageHandlers.csproj" />
 	  <ProjectReference Include="..\Benzene.Core.Middleware\Benzene.Core.Middleware.csproj" />

@@ -29,22 +29,34 @@ public abstract class CacheEntry<T> : CacheWriteActions<T>, ICacheEntry<T>
     /// <summary>
     /// Reads the entry, returning whether the key was <em>present</em> (a real cache hit) separately
     /// from the deserialized value. The presence flag is what <see cref="GetEntryValueAsync"/> already
-    /// knows (a non-empty stored string), and it's the only reliable hit signal for an unconstrained
-    /// generic <typeparamref name="T"/>: for a value type, a genuine miss returns <c>default(T)</c>,
-    /// and <c>default(T) != null</c> (via boxing) is always <c>true</c> - so deciding hit/miss from
-    /// <c>value != null</c> mistakes every value-type miss for a hit of the default value. The same
-    /// presence flag also makes an intentionally-cached <c>null</c> a real hit for a reference-type
-    /// <typeparamref name="T"/> (see <see cref="LazyLoadAsync{TResult}"/>): the JSON serialization of
-    /// <c>null</c> is the 4-character string <c>"null"</c>, never an empty stored value, so presence
-    /// and "the stored value deserializes to null" are never confused with each other.
+    /// knows - a store miss is <c>null</c> - and it's the only reliable hit signal for an
+    /// unconstrained generic <typeparamref name="T"/>: for a value type, a genuine miss returns
+    /// <c>default(T)</c>, and <c>default(T) != null</c> (via boxing) is always <c>true</c> - so
+    /// deciding hit/miss from <c>value != null</c> mistakes every value-type miss for a hit of the
+    /// default value. The same presence flag also makes an intentionally-cached <c>null</c> a real
+    /// hit for a reference-type <typeparamref name="T"/> (see <see cref="LazyLoadAsync{TResult}"/>).
     /// </summary>
+    /// <remarks>
+    /// Presence is decided by <c>cacheValue != null</c>, not <c>!string.IsNullOrEmpty(cacheValue)</c>
+    /// (#201): the former conflated "key absent" with "the serializer emitted an empty string" for
+    /// any <see cref="ISerializer"/> that encodes a null/default value as <c>""</c> rather than the
+    /// stock <c>System.Text.Json</c> serializer's 4-character <c>"null"</c> - silently reintroducing
+    /// the cache-penetration hazard #140 was fixed to close, for that class of serializer. This
+    /// requires every <see cref="GetEntryValueAsync"/> implementation to genuinely distinguish a
+    /// store-level miss (returns <c>null</c>) from an empty stored value (returns <c>""</c>) -
+    /// including on its own error path, where "could not determine presence" must also be
+    /// <c>null</c>, never <c>""</c> (which this fix would otherwise misreport as a hit of an empty
+    /// value). <see cref="Benzene.Cache.Redis.RedisCacheService"/>'s implementation does this: Redis
+    /// itself returns a null bulk reply for a missing key, and its error-handling path returns
+    /// <c>null</c> too.
+    /// </remarks>
     private async Task<(bool Found, T? Value)> TryReadEntryAsync(CancellationToken cancellationToken)
     {
         try
         {
             Logger.LogDebug("Trying to hit cache key {key}", KeyDescription);
             var cacheValue = await GetEntryValueAsync(cancellationToken);
-            if (!string.IsNullOrEmpty(cacheValue))
+            if (cacheValue != null)
             {
                 return (true, Serializer.Deserialize<T>(cacheValue));
             }

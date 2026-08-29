@@ -29,7 +29,12 @@ package documents that loudly (`docs/rate-limiting.md`); never present it as a h
   never grant (`ArgumentOutOfRangeException`, e.g. a payload bigger than the whole bucket) is a
   rejection with a distinguishing message, not a bare "Rate limit exceeded" (#142); an
   `ObjectDisposedException` from an already-disposed BYO limiter is likewise a rejection, not an
-  unhandled crash (#134 — fails CLOSED, documented as the deliberate choice). Carries an
+  unhandled crash (#134 — fails CLOSED, documented as the deliberate choice). The cost delegate and
+  `Acquire()` each get their **own** `ObjectDisposedException` catch (#202, splitting what #143's fix
+  had shared): one from the cost delegate is reported as a cost-delegate dependency failure (still
+  failing CLOSED), one from `Acquire()` keeps the "the rate limiter has already been disposed"
+  message — a delegate touching an unrelated disposed dependency used to be misreported as the
+  limiter itself being disposed. Carries an
   `ownsLimiter` flag: `true` only for the three internally-created convenience limiters below, whose
   disposal this middleware type is capable of (via `DisposeAsync`) — though in practice the DI
   registration in `Extensions.cs` is what actually disposes them (see below); `false` (the default)
@@ -71,16 +76,38 @@ package documents that loudly (`docs/rate-limiting.md`); never present it as a h
 constructed per message — see `MiddlewarePipeline<TContext>` — but the underlying `RateLimiter` is
 one shared instance), so a middleware-level `ownsLimiter` flag alone cannot be *the* fix: whichever
 per-message instance ran `Dispose` first would break every later message. The actual fix registers
-the limiter with the DI container via a **factory** registration
-(`x.AddSingleton<RateLimiter>(_ => rateLimiter)`, not a pre-built instance) — the same convention
-this codebase already relies on for other container-created disposables (`RabbitMqConnectionProvider`,
+the limiter with the DI container via a **factory** registration — the same convention this codebase
+already relies on for other container-created disposables (`RabbitMqConnectionProvider`,
 `MeshAnnouncer`): a compliant container disposes a singleton it constructed itself when the
 container is disposed, but never disposes an externally-supplied instance. `UseInternallyOwnedRateLimiting`
 (private, in `Extensions.cs`) also guards against two internal `UseX...` calls stacking on one
-pipeline (which would otherwise let the second silently shadow the first under the shared
-`RateLimiter` DI key) — it throws `InvalidOperationException` instead. Combine limits into one
-`RateLimiter` and call `UseRateLimiting`, or use `UsePartitionedRateLimiting`, if more than one
-layer is genuinely needed.
+pipeline (which would otherwise let the second silently shadow the first under the shared DI key) —
+it throws `InvalidOperationException` instead. Combine limits into one `RateLimiter` and call
+`UseRateLimiting`, or use `UsePartitionedRateLimiting`, if more than one layer is genuinely needed.
+
+### #200 — the per-pipeline guard/registration is keyed on TContext, not the shared container
+The factory registration above was originally `x.AddSingleton<RateLimiter>(_ => rateLimiter)` and
+the "only one per pipeline" guard checked `x.IsTypeRegistered<RateLimiter>()` — both keyed on the
+bare `RateLimiter` type in the shared `IBenzeneServiceContainer`. That broke
+`MiddlewarePipelineBuilder<T>.Create<TNewContext>()`'s documented multi-transport pattern (one
+container shared across a service's sibling pipelines — API Gateway/BenzeneMessage/SQS/SNS/
+EventBridge, each its own context type off one `IBenzeneApplicationBuilder`, see
+`examples/AwsMesh`): the second sibling's own internally-created limiter always collided with the
+first's registration and threw, even though the docs/exception text call the guard "per pipeline."
+Fixed by introducing `internal sealed class InternallyOwnedRateLimiterHolder<TContext> :
+IAsyncDisposable` (wraps the `RateLimiter`, forwards `DisposeAsync` to it) and keying both the
+registration (`x.AddSingleton<InternallyOwnedRateLimiterHolder<TContext>>(...)`) and the guard
+(`x.IsTypeRegistered<InternallyOwnedRateLimiterHolder<TContext>>()`) on that closed generic type.
+`TContext` is the identity this codebase already uses to distinguish sibling pipelines at
+registration time — `MiddlewarePipelineBuilder<TContext>.Build()`'s own `PipelineDescriptor` is keyed
+the same way. Two sibling pipelines (genuinely different `TContext`) now each get their own
+independent, container-owned limiter; two `UseX...` calls sharing one pipeline builder (so the same
+`TContext`) still collide on the same key and still fail fast. The holder's own `IAsyncDisposable` is
+what keeps #133's disposal fix working through this extra indirection — the container only disposes
+what it directly resolved (the holder), not a `RateLimiter` field buried inside it. `Extensions`
+exposes the holder type as `internal` with an `InternalsVisibleTo("Benzene.Test")` so the test suite
+can resolve it directly the same way the container does, rather than only observing disposal
+indirectly.
 
 ### #135 — payload-size limiting is a rate bound, not a memory bound
 On ASP.NET Core hosts, `UseBufferedRequestBody()` reads the whole request body into memory
@@ -121,6 +148,9 @@ is documented; do not present it as a memory bound.
 - `test/Benzene.Core.Test/Plugins/RateLimiting/RateLimitingPipelineTest.cs` - pass-through under
   the limit, 429 + message over it (+ `Retry-After` header), payload-size budget spend +
   oversized-payload rejection + Content-Length pre-check, BYO concurrency limiter lease release, BYO
-  cost function (+ negative-cost rejection, + throwing-delegate propagation), BYO limiter disposed
+  cost function (+ negative-cost rejection, + throwing-delegate propagation, + a cost delegate's own
+  `ObjectDisposedException` reported distinctly from the limiter's, #202), BYO limiter disposed
   before use fails closed, internally-created limiter disposed with the container, stacking two
-  internal limiters fails fast, partitioned limiter isolates one abusive partition from another.
+  internal limiters on one pipeline fails fast, sibling pipelines off one shared container each get
+  their own independent internally-owned limiter (#200), partitioned limiter isolates one abusive
+  partition from another.

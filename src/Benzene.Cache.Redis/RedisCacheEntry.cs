@@ -36,7 +36,11 @@ internal class RedisCacheEntry<T> : CacheEntry<T>
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "Error getting value from cache");
-            return "";
+            // #201: null, not "" - CacheEntry.TryReadEntryAsync now decides presence by
+            // `cacheValue != null`, so an error here (which is not a real cached value) must stay
+            // indistinguishable from a genuine store miss, never be misread as a hit of an empty
+            // stored value.
+            return null;
         }
     }
 

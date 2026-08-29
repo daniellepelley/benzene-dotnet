@@ -235,6 +235,33 @@ public class RateLimitingPipelineTest
     }
 
     [Fact]
+    public async Task BringYourOwnCost_CostDelegateThrowsObjectDisposedException_IsReportedAsACostDelegateFailure_NotAsTheLimiterDisposed()
+    {
+        // #202: #143's fix moved the cost delegate inside the same try as Acquire(), but its single
+        // ObjectDisposedException catch always reported "the rate limiter has already been disposed"
+        // - wrong when the exception actually came from an unrelated disposed dependency the cost
+        // delegate itself touches, with a perfectly healthy limiter underneath. The two cases must be
+        // distinguishable.
+        using var limiter = new FixedWindowRateLimiter(new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 100,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+            AutoReplenishment = true,
+        });
+        var (app, resolver) = CreateApp(p => p.UseRateLimiting(
+            limiter,
+            (Func<Benzene.Abstractions.DI.IServiceResolver, BenzeneMessageContext, int>)((_, _) =>
+                throw new ObjectDisposedException("SomeUnrelatedDependency"))));
+
+        var response = await app.HandleAsync(CreateRequest(), resolver);
+
+        Assert.Equal(BenzeneResultStatus.TooManyRequests, response.StatusCode);
+        Assert.Contains("cost delegate", response.Body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("the rate limiter has already been disposed", response.Body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task InternallyCreatedLimiter_IsDisposedWhenTheContainerIsDisposed()
     {
         // #133: UseFixedWindowRateLimiting/UseTokenBucketRateLimiting/UsePayloadSizeRateLimiting
@@ -261,12 +288,84 @@ public class RateLimitingPipelineTest
         RateLimiter limiter;
         using (var scope = resolverFactory.CreateScope())
         {
-            limiter = scope.GetService<RateLimiter>();
+            // #200: the container-owned registration is now keyed by
+            // InternallyOwnedRateLimiterHolder<TContext> (closed over the pipeline's own context
+            // type), not the bare RateLimiter type - see Extensions.cs's #200 remarks. Disposal still
+            // works the identical way: the holder forwards its own IAsyncDisposable to the limiter.
+            limiter = scope.GetService<Benzene.RateLimiting.Extensions.InternallyOwnedRateLimiterHolder<BenzeneMessageContext>>().RateLimiter;
         }
 
         resolverFactory.Dispose();
 
         Assert.Throws<ObjectDisposedException>(() => limiter.AttemptAcquire(1));
+    }
+
+    [Fact]
+    public async Task SiblingPipelines_OffOneSharedContainer_EachGetTheirOwnIndependentInternallyOwnedLimiter()
+    {
+        // #200: MiddlewarePipelineBuilder<T>.Create<TNewContext>() deliberately shares one container
+        // across a service's sibling pipelines - the documented multi-transport pattern (see e.g.
+        // examples/AwsMesh's MeshServiceWiring.Configure, which wires ApiGateway/BenzeneMessage/Sqs/
+        // Sns/EventBridge, each a genuinely different context type, off one shared
+        // IBenzeneApplicationBuilder). Round 11's #133 guard used to be keyed on the shared container
+        // itself, so the second sibling's own internally-created limiter tripped the "only one per
+        // pipeline" guard even though it is a completely different pipeline for a different transport.
+        var serviceCollection = ServiceResolverMother.CreateServiceCollection();
+        serviceCollection.UsingBenzene(x => x.AddBenzeneMessage());
+        var secondResultSetter = new RecordingResultSetter();
+        serviceCollection.AddSingleton<Benzene.Abstractions.MessageHandlers.Mappers.IMessageHandlerResultSetter<SecondPipelineContext>>(secondResultSetter);
+
+        var container = new MicrosoftBenzeneServiceContainer(serviceCollection);
+        var firstPipeline = new MiddlewarePipelineBuilder<BenzeneMessageContext>(container);
+        firstPipeline.UseFixedWindowRateLimiting(1, TimeSpan.FromMinutes(1));
+        firstPipeline.UseMessageHandlers();
+        var firstApp = new BenzeneMessageApplication(firstPipeline.Build());
+
+        // Building a sibling pipeline for a completely different transport context, off the SAME
+        // container, must NOT throw - before the fix this always threw InvalidOperationException.
+        var secondPipeline = firstPipeline.Create<SecondPipelineContext>();
+        secondPipeline.UseFixedWindowRateLimiting(1, TimeSpan.FromMinutes(1));
+        var secondBuiltPipeline = secondPipeline.Build();
+
+        var resolverFactory = new MicrosoftServiceResolverFactory(serviceCollection.BuildServiceProvider());
+
+        // The first (original) pipeline's own limiter still enforces its own limit of 1, unaffected
+        // by the sibling registration sharing the same container.
+        var firstOk = await firstApp.HandleAsync(CreateRequest(), resolverFactory);
+        var firstRejected = await firstApp.HandleAsync(CreateRequest(), resolverFactory);
+        Assert.Equal(BenzeneResultStatus.Ok, firstOk.StatusCode);
+        Assert.Equal(BenzeneResultStatus.TooManyRequests, firstRejected.StatusCode);
+
+        // The second (sibling) pipeline has its OWN limiter with its own independent budget of 1 -
+        // not shared with, shadowed by, or already exhausted by the first pipeline's two messages above.
+        using (var scope = resolverFactory.CreateScope())
+        {
+            await secondBuiltPipeline.HandleAsync(new SecondPipelineContext(), scope);
+        }
+        Assert.Equal(BenzeneResultStatus.Ok, secondResultSetter.LastResult!.BenzeneResult.Status);
+
+        using (var scope = resolverFactory.CreateScope())
+        {
+            await secondBuiltPipeline.HandleAsync(new SecondPipelineContext(), scope);
+        }
+        Assert.Equal(BenzeneResultStatus.TooManyRequests, secondResultSetter.LastResult!.BenzeneResult.Status);
+    }
+
+    /// <summary>A stand-in transport context for a sibling pipeline, distinct from <see cref="BenzeneMessageContext"/>.</summary>
+    private sealed class SecondPipelineContext
+    {
+    }
+
+    /// <summary>Minimal <see cref="IMessageHandlerResultSetter{TContext}"/> that just records the last result written to it.</summary>
+    private sealed class RecordingResultSetter : Benzene.Abstractions.MessageHandlers.Mappers.IMessageHandlerResultSetter<SecondPipelineContext>
+    {
+        public Benzene.Abstractions.MessageHandlers.IMessageHandlerResult? LastResult { get; private set; }
+
+        public Task SetResultAsync(SecondPipelineContext context, Benzene.Abstractions.MessageHandlers.IMessageHandlerResult messageHandlerResult)
+        {
+            LastResult = messageHandlerResult;
+            return Task.CompletedTask;
+        }
     }
 
     [Fact]

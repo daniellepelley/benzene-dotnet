@@ -15,15 +15,26 @@ distributed caching shared across instances.
   its container disposes it on shutdown; after it runs, any further `RedisSetup`/`StartConnection`/
   connect-driven call throws `ObjectDisposedException` rather than silently opening (and leaking) a
   new multiplexer. Factory methods build the concrete entry/action types below.
+  `CreatePrefixActions(prefix)` throws `ArgumentException` for a null/empty/whitespace `prefix`
+  (#198) before ever building the wildcard pattern - an empty prefix would otherwise silently become
+  the literal glob `"*"`, matching (and so invalidating) the entire keyspace.
 - `RedisCacheEntry<T>` (internal) - `CacheEntry<T>` over a single key. `Get`/`Set`/`Invalidate` map
-  to `StringGetAsync` / `StringSetAsync` (with TTL) / `KeyDeleteAsync`.
+  to `StringGetAsync` / `StringSetAsync` (with TTL) / `KeyDeleteAsync`. `GetEntryValueAsync` returns
+  `null` for both a genuine Redis miss (`StringGetAsync`'s `RedisValue.Null`) **and** its own
+  error-handling path (#201 - previously `""`, which `CacheEntry.TryReadEntryAsync`'s
+  `cacheValue != null` presence check would otherwise misread as a hit of a genuinely-empty cached
+  value rather than "the read failed").
 - `RedisMultiKeyActions<T>` (internal) - write/invalidate the same value across several keys.
   `SetEntryValueAsync` issues each key's `StringSetAsync` concurrently, with each key's outcome
   (success / `false` / a thrown exception) captured independently so one key's failure never stops the
   others from being attempted; `InvalidateEntryAsync` issues one atomic multi-key `KeyDeleteAsync(RedisKey[])`
   rather than a per-key loop.
 - `RedisWildcardActions` (internal) - invalidate by pattern via a `KEYS <pattern>` scan then batched
-  `KeyDeleteAsync`.
+  `KeyDeleteAsync`. `InvalidateEntryAsync` refuses to run (throws `InvalidOperationException`, no
+  `KEYS` scan issued) for a null/empty/whitespace pattern or one that's - after trimming - composed
+  entirely of `*` (Redis glob syntax treats `"*"`/`"**"`/`" * "` identically): defense-in-depth
+  against #198 for this type's own `CreateWildcardActions` escape hatch, which passes an unescaped,
+  caller-supplied pattern through by design and so isn't covered by `CreatePrefixActions`'s guard.
 - `IRedisConnectionFactory` / `RedisConnectionFactory` - the `ConnectionMultiplexer.ConnectAsync`
   seam (overridable for tests).
 

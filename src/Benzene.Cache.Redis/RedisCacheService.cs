@@ -108,6 +108,19 @@ public abstract class RedisCacheService : ICacheService, IAsyncDisposable
 
     protected ICacheInvalidateActions CreatePrefixActions(string prefix)
     {
+        // #198: an empty/whitespace prefix (a missing tenant id, an unset config value) would
+        // otherwise build the literal pattern "*" below - matching, and so invalidating, every key
+        // in the logical database. Fail fast and loud here (a startup/first-use error) rather than
+        // silently wiping the entire keyspace the first time this runs.
+        if (string.IsNullOrWhiteSpace(prefix))
+        {
+            throw new ArgumentException(
+                "The cache-key prefix must not be null, empty, or consist only of whitespace - an " +
+                "empty prefix would build the wildcard pattern \"*\", which matches (and so " +
+                "invalidates) every key in the cache (#198). Pass a real, non-empty prefix " +
+                "(e.g. a tenant id) instead.", nameof(prefix));
+        }
+
         // Escape glob metacharacters in the LITERAL prefix before appending the wildcard. Redis KEYS
         // treats * ? [ ] \ as glob syntax, so a prefix derived from data (tenant id, email, ...) that
         // contains one would otherwise match the wrong keys - under-invalidating (an unterminated "["

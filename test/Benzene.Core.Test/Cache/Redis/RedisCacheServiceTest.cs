@@ -356,6 +356,85 @@ public class RedisCacheServiceTest
         connectionFactory.DataBaseMock.Verify(x => x.ExecuteAsync("KEYS", @"TEST_\[a*"));
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void CreatePrefixActions_EmptyOrWhitespacePrefix_ThrowsRatherThanBuildingAUniversalPattern(string prefix)
+    {
+        // #198: an empty/whitespace prefix used to build the literal wildcard pattern "*", which
+        // matches (and so invalidates) every key in the cache. Fail fast instead.
+        var connectionFactory = new MockConnectionFactory();
+        var service = new TestRedisCacheService(NullLogger<RedisCacheService>.Instance, new DebugTimerFactory(), connectionFactory);
+
+        var ex = Assert.Throws<ArgumentException>(() => service.GetTestPrefixActions(prefix));
+        Assert.Contains("prefix", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CreatePrefixActions_RealPrefix_StillProducesTheEscapedPrefixStarPatternAndInvalidates()
+    {
+        // A genuine, non-empty prefix must still work exactly as before the #198 fix.
+        var connectionFactory = new MockConnectionFactory();
+        connectionFactory.DataBaseMock.Setup(x => x.ExecuteAsync("KEYS", It.IsAny<string>()))
+            .ReturnsAsync(RedisResult.Create(System.Array.Empty<RedisResult>()));
+        connectionFactory.DataBaseMock.Setup(x => x.KeyDeleteAsync(It.IsAny<RedisKey[]>(), CommandFlags.None)).ReturnsAsync(0);
+
+        var service = new TestRedisCacheService(NullLogger<RedisCacheService>.Instance, new DebugTimerFactory(), connectionFactory);
+        var actions = service.GetTestPrefixActions("TENANT_1_");
+
+        await actions.InvalidateAsync();
+
+        connectionFactory.DataBaseMock.Verify(x => x.ExecuteAsync("KEYS", "TENANT_1_*"));
+    }
+
+    [Fact]
+    public async Task WildcardActions_BarePattern_RefusesToRunRatherThanDeletingTheEntireKeyspace()
+    {
+        // #198 defense-in-depth: CreateWildcardActions is a lower-level escape hatch reachable
+        // directly (unlike CreatePrefixActions, whose own guard is tested above) - the last line of
+        // defense before a real Redis KEYS scan must also refuse a bare "*".
+        var connectionFactory = new MockConnectionFactory();
+        var service = new TestRedisCacheService(NullLogger<RedisCacheService>.Instance, new DebugTimerFactory(), connectionFactory);
+        var actions = service.GetTestWildcardActions("*");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => actions.InvalidateAsync());
+
+        // The dangerous KEYS scan must never have been issued.
+        connectionFactory.DataBaseMock.Verify(x => x.ExecuteAsync("KEYS", It.IsAny<string>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("**")]
+    [InlineData(" * ")]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task WildcardActions_OtherEffectivelyUniversalPatterns_AlsoRefuseToRun(string pattern)
+    {
+        var connectionFactory = new MockConnectionFactory();
+        var service = new TestRedisCacheService(NullLogger<RedisCacheService>.Instance, new DebugTimerFactory(), connectionFactory);
+        var actions = service.GetTestWildcardActions(pattern);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => actions.InvalidateAsync());
+        connectionFactory.DataBaseMock.Verify(x => x.ExecuteAsync("KEYS", It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task WildcardActions_NonUniversalPattern_StillRunsNormally()
+    {
+        // The guard must not be so broad it rejects legitimate, non-universal patterns.
+        var connectionFactory = new MockConnectionFactory();
+        connectionFactory.DataBaseMock.Setup(x => x.ExecuteAsync("KEYS", It.IsAny<string>()))
+            .ReturnsAsync(RedisResult.Create(System.Array.Empty<RedisResult>()));
+
+        var service = new TestRedisCacheService(NullLogger<RedisCacheService>.Instance, new DebugTimerFactory(), connectionFactory);
+        var actions = service.GetTestWildcardActions("TEST_*");
+
+        var result = await actions.InvalidateAsync();
+
+        Assert.False(result);
+        connectionFactory.DataBaseMock.Verify(x => x.ExecuteAsync("KEYS", "TEST_*"), Times.Once);
+    }
+
     [Fact]
     public async Task DisposeAsync_AfterConnecting_DisposesTheMultiplexer()
     {

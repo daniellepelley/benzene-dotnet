@@ -45,4 +45,9 @@ internal class TestRedisCacheService : RedisCacheService
     {
         return CreateWildcardActions("TEST_*");
     }
+
+    public ICacheInvalidateActions GetTestWildcardActions(string pattern)
+    {
+        return CreateWildcardActions(pattern);
+    }
 }
