@@ -45,12 +45,19 @@ public class Startup
 
     public void ConfigureServices(IServiceCollection services)
     {
+        // Demo-only: no real Application Insights key is checked into this example. Put a real
+        // instrumentation key in config.json ("APPINSIGHTS_INSTRUMENTATIONKEY") or the
+        // APPINSIGHTS_INSTRUMENTATIONKEY environment variable to see telemetry flow; with the
+        // placeholder default below, ApplicationInsights sends nowhere and the console sink still
+        // works.
+        var appInsightsKey = Configuration["APPINSIGHTS_INSTRUMENTATIONKEY"] ?? string.Empty;
+
         Log.Logger = new LoggerConfiguration()
             .MinimumLevel.Debug()
             .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
             .Enrich.FromLogContext()
             .WriteTo.Console(new CustomJsonFormatter())
-            .WriteTo.ApplicationInsights(new TelemetryConfiguration("3f72a47f-1aba-4e7a-913e-b3aa3161e6c6"),
+            .WriteTo.ApplicationInsights(new TelemetryConfiguration(appInsightsKey),
                 TelemetryConverter.Traces)
             .CreateLogger();
 
@@ -108,18 +115,27 @@ public class Startup
         // via plain ASP.NET Core Map, is what actually isolates a protected route from a public one
         // in the same app. UseOAuth2Bearer validates the caller's bearer token against the demo
         // identity provider's JWKS (DemoAuthController), and RequireScope("orders:read") then
-        // requires that specific scope. Try it:
+        // requires that specific scope - this is Benzene's own auth, not ASP.NET Core's
+        // UseAuthorization/UseEndpoints above, so this branch has no UseRouting()/UseEndpoints() of
+        // its own (ASP0001: an extra UseRouting()/UseEndpoints() pair in a branch that never maps an
+        // endpoint confuses the analyzer into misjudging the real UseAuthorization/UseEndpoints pair
+        // above as out of order). Try it:
         //   curl http://localhost:5000/demo-token?scope=orders:read      # mint a token
         //   curl -H "Authorization: Bearer <token>" http://localhost:5000/protected/ping
+        //
+        // The demo issuer's base URL (and therefore JwksUri below) defaults to http://localhost:5000/
+        // - see DemoJwtIssuer.Issuer's doc comment for what breaks (an opaque 401 on every
+        // /protected/* request) if the app is run on a different port without also setting
+        // DEMO_AUTH_ISSUER to match.
+        var demoJwtIssuer = app.ApplicationServices.GetRequiredService<DemoJwtIssuer>();
         app.Map("/protected", protectedApp =>
         {
-            protectedApp.UseRouting();
             protectedApp.UseBenzene(benzene => benzene
                 .UseHttp(asp => asp
                     .UseOAuth2Bearer(new OAuth2BearerOptions
                     {
-                        JwksUri = $"{DemoJwtIssuer.Issuer}.well-known/jwks.json",
-                        ValidIssuers = new[] { DemoJwtIssuer.Issuer },
+                        JwksUri = demoJwtIssuer.JwksUri,
+                        ValidIssuers = new[] { demoJwtIssuer.Issuer },
                         ValidAudiences = new[] { DemoJwtIssuer.Audience },
                         ValidAlgorithms = new[] { "RS256" },
                         // The demo identity provider above is this same app, over plain HTTP - never
@@ -130,7 +146,6 @@ public class Startup
                     .UseMessageHandlers(typeof(ProtectedPingMessageHandler))
                 )
             );
-            protectedApp.UseEndpoints(endpoints => { });
         });
 
         // Cancellation demo (docs/message-handlers.md#cancellation): isolated the same way the
@@ -142,14 +157,12 @@ public class Startup
         // it: curl http://localhost:5000/slow/slow-operation
         app.Map("/slow", slowApp =>
         {
-            slowApp.UseRouting();
             slowApp.UseBenzene(benzene => benzene
                 .UseHttp(asp => asp
                     .UseTimeout(TimeSpan.FromSeconds(2))
                     .UseMessageHandlers(typeof(SlowOperationMessageHandler))
                 )
             );
-            slowApp.UseEndpoints(endpoints => { });
         });
 
         app.UseEndpoints(endpoints => { endpoints.MapControllers(); });

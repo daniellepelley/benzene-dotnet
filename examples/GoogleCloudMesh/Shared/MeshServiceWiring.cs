@@ -1,3 +1,5 @@
+#nullable enable
+
 using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Hosting;
 using Benzene.AspNet.Core;

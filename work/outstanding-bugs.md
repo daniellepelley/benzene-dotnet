@@ -2750,6 +2750,110 @@ gaps inside that vendored bundle.
   to avoid the omission reading as an oversight. Same disposition as #205/#206: needs a `benzene-ui`
   fix plus a re-vendor. Documented in `src/Benzene.Mesh.Ui/CLAUDE.md`. Out of scope for this repo's
   fix rounds.
+### Tracked findings rounds 12/14, WP-P — Examples sweep (task board #193–#196, #214–#223, done)
+Ruled in [`bug-fix-plan-rounds12-14-2026-08.md`](archive/bug-fix-plan-rounds12-14-2026-08.md) WP-P,
+covering round-12 §4 and round-14 §4 (both archived). All fourteen tasks are independent,
+example-local fixes. Verified per-project rather than via one whole-`Benzene.Examples.sln` build
+(the review host was under extreme, unrelated contention from concurrent sessions for the whole
+session — load average 100–165 — making a several-hundred-project solution build impractically
+slow): `examples/Cqrs/Benzene.Example.Cqrs.csproj` (a newly-added `Benzene.Examples.sln` member,
+pulling in the also-newly-added `src/Benzene.Outbox`) built clean (0 warnings, 0 errors);
+`examples/Asp/Benzene.Example.Asp.csproj` built clean and its 6 integration tests passed;
+`examples/GoogleCloudMesh/Benzene.Examples.GoogleCloudMesh.sln` built clean. The Cloudflare worker's
+`npm install` + `npx wrangler deploy --dry-run` both pass with no bundling error and no
+deprecated-config warning.
+
+- **[RESOLVED] #214 — `examples/GoogleCloudMesh/Mesh/Startup.cs:48` called
+  `MeshServiceRegistry.FromEnvironment()`, which doesn't exist** (a genuine build error,
+  contradicting the README's "the whole solution builds" claim). Fixed: corrected to
+  `MeshRegistry.FromEnvironment()` — the example's own static registry-builder class
+  (`Mesh/MeshRegistry.cs`). `dotnet build examples/GoogleCloudMesh/Benzene.Examples.GoogleCloudMesh.sln`
+  now succeeds (0 errors).
+- **[RESOLVED] #193 + #215 — `examples/Cqrs`, `examples/K8sTransports`, and `examples/Outbox` were not
+  members of `Benzene.Examples.sln`**, so the documented build gate silently skipped all three. Added
+  all three (and their sub-projects — `K8sTransports` has `App`+`Domain`) as solution items, nested
+  under matching solution folders; `Cqrs`'s `ProjectReference` to `src/Benzene.Outbox` turned out to be
+  missing from the solution entirely too (a `src/` gap, not an `examples/` one), so it was added
+  alongside, nested under the existing `src` solution folder to match convention. All three now build
+  as members of `Benzene.Examples.sln`.
+- **[RESOLVED] #216 — `examples/GoogleCloudMesh` was entirely undocumented in `examples/CLAUDE.md`**,
+  unlike every sibling mesh example. Added a `GoogleCloudMesh/` bullet to the Layout section (topology,
+  the two-functions-per-service Gen2 split, static discovery, GCS-backed catalog, its own `.sln` and
+  the fact that it is *not* a member of the root `Benzene.Examples.sln`), and noted the same in the
+  "How these build" per-folder-solution list.
+- **[RESOLVED] #194 — the Cloudflare worker's `@cloudflare/containers@^0.0.15` was the one npm-deprecated
+  version in the package's whole history** ("bundling is wrong, please use 0.0.16" per its own npm
+  deprecation notice), and `npx wrangler deploy --dry-run` failed local bundling with "Could not
+  resolve `@cloudflare/containers`" (the 0.0.15 tarball ships no `dist/`). Bumped to `^0.3.7` (current
+  latest at review time, no deprecation notice, same `Container`/`getContainer`/`defaultPort` API the
+  Worker and the docs' worked example already use). `npm install` now succeeds (0 vulnerabilities) and
+  `wrangler deploy --dry-run` gets past local bundling ("Total Upload: ...") with no
+  `@cloudflare/containers` resolution error; the dry-run then stops at "The Docker CLI is needed to
+  build the configured image ... but could not be launched" — an environment limitation (no Docker
+  daemon in this sandbox, same limitation round-14 already noted for the Kafka finding), not a defect
+  in the fix, since it's past the exact failure point (local bundling) the review asked to confirm.
+- **[RESOLVED] #195 — `worker/wrangler.toml`'s `[containers.configuration]` / `instance_type` block is
+  a deprecated config shape current wrangler flags**, and diverges from `docs/getting-started-cloudflare.md`'s
+  own worked example, which has no such block. Removed the block so the example matches its own
+  documented source of truth; `wrangler deploy --dry-run` no longer emits the deprecated-shape warning.
+- **[RESOLVED] #196 — `examples/K8sTransports/Domain/PlaceOrderMessageHandler.cs:23-25`'s doc comment
+  pointed readers at `App/HttpStartup.cs`/`App/WorkerStartup.cs` for "how one process hosts all
+  three"** — neither file exists (only `App/Startup.cs`, where that explanation actually lives).
+  Corrected the reference.
+- **[RESOLVED] #217 — `examples/Kafka/docker-compose.yaml` pinned `confluentinc/cp-kafka:latest` (and
+  `cp-zookeeper:latest`) in a ZooKeeper topology**, and `latest` currently tracks a Confluent Platform
+  line that dropped ZooKeeper support. Pinned both images to `7.4.4`, the exact tag the example's own
+  test-harness compose file (`Benzene.Examples.Kafka.Test/docker-compose.yaml`) already uses as its
+  last-ZK-compatible precedent.
+- **[RESOLVED] #218 + #222 — `examples/Asp/Benzene.Example.Asp/Startup.cs:52` hardcoded an Application
+  Insights instrumentation key in source, and `config.json` shipped a dummy DB connection string with a
+  plaintext placeholder password that nothing reads** (confirmed by grep across the whole repo before
+  removal — only `Program.cs`'s non-optional `AddJsonFile("config.json")` load references the file
+  itself; no code anywhere reads `DB_CONNECTION_STRING`). Fixed: the AI key is now read from
+  configuration (`APPINSIGHTS_INSTRUMENTATIONKEY`, defaulting to empty — telemetry simply sends nowhere
+  until a real key is configured), with a comment explaining where to put a real one; `config.json`'s
+  dummy connection string was deleted outright (left as `{}` so `Program.cs`'s non-optional
+  `AddJsonFile` call still finds a file).
+- **[RESOLVED] #219 — the demo JWT issuer's `Issuer`/`JwksUri` (`examples/Asp`) were hardcoded to
+  `http://localhost:5000/` with no hint on failure if the app runs on a different port** (verified: an
+  opaque 401 on every `/protected/*` request). `DemoJwtIssuer.Issuer` is now an instance property read
+  from configuration (`DEMO_AUTH_ISSUER`, defaulting to `http://localhost:5000/` to preserve current
+  behavior), with `JwksUri` derived from it; `Startup.cs` resolves the singleton instance via DI instead
+  of the old `static const`. Added a doc comment on `DemoJwtIssuer.Issuer` (and a pointer from
+  `Startup.cs`) spelling out the opaque-401 symptom and its cause.
+- **[RESOLVED] #220 — `examples/App/Benzene.Examples.App.Data` was an orphaned project** (stale
+  pre-split namespace `Benzene.Examples.Aws.Data`, EF Core/Npgsql 7.0.3, out of support since 2024).
+  Verified zero references repo-wide before deleting: every `using Benzene.Examples.App.Data;` in the
+  tree resolves to the *namespace* of the same name declared inside the live `Benzene.Examples.App`
+  project's own `Data/` folder — a same-named but unrelated namespace — and grepping for the orphaned
+  project's actual namespace (`Benzene.Examples.Aws.Data`) or its `.csproj` path found only the
+  project's own files and its `Benzene.Examples.sln` entry, no `ProjectReference` anywhere. Deleted the
+  project directory, removed its solution entry, and removed the stale mention from `examples/CLAUDE.md`.
+- **[RESOLVED] #221 — a CS8632 nullable-annotation warning in
+  `GoogleCloudMesh/Shared/MeshServiceWiring.cs`** (a `?` on a parameter type in a project with
+  `<Nullable>disable</Nullable>`, copied from the nullable-enabled `AzureFunctionsMesh` sibling whose
+  `MeshServiceWiring.cs` uses the identical `Action<...>? configureBenzene = null` shape correctly).
+  Added `#nullable enable` at the top of the file (scoped to this one file rather than flipping the
+  whole project) — the warning is gone and no new nullable warnings were introduced.
+- **[RESOLVED] #223 — `examples/Asp/Benzene.Example.Asp/Startup.cs` emitted ASP0001 ("The call to
+  UseAuthorization should appear between app.UseRouting() and app.UseEndpoints(..)")**, copied
+  verbatim into every adopter's project since this file is used as a template. Root cause: the
+  `app.Map("/protected", ...)`/`app.Map("/slow", ...)` branches each called their own `protectedApp`/
+  `slowApp`-scoped `UseRouting()` + an empty `UseEndpoints(endpoints => { })` — dead weight, since
+  neither branch ever maps an ASP.NET Core endpoint (both gate access and dispatch entirely through
+  Benzene's own `UseBenzene(...)`/`UseOAuth2Bearer`/`RequireScope`, mirroring the main pipeline's
+  `UseBenzene(...)` a few lines up, which has no such wrapper of its own) — but their mere presence
+  was enough to make the analyzer misjudge the real, correctly-ordered top-level
+  `UseRouting()`/`UseAuthorization()`/`UseEndpoints(MapControllers)` triplet as out of order (confirmed
+  empirically: relocating just the `UseAuthorization()` call, leaving the extra pairs in place, did
+  not clear the warning — it kept firing wherever `UseAuthorization()` was moved to, until the two dead
+  pairs were removed). Fixed by deleting both branches' redundant `UseRouting()`/`UseEndpoints()` calls
+  and leaving `UseAuthorization()` in its original, natural position right after the top-level
+  `UseRouting()`. No behavior change: `WeatherForecastController` (the only thing ever dispatched
+  through the real `UseEndpoints`) is unauthenticated either way, and the `/protected`/`/slow` branches
+  never touched ASP.NET Core's own authorization/endpoint-routing machinery to begin with. Verified:
+  the ASP0001 warning is gone from a clean rebuild of `Benzene.Example.Asp.csproj` (0 errors, only the
+  pre-existing, unrelated `NU1510` package-pruning warning remains).
 
 ## Open — maintainer decisions (the real remaining backlog)
 
