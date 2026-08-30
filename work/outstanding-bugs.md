@@ -2591,6 +2591,40 @@ on state-store failure + multi-failure surfacing (#208, #209)" and
   `RunAsync_ManyConcurrentRunsOnOneBuiltSaga_NeverCrossContaminate` (300 concurrent runs, 0
   cross-contaminated) - this WP's `RunOnceAsync` changes added only local/parameter state, no new
   shared mutable state.
+### Tracked findings rounds 12–14, WP-L — Autofac closed-generic routing (done)
+Ruled in [`bug-fix-plan-rounds12-14-2026-08.md`](bug-fix-plan-rounds12-14-2026-08.md) WP-L, from the
+round-14 finding in [`bug-fix-designs-round14-2026-08.md`](bug-fix-designs-round14-2026-08.md) §3. Read
+the round-9 #82–#85 `[RESOLVED]` entries above (WP-Q) before touching this file again — these are the
+same six methods those fixes touched, and their regression tests (32-way concurrent resolution,
+`TryAdd*` idempotency, `CreateServiceResolverFactory()` repeat-call safety) must stay green.
+
+- **[RESOLVED] #210 — `AutofacBenzeneServiceContainer` threw on a CLOSED generic `Type` where the
+  Microsoft DI adapter succeeds, because the generic-routing check in six methods
+  (`AddScoped(Type)`, `AddScoped(Type, Type)`, `AddTransient(Type)`, `AddTransient(Type, Type)`,
+  `AddSingleton(Type)`, `AddSingleton(Type, Type)`) tested `Type.IsGenericType` — true for both an open
+  generic definition (`typeof(Handler<>)`) and a closed generic (`typeof(Handler<Widget>)`) — instead of
+  `Type.IsGenericTypeDefinition`, true only for the open definition. A closed generic `Type` failed the
+  check into Autofac's `RegisterGeneric`, which requires an open generic type definition and throws
+  `ArgumentException: The type ... is not an open generic type definition` on a closed one — so a
+  discovered handler class that happened to be a closed generic (e.g. `Handler<SomeConcreteMessage>`
+  rather than an open `Handler<>`) worked under `MicrosoftBenzeneServiceContainer` (which has no generic
+  branching at all - it forwards every `Type` straight to `IServiceCollection`, which handles open and
+  closed generics uniformly) and threw under Autofac.** Fixed: all six checks now test
+  `IsGenericTypeDefinition`, routing a closed generic `Type` through the ordinary `RegisterType`/`As`
+  path exactly like the Microsoft adapter, while an open generic definition still takes
+  `RegisterGeneric`. New `AutofacClosedGenericRoutingTest` (alongside the existing
+  `AutofacDIParityTest`/`AutofacDITest`): a red run against the pre-fix `IsGenericType` check reproduced
+  the exact `ArgumentException` on all six methods (verified by reverting the fix locally and re-running
+  the new test file — 6 failed, 3 passed); post-fix all 9 tests pass, including a Microsoft-adapter
+  control test (`MicrosoftAdapter_AddScoped_ClosedGenericType_Succeeds`) resolving the identical closed
+  generic type side-by-side, and an open-generic regression test
+  (`AutofacAdapter_AddScoped_OpenGenericType_StillResolvesPerClosedRequest`) confirming the
+  generic-definition path is untouched. Full re-run of `test/Benzene.Core.Test` (1413 tests, including
+  every #82–#85 regression test and all pre-existing open-generic registrations exercised transitively
+  by `AddMessageHandlers`): 1411 passed, 0 failed, 2 skipped. No capability-matrix change: the matrix
+  carries no DI-container-adapter row describing generic-registration behavior, so there is no stale
+  capability statement to correct — parity with the Microsoft adapter is exactly what the adapter is
+  meant to provide and was never claimed otherwise.
 
 ## Open — maintainer decisions (the real remaining backlog)
 
