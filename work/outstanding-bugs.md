@@ -2861,6 +2861,46 @@ deprecated-config warning.
   the ASP0001 warning is gone from a clean rebuild of `Benzene.Example.Asp.csproj` (0 errors, only the
   pre-existing, unrelated `NU1510` package-pruning warning remains).
 
+## Round 15 + rounds 12–14: two integration bugs found only by the post-merge baseline (2026-08-30)
+
+Both of the above rounds' 16 work packages built and tested clean in isolated worktrees; the two
+issues below only existed at the intersection of two independently-correct work packages, and so
+were invisible until everything landed on `main` together. Caught by the first full, uncontended
+`dotnet build` + `dotnet test` run against fully-merged `main` — not by any individual work package's
+own (correct, at the time) verification. Recorded here as a reminder that a fix round isn't done at
+the last merge commit; it's done after a real centralized baseline run.
+
+- **[RESOLVED] `S3TestHelpersTest.AsS3_ReservedOrUnicodeCharactersInKey_RoundTripThroughTheRealProductionGetters`
+  (3 theory cases) failed post-merge.** Root cause: WP-N's test (`#191`) was written against a pipeline
+  with no terminal result-setting middleware, before WP-B's `#229` fix existed; `#229` changed
+  SNS/S3/EventBridge to escalate (throw) on an unset `MessageResult` instead of silently treating it as
+  accepted. Individually each change was correct; merged together, WP-N's test now hit WP-B's new
+  escalation path and failed. Fixed by adding `configure: options => options.RaiseOnFailureStatus =
+  false` to the test's `app.UseS3(...)` call, matching the sibling test immediately above it
+  (`AsS3_BuildsAnEventThatRoutesThroughTheS3Pipeline`), which already opts out of that escalation for
+  the same reason (the test is about key round-tripping, not message routing, so the inline middleware
+  deliberately never sets a `MessageResult`). `test/Benzene.Core.Test/Aws/S3/S3TestHelpersTest.cs`.
+- **[RESOLVED] `RateLimitingPipelineTest`'s two `#200`-era tests failed post-merge.**
+  `InternallyOwnedRateLimiterHolder<TContext>` (WP-J's new class backing `#200`'s per-pipeline-not-
+  per-container guard) implemented only `IAsyncDisposable`. The Microsoft DI adapter's synchronous
+  container disposal (`ServiceProviderEngineScope.Dispose()`) throws `InvalidOperationException` when
+  it needs to dispose a resolved singleton that implements only `IAsyncDisposable` — the same defect
+  class as the already-fixed `#85` (`AutofacServiceResolverFactory` missing `IAsyncDisposable`), but in
+  the opposite direction. Fixed by also implementing `IDisposable` on the holder, bridging to its
+  existing `DisposeAsync()` the same way `MeshAnnouncer.Dispose()` already does
+  (`DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(5))`, best-effort on `AggregateException`).
+  Separately, `SiblingPipelines_OffOneSharedContainer_EachGetTheirOwnIndependentInternallyOwnedLimiter`
+  (also new in WP-J) never added a terminal middleware to its second pipeline, so a successful
+  (non-rejected) rate-limit acquire never wrote a result via `IMessageHandlerResultSetter` — the
+  rate-limiting middleware itself only writes a result on rejection — leaving an NRE on the
+  success-path assertion; fixed by adding a terminal `.Use((resolver, context, next) => ...)` that
+  records `BenzeneResult.Ok()`. `src/Benzene.RateLimiting/Extensions.cs`,
+  `test/Benzene.Core.Test/Plugins/RateLimiting/RateLimitingPipelineTest.cs`.
+
+Full baseline re-verified after both fixes: `Benzene.Core.Test` 3296 passed / 2 skipped / 0 failed,
+`Benzene.Mesh.Test` 575 passed, `Benzene.Mesh.Host.Test` 150 passed, `Benzene.Examples.sln` build 0
+errors. Pushed to `main` (`28473b0`).
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.
