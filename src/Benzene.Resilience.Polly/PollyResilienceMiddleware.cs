@@ -101,6 +101,12 @@ public class PollyResilienceMiddleware<TContext> : IMiddleware<TContext>
             {
                 if (Interlocked.Increment(ref state.inFlight[0]) > 1)
                 {
+                    // Pair this increment with a decrement before throwing - otherwise the
+                    // rejected attempt's increment is never undone and the per-call counter is
+                    // left permanently above zero, wrongly poisoning every later, purely
+                    // sequential attempt in the same HandleAsync call (e.g. an outer Retry
+                    // retrying after this rejection) into tripping the same guard (#288).
+                    Interlocked.Decrement(ref state.inFlight[0]);
                     throw new NotSupportedException(
                         "A concurrent-attempt resilience strategy (e.g. a custom hedge) is not " +
                         "supported by PollyResilienceMiddleware<TContext>: attempts share the " +

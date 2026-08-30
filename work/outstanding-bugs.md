@@ -3360,6 +3360,71 @@ Verified: `dotnet test test/Benzene.Mesh.Test -c Release --filter "FullyQualifie
   rethrowing, so its observable fix is "the call actually completes near the deadline" rather than a
   propagated `TimeoutException` - documented inline on that test.
 
+## Round 17, WP-A: repairing round 16's own #267/#266 fixes (2026-08-30)
+
+Findings from the round-17 review pass (task board #288, #289; `work/bug-fix-plan-round17-2026-08.md`
+WP-A; evidence in `work/review-round17-performance-2026-08.md` Findings 1-2). Both are regressions
+*in* round 16's own fixes for #267 and #266 above - this WP repairs those fixes, it does not revert
+them. Fixed in `src/Benzene.Resilience.Polly/PollyResilienceMiddleware.cs`,
+`src/Benzene.Microsoft.Dependencies/MicrosoftServiceResolverAdapter.cs`,
+`src/Benzene.Microsoft.Dependencies/MicrosoftServiceResolverFactory.cs`.
+
+- **[RESOLVED] #288 — the round-16 #267 re-entrancy guard's `Interlocked.Increment` ran *before* the
+  `try`/`finally` that decrements it, so a guard-rejected (genuinely concurrent) attempt threw
+  `NotSupportedException` **without ever pairing its own increment with a decrement** - permanently
+  poisoning the per-`HandleAsync`-call counter above zero. Any later, purely sequential attempt in the
+  same call (e.g. an outer `Retry` retrying after the rejected race) then incremented the already-
+  poisoned counter and was wrongly rejected by the same guard, even though nothing overlapped with it
+  at all - the exact composition the round-16 fix's own cookbook section anticipates someone reaching
+  for.** Fixed minimally, per the plan's ruling: `Interlocked.Decrement` now runs immediately before
+  the guard throws, so the rejected attempt undoes its own count while the in-flight attempt's count
+  is left untouched - every increment is paired with exactly one decrement, whichever branch runs.
+  No restructuring beyond that. Test: `test/Benzene.Core.Test/Resilience/PollyGuardCounterLeakTest.cs`
+  (new) - `HandleAsync_SequentialRetryAfterEarlierConcurrentRace_RunsAndDoesNotThrowNotSupported`,
+  reusing the review's `ConcurrentOnFirstRoundStrategy` (a `Retry` pipeline wrapping a strategy that
+  races two concurrent sub-attempts on round 1, then forwards a single sequential attempt on round 2+,
+  matching every stock Polly strategy's shape) - red before the fix (round 2's `next()` never ran,
+  rejected by the poisoned counter), green after. All 14 pre-existing
+  `PollyResilienceMiddlewareTest`/`PollyResilienceMiddlewareConcurrentAttemptGuardTest` cases (the
+  #267 regression suite) verified unchanged and green alongside it.
+- **[RESOLVED] #289 — the round-16 #266 disposal bridge's deliberately-unbounded
+  `DisposeAsync().AsTask().GetAwaiter().GetResult()` (both `MicrosoftServiceResolverAdapter.Dispose()`
+  and `MicrosoftServiceResolverFactory.Dispose()`) could deadlock the calling thread FOREVER - not
+  just for a long time - whenever the disposed scope/provider's own `DisposeAsync()` awaits without
+  `ConfigureAwait(false)` (ordinary application code, not a Benzene defect) under an ambient
+  single-thread-affinity `SynchronizationContext` (the same shape as WinForms'/WPF's message-loop
+  context or Blazor Server's per-circuit renderer context): the posted continuation could only ever
+  run on the very thread now blocked waiting for it - the textbook sync-over-async deadlock. For
+  `MicrosoftServiceResolverFactory.Dispose()`, which tears down the whole root DI container typically
+  once at process/host shutdown, that hang can mean the entire application never finishes shutting
+  down.** Per the plan's explicit ruling, this is **not** fixed by switching to the bounded-5s pattern
+  used elsewhere (`RedisCacheService`, `MeshAnnouncer`) - that would reopen #266's own "never abandon
+  a user's cleanup mid-way" reasoning. Instead, both `Dispose()` methods now suppress the ambient
+  `SynchronizationContext` around the blocking call (the standard sync-over-async mitigation),
+  restoring the original context in a `finally`:
+  ```csharp
+  var previous = SynchronizationContext.Current;
+  SynchronizationContext.SetSynchronizationContext(null);
+  try { asyncDisposable.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
+  finally { SynchronizationContext.SetSynchronizationContext(previous); }
+  ```
+  This keeps the wait unbounded (matching Autofac's own semantics for the identical shape, as #266
+  intended) while removing the specific deadlock vector - a slow-but-eventually-completing disposal
+  still blocks the caller for exactly as long as it takes, same as before. Test:
+  `test/Benzene.Core.Test/Core/Core/DI/MicrosoftServiceResolverAdapterSyncContextDeadlockTest.cs`
+  (new) - a controllable `SingleThreadAffinitySynchronizationContext` (`Post` enqueues, nothing ever
+  dequeues) paired with a fake `IAsyncDisposable` scope/singleton whose `DisposeAsync()` awaits
+  without `ConfigureAwait(false)`, run on a dedicated background thread with a bounded `Join` so the
+  test itself can't hang CI. Both `Dispose_ScopeDisposeAsyncCapturesAmbientSyncContext_...` (adapter)
+  and `FactoryDispose_ProviderDisposeAsyncCapturesAmbientSyncContext_...` (factory, through a real
+  `IServiceCollection`-built container) were red before the fix (did not return within 10s) and green
+  after, with the async disposal confirmed to have actually run in both cases. `AsyncOnlyDisposableParityTest`
+  and the round-16 #266/#262 disposal regression suite verified unchanged and green alongside it.
+
+Scoped verification: `dotnet test test/Benzene.Core.Test -c Release --filter
+"FullyQualifiedName~PollyResilienceMiddleware|FullyQualifiedName~Microsoft|FullyQualifiedName~Cache.Redis|FullyQualifiedName~Autofac"`
+— 106 passed, 0 failed.
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.

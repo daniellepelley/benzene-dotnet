@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Threading;
 using Benzene.Abstractions.DI;
 using Benzene.Core.Exceptions;
 using Microsoft.Extensions.DependencyInjection;
@@ -109,13 +110,29 @@ public sealed class MicrosoftServiceResolverAdapter : IServiceResolver
     /// for best-effort telemetry flushes elsewhere (<c>MeshAnnouncer</c>) - abandoning a user's own
     /// scope disposal mid-way would silently leak their resources by design, and Autofac's own
     /// <see cref="Autofac.ILifetimeScope.Dispose"/> already blocks unboundedly for the identical shape,
-    /// so this restores parity rather than introducing new blocking behavior.
+    /// so this restores parity rather than introducing new blocking behavior. The wait deliberately
+    /// suppresses the ambient <see cref="SynchronizationContext"/> (restored in a <c>finally</c>)
+    /// around the blocking call: without this, a scope's own <c>DisposeAsync()</c> that awaits
+    /// without <c>ConfigureAwait(false)</c> (ordinary application code) can deadlock this thread
+    /// FOREVER under a single-thread-affinity context (WinForms/WPF/Blazor-Server-shaped) - the
+    /// posted continuation could only ever run on the very thread now blocked waiting for it (task
+    /// board #289, round 17). This is the standard sync-over-async mitigation, not the bounded-5s
+    /// pattern - it keeps the wait unbounded (matching Autofac) while removing the deadlock vector.
     /// </summary>
     public void Dispose()
     {
         if (_scope is IAsyncDisposable asyncDisposableScope)
         {
-            asyncDisposableScope.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            var previousContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+            try
+            {
+                asyncDisposableScope.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            }
+            finally
+            {
+                SynchronizationContext.SetSynchronizationContext(previousContext);
+            }
         }
         else
         {
