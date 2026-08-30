@@ -2901,6 +2901,59 @@ Full baseline re-verified after both fixes: `Benzene.Core.Test` 3296 passed / 2 
 `Benzene.Mesh.Test` 575 passed, `Benzene.Mesh.Host.Test` 150 passed, `Benzene.Examples.sln` build 0
 errors. Pushed to `main` (`28473b0`).
 
+- **[RESOLVED] (2026-08-30) #263 — `OpenApiSchemaCSharpTypeBuilder` interpolated
+  `Discriminator.PropertyName` and every `mapping.Key` unescaped into generated
+  `[JsonPolymorphic]`/`[JsonDerivedType]` C# string literals** — the fourth instance of the
+  unescaped-interpolation-into-structured-output bug class this round-family (YAML #212, Markdown
+  #86, HCL #244). A discriminator value containing a `"` (e.g. `12" wheel`, a realistic
+  size/dimension-flavoured mapping value reachable via `SuppliedSchemaCatalog` or any hand-built
+  `EventServiceDocument`, not only reflection-derived schemas) produced 7 cascading Roslyn errors
+  while the CLI's `build` command reported success. Fixed by adding a small local
+  `EscapeCSharpString` helper (backslash, double-quote, `\n`/`\r`/`\t`/`\0`, and every other control
+  character via `\uXXXX`) mirroring the shape of `YamlValueEscaping`/`NameFormatter.EscapeHclString`
+  elsewhere in this codebase — deliberately NOT a new `Microsoft.CodeAnalysis.CSharp` (Roslyn)
+  dependency in `Benzene.CodeGen.Client`, which doesn't otherwise need it (Roslyn is only a
+  transitive dependency of the test project). Applied to `PropertyName` and every `mapping.Key`.
+  Test: `GeneratedClient_WithAdversarialDiscriminatorMappingKeyContainingAQuote_Compiles` (new
+  theory case in `CodegenOutputCompilesTest.cs`, using the same Roslyn-compile oracle as the
+  existing #66/#67/#240 regression tests). `src/Benzene.CodeGen.Client/OpenApiSchemaCSharpTypeBuilder.cs`.
+- **[RESOLVED] (2026-08-30) #264 — `JsonOpenApiSchemaBuilder.Create`'s switch had no case for
+  `JTokenType.Float` or `JTokenType.Null`**, throwing `Exception("No map for Float"/"No map for
+  Null")` and aborting the whole document on an ordinary JSON decimal number (e.g. a price,
+  percentage, or rating) or an ordinary JSON `null` (extremely common for an optional field in a
+  captured real-world example) — reachable from the public documented API
+  `EventServiceDocumentBuilder.AddJsonEvent`. Same crash-on-legitimate-input shape as
+  #241/#242/#243. Fixed by adding `JTokenType.Float => CreateNumberSchema()` (mirroring
+  `CreateIntegerSchema`, `Type = "number"`, `Format = "double"`) and a `JTokenType.Null` branch
+  (`CreateNullPlaceholderSchema`) returning the exact untyped/`Nullable = true` placeholder
+  convention `CreateArraySchema` already established for "nothing in the example to infer from"
+  after the #242 fix — no `type` keyword, so it matches anything, rather than inventing a new
+  placeholder shape. Tests: `CreateSchema_FloatExampleValue_DoesNotThrow_AndEmitsANumberSchema`,
+  `CreateSchema_NullExampleValue_DoesNotThrow_AndEmitsAnUntypedNullablePlaceholder`
+  (`JsonOpenApiSchemaBuilderTest.cs`). `src/Benzene.Schema.OpenApi/JsonOpenApiSchemaBuilder.cs`.
+- **[RESOLVED] (2026-08-30) #265 (minor) — `MarkdownTypeBuilder.MapProperty`'s empty-object `else`
+  branch (and the matching array-of-object branch) wrote a bare, unlabelled `"{}"`/`"{}[]"` with the
+  property NAME dropped entirely** — the normal shape for a `Dictionary<string, T>`-typed property
+  (`type: object` with `additionalProperties` but no own declared `properties`) rendered as an
+  anonymous line a reader couldn't attribute to any field. Fixed both `else` branches to always emit
+  `{CodeGenHelpers.Camelcase(name)}: ` before the placeholder, and — where `AdditionalProperties !=
+  null` — render the map shape via a new `GetMapOrEmptyObjectPlaceholder` helper
+  (`{[string]: <valueType>}`, resolving `<valueType>` through the same `GetPropertyTypeName`
+  recursion this file already uses elsewhere, e.g. `scores: {[string]: int}`), mirroring
+  `CSharpTypeName.GetName`'s `Dictionary<string, T>` handling for the C# generator (see its comment
+  at `OpenApiSchemaCSharpTypeBuilder.cs:176-183`). A genuinely empty object (no `additionalProperties`
+  either) still renders as `{name}: {}` — now at least attributable to its field. Tests:
+  `MapProperty_AdditionalPropertiesMap_RendersTheNamedMapShape_NotABareAnonymousBraces`,
+  `MapProperty_ArrayOfAdditionalPropertiesMaps_RendersTheNamedMapShape`
+  (`MarkdownTypeBuilderTest.cs`). `src/Benzene.CodeGen.Markdown/MarkdownTypeBuilder.cs`.
+
+Verified: `dotnet test test/Benzene.Core.Test -c Release --filter
+"FullyQualifiedName~Autogen|FullyQualifiedName~Schema"` — 543 passed, 2 skipped (pre-existing,
+unrelated source-generator tests), 0 failed. All three fixes are additive (a new switch arm, a new
+escaping helper applied at two call sites, a new-else-branch line shape) — every existing
+#241/#242/#243, #212/#244, #86/#213, #66/#67/#240 regression test in this filter's scope stayed
+green unmodified.
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.
