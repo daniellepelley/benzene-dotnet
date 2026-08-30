@@ -2069,6 +2069,49 @@ top-of-file summary blockquote).
   scheme specifically) to record this explicitly as a `[DECISION]` in place, rather than leaving it
   silently misleading. Left for a future round to decide whether/how to carry the scheme onto the wire.
 
+### Tracked findings round 12–14, WP-K — Saga: rollback on state-store failure + multi-failure surfacing (done)
+Ruling and rationale are recorded in
+[`bug-fix-plan-rounds12-14-2026-08.md`](bug-fix-plan-rounds12-14-2026-08.md) §"WP-K — Saga: rollback
+on state-store failure + multi-failure surfacing (#208, #209)" and
+[`bug-fix-designs-round14-2026-08.md`](bug-fix-designs-round14-2026-08.md) §2.
+- **[RESOLVED] #208 — a saga-state-store failure aborted the run with zero rollback attempt, silently
+  breaking `Saga`'s own documented "all-or-nothing" guarantee.** A state-store exception thrown right
+  after a real, effect-producing stage completed (`ISagaStateStore.RecordStageCompletedAsync`, and the
+  final `RecordFinishedAsync` call on an all-succeeded run) propagated raw out of `RunAsync`, so the
+  registered `Compensate` for the completed stage(s) never ran. Fixed: `Saga.RunOnceAsync` now catches
+  a store exception at both of those call sites, compensates every completed stage exactly as a step
+  failure would (new `RollBackCompletedStagesAsync`/`HandleStateStoreFailureAsync` helpers), and
+  returns `SagaOutcome.RolledBack` (or `PartiallyRolledBack` if a compensation itself also fails,
+  populating the existing `CompensationFailures` list) with the store's exception attached via a new
+  `SagaResult.StateStoreException` property — never a raw throw. The result is still (best-effort)
+  persisted via one more `RecordFinishedAsync` call, swallowing a second store failure there so it
+  cannot mask the already-computed rollback outcome. **Documented edge case (deliberate):** a failure
+  from `ISagaStateStore.RecordStartedAsync` - before any stage has run - is left to propagate raw,
+  since there is nothing yet to compensate; this is called out explicitly in the `Saga` class remarks
+  and in the `RunOnceAsync` call site. A store failure on `RecordFinishedAsync` *after* a step-failure
+  rollback has already run is likewise left as a swallowed best-effort persist (rollback already
+  happened; nothing further to compensate), so a second store hiccup there can't discard the
+  already-correct, already-computed result. New tests in `SagaRetryAndStateStoreTest`:
+  `StateStore_ThrowsRightAfterARealStageCompletes_TriggersCompensation_InsteadOfRawThrow`,
+  `StateStore_CompensationItselfFails_ReturnsPartiallyRolledBack`,
+  `StateStore_ThrowsOnFinalFinish_AfterEveryStageSucceeded_TriggersFullRollback`, and (for the
+  documented edge case) `StateStore_ThrowsOnRecordStarted_BeforeAnyStageRuns_PropagatesRaw`.
+- **[RESOLVED] #209 — when two steps in the same stage failed concurrently, `SagaResult` surfaced only
+  one of them via `Failure`/`FailureException`; the other had no representation anywhere on the public
+  result.** Fixed: added `SagaResult.Failures` (`IReadOnlyList<SagaStepOutcome>`), populated with
+  *every* failed step's outcome in the failing stage - the data was already there in
+  `RollBackAsync`'s per-stage outcome list, just filtered down to `FirstOrDefault` before. `Failure`
+  and `FailureException` are now convenience views over `Failures[0]`, kept for backward
+  compatibility and documented as such, mirroring how `CompensationFailures` is already the full list
+  on this same class. New test in `SagaTest`:
+  `RunAsync_TwoStepsFailConcurrentlyInSameStage_SurfacesBothInFailures` (asserts `Failures.Count == 2`,
+  both step identities/exceptions present, and that `Failure`/`FailureException` still match the first
+  entry). Round-1's #15 concurrency fix (`SagaStep<T>`/`Stage` outcome now run-scoped, not stored on
+  the shared instance) was re-run unchanged and remains green -
+  `RunAsync_ManyConcurrentRunsOnOneBuiltSaga_NeverCrossContaminate` (300 concurrent runs, 0
+  cross-contaminated) - this WP's `RunOnceAsync` changes added only local/parameter state, no new
+  shared mutable state.
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.

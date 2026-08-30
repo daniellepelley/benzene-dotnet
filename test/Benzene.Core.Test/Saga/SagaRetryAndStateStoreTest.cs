@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Benzene.Abstractions.Results;
 using Benzene.Results;
@@ -172,5 +173,133 @@ public class SagaRetryAndStateStoreTest
         var result = await saga.RunAsync();
 
         Assert.Equal(SagaOutcome.Succeeded, result.Outcome);
+    }
+
+    // ---- #208: a state-store failure must trigger rollback, not a raw abort ----------------------
+
+    // A store whose calls fail selectively, so tests can target exactly one persistence point.
+    private class ThrowingStateStore : ISagaStateStore
+    {
+        private readonly Exception _exception;
+        private readonly bool _throwOnStageCompleted;
+        private readonly bool _throwOnFinished;
+
+        public ThrowingStateStore(Exception exception, bool throwOnStageCompleted = false, bool throwOnFinished = false)
+        {
+            _exception = exception;
+            _throwOnStageCompleted = throwOnStageCompleted;
+            _throwOnFinished = throwOnFinished;
+        }
+
+        public Task RecordStartedAsync(SagaRunInfo run, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task RecordStageCompletedAsync(string sagaId, int attempt, int stageIndex, CancellationToken cancellationToken = default)
+            => _throwOnStageCompleted ? throw _exception : Task.CompletedTask;
+
+        public Task RecordFinishedAsync(string sagaId, int attempt, SagaResult result, CancellationToken cancellationToken = default)
+            => _throwOnFinished ? throw _exception : Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task StateStore_ThrowsRightAfterARealStageCompletes_TriggersCompensation_InsteadOfRawThrow()
+    {
+        var log = new List<string>();
+        var storeException = new InvalidOperationException("store unavailable");
+        var store = new ThrowingStateStore(storeException, throwOnStageCompleted: true);
+
+        var saga = new SagaBuilder()
+            .Stage(s => s.Step<string>(step => step
+                .Do(_ => Ok("a"))
+                .Compensate((_, r) =>
+                {
+                    log.Add($"undo-a:{r}");
+                    return Undo();
+                })))
+            .Stage(s => s.Step<string>(step => step.Do(_ => Ok("b"))))
+            .Build();
+
+        // Before the fix: this throws storeException straight out of RunAsync and "undo-a" never
+        // runs. After the fix: the exception is caught, the completed stage is compensated, and the
+        // caller gets a rollback-status result carrying the store exception.
+        var result = await saga.RunAsync(new SagaRunOptions { SagaId = "saga-store-1", StateStore = store });
+
+        Assert.Equal(SagaOutcome.RolledBack, result.Outcome);
+        Assert.Same(storeException, result.StateStoreException);
+        Assert.Contains("undo-a:a", log);
+        Assert.Empty(result.Failures); // no step failed - this was a persistence failure
+    }
+
+    [Fact]
+    public async Task StateStore_CompensationItselfFails_ReturnsPartiallyRolledBack()
+    {
+        var storeException = new InvalidOperationException("store unavailable");
+        var store = new ThrowingStateStore(storeException, throwOnStageCompleted: true);
+
+        var saga = new SagaBuilder()
+            .Stage(s => s.Step<string>(step => step
+                .Do(_ => Ok("a"))
+                .Compensate((_, _) => Task.FromResult(BenzeneResult.ServiceUnavailable())))) // undo fails
+            .Stage(s => s.Step<string>(step => step.Do(_ => Ok("b"))))
+            .Build();
+
+        var result = await saga.RunAsync(new SagaRunOptions { SagaId = "saga-store-2", StateStore = store });
+
+        Assert.Equal(SagaOutcome.PartiallyRolledBack, result.Outcome);
+        Assert.Same(storeException, result.StateStoreException);
+        Assert.Single(result.CompensationFailures);
+    }
+
+    [Fact]
+    public async Task StateStore_ThrowsOnFinalFinish_AfterEveryStageSucceeded_TriggersFullRollback()
+    {
+        var log = new List<string>();
+        var storeException = new InvalidOperationException("store unavailable");
+        var store = new ThrowingStateStore(storeException, throwOnFinished: true);
+
+        var saga = new SagaBuilder()
+            .Stage(s => s.Step<string>(step => step
+                .Do(_ => Ok("a"))
+                .Compensate((_, r) =>
+                {
+                    log.Add($"undo-a:{r}");
+                    return Undo();
+                })))
+            .Build();
+
+        var result = await saga.RunAsync(new SagaRunOptions { SagaId = "saga-store-3", StateStore = store });
+
+        Assert.Equal(SagaOutcome.RolledBack, result.Outcome);
+        Assert.Same(storeException, result.StateStoreException);
+        Assert.Contains("undo-a:a", log);
+    }
+
+    [Fact]
+    public async Task StateStore_ThrowsOnRecordStarted_BeforeAnyStageRuns_PropagatesRaw()
+    {
+        // Documented edge case: nothing has run yet, so there is nothing to compensate - this keeps
+        // the pre-existing throw-behavior rather than manufacturing a rollback for zero effects.
+        var storeException = new InvalidOperationException("store unavailable");
+        var store = new ThrowingStartStateStore(storeException);
+
+        var forwardRan = false;
+        var saga = new SagaBuilder()
+            .Stage(s => s.Step<string>(step => step.Do(_ => { forwardRan = true; return Ok("a"); })))
+            .Build();
+
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            saga.RunAsync(new SagaRunOptions { SagaId = "saga-store-4", StateStore = store }));
+
+        Assert.Same(storeException, thrown);
+        Assert.False(forwardRan);
+    }
+
+    private class ThrowingStartStateStore : ISagaStateStore
+    {
+        private readonly Exception _exception;
+        public ThrowingStartStateStore(Exception exception) => _exception = exception;
+
+        public Task RecordStartedAsync(SagaRunInfo run, CancellationToken cancellationToken = default) => throw _exception;
+        public Task RecordStageCompletedAsync(string sagaId, int attempt, int stageIndex, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task RecordFinishedAsync(string sagaId, int attempt, SagaResult result, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 }

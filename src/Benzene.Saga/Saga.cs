@@ -8,6 +8,7 @@ namespace Benzene.Saga;
 /// retried. It is all-or-nothing: it either completes in full or rolls back in full.
 /// </summary>
 /// <remarks>
+/// <para>
 /// <b>A built <see cref="Saga"/> is immutable and safe for concurrent <see cref="RunAsync()"/> calls.</b>
 /// <see cref="SagaBuilder.Build"/> produces a <see cref="Saga"/> whose stages and steps are read-only
 /// descriptors - no per-execution outcome (a step's state, result, or exception) is ever stored on
@@ -15,6 +16,20 @@ namespace Benzene.Saga;
 /// step, threaded through as a list local to that call) rather than mutating shared state, so the same
 /// built <see cref="Saga"/> instance can be reused - including run concurrently, any number of times -
 /// without one run's outcome corrupting another's.
+/// </para>
+/// <para>
+/// <b>The all-or-nothing guarantee also covers a failure of the optional <see cref="ISagaStateStore"/>
+/// (see <see cref="SagaRunOptions.StateStore"/>).</b> A store call made <em>after</em> an
+/// effect-producing stage has completed (<see cref="ISagaStateStore.RecordStageCompletedAsync"/>, and
+/// the final <see cref="ISagaStateStore.RecordFinishedAsync"/> call on a successful run) is treated the
+/// same as a step failure: the exception is caught, every completed stage is compensated, and the run
+/// returns a <see cref="SagaOutcome.RolledBack"/> (or <see cref="SagaOutcome.PartiallyRolledBack"/>, if
+/// a compensation also fails) result carrying the store's exception in
+/// <see cref="SagaResult.StateStoreException"/> - never a raw throw out of <c>RunAsync</c>. The one
+/// deliberate exception is <see cref="ISagaStateStore.RecordStartedAsync"/>: a failure there happens
+/// strictly before any stage has run, so there is nothing yet to compensate, and it is left to
+/// propagate raw rather than manufacture a rollback for zero effects.
+/// </para>
 /// </remarks>
 public class Saga
 {
@@ -77,6 +92,10 @@ public class Saga
         if (store != null)
         {
             sagaId ??= options.SagaId ?? Guid.NewGuid().ToString();
+
+            // #208 edge case (deliberate, documented on the Saga class): nothing has run yet, so
+            // there is nothing to compensate. This one call is left to propagate raw; every store
+            // call below happens after an effect-producing stage has completed and is guarded.
             await store.RecordStartedAsync(new SagaRunInfo(sagaId, options.Name, attempt, _stages.Count));
         }
 
@@ -94,9 +113,21 @@ public class Saga
             {
                 stage.Publish(context, outcomes);
                 completedStages.Add((stage, outcomes));
+
                 if (store != null)
                 {
-                    await store.RecordStageCompletedAsync(sagaId!, attempt, i);
+                    try
+                    {
+                        await store.RecordStageCompletedAsync(sagaId!, attempt, i);
+                    }
+                    catch (Exception storeEx)
+                    {
+                        // #208: this happens strictly after a real, effect-producing stage has
+                        // completed - the all-or-nothing guarantee means we compensate exactly as a
+                        // step failure would, rather than let this propagate raw and orphan the
+                        // stage's effects.
+                        return await HandleStateStoreFailureAsync(context, completedStages, i, storeEx, store, sagaId!, attempt);
+                    }
                 }
 
                 continue;
@@ -108,30 +139,111 @@ public class Saga
             var (rollbackClean, failedStageOutcomes, compensationFailures) =
                 await RollBackAsync(context, completedStages, stage, outcomes);
 
-            var failedOutcome = failedStageOutcomes.FirstOrDefault(o => o.State == SagaStepState.Failed);
+            // #209: every step in the failing stage that actually failed is surfaced, not just the
+            // first - two steps in the same stage can fail concurrently.
+            var failures = failedStageOutcomes.Where(o => o.State == SagaStepState.Failed).ToArray();
 
             var failure = new SagaResult(
                 rollbackClean ? SagaOutcome.RolledBack : SagaOutcome.PartiallyRolledBack,
                 i,
-                failedOutcome?.Result,
-                failedOutcome?.Exception,
+                failures,
                 compensationFailures);
 
             if (store != null)
             {
-                await store.RecordFinishedAsync(sagaId!, attempt, failure);
+                try
+                {
+                    await store.RecordFinishedAsync(sagaId!, attempt, failure);
+                }
+                catch
+                {
+                    // Best-effort: rollback already ran (cleanly or partially) before this call, so
+                    // there is nothing further to compensate - a second store failure here must not
+                    // discard the already-computed, correct result.
+                }
             }
 
             return failure;
         }
 
-        var success = new SagaResult(SagaOutcome.Succeeded, null, null, null, Array.Empty<SagaStepOutcome>());
+        var success = new SagaResult(SagaOutcome.Succeeded, null, Array.Empty<SagaStepOutcome>(), Array.Empty<SagaStepOutcome>());
         if (store != null)
         {
-            await store.RecordFinishedAsync(sagaId!, attempt, success);
+            try
+            {
+                await store.RecordFinishedAsync(sagaId!, attempt, success);
+            }
+            catch (Exception storeEx)
+            {
+                // #208: every stage has already completed (real effects exist) by the time we reach
+                // this final persistence call, so the same all-or-nothing guarantee applies here too.
+                return await HandleStateStoreFailureAsync(context, completedStages, _stages.Count - 1, storeEx, store, sagaId!, attempt);
+            }
         }
 
         return success;
+    }
+
+    /// <summary>
+    /// #208: handles an <see cref="ISagaStateStore"/> failure that happened after at least one
+    /// effect-producing stage completed, by compensating every completed stage (last-in, first-out)
+    /// and returning a rollback-status result carrying the store's exception, instead of letting it
+    /// propagate raw. Best-effort persists that result via <see cref="ISagaStateStore.RecordFinishedAsync"/>
+    /// too, swallowing a further store failure there - the store is already known to be failing, and a
+    /// second failure must not mask the rollback outcome the caller needs.
+    /// </summary>
+    private static async Task<SagaResult> HandleStateStoreFailureAsync(
+        SagaContext context,
+        List<(Stage Stage, IReadOnlyList<SagaStepOutcome> Outcomes)> completedStages,
+        int failedStageIndex,
+        Exception storeException,
+        ISagaStateStore store,
+        string sagaId,
+        int attempt)
+    {
+        var (clean, compensationFailures) = await RollBackCompletedStagesAsync(context, completedStages);
+
+        var result = new SagaResult(
+            clean ? SagaOutcome.RolledBack : SagaOutcome.PartiallyRolledBack,
+            failedStageIndex,
+            Array.Empty<SagaStepOutcome>(),
+            compensationFailures,
+            storeException);
+
+        try
+        {
+            await store.RecordFinishedAsync(sagaId, attempt, result);
+        }
+        catch
+        {
+            // Best-effort - see the method summary.
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Compensates every completed stage, newest-first (last-in, first-out), with no distinguished
+    /// "failed stage" - used for a state-store-triggered rollback (see
+    /// <see cref="HandleStateStoreFailureAsync"/>), where every stage in <paramref name="completedStages"/>
+    /// actually succeeded and the trigger was the store, not a step.
+    /// </summary>
+    private static async Task<(bool Clean, IReadOnlyList<SagaStepOutcome> CompensationFailures)> RollBackCompletedStagesAsync(
+        SagaContext context,
+        List<(Stage Stage, IReadOnlyList<SagaStepOutcome> Outcomes)> completedStages)
+    {
+        var allOutcomes = new List<SagaStepOutcome>();
+        for (var j = completedStages.Count - 1; j >= 0; j--)
+        {
+            var (stage, outcomes) = completedStages[j];
+            var compensated = await stage.CompensateAsync(context, outcomes);
+            allOutcomes.AddRange(compensated);
+        }
+
+        var clean = allOutcomes.All(o => o.State != SagaStepState.CompensationFailed);
+        var compensationFailures = allOutcomes.Where(o => o.State == SagaStepState.CompensationFailed).ToArray();
+
+        return (clean, compensationFailures);
     }
 
     private static async Task<(bool Clean, IReadOnlyList<SagaStepOutcome> FailedStageOutcomes, IReadOnlyList<SagaStepOutcome> CompensationFailures)> RollBackAsync(
