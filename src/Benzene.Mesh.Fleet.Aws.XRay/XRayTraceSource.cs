@@ -239,9 +239,21 @@ public class XRayTraceSource : IMeshTraceSource
                     result[trace.Id] = XRaySegmentMapper.Map(trace.Id, segments.Select(s => s.Document));
                 }
             }
+            catch (Exception ex) when (ex is OperationCanceledException && cancellationToken.IsCancellationRequested)
+            {
+                // The complement of the fetch-isolation catch below: when the caller's own cancellationToken
+                // is actually cancelled, that's a genuine host cancellation (not a per-batch backend failure
+                // or an unrelated per-request timeout) and must propagate rather than silently degrading this
+                // batch's rows to the summary plane - see MessageHandler.cs's
+                // ex.CancellationToken.IsCancellationRequested checks and the Jaeger/Tempo trace-source fix
+                // for the same timeout-vs-cancellation distinction.
+                throw;
+            }
             catch
             {
-                // Fetch isolation: a failed batch leaves its ≤5 rows on the summary plane, never the whole list.
+                // Fetch isolation: a failed batch - including an HttpClient-level per-request timeout
+                // unrelated to the caller's own token - leaves its ≤5 rows on the summary plane, never the
+                // whole list.
             }
 
             return result;

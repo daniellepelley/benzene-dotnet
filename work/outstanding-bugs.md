@@ -2901,6 +2901,47 @@ Full baseline re-verified after both fixes: `Benzene.Core.Test` 3296 passed / 2 
 `Benzene.Mesh.Test` 575 passed, `Benzene.Mesh.Host.Test` 150 passed, `Benzene.Examples.sln` build 0
 errors. Pushed to `main` (`28473b0`).
 
+## Round 16 fixes (2026-08-30)
+
+- **[RESOLVED] #252 — `JaegerTraceSource`/`TempoTraceSource`'s per-service/per-trace isolation catch
+  didn't survive an `HttpClient`-level timeout that wasn't the caller's own token; `XRayTraceSource`'s
+  complementary bare catch swallowed genuine caller cancellation.**
+  `src/Benzene.Mesh.Fleet.Jaeger/JaegerTraceSource.cs`, `src/Benzene.Mesh.Fleet.Tempo/TempoTraceSource.cs`
+  isolated a per-service/per-trace fetch with `catch (Exception ex) when (ex is not
+  OperationCanceledException)` — distinguishing "backend failed" from "host cancelled" purely by
+  exception *type*. `HttpClient.Timeout` on one slow backend throws `TaskCanceledException` (an
+  `OperationCanceledException` subclass) even when the caller's own token was never cancelled, so that
+  exception escaped the isolation catch, faulted the whole `BoundedFanOut.WhenAllAsync` fan-out, and
+  discarded every other service's already-fetched results — the #189 regression class reintroduced for
+  one exception family. Separately, `src/Benzene.Mesh.Fleet.Aws.XRay/XRayTraceSource.cs`'s
+  `EnrichRecentFlowsAsync`/`FetchBatchAsync` had a bare `catch { }` with the inverse problem — it
+  swallowed genuine caller cancellation too, silently degrading a cancelled recent-flows enrichment to
+  the summary plane instead of propagating.
+
+  Fixed by replacing the type-based filters in Jaeger/Tempo with the token-verified form `catch
+  (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)`
+  — isolating everything EXCEPT an `OperationCanceledException` while the caller's own token is actually
+  cancelled, matching `MessageHandler.cs`'s existing `ex.CancellationToken.IsCancellationRequested`
+  precedent for the same timeout-vs-cancellation distinction. `XRayTraceSource.FetchBatchAsync` gained
+  the complementary rethrow (`catch (Exception ex) when (ex is OperationCanceledException &&
+  cancellationToken.IsCancellationRequested) { throw; }`, ahead of the existing bare `catch` that keeps
+  degrading everything else).
+
+  Verified with permanent regression tests in `test/Benzene.Mesh.Test/JaegerTraceSourceTest.cs` and
+  `TempoTraceSourceTest.cs`: `GetCorrelationAsync_IsolatesAPerServiceTimeout_NotTiedToTheCallersToken`
+  / `..._IsolatesAPerTraceTimeout_NotTiedToTheCallersToken` (a `TaskCanceledException` simulating an
+  `HttpClient.Timeout` on one service/trace with the caller's own token uncancelled → before the fix
+  the exception propagated and the healthy service's/trace's result was lost too; after, it survives,
+  mirroring the adjacent `HttpRequestException` isolation test) and the complementary
+  `GetCorrelationAsync_PropagatesGenuineCancellation_WhenTheCallersOwnTokenIsCancelled` (the ambient
+  token is actually cancelled from within the failing service's/trace's handler → `OperationCanceledException`
+  correctly propagates, both before and after the fix — confirming the fix doesn't newly break genuine
+  cancellation). `test/Benzene.Mesh.Test/XRayTraceSourceTest.cs` gained
+  `GetRecentFlowsAsync_PropagatesGenuineCancellation_InsteadOfDegradingToSummaryPlane` (a mocked
+  `BatchGetTracesAsync` throwing `OperationCanceledException` while the caller's token is cancelled →
+  before the fix no exception surfaced and the row silently degraded; after, it propagates). Full
+  `Benzene.Mesh.Test` run: 582 passed / 0 failed.
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.

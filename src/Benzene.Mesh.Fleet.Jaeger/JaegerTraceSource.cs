@@ -127,11 +127,18 @@ public class JaegerTraceSource : IMeshTraceSource
                 var body = await GetStringOrNullAsync(url, cancellationToken);
                 return body is null ? new List<JaegerMappedTrace>() : JaegerTraceMapper.MapTraces(body);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
-                // Per-service isolation: one service's connection failure shouldn't discard every other
-                // service's completed results (Task.WhenAll's fault semantics would otherwise fault the
-                // whole fan-out). Logged, then degrades to that service contributing no traces this call.
+                // Per-service isolation: one service's connection failure - or an HttpClient-level
+                // per-request Timeout, which throws TaskCanceledException (an OperationCanceledException
+                // subclass) regardless of whether the caller's own token was ever cancelled - shouldn't
+                // discard every other service's completed results (Task.WhenAll's fault semantics would
+                // otherwise fault the whole fan-out). The filter is token-verified, not type-based: it
+                // isolates any OperationCanceledException UNLESS the caller's own cancellationToken is
+                // actually cancelled, in which case that's a genuine host cancellation and must propagate
+                // instead (see MessageHandler.cs's ex.CancellationToken.IsCancellationRequested checks for
+                // the same timeout-vs-cancellation distinction). Logged, then degrades to that service
+                // contributing no traces this call.
                 _logger?.LogWarning(ex,
                     "JaegerTraceSource search failed for service {Service}; skipping it and keeping the other services' results.",
                     service);
