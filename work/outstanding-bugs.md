@@ -2633,6 +2633,94 @@ None of these is a clean self-contained bug; each changes behaviour, a public AP
 - **[DECISION] Version unknown-version passthrough** — an unknown requested version silently falls
   back to the max version (`VersionSelector.cs:21-29`). A documented per-policy behaviour.
 
+### Tracked findings rounds 12–14, WP-J — Cache + RateLimiting round-13 residue (done)
+Ruled in [`bug-fix-plan-rounds12-14-2026-08.md`](bug-fix-plan-rounds12-14-2026-08.md) §"WP-J" and
+[`bug-fix-designs-round13-2026-08.md`](bug-fix-designs-round13-2026-08.md) — round 13's blind
+re-audit of the round-11-fixed `Benzene.RateLimiting`/`Benzene.Cache.Core`/`.Redis` packages (#198–202,
+3 worth-fixing + 2 minor). Read alongside the round-11 `#133`–`#147` entries above, none of which are
+regressed by this work package.
+- **[RESOLVED] #198 — `RedisCacheService.CreatePrefixActions` built a wildcard-invalidation pattern
+  with no check that the prefix was non-empty**, so an empty/whitespace prefix (a missing tenant id, an
+  unset config value) produced the literal pattern `"*"`, which `RedisWildcardActions.InvalidateEntryAsync`
+  then deleted in batches — every key in the logical database, one bad string interpolation away from a
+  full cache wipe. Fixed at both ends per the ruling's "fail fast, defense-in-depth" split:
+  `CreatePrefixActions` now throws `ArgumentException` on a null/empty/whitespace prefix before ever
+  building the glob (a loud startup/first-use error instead of a silent keyspace wipe), and
+  `RedisWildcardActions.InvalidateEntryAsync` independently refuses to execute a bare or
+  effectively-universal pattern (empty/whitespace, or — after trimming — composed entirely of `*`,
+  since Redis glob syntax treats `"*"`/`"**"`/`" * "` identically) with `InvalidOperationException`,
+  covering the still-reachable `CreateWildcardActions` escape hatch (an unescaped, caller-supplied
+  pattern by design) as a second, independent line of defense. A real, non-empty prefix still produces
+  the identical escaped `prefix*` pattern and invalidates exactly as before. Tests:
+  `CreatePrefixActions_EmptyOrWhitespacePrefix_ThrowsRatherThanBuildingAUniversalPattern`,
+  `CreatePrefixActions_RealPrefix_StillProducesTheEscapedPrefixStarPatternAndInvalidates`,
+  `WildcardActions_BarePattern_RefusesToRunRatherThanDeletingTheEntireKeyspace`,
+  `WildcardActions_OtherEffectivelyUniversalPatterns_AlsoRefuseToRun`,
+  `WildcardActions_NonUniversalPattern_StillRunsNormally` (`RedisCacheServiceTest.cs`).
+- **[RESOLVED] #199 — `CacheWriteActions.WriteThroughAsync`'s 3-arg overload ran the caller-supplied
+  `getCacheAction`/`getCacheValue` delegates outside the try/catch protection `SyncCacheAfterWriteAsync`
+  (#139) gives the actual cache I/O**, so a delegate throwing after a successful database write
+  propagated as if the database write itself had failed — exactly the failure mode #139 closed, just
+  reachable one call wider. Fixed by moving the whole decide-then-sync sequence (evaluating
+  `getCacheAction`, and — for `Set` — `getCacheValue`) inside the same `SyncCacheAfterWriteAsync` call
+  that already wraps the cache I/O, so a throw from either delegate degrades identically: logged and
+  swallowed, the already-successful database result still returned. A caller-driven
+  `OperationCanceledException` still propagates unchanged, matching #139's/#141's established
+  convention. Tests: `WriteThroughAsync_GetCacheValueDelegateThrows_StillReturnsTheSuccessfulDatabaseResult`,
+  `WriteThroughAsync_GetCacheActionDelegateThrows_StillReturnsTheSuccessfulDatabaseResult`,
+  `WriteThroughAsync_GetCacheValueDelegateThrowsOperationCanceled_Propagates` (`CacheEntryTest.cs`).
+- **[RESOLVED] #200 — the "one internally-owned rate limiter" guard round 11's `#133` fix added
+  (`UseInternallyOwnedRateLimiting`) was keyed on the shared `IBenzeneServiceContainer`, but
+  `MiddlewarePipelineBuilder<T>.Create<TNewContext>()` deliberately shares that same container across a
+  service's sibling pipelines for different transports** (the documented multi-transport pattern — see
+  `examples/AwsMesh`'s `MeshServiceWiring.Configure`, which wires ApiGateway/BenzeneMessage/Sqs/Sns/
+  EventBridge, each its own context type, off one shared `IBenzeneApplicationBuilder`) — so building two
+  unrelated pipelines off one container, each with its own `UseFixedWindowRateLimiting`, threw
+  `InvalidOperationException` on the second even though the docs and exception text both describe the
+  guard as "per pipeline." Re-keyed the guard (and the underlying DI registration) on a new internal
+  `Extensions.InternallyOwnedRateLimiterHolder<TContext>` wrapper type, closed over the pipeline's own
+  `TContext` — the identity this codebase already uses to distinguish sibling pipelines at registration
+  time (`MiddlewarePipelineBuilder<TContext>.Build()`'s own `PipelineDescriptor` is keyed the same way).
+  Two sibling pipelines (genuinely different `TContext`) now each get their own independent,
+  container-owned limiter; two `UseXRateLimiting` calls sharing one pipeline builder (and so the same
+  `TContext`) still collide on the same key and still fail fast exactly as before. The holder also
+  implements `IAsyncDisposable` itself, forwarding to the wrapped `RateLimiter` — necessary because the
+  container only disposes what it directly resolved (the holder), not a `RateLimiter` field buried
+  inside it, so #133's disposal fix is preserved rather than silently regressed by the extra layer of
+  indirection. Tests: `SiblingPipelines_OffOneSharedContainer_EachGetTheirOwnIndependentInternallyOwnedLimiter`
+  (new) plus the existing `InternallyCreatedLimiter_IsDisposedWhenTheContainerIsDisposed` (updated to
+  resolve through the new holder type — an internal type, exposed to the test assembly via
+  `InternalsVisibleTo`, the same pattern this repo already uses elsewhere) and
+  `StackingTwoInternallyCreatedLimiters_OnOnePipeline_FailsFast` (unchanged, still green) —
+  `RateLimitingPipelineTest.cs`.
+- **[RESOLVED] #201 (minor) — negative caching's presence check `!string.IsNullOrEmpty(cacheValue)`
+  conflated "key absent" with "the serializer emitted an empty string"**, silently reintroducing #140's
+  cache-penetration hazard for any `ISerializer` that encodes a null/default value as `""` rather than
+  the stock `System.Text.Json` serializer's 4-character `"null"`. Changed `CacheEntry.TryReadEntryAsync`'s
+  presence detection to `cacheValue != null` (a store miss is `null`; any real stored value — including
+  `""` — is a hit). Verified both read paths genuinely distinguish nil-from-store vs. empty-value before
+  relying on that: the in-memory test double's `GetEntryValueAsync` already returned a real `null` for a
+  missing dictionary key; `RedisCacheEntry.GetEntryValueAsync` did too for a genuine Redis miss
+  (`StringGetAsync`'s `RedisValue.Null` converts to a `null` string), **but its own error-handling catch
+  block returned `""` on a thrown exception** — which the new `cacheValue != null` check would have
+  misread as a hit of a genuinely-empty cached value instead of "the read failed." Fixed that catch to
+  return `null` too, so a Redis-side error stays indistinguishable from a genuine store miss under the
+  new presence rule. Test: `LazyLoadAsync_CustomSerializerEncodesNullAsEmptyString_ExplicitlyCachedNull_IsStillAHitWithoutCallingDb`
+  (`CacheEntryTest.cs`, using a new `EmptyStringForNullSerializer` test double).
+- **[RESOLVED] #202 (minor) — `RateLimitingMiddlewareBase.HandleAsync` caught `ObjectDisposedException`
+  around both the cost delegate and `Acquire()` in one block (per `#143`'s deliberate fix, which moved
+  the cost delegate inside this guard), always reporting "the rate limiter has already been disposed"
+  even when the exception came from an unrelated disposed dependency inside the cost delegate.** Split
+  into two catches: an `ObjectDisposedException` from the cost delegate is now reported as
+  `"Rate limit exceeded: the permit cost delegate depends on a resource that has already been disposed"`
+  (still failing CLOSED, per #134's ruling — a broken cost delegate must never silently bypass the
+  limiter), while one from `Acquire()` keeps #134's original
+  `"Rate limit exceeded: the rate limiter has already been disposed"` message unchanged. Every other
+  aspect of #143's/#134's behavior (negative-cost rejection, non-ODE exceptions from the cost delegate
+  still propagating unhandled, `Acquire()`'s `ArgumentOutOfRangeException` handling) is untouched. Test:
+  `BringYourOwnCost_CostDelegateThrowsObjectDisposedException_IsReportedAsACostDelegateFailure_NotAsTheLimiterDisposed`
+  (`RateLimitingPipelineTest.cs`).
+
 ### Health / convergence / lower-impact
 - **[DECISION] `DynamoDbHealthCheck` ignores `TableStatus`** — verdict is HTTP-200 only; `TableStatus`
   is now surfaced in the result data but doesn't fail a `DELETING`/`INACCESSIBLE_…` table. Which

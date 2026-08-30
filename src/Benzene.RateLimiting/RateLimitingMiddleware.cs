@@ -66,36 +66,53 @@ public abstract class RateLimitingMiddlewareBase<TContext> : IMiddleware<TContex
         {
             try
             {
-                // The cost delegate runs inside this try (not before it) so a delegate that throws -
-                // deliberately (e.g. signalling "reject this") or by bug - is handled the same way an
-                // out-of-range cost from AttemptAcquire itself is, rather than escaping unhandled and
+                // The cost delegate runs inside its own try (not before it, and - #202 - not sharing
+                // one catch with Acquire() below) so a delegate that throws - deliberately (e.g.
+                // signalling "reject this") or by bug - is handled, rather than escaping unhandled and
                 // bypassing the limiter entirely.
                 cost = _permitCost(ServiceResolver, context);
-                if (cost < 0)
-                {
-                    // A negative cost is a caller bug in the cost delegate, not a valid "free" message -
-                    // silently clamping it to 0 (as this used to do) would let it always succeed and hide
-                    // the bug. Raising the same exception AttemptAcquire itself would throw for an
-                    // out-of-range cost routes it through the identical, already-correct rejection path
-                    // below instead of adding a second one.
-                    throw new ArgumentOutOfRangeException(nameof(cost), cost,
-                        "The permit cost delegate returned a negative value.");
-                }
-
-                lease = Acquire(context, cost);
-            }
-            catch (ArgumentOutOfRangeException)
-            {
-                rejectionDetail =
-                    "Rate limit exceeded: the message's cost is invalid, or exceeds the limiter's capacity and can never be granted";
             }
             catch (ObjectDisposedException)
             {
-                // #134: a caller-disposed BYO limiter must not crash every subsequent message with an
-                // unhandled ObjectDisposedException. Fail CLOSED - the same 429-style rejection as any
-                // other denial - rather than failing open (which would silently turn off the protection
-                // this middleware exists to provide the moment the limiter is disposed).
-                rejectionDetail = "Rate limit exceeded: the rate limiter has already been disposed";
+                // #202: an ObjectDisposedException here means a dependency the cost delegate itself
+                // touches is already disposed - NOT the rate limiter (that's Acquire()'s own
+                // ObjectDisposedException, caught separately below, unchanged from #134's fix). Report
+                // it as its own distinct failure rather than the misleading "the rate limiter has
+                // already been disposed", while still failing CLOSED per #134's ruling - a broken cost
+                // delegate must never silently bypass the limiter.
+                rejectionDetail = "Rate limit exceeded: the permit cost delegate depends on a resource that has already been disposed";
+            }
+
+            if (rejectionDetail is null)
+            {
+                try
+                {
+                    if (cost < 0)
+                    {
+                        // A negative cost is a caller bug in the cost delegate, not a valid "free"
+                        // message - silently clamping it to 0 (as this used to do) would let it always
+                        // succeed and hide the bug. Raising the same exception AttemptAcquire itself
+                        // would throw for an out-of-range cost routes it through the identical,
+                        // already-correct rejection path below instead of adding a second one.
+                        throw new ArgumentOutOfRangeException(nameof(cost), cost,
+                            "The permit cost delegate returned a negative value.");
+                    }
+
+                    lease = Acquire(context, cost);
+                }
+                catch (ArgumentOutOfRangeException)
+                {
+                    rejectionDetail =
+                        "Rate limit exceeded: the message's cost is invalid, or exceeds the limiter's capacity and can never be granted";
+                }
+                catch (ObjectDisposedException)
+                {
+                    // #134: a caller-disposed BYO limiter must not crash every subsequent message with an
+                    // unhandled ObjectDisposedException. Fail CLOSED - the same 429-style rejection as any
+                    // other denial - rather than failing open (which would silently turn off the protection
+                    // this middleware exists to provide the moment the limiter is disposed).
+                    rejectionDetail = "Rate limit exceeded: the rate limiter has already been disposed";
+                }
             }
 
             if (lease is not { IsAcquired: true })

@@ -48,15 +48,27 @@ when none is supplied anywhere.
   `OperationCanceledException` is the one exception excluded from this - it always propagates rather
   than being logged as a miss, everywhere in this package (read, write, invalidate, write-through).
 - A cache hit is decided by **presence**, never by whether the deserialized value is itself `null`:
-  `LazyLoadAsync` treats an explicitly-cached `null` (`SetValueAsync(default)`) as a real, repeatable
-  hit - negative caching - rather than a permanent miss that re-runs `databaseReadFunc` forever. It
-  still never writes a `null` `Payload` back automatically on a cache miss; a caller opts a null result
-  into the cache itself.
+  `CacheEntry<T>.TryReadEntryAsync` decides presence as `cacheValue != null` (#201 - **not**
+  `!string.IsNullOrEmpty(cacheValue)`, which conflated "key absent" with "the serializer emitted an
+  empty string" and broke negative caching for any `ISerializer` encoding null/default as `""` rather
+  than the stock serializer's `"null"`). `LazyLoadAsync` treats an explicitly-cached `null`
+  (`SetValueAsync(default)`) as a real, repeatable hit - negative caching - rather than a permanent
+  miss that re-runs `databaseReadFunc` forever. It still never writes a `null` `Payload` back
+  automatically on a cache miss; a caller opts a null result into the cache itself. **Every concrete
+  `GetEntryValueAsync` must genuinely distinguish a store-level miss (`null`) from an empty stored
+  value (`""`), including on its own error-handling path** - `RedisCacheEntry.GetEntryValueAsync`'s
+  catch block used to return `""` on a thrown exception, which the presence check above would
+  otherwise misread as a hit of an empty cached value rather than "the read failed"; it now returns
+  `null` there too.
 - Write-through's cache-sync step (`Set`/`Invalidate`, run *after* `modifyDatabaseFunc` has already
   committed) never turns an already-successful database write into this operation's own failure: an
   exception or a provider honestly returning `false` is logged (`Warning`) and swallowed by
   `CacheInvalidateActions.SyncCacheAfterWriteAsync`, and the database's own successful result is still
-  returned. `SetValueAsync`/`InvalidateAsync` themselves are unchanged for a caller invoking them
+  returned. This covers not just the cache I/O itself but also `WriteThroughAsync`'s own
+  caller-supplied `getCacheValue`/`getCacheAction` mapping delegates (#199 - they run inside the same
+  `SyncCacheAfterWriteAsync` call as the cache I/O they decide, so a throw from either degrades
+  identically instead of propagating as if the database write itself had failed).
+  `SetValueAsync`/`InvalidateAsync` themselves are unchanged for a caller invoking them
   directly (outside write-through) - there, an exception is the primary requested action's own failure.
 - `CacheHealthCheck<TCacheService>` - an `IHealthCheck` verifying `ICacheService.CanConnectAsync(cancellationToken)`;
   result `Data` includes `CanConnect` and `Error` (the exception's type name, not its message - not a
@@ -89,7 +101,11 @@ when none is supplied anywhere.
   branches, the value-type miss-as-hit regression, the reference-type explicitly-cached-null-is-a-hit
   case (negative caching), and per-call `expireIn` threading; all three `WriteThroughAsync` overloads
   (default `BenzeneResultStatus`-derived action mapping for `Ok`/`Deleted`/`NotFound`, a custom
-  cache-value mapping, a custom cache-action mapping, per-call `expireIn` threading, and a cache-side
-  exception on the `Set`/`Invalidate` step not failing the already-successful database result); and
-  `WriteThroughInvalidateAsync`'s successful-vs-unsuccessful-result branches plus a cache-side `false`
-  result being logged rather than silently discarded.
+  cache-value mapping, a custom cache-action mapping, per-call `expireIn` threading, a cache-side
+  exception on the `Set`/`Invalidate` step not failing the already-successful database result, and -
+  #199 - a throwing `getCacheValue`/`getCacheAction` delegate degrading the same way rather than
+  propagating as if the database write had failed, with a caller-driven `OperationCanceledException`
+  from either delegate still propagating); a custom `ISerializer` that encodes null as `""` still
+  getting a real negative-cache hit through `LazyLoadAsync` (#201); and `WriteThroughInvalidateAsync`'s
+  successful-vs-unsuccessful-result branches plus a cache-side `false` result being logged rather than
+  silently discarded.

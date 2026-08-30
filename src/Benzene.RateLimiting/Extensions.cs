@@ -245,12 +245,29 @@ public static class Extensions
     /// singleton) once per message, which is what makes the container actually construct-and-track
     /// it for disposal the first time any message flows through.
     /// <para>
-    /// Only ONE internally-created limiter is supported per pipeline: stacking two
+    /// Only ONE internally-created limiter is supported <b>per pipeline</b>: stacking two
     /// <c>UseXRateLimiting</c> calls on the same pipeline builder would otherwise silently let the
-    /// second shadow the first under the shared <see cref="RateLimiter"/> DI key, so this fails fast
-    /// with a clear exception instead. A caller needing more than one layer of protection should
-    /// combine the limits into one <see cref="RateLimiter"/> and use <c>UseRateLimiting</c>, or use
-    /// <c>UsePartitionedRateLimiting</c>.
+    /// second shadow the first, so this fails fast with a clear exception instead. A caller needing
+    /// more than one layer of protection should combine the limits into one <see cref="RateLimiter"/>
+    /// and use <c>UseRateLimiting</c>, or use <c>UsePartitionedRateLimiting</c>.
+    /// </para>
+    /// <para>
+    /// #200: the registration (and the guard above) is keyed on
+    /// <see cref="InternallyOwnedRateLimiterHolder{TContext}"/> — closed over <typeparamref name="TContext"/>,
+    /// not on the bare <see cref="RateLimiter"/> type — because
+    /// <see cref="IMiddlewarePipelineBuilder{TContext}.Create{TNewContext}"/> deliberately shares one
+    /// container across a service's sibling pipelines for different transports (e.g. the AwsMesh
+    /// examples' API Gateway + BenzeneMessage + SQS + SNS + EventBridge pipelines, each its own
+    /// context type, off one <c>IBenzeneApplicationBuilder</c>). Keying on the bare <c>RateLimiter</c>
+    /// type made every sibling pipeline's internally-created limiter collide on the same DI
+    /// registration: the guard above tripped on the second sibling even though it is a genuinely
+    /// different pipeline, and (had the guard been bypassed) the two limiters would have shadowed
+    /// each other under one ambient registration. <typeparamref name="TContext"/> is what already
+    /// distinguishes sibling pipelines at registration time in this codebase (see
+    /// <c>MiddlewarePipelineBuilder{TContext}.Build()</c>'s own <c>PipelineDescriptor</c>, keyed the
+    /// same way) — two calls sharing one pipeline builder (and so the same <typeparamref name="TContext"/>)
+    /// still collide on the same key, so double-registration <b>within</b> one pipeline still fails
+    /// fast exactly as before.
     /// </para>
     /// </remarks>
     private static IMiddlewarePipelineBuilder<TContext> UseInternallyOwnedRateLimiting<TContext>(
@@ -260,7 +277,7 @@ public static class Extensions
     {
         app.Register(x =>
         {
-            if (x.IsTypeRegistered<RateLimiter>())
+            if (x.IsTypeRegistered<InternallyOwnedRateLimiterHolder<TContext>>())
             {
                 throw new InvalidOperationException(
                     "Only one internally-created rate limiter (UseFixedWindowRateLimiting / " +
@@ -269,13 +286,36 @@ public static class Extensions
                     "instead, or use UsePartitionedRateLimiting.");
             }
 
-            x.AddSingleton<RateLimiter>(_ => rateLimiter);
+            x.AddSingleton<InternallyOwnedRateLimiterHolder<TContext>>(_ => new InternallyOwnedRateLimiterHolder<TContext>(rateLimiter));
         });
 
         return app.Use(resolver => new RateLimitingMiddleware<TContext>(
-            resolver.GetService<RateLimiter>(), permitCost, resolver,
+            resolver.GetService<InternallyOwnedRateLimiterHolder<TContext>>().RateLimiter, permitCost, resolver,
             ownsLimiter: true,
             logger: resolver.TryGetService<ILogger<RateLimitingMiddleware<TContext>>>()));
+    }
+
+    /// <summary>
+    /// Wraps an internally-created <see cref="RateLimiter"/> under a DI key unique to the pipeline
+    /// that created it (its <typeparamref name="TContext"/> — see the #200 remarks on
+    /// <see cref="UseInternallyOwnedRateLimiting{TContext}"/>), so sibling pipelines sharing one
+    /// container each get their own container-owned limiter instead of colliding on a single ambient
+    /// registration. Still a container-owned factory singleton — implementing
+    /// <see cref="IAsyncDisposable"/> here (forwarding to the wrapped limiter) is what keeps disposal
+    /// working through this extra layer of indirection: the container only disposes what it resolved
+    /// (this holder), not fields buried inside it, so #133's fix (the limiter must be disposed when
+    /// the container is) would otherwise silently stop working the moment the registration is wrapped.
+    /// </summary>
+    internal sealed class InternallyOwnedRateLimiterHolder<TContext> : IAsyncDisposable
+    {
+        public RateLimiter RateLimiter { get; }
+
+        public InternallyOwnedRateLimiterHolder(RateLimiter rateLimiter)
+        {
+            RateLimiter = rateLimiter;
+        }
+
+        public ValueTask DisposeAsync() => RateLimiter.DisposeAsync();
     }
 
     private static TokenBucketRateLimiter CreateTokenBucket(int tokenLimit, int tokensPerPeriod,

@@ -64,31 +64,34 @@ public abstract class CacheWriteActions<T> : CacheInvalidateActions, ICacheWrite
 
         var result = await modifyDatabaseFunc();
 
-        switch (getCacheAction(result))
+        // #199: getCacheAction/getCacheValue are caller-supplied delegates that only run AFTER the
+        // database write above has already committed - exactly like the cache I/O they decide, so a
+        // throw from either of them must degrade the same way (#139's SyncCacheAfterWriteAsync
+        // contract: logged and swallowed, the already-successful database result still returned)
+        // rather than propagating as if the database write itself had failed. Running the whole
+        // decide-then-sync sequence inside one SyncCacheAfterWriteAsync call gives a throw from
+        // getCacheAction/getCacheValue the identical protection as one from the cache I/O they lead to.
+        await SyncCacheAfterWriteAsync(async ct =>
         {
-            case CacheUpdateAction.Set:
-                timerScope.SetTag("cache-action", "set");
-                // getCacheValue can legitimately produce null (e.g. the default Payload-based mapping
-                // for a reference-type T) - nothing to write back to the cache in that case.
-                var cacheValue = getCacheValue(result);
-                if (cacheValue is not null)
-                {
-                    // The database write already committed - see SyncCacheAfterWriteAsync (#139): a
-                    // cache-side failure here must not surface as this operation's own failure.
-                    await SyncCacheAfterWriteAsync(ct => SetValueAsync(cacheValue, expireIn, ct), "set", cancellationToken);
-                }
-                break;
+            switch (getCacheAction(result))
+            {
+                case CacheUpdateAction.Set:
+                    timerScope.SetTag("cache-action", "set");
+                    // getCacheValue can legitimately produce null (e.g. the default Payload-based
+                    // mapping for a reference-type T) - nothing to write back to the cache in that case.
+                    var cacheValue = getCacheValue(result);
+                    return cacheValue is null || await SetValueAsync(cacheValue, expireIn, ct);
 
-            case CacheUpdateAction.Invalidate:
-                timerScope.SetTag("cache-action", "invalidate");
-                await SyncCacheAfterWriteAsync(ct => InvalidateAsync(ct), "invalidate", cancellationToken);
-                break;
+                case CacheUpdateAction.Invalidate:
+                    timerScope.SetTag("cache-action", "invalidate");
+                    return await InvalidateAsync(ct);
 
-            default:
-                timerScope.SetTag("cache-action", "none");
-                Logger.LogDebug("Cache unchanged for key {key}", KeyDescription);
-                break;
-        }
+                default:
+                    timerScope.SetTag("cache-action", "none");
+                    Logger.LogDebug("Cache unchanged for key {key}", KeyDescription);
+                    return true;
+            }
+        }, "write-through", cancellationToken);
 
         return result;
     }
