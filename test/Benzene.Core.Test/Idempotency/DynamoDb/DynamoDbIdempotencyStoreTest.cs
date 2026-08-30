@@ -182,6 +182,43 @@ public class DynamoDbIdempotencyStoreTest
     }
 
     [Fact]
+    public async Task TryClaim_WhenExistingRecordExpiresAtExactlyNow_WinsTheReclaim_NotContention()
+    {
+        // #272 — the write condition and ReadRecordAsync's expiry check must agree at the exact
+        // boundary: a record whose expiresAt equals "now" (the same whole-second granularity both
+        // sides use) must be reclaimable by the WRITE path too, not just treated as expired by the
+        // read-back that follows a lost race. Simulate DynamoDB evaluating the store's own
+        // ConditionExpression text against the existing record (attribute_exists(pk) is true here, so
+        // only the expiresAt comparison decides the outcome) so this test actually exercises the
+        // comparison operator the store builds, not a hard-coded assumption about it.
+        var dynamo = MockDynamo();
+        var recordExpiresAt = Now;
+        var putAttempts = 0;
+        dynamo.Setup(x => x.PutItemAsync(It.IsAny<PutItemRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<PutItemRequest, CancellationToken>((r, _) =>
+            {
+                putAttempts++;
+                var nowValue = long.Parse(r.ExpressionAttributeValues[":now"].N);
+                var expiresValue = recordExpiresAt.ToUnixTimeSeconds();
+                var conditionPasses = r.ConditionExpression.Contains("<=")
+                    ? expiresValue <= nowValue
+                    : expiresValue < nowValue;
+                return conditionPasses
+                    ? Task.FromResult(new PutItemResponse())
+                    : throw new ConditionalCheckFailedException("live record exists");
+            });
+        dynamo.Setup(x => x.GetItemAsync(It.IsAny<GetItemRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(LiveRecord("key-1", "InProgress", false, recordExpiresAt));
+        var store = new DynamoDbIdempotencyStore(dynamo.Object, "idempotency", now: () => Now);
+
+        var claim = await store.TryClaimAsync("key-1");
+
+        Assert.True(claim.Claimed);
+        Assert.Equal(1, putAttempts);
+        dynamo.Verify(x => x.GetItemAsync(It.IsAny<GetItemRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task TryClaim_WhenEveryRetryRacesAgainstAVanishingRecord_ThrowsRatherThanPhantomWin()
     {
         // Pathological case: every conditional PutItem loses, and every immediate read-back finds the

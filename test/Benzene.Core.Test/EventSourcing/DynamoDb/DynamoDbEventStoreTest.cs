@@ -230,6 +230,61 @@ public class DynamoDbEventStoreTest
     }
 
     [Fact]
+    public async Task Append_ExactlyTheTransactionLimit_AtExpectedVersionZero_Succeeds()
+    {
+        // #271 — a brand-new stream (expectedVersion == 0) has no ConditionCheck item, so a genuine
+        // 100-event append is exactly 100 transact items and must still succeed.
+        var dynamo = new Mock<IAmazonDynamoDB>(MockBehavior.Strict);
+        TransactWriteItemsRequest? captured = null;
+        dynamo.Setup(x => x.TransactWriteItemsAsync(It.IsAny<TransactWriteItemsRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<TransactWriteItemsRequest, CancellationToken>((r, _) => captured = r)
+            .ReturnsAsync(new TransactWriteItemsResponse());
+        var store = new DynamoDbEventStore(dynamo.Object, "events");
+        var exactly100 = Enumerable.Range(0, 100).Select(_ => new EventEnvelope("E", "{}")).ToArray();
+
+        var newVersion = await store.AppendAsync("acct-1", 0, exactly100);
+
+        Assert.Equal(100, newVersion);
+        Assert.Equal(100, captured!.TransactItems.Count);
+    }
+
+    [Fact]
+    public async Task Append_100EventsAtAnExpectedVersionGreaterThanZero_ThrowsAFriendlyErrorPreFlight()
+    {
+        // #271 — an append onto an EXISTING stream (expectedVersion > 0) also carries the #121
+        // ConditionCheck item, so 100 events + 1 condition check = 101 transact items, over AWS's
+        // hard 100-item limit. The library must reject this itself with a friendly ArgumentException
+        // before ever calling DynamoDB (MockBehavior.Strict enforces no SDK call is made).
+        var dynamo = new Mock<IAmazonDynamoDB>(MockBehavior.Strict);
+        var store = new DynamoDbEventStore(dynamo.Object, "events");
+        var exactly100 = Enumerable.Range(0, 100).Select(_ => new EventEnvelope("E", "{}")).ToArray();
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => store.AppendAsync("acct-1", expectedVersion: 5, exactly100));
+
+        Assert.Contains("99", ex.Message);
+        dynamo.Verify(x => x.TransactWriteItemsAsync(It.IsAny<TransactWriteItemsRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Append_99EventsAtAnExpectedVersionGreaterThanZero_ProducesExactly100TransactItems_AndSucceeds()
+    {
+        // #271 — 99 events + 1 ConditionCheck item = 100 transact items, exactly at (not over) AWS's
+        // limit, so this must succeed.
+        var dynamo = new Mock<IAmazonDynamoDB>(MockBehavior.Strict);
+        TransactWriteItemsRequest? captured = null;
+        dynamo.Setup(x => x.TransactWriteItemsAsync(It.IsAny<TransactWriteItemsRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<TransactWriteItemsRequest, CancellationToken>((r, _) => captured = r)
+            .ReturnsAsync(new TransactWriteItemsResponse());
+        var store = new DynamoDbEventStore(dynamo.Object, "events");
+        var exactly99 = Enumerable.Range(0, 99).Select(_ => new EventEnvelope("E", "{}")).ToArray();
+
+        var newVersion = await store.AppendAsync("acct-1", expectedVersion: 5, exactly99);
+
+        Assert.Equal(104, newVersion);
+        Assert.Equal(100, captured!.TransactItems.Count);
+    }
+
+    [Fact]
     public async Task Append_SameStreamExpectedVersionAndEvents_ProducesTheSameClientRequestToken()
     {
         // #129 — a deterministic token means a retried request for the exact same append is treated
