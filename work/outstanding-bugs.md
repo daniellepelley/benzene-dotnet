@@ -2901,6 +2901,52 @@ Full baseline re-verified after both fixes: `Benzene.Core.Test` 3296 passed / 2 
 `Benzene.Mesh.Test` 575 passed, `Benzene.Mesh.Host.Test` 150 passed, `Benzene.Examples.sln` build 0
 errors. Pushed to `main` (`28473b0`).
 
+## Round 16, WP-B — Benzene.Resilience.Polly (2026-08-30)
+
+- **[RESOLVED] #267 — `PollyResilienceMiddleware<TContext>`'s docs overclaimed Hedging/Fallback
+  support that doesn't compile, and the underlying design had no isolation between concurrent Polly
+  attempts.** Two independent halves, one root: (a) the package's `.csproj` `<Description>`, XML
+  `<remarks>`, `CLAUDE.md`, and `docs/cookbooks/polly-resilience.md` all listed Hedging and Fallback
+  as supported strategies, but Polly.Core 8.5.0's `AddHedging`/`AddFallback` exist only on the
+  *generic* `ResiliencePipelineBuilder<TResult>`, while every `.UseResiliencePipeline(...)` overload
+  only hands out the non-generic builder — the advertised code shapes don't compile (`CS1929`/`CS0305`,
+  verified in `work/review-round16-core-2026-08.md` §2). (b) The deeper bug:
+  `PollyResilienceMiddleware<TContext>.HandleAsync` shared one mutable `CancellationTokenAccessor`,
+  one `context`, and one `next` closure across every Polly attempt with zero isolation — reachable
+  today via Polly's own public non-generic `AddStrategy(...)` extensibility point (a hand-rolled
+  concurrent-attempt "hedge"), which ran `next()` (the entire downstream pipeline) twice for one
+  message, tore the ambient token between attempts, and last-write-won the shared context. Proven
+  3/3 by the xUnit repro in `work/review-round16-performance-2026-08.md` Finding 1 (all three
+  assertions passed against the unmodified middleware, proving the corruption).
+  - **Docs fix**: removed every Hedging/Fallback claim from the `.csproj` `Description`, the type's
+    XML `<remarks>`, `CLAUDE.md`, and the cookbook (retitled "Polly Resilience Pipelines (circuit
+    breaker, timeout, retry, rate limiter)"), replacing them with the accurate supported-strategy
+    list (Retry, Timeout, CircuitBreaker, RateLimiter — the sequential-attempt strategies expressible
+    on the non-generic builder) plus a new cookbook section,
+    [Why concurrent-attempt strategies aren't supported](cookbooks/polly-resilience.md#why-concurrent-attempt-strategies-arent-supported),
+    explaining both halves of the root cause. `docs/capability-matrix.md`'s Resilience row updated to
+    match.
+  - **Runtime fix**: added a per-`HandleAsync`-call re-entrancy guard (`Interlocked.Increment` on a
+    one-element `int[]` counter allocated once per call, closed over via the existing state tuple) in
+    the attempt callback — if a second attempt starts while one is still in flight, it throws
+    `NotSupportedException` naming the problem ("a concurrent-attempt resilience strategy ... is not
+    supported by PollyResilienceMiddleware<TContext> ... run attempts sequentially, or hedge at a
+    different layer") before ever calling `next()` a second time, instead of silently corrupting the
+    shared context/token. Zero added cost/behavioral change for every sequential-attempt strategy
+    (Retry/Timeout/CircuitBreaker/RateLimiter never drive the counter above 1). Did **not** attempt
+    per-attempt context/token isolation (option (b) from the performance review) — that is a bigger
+    architecture change with no defined merge semantics for a mutable message context across
+    concurrent attempts, deliberately deferred; see the `[OPEN]` entry below.
+  - **Tests**: `test/Benzene.Core.Test/Resilience/PollyResilienceMiddlewareConcurrentAttemptGuardTest.cs`
+    (new) — the `ConcurrentDuplicateStrategy` custom Polly strategy from the performance review's
+    repro, rewritten to assert the corrected fail-fast behavior: the middleware throws
+    `NotSupportedException` on the concurrent second attempt, `next()` runs at most once (no
+    concurrent-execution, no shared-accessor tearing, no last-write-wins on the context observed).
+    Every existing `test/Benzene.Core.Test/Resilience/PollyResilienceMiddlewareTest.cs` case (Retry/
+    Timeout paths, the #237 and #63 regression tests) verified unchanged and green —
+    `dotnet test test/Benzene.Core.Test -c Release --filter "FullyQualifiedName~PollyResilienceMiddleware"`:
+    14 passed (11 existing + 3 new), 0 failed.
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.
@@ -3090,6 +3136,22 @@ regressed by this work package.
   `CosmosChangeType.Unknown` enum value.
 - **[DECISION] `SnsMessageBodyGetter` un-guarded `SnsRecord.Sns`** — adding `?.` would return null and
   weaken `GetBody`'s non-null contract; not production-reachable (AWS always populates `Sns`).
+
+### New from round 16, WP-B — Benzene.Resilience.Polly (2026-08-30)
+- **[OPEN] Should `PollyResilienceMiddleware<TContext>` ever support concurrent-attempt Polly
+  strategies (Hedging, or a hand-rolled concurrent-attempt strategy) via per-attempt isolation?**
+  #267's fix (below) makes the middleware fail fast with `NotSupportedException` on a concurrent
+  second attempt rather than corrupt shared state, but that's a guard, not support. The performance
+  review's option (b) — redesign the ambient-token/context exposure to be attempt-scoped (e.g. an
+  `AsyncLocal<CancellationToken>` per logical attempt instead of one mutable
+  `CancellationTokenAccessor` field, plus a defined merge/isolation semantics for the shared,
+  mutable `TContext` each attempt's `next()` closure currently writes to directly) is a bigger
+  architecture question deliberately deferred this round: per-attempt context cloning has no
+  obvious merge semantics for an arbitrary mutable message context (which attempt's writes win? do
+  they merge? is that even meaningful for a `MessageResult`?). Needs a maintainer decision on
+  whether concurrent-attempt strategies are worth that redesign at all, or whether the middleware's
+  documented position should simply stay "sequential-attempt only, hedge at a different layer."
+  (`work/review-round16-performance-2026-08.md` Finding 1, recommendation 2(b).)
 
 ---
 
