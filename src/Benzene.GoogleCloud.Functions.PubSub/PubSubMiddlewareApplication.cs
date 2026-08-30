@@ -68,7 +68,14 @@ public class PubSubMiddlewareApplication : IMiddlewareApplication<MessagePublish
                 await _pipeline.HandleAsync(context, scope);
             }
 
-            if (_options.RaiseOnFailureStatus && context.MessageResult?.IsSuccessful == false)
+            // #275: null (a pipeline that completed without any middleware setting an outcome - an
+            // unroutable topic, or a short-circuit before MessageRouter runs) must escalate the same
+            // way an explicit failure does - "not proven successful", matching
+            // SingleContextEscalatingApplicationBase/#229/#260's convention. Worse to get wrong here
+            // than on the AWS single-context transports: Cloud Functions delivers exactly one Pub/Sub
+            // message per invocation with no batch-level fallback, so completing without throwing
+            // silently, permanently acks (and drops) it.
+            if (_options.RaiseOnFailureStatus && context.MessageResult?.IsSuccessful != true)
             {
                 throw new PubSubMessageProcessingException(context.Message?.MessageId);
             }

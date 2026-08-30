@@ -83,16 +83,21 @@ default here.
   contract is not "skip the bad records" — the event source mapping reads only the *first* reported
   failure and retries **every** record from that sequence number to the end of the batch (see
   `work/archive/kinesis-batch-failure-handling-design-2026-07.md` §2). So `CheckpointAsync(record)` means
-  "everything up to this record **in shard/batch order** is safe", and the checkpointer keeps a
-  single monotonic watermark (it never rewinds; an out-of-shard-order or projected-copy checkpoint
-  that would move the resume point backward is ignored). **Consequence for a `PartitionBy` handler:**
-  do **not** checkpoint each partition's own latest record independently — checkpointing a
-  later-in-the-batch record marks *every* earlier record done, including interleaved records from
-  other partitions you may not have processed yet, and Kinesis cannot skip them (there is no
-  per-record redelivery). Checkpoint the **shard-order frontier** — the highest record index `N`
-  such that every record `0..N` is complete — or just let `AutoCheckpointOnSuccess` checkpoint the
-  whole batch at the end. A per-partition/set-based "retain A, retry B" model is impossible within
-  Kinesis's contract, not a missing feature.
+  "this record is confirmed", and the checkpointer reports the resume point as the first record that
+  hasn't been confirmed — the end of the longest **contiguous-prefix** (in original batch/shard order)
+  of confirmed records (round 17, `#273`; a confirmed record can never become unconfirmed, so this only
+  ever advances as more of the prefix fills in). **Consequence for a `PartitionBy` handler:** you
+  *can* checkpoint each record as its own partition group finishes it — the checkpointer will never
+  silently report a still-failed, earlier-in-the-batch record from a different partition as done just
+  because a later record was confirmed first (the bug `#273` fixed). What you get instead is
+  **accepted over-retry**: if partition A's group finishes and checkpoints before partition B's group
+  is even reached, and B then fails, every one of A's already-confirmed records sits *after* B's
+  position and is reported to AWS as unconfirmed too — so Kinesis redelivers them alongside B, even
+  though they already succeeded. That's safe (at-least-once; keep handlers idempotent), never the
+  silent skip the old max-index watermark risked. If you'd rather avoid that over-retry entirely,
+  checkpoint the **shard-order frontier** yourself — the highest record index `N` such that every
+  record `0..N` is complete — or just let `AutoCheckpointOnSuccess` checkpoint the whole batch at the
+  end.
 - **Real checkpointing and per-record failure containment** (2026-07-17, closing the gap flagged
   below this line previously): the batch's `StreamContext<KinesisEventRecord>` is wired with a real
   `KinesisStreamCheckpointer`, not `NullStreamCheckpointer`. A handler calls

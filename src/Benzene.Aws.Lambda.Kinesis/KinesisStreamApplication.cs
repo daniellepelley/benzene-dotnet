@@ -17,7 +17,11 @@ namespace Benzene.Aws.Lambda.Kinesis;
 /// processed by one pipeline run in one DI scope — the same shape as the Azure Event Hubs streaming
 /// transport. This preserves the batch as a stream, so handlers can window and re-order it (e.g.
 /// <c>PartitionBy(r =&gt; r.Kinesis.PartitionKey)</c>), rather than fanning out per record and losing
-/// shard ordering.
+/// shard ordering. Checkpointing per record while partitioned is safe: <see cref="KinesisStreamCheckpointer"/>
+/// tracks a contiguous-prefix watermark (not a single monotonic max-index one), so a still-failed
+/// record earlier in the batch is never silently reported as done just because a later record from a
+/// different partition group was confirmed first — see the checkpointer's own remarks for the
+/// accepted over-retry tradeoff that follows from this.
 /// </summary>
 /// <remarks>
 /// Response-producing: wires a <see cref="KinesisStreamCheckpointer"/> into the batch's

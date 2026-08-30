@@ -19,7 +19,11 @@ public class PubSubOptions
     /// <summary>
     /// Gets or sets whether a message handler returning a non-exception failure result is escalated
     /// into a thrown exception, so a failure is treated the same as an unhandled exception for
-    /// retry purposes. Defaults to <c>true</c> (safe-by-default: a returned failure is escalated and redelivered; set <c>false</c> for at-most-once, and keep the handler idempotent). Historically the reasoning was that a failure result usually reflects a
+    /// retry purposes. Defaults to <c>true</c> (safe-by-default: a returned failure - or a pipeline
+    /// that completes without ever setting a result at all, e.g. an unroutable topic or a
+    /// short-circuit before <c>MessageRouter</c> runs - is escalated and redelivered; only an
+    /// explicit success is accepted. Set <c>false</c> for at-most-once, and keep the handler
+    /// idempotent). Historically the reasoning was that a failure result usually reflects a
     /// permanent/business-logic failure that retrying won't fix.
     /// </summary>
     public bool RaiseOnFailureStatus { get; set; } = true;
