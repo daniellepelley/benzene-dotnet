@@ -36,7 +36,12 @@ public class AutofacBenzeneServiceContainer : IBenzeneServiceContainer
 
     public IBenzeneServiceContainer AddScoped(Type type)
     {
-        if (type.IsGenericType)
+        // IsGenericTypeDefinition (not IsGenericType, which is also true for a CLOSED generic like
+        // Handler<Widget>) - Autofac's RegisterGeneric requires an open generic type definition and
+        // throws ArgumentException on a closed one. A closed generic Type must take the ordinary
+        // RegisterType path, exactly like MicrosoftBenzeneServiceContainer (which has no generic
+        // branching at all and forwards every Type straight to IServiceCollection). See #210.
+        if (type.IsGenericTypeDefinition)
         {
             _containerBuilder.RegisterGeneric(type).InstancePerLifetimeScope();
         }
@@ -51,7 +56,9 @@ public class AutofacBenzeneServiceContainer : IBenzeneServiceContainer
 
     public IBenzeneServiceContainer AddScoped(Type serviceType, Type implementationType)
     {
-        if (implementationType.IsGenericType)
+        // See #210 note on the Type-only AddScoped overload above: IsGenericTypeDefinition, not
+        // IsGenericType.
+        if (implementationType.IsGenericTypeDefinition)
         {
             _containerBuilder.RegisterGeneric(implementationType).As(serviceType).InstancePerLifetimeScope();
         }
@@ -114,7 +121,8 @@ public class AutofacBenzeneServiceContainer : IBenzeneServiceContainer
 
     public IBenzeneServiceContainer AddTransient(Type type)
     {
-        if (type.IsGenericType)
+        // See #210 note on AddScoped(Type) above: IsGenericTypeDefinition, not IsGenericType.
+        if (type.IsGenericTypeDefinition)
         {
             _containerBuilder.RegisterGeneric(type).InstancePerDependency();
         }
@@ -129,7 +137,8 @@ public class AutofacBenzeneServiceContainer : IBenzeneServiceContainer
 
     public IBenzeneServiceContainer AddTransient(Type serviceType, Type implementationType)
     {
-        if (implementationType.IsGenericType)
+        // See #210 note on AddScoped(Type) above: IsGenericTypeDefinition, not IsGenericType.
+        if (implementationType.IsGenericTypeDefinition)
         {
             _containerBuilder.RegisterGeneric(implementationType).As(serviceType).InstancePerDependency();
         }
@@ -178,7 +187,8 @@ public class AutofacBenzeneServiceContainer : IBenzeneServiceContainer
 
     public IBenzeneServiceContainer AddSingleton(Type type)
     {
-        if (type.IsGenericType)
+        // See #210 note on AddScoped(Type) above: IsGenericTypeDefinition, not IsGenericType.
+        if (type.IsGenericTypeDefinition)
         {
             _containerBuilder.RegisterGeneric(type).SingleInstance();
         }
@@ -193,7 +203,8 @@ public class AutofacBenzeneServiceContainer : IBenzeneServiceContainer
 
     public IBenzeneServiceContainer AddSingleton(Type serviceType, Type implementationType)
     {
-        if (implementationType.IsGenericType)
+        // See #210 note on AddScoped(Type) above: IsGenericTypeDefinition, not IsGenericType.
+        if (implementationType.IsGenericTypeDefinition)
         {
             _containerBuilder.RegisterGeneric(implementationType).As(serviceType).SingleInstance();
         }
