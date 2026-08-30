@@ -181,6 +181,31 @@ public class SagaTest
         Assert.Empty(result.CompensationFailures);
     }
 
+    // #209: two steps in the same stage can fail concurrently (a normal production scenario - two
+    // downstream calls both timing out). Before the fix, SagaResult surfaced only one of them via
+    // Failure/FailureException; the other had no representation anywhere on the result.
+    [Fact]
+    public async Task RunAsync_TwoStepsFailConcurrentlyInSameStage_SurfacesBothInFailures()
+    {
+        var saga = new SagaBuilder()
+            .Stage(stage => stage
+                .Step<string>(step => step.Do(_ => Task.FromResult(BenzeneResult.ServiceUnavailable<string>())))
+                .Step<string>(step => step.Do(_ => throw new InvalidOperationException("boom"))))
+            .Build();
+
+        var result = await saga.RunAsync();
+
+        Assert.Equal(SagaOutcome.RolledBack, result.Outcome);
+        Assert.Equal(2, result.Failures.Count);
+        Assert.All(result.Failures, f => Assert.Equal(SagaStepState.Failed, f.State));
+        Assert.Contains(result.Failures, f => f.Exception is InvalidOperationException);
+        Assert.Contains(result.Failures, f => f.Exception == null && f.Result is { IsSuccessful: false });
+
+        // Failure/FailureException remain a backward-compatible view over the first entry.
+        Assert.Same(result.Failures[0].Result, result.Failure);
+        Assert.Same(result.Failures[0].Exception, result.FailureException);
+    }
+
     [Fact]
     public void Build_WithNoStages_Throws()
     {

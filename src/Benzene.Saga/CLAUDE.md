@@ -45,9 +45,13 @@ Saga  ── ordered ──▶  Stage  ── concurrent ──▶  Step (forwar
   `Benzene.Results` names its type `BenzeneResult`, not `Results`.)
 - `SagaContext` — typed result bag; steps publish their result after their stage succeeds.
 - `SagaResult` — `Outcome` (`Succeeded` / `RolledBack` / `PartiallyRolledBack`), `IsSuccess`,
-  `FailedStageIndex`, `Failure` (the failing step's result), `FailureException`, and
+  `FailedStageIndex`, `Failures` — `IReadOnlyList<SagaStepOutcome>`, **every** failed step's outcome
+  in the failing stage (concurrent steps can fail together) — `Failure`/`FailureException` are
+  convenience views over `Failures[0]`, kept for backward compatibility, and
   `CompensationFailures` — `IReadOnlyList<SagaStepOutcome>`, the run-scoped outcomes of steps whose
-  compensation itself failed (orphaned effects to attend to).
+  compensation itself failed (orphaned effects to attend to). `StateStoreException` carries the
+  `ISagaStateStore` exception when a persistence failure (not a step failure) is what triggered the
+  rollback - see the `ISagaStateStore` bullet below.
 - `SagaStepOutcome` — an immutable, per-run snapshot of one step's outcome (`Step`, `State`, `Result`,
   `Exception`), returned by `ISagaStep.ExecuteAsync`/`CompensateAsync` instead of being stored on the
   step. This is the run-scoped state object the immutability/concurrency-safety contract above depends
@@ -66,6 +70,13 @@ Saga  ── ordered ──▶  Stage  ── concurrent ──▶  Step (forwar
   (in-memory step closures can't be serialized/rehydrated). `InMemorySagaStateStore` (event list +
   `EventsFor(sagaId)`) is the built-in test double; a durable adapter is a 3-method copy-paste (see
   the cookbook). `SagaRunInfo`/`SagaStateEvent`/`SagaStateEventKind` are the data model.
+  **All-or-nothing extends to the store itself (#208):** a call made *after* an effect-producing
+  stage completed (`RecordStageCompletedAsync`, or the final `RecordFinishedAsync` on an
+  all-succeeded run) that throws is caught and treated exactly like a step failure - every completed
+  stage is compensated and the run returns `RolledBack`/`PartiallyRolledBack` with the store's
+  exception on `SagaResult.StateStoreException`, never a raw throw. The one deliberate exception:
+  `RecordStartedAsync` failing (before any stage has run) still propagates raw - nothing exists yet
+  to compensate.
 
 ## Design decisions (from `work/archive/saga-design-2026-07.md` §7)
 - **Await-all within a stage** (not fail-fast) — deterministic; every step's outcome is known
@@ -106,11 +117,15 @@ Saga  ── ordered ──▶  Stage  ── concurrent ──▶  Step (forwar
   reference to shared state.
 - Test coverage lives in `test/Benzene.Core.Test/Saga/` — `SagaTest.cs` (happy path, mid-stage
   failure + rollback, cross-stage LIFO rollback, compensation-failure → `PartiallyRolledBack`,
-  forward-throws, and a 300-concurrent-`RunAsync()` stress test on one built `Saga` asserting zero
-  cross-run contamination), `SagaStepTest.cs` (a step instance returns an independent outcome per call,
-  even under concurrent calls) and `SagaRetryAndStateStoreTest.cs` (retry recovers a flaky step,
-  exhausts to `RolledBack`, refuses to retry `PartiallyRolledBack`; state store records
-  start/stage/finish, only completed stages on failure, one `Started` per retry attempt, and generates
-  an id when none given).
+  forward-throws, two-steps-fail-concurrently → `SagaResult.Failures` has both (#209), and a
+  300-concurrent-`RunAsync()` stress test on one built `Saga` asserting zero cross-run contamination),
+  `SagaStepTest.cs` (a step instance returns an independent outcome per call, even under concurrent
+  calls) and `SagaRetryAndStateStoreTest.cs` (retry recovers a flaky step, exhausts to `RolledBack`,
+  refuses to retry `PartiallyRolledBack`; state store records start/stage/finish, only completed
+  stages on failure, one `Started` per retry attempt, generates an id when none given; and, for #208,
+  a state-store failure right after a stage completes/on the final successful finish triggers
+  compensation and `StateStoreException` rather than a raw throw, a state-store failure before any
+  stage runs still propagates raw, and a compensation failure during a state-store-triggered rollback
+  still reports `PartiallyRolledBack`).
 - Vocabulary note: the legacy code called the forward+compensation unit a "Part" and the parallel
   group a "Step"; this package renames them **Step** and **Stage** respectively.
