@@ -39,6 +39,8 @@ public class SqsBenzeneMessageClient : IBenzeneMessageClient
     /// <param name="topicAttributeKey">The message attribute the topic is written to (defaults to <see cref="SqsContextConverter{T}.DefaultTopicAttribute"/>).</param>
     public SqsBenzeneMessageClient(string queueUrl, IAmazonSQS amazonSqsClient, ILogger<SqsBenzeneMessageClient> logger, IServiceResolver serviceResolver, string topicAttributeKey = SqsContextConverter<object>.DefaultTopicAttribute)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _serviceResolver = serviceResolver;
         _queueUrl = queueUrl;
         _logger = logger;
@@ -62,6 +64,8 @@ public class SqsBenzeneMessageClient : IBenzeneMessageClient
     /// <param name="topicAttributeKey">The message attribute the topic is written to (defaults to <see cref="SqsContextConverter{T}.DefaultTopicAttribute"/>).</param>
     public SqsBenzeneMessageClient(string queueUrl, IMiddlewarePipeline<SqsSendMessageContext> middlewarePipeline, ILogger<SqsBenzeneMessageClient> logger, IServiceResolver serviceResolver, string topicAttributeKey = SqsContextConverter<object>.DefaultTopicAttribute)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _serviceResolver = serviceResolver;
         _middlewarePipeline = middlewarePipeline;
         _logger = logger;

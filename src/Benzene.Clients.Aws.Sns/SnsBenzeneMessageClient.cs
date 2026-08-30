@@ -37,6 +37,8 @@ public class SnsBenzeneMessageClient : IBenzeneMessageClient
     /// <param name="serviceResolver">The service resolver used to run the pipeline.</param>
     public SnsBenzeneMessageClient(string topicArn, IAmazonSimpleNotificationService amazonSnsClient, ILogger<SnsBenzeneMessageClient> logger, IServiceResolver serviceResolver)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _topicArn = topicArn;
         _serviceResolver = serviceResolver;
         _logger = logger;
@@ -58,6 +60,8 @@ public class SnsBenzeneMessageClient : IBenzeneMessageClient
     /// <param name="serviceResolver">The service resolver used to run the pipeline.</param>
     public SnsBenzeneMessageClient(string topicArn, IMiddlewarePipeline<SnsSendMessageContext> middlewarePipeline, ILogger<SnsBenzeneMessageClient> logger, IServiceResolver serviceResolver)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _logger = logger;
         _topicArn = topicArn;
         _middlewarePipeline = middlewarePipeline;

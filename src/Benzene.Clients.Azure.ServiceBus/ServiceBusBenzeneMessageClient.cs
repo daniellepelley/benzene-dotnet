@@ -37,6 +37,8 @@ public class ServiceBusBenzeneMessageClient : IBenzeneMessageClient
     /// <param name="topicPropertyKey">The application property the topic is written to (defaults to <see cref="ServiceBusContextConverter{T}.DefaultTopicProperty"/>).</param>
     public ServiceBusBenzeneMessageClient(ServiceBusSender sender, ILogger<ServiceBusBenzeneMessageClient> logger, IServiceResolver serviceResolver, string topicPropertyKey = ServiceBusContextConverter<object>.DefaultTopicProperty)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _serviceResolver = serviceResolver;
         _logger = logger;
         _topicPropertyKey = topicPropertyKey;
@@ -58,6 +60,8 @@ public class ServiceBusBenzeneMessageClient : IBenzeneMessageClient
     /// <param name="topicPropertyKey">The application property the topic is written to (defaults to <see cref="ServiceBusContextConverter{T}.DefaultTopicProperty"/>).</param>
     public ServiceBusBenzeneMessageClient(IMiddlewarePipeline<ServiceBusSendMessageContext> middlewarePipeline, ILogger<ServiceBusBenzeneMessageClient> logger, IServiceResolver serviceResolver, string topicPropertyKey = ServiceBusContextConverter<object>.DefaultTopicProperty)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _serviceResolver = serviceResolver;
         _middlewarePipeline = middlewarePipeline;
         _logger = logger;

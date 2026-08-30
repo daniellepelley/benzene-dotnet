@@ -7,6 +7,7 @@ using Benzene.Clients;
 using Benzene.Core.Middleware;
 using Benzene.RabbitMq.RabbitMqSendMessage;
 using Benzene.Results;
+using Benzene.Test.Logging.Helpers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using RabbitMQ.Client;
@@ -16,6 +17,44 @@ namespace Benzene.Test.RabbitMq;
 
 public class RabbitMqBenzeneMessageClientTest
 {
+    [Fact]
+    public void Constructor_NullLogger_ThrowsImmediately()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            new RabbitMqBenzeneMessageClient(PublishingChannel().Object, null!, new NullServiceResolver()));
+    }
+
+    [Fact]
+    public void Constructor_PrebuiltPipelineOverload_NullLogger_ThrowsImmediately()
+    {
+        var pipeline = new MiddlewarePipelineBuilder<RabbitMqSendMessageContext>(new NullBenzeneServiceContainer())
+            .UseRabbitMqClient(PublishingChannel().Object)
+            .Build();
+
+        Assert.Throws<ArgumentNullException>(() =>
+            new RabbitMqBenzeneMessageClient(pipeline, null!, new NullServiceResolver()));
+    }
+
+    [Fact]
+    public async Task SendMessageAsync_ThrowingChannel_LogsThroughTheErrorPathWithoutThrowing()
+    {
+        var mockChannel = new Mock<IChannel>();
+        mockChannel.Setup(x => x.BasicPublishAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(),
+                It.IsAny<BasicProperties>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()))
+            .Returns(ValueTask.FromException(new Exception("boom")));
+
+        var collector = new FakeLogCollector();
+        var logger = new FakeLogger<RabbitMqBenzeneMessageClient>(collector);
+
+        var client = new RabbitMqBenzeneMessageClient(mockChannel.Object, logger, new NullServiceResolver());
+
+        var result = await client.SendMessageAsync<string, string>("some-topic", "some-message");
+
+        Assert.Equal(BenzeneResultStatus.ServiceUnavailable, result.Status);
+        Assert.Contains(collector.Entries, e => e.Exception?.Message == "boom");
+    }
+
     private static Mock<IChannel> PublishingChannel()
     {
         var mockChannel = new Mock<IChannel>();

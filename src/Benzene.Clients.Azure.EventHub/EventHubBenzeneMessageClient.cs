@@ -37,6 +37,8 @@ public class EventHubBenzeneMessageClient : IBenzeneMessageClient
     /// <param name="topicPropertyKey">The event property the topic is written to (defaults to <see cref="EventHubContextConverter{T}.DefaultTopicProperty"/>).</param>
     public EventHubBenzeneMessageClient(EventHubProducerClient producerClient, ILogger<EventHubBenzeneMessageClient> logger, IServiceResolver serviceResolver, string topicPropertyKey = EventHubContextConverter<object>.DefaultTopicProperty)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _serviceResolver = serviceResolver;
         _logger = logger;
         _topicPropertyKey = topicPropertyKey;
@@ -58,6 +60,8 @@ public class EventHubBenzeneMessageClient : IBenzeneMessageClient
     /// <param name="topicPropertyKey">The event property the topic is written to (defaults to <see cref="EventHubContextConverter{T}.DefaultTopicProperty"/>).</param>
     public EventHubBenzeneMessageClient(IMiddlewarePipeline<EventHubSendMessageContext> middlewarePipeline, ILogger<EventHubBenzeneMessageClient> logger, IServiceResolver serviceResolver, string topicPropertyKey = EventHubContextConverter<object>.DefaultTopicProperty)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _serviceResolver = serviceResolver;
         _middlewarePipeline = middlewarePipeline;
         _logger = logger;

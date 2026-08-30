@@ -59,6 +59,8 @@ public class RabbitMqBenzeneMessageClient : IBenzeneMessageClient
         IServiceResolver serviceResolver, string exchange = "", bool mandatory = false,
         string topicHeaderKey = RabbitMqConstants.DefaultTopicHeader, TimeSpan? publishConfirmTimeout = null)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _serviceResolver = serviceResolver;
         _logger = logger;
         _exchange = exchange;
@@ -81,6 +83,8 @@ public class RabbitMqBenzeneMessageClient : IBenzeneMessageClient
         ILogger<RabbitMqBenzeneMessageClient> logger, IServiceResolver serviceResolver, string exchange = "",
         string topicHeaderKey = RabbitMqConstants.DefaultTopicHeader)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _serviceResolver = serviceResolver;
         _logger = logger;
         _exchange = exchange;
