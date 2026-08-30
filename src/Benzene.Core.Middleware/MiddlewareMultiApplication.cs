@@ -59,7 +59,7 @@ public class MiddlewareMultiApplication<TEvent, TContext, TResult>(
                 scope.SeedCancellationToken(cancellationToken);
                 await pipelineBuilder.HandleAsync(context, scope);
                 return resultMapper(context);
-            }, maxDegreeOfParallelism);
+            }, maxDegreeOfParallelism, cancellationToken);
     }
 }
 
@@ -113,7 +113,7 @@ public class MiddlewareMultiApplication<TEvent, TContext>(
                 using var scope = serviceResolverFactory.CreateScope();
                 scope.SeedCancellationToken(cancellationToken);
                 await pipeline.HandleAsync(context, scope);
-            }, maxDegreeOfParallelism);
+            }, maxDegreeOfParallelism, cancellationToken);
     }
 }
 

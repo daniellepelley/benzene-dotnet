@@ -70,7 +70,9 @@ public class KafkaApplication : IMiddlewareApplication<KafkaEvent, KafkaBatchRes
         // partition's resume point; across partitions we fan out, bounded by MaxDegreeOfParallelism.
         var perPartition = await BoundedFanOut.WhenAllAsync(records, async partition =>
             await ProcessPartitionAsync(@event, partition.Key, partition.Value, serviceResolverFactory),
-            _options.MaxDegreeOfParallelism);
+            // No cancellation token reaches this application's HandleAsync today (IMiddlewareApplication's
+            // two-arg overload only) - default is the honest signal there is none to observe here.
+            _options.MaxDegreeOfParallelism, default);
 
         var failures = perPartition.Where(failure => failure != null).Select(failure => failure!).ToList();
 

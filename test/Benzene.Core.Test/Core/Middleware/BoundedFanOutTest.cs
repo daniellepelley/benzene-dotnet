@@ -147,4 +147,101 @@ public class BoundedFanOutTest
         Assert.True(probe.MaxObserved <= 3, $"Expected at most 3 concurrent, observed {probe.MaxObserved}.");
         Assert.True(probe.MaxObserved == 3, $"Expected the cap of 3 to actually be reached, observed {probe.MaxObserved}.");
     }
+
+    /// <summary>
+    /// Regression coverage for #230: an item still queued behind the semaphore's
+    /// <c>MaxDegreeOfParallelism</c> gate must observe cancellation instead of waiting indefinitely
+    /// for a free slot. The review's exact probe: cap of 1, three items, item 0 sleeps 300ms, cancel at
+    /// 50ms - before the fix all three ran to completion (~300ms+, no OCE); after the fix items 1/2
+    /// never start and the call surfaces cancellation quickly.
+    /// </summary>
+    [Fact]
+    public async Task WhenAllAsync_Bounded_ItemQueuedBehindTheSemaphore_ObservesCancellation()
+    {
+        var started = new System.Collections.Concurrent.ConcurrentBag<int>();
+        using var cts = new CancellationTokenSource();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        var task = BoundedFanOut.WhenAllAsync(new[] { 0, 1, 2 }, async i =>
+        {
+            started.Add(i);
+            await Task.Delay(300);
+            return i;
+        }, maxDegreeOfParallelism: 1, cts.Token);
+
+        cts.CancelAfter(50);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
+        sw.Stop();
+
+        // Items 1 and 2 were still queued behind the cap when cancellation fired - they must never
+        // start. Only item 0 (already running) gets to. This is the load-bearing assertion: it is
+        // timing-independent (unlike a wall-clock bound, which is unreliable on a loaded CI box) and
+        // fails unambiguously under the pre-fix behavior, where every item ran to completion.
+        Assert.Equal(new[] { 0 }, started.OrderBy(x => x));
+
+        // Loose sanity check that cancellation wasn't drained through the full backlog (3 items x
+        // 300ms, ~900ms+ pre-fix) - generous enough to tolerate scheduling jitter on a busy host
+        // without becoming a source of flakiness; the "started" assertion above is the real guard.
+        Assert.True(sw.ElapsedMilliseconds < 5000, $"Expected cancellation well before the full unbounded drain, took {sw.ElapsedMilliseconds}ms.");
+    }
+
+    /// <summary>
+    /// The void overload must forward the token through to the same gated path - regression coverage
+    /// alongside the result-returning overload's cancellation test.
+    /// </summary>
+    [Fact]
+    public async Task WhenAllAsync_Void_Bounded_ItemQueuedBehindTheSemaphore_ObservesCancellation()
+    {
+        var started = new System.Collections.Concurrent.ConcurrentBag<int>();
+        using var cts = new CancellationTokenSource();
+
+        var task = BoundedFanOut.WhenAllAsync(new[] { 0, 1, 2 }, async i =>
+        {
+            started.Add(i);
+            await Task.Delay(300);
+        }, maxDegreeOfParallelism: 1, cts.Token);
+
+        cts.CancelAfter(50);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
+
+        Assert.Equal(new[] { 0 }, started.OrderBy(x => x));
+    }
+
+    /// <summary>
+    /// An already-running item (not queued) must still be awaited to completion rather than abandoned
+    /// when a sibling's queued wait is cancelled - <see cref="Task.WhenAll(Task[])"/> awaits every task
+    /// before this call returns/throws, so nothing is left running un-observed.
+    /// </summary>
+    [Fact]
+    public async Task WhenAllAsync_Bounded_OnCancellation_AlreadyStartedItemStillRunsToCompletion()
+    {
+        var completed = false;
+        using var cts = new CancellationTokenSource();
+
+        var task = BoundedFanOut.WhenAllAsync(new[] { 0, 1 }, async i =>
+        {
+            if (i == 0)
+            {
+                await Task.Delay(150);
+                completed = true;
+            }
+            else
+            {
+                // Item 1 is queued behind the cap of 1 and never gets to run before cancellation.
+                await Task.Delay(1000);
+            }
+
+            return i;
+        }, maxDegreeOfParallelism: 1, cts.Token);
+
+        cts.CancelAfter(20);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
+
+        // By the time WhenAllAsync's task has completed (with cancellation), item 0's own 150ms delay
+        // must already have finished - it was awaited to completion, not abandoned.
+        Assert.True(completed, "Expected the already-started item to run to completion before cancellation surfaced.");
+    }
 }

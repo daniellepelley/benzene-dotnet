@@ -53,6 +53,8 @@ public class S3Application : SingleContextEscalatingApplicationBase<S3Applicatio
     public async Task HandleAsync(S3Event @event, IServiceResolverFactory serviceResolverFactory)
     {
         var contexts = @event.Records.Select(record => S3RecordContext.CreateInstance(@event, record));
-        await BoundedFanOut.WhenAllAsync(contexts, context => ProcessAsync(context, serviceResolverFactory), _options.MaxDegreeOfParallelism);
+        // No cancellation token reaches this application's HandleAsync today (IMiddlewareApplication's
+        // two-arg overload only) - default is the honest signal there is none to observe here.
+        await BoundedFanOut.WhenAllAsync(contexts, context => ProcessAsync(context, serviceResolverFactory), _options.MaxDegreeOfParallelism, default);
     }
 }

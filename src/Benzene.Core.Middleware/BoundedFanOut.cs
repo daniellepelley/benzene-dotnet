@@ -1,3 +1,5 @@
+using System.Threading;
+
 namespace Benzene.Core.Middleware;
 
 /// <summary>
@@ -30,9 +32,18 @@ public static class BoundedFanOut
     /// The maximum number of records processed at once. <c>null</c> or any value &lt;= 0 means
     /// unbounded (every record starts at once) - the default, behavior-preserving mode.
     /// </param>
+    /// <param name="cancellationToken">
+    /// Observed by an item still queued behind <paramref name="maxDegreeOfParallelism"/>'s
+    /// concurrency gate - cancelling it stops queued items from ever starting. Items already running
+    /// are not abandoned: they still run to completion (or their own fault/cancellation) and are
+    /// awaited before the cancellation surfaces from this call, so a caller never has an un-awaited
+    /// in-flight task left behind. Defaults to <see cref="CancellationToken.None"/>. Has no effect in
+    /// the unbounded path above, since nothing ever queues.
+    /// </param>
     /// <returns>The per-record results, in the same order as <paramref name="source"/>.</returns>
     public static Task<TResult[]> WhenAllAsync<TSource, TResult>(
-        IEnumerable<TSource> source, Func<TSource, Task<TResult>> body, int? maxDegreeOfParallelism)
+        IEnumerable<TSource> source, Func<TSource, Task<TResult>> body, int? maxDegreeOfParallelism,
+        CancellationToken cancellationToken = default)
     {
         if (!IsBounded(maxDegreeOfParallelism))
         {
@@ -40,7 +51,7 @@ public static class BoundedFanOut
         }
 
         var semaphore = new SemaphoreSlim(maxDegreeOfParallelism!.Value);
-        return RunGatedAsync(source, body, semaphore);
+        return RunGatedAsync(source, body, semaphore, cancellationToken);
     }
 
     /// <summary>
@@ -54,8 +65,17 @@ public static class BoundedFanOut
     /// The maximum number of records processed at once. <c>null</c> or any value &lt;= 0 means
     /// unbounded (every record starts at once) - the default, behavior-preserving mode.
     /// </param>
+    /// <param name="cancellationToken">
+    /// Observed by an item still queued behind <paramref name="maxDegreeOfParallelism"/>'s
+    /// concurrency gate - cancelling it stops queued items from ever starting. Items already running
+    /// are not abandoned: they still run to completion (or their own fault/cancellation) and are
+    /// awaited before the cancellation surfaces from this call, so a caller never has an un-awaited
+    /// in-flight task left behind. Defaults to <see cref="CancellationToken.None"/>. Has no effect in
+    /// the unbounded path above, since nothing ever queues.
+    /// </param>
     public static Task WhenAllAsync<TSource>(
-        IEnumerable<TSource> source, Func<TSource, Task> body, int? maxDegreeOfParallelism)
+        IEnumerable<TSource> source, Func<TSource, Task> body, int? maxDegreeOfParallelism,
+        CancellationToken cancellationToken = default)
     {
         // Reuse the result-returning overload with a sentinel result so there's one gating
         // implementation to reason about; the throwaway bool[] is negligible against per-record
@@ -64,17 +84,18 @@ public static class BoundedFanOut
         {
             await body(item);
             return true;
-        }, maxDegreeOfParallelism);
+        }, maxDegreeOfParallelism, cancellationToken);
     }
 
     private static async Task<TResult[]> RunGatedAsync<TSource, TResult>(
-        IEnumerable<TSource> source, Func<TSource, Task<TResult>> body, SemaphoreSlim semaphore)
+        IEnumerable<TSource> source, Func<TSource, Task<TResult>> body, SemaphoreSlim semaphore,
+        CancellationToken cancellationToken)
     {
         using (semaphore)
         {
             var tasks = source.Select(async item =>
                 {
-                    await semaphore.WaitAsync().ConfigureAwait(false);
+                    await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
                     try
                     {
                         return await body(item).ConfigureAwait(false);
@@ -86,6 +107,10 @@ public static class BoundedFanOut
                 })
                 .ToArray();
 
+            // Task.WhenAll awaits every task to completion (success, fault, or cancellation) before
+            // this returns/throws - an item cancelled while queued behind the semaphore surfaces as
+            // OperationCanceledException here only once every already-started item has settled, so
+            // none of them are left running un-awaited.
             return await Task.WhenAll(tasks).ConfigureAwait(false);
         }
     }

@@ -119,7 +119,7 @@ public class JaegerTraceSource : IMeshTraceSource
 
             var body = await GetStringOrNullAsync(url, cancellationToken);
             return body is null ? new List<JaegerMappedTrace>() : JaegerTraceMapper.MapTraces(body);
-        }, _options.SearchConcurrency);
+        }, _options.SearchConcurrency, cancellationToken);
 
         var byTraceId = new Dictionary<string, JaegerMappedTrace>();
         foreach (var trace in perService.SelectMany(traces => traces))

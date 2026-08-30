@@ -70,7 +70,9 @@ public static class ScatterGatherExtensions
                     return Outcome<TShard, TPartial>.Failed(shard, ex);
                 }
             },
-            options.MaxDegreeOfParallelism);
+            // ScatterGatherAsync's public signature carries no CancellationToken today - default is the
+            // honest signal there is none to observe here.
+            options.MaxDegreeOfParallelism, default);
 
         var failed = outcomes
             .Where(o => !o.Success)
