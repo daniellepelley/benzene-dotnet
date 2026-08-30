@@ -3224,6 +3224,42 @@ breaking-change cost across every adapter and hosting integration, or does the s
 unbounded-wait resolve this permanently? If the abstraction never grows one, document that
 `IServiceResolver.Dispose()` blocking on a user's `DisposeAsync()` is a deliberate, permanent design
 choice (not a stopgap) so it isn't re-litigated as an oversight in a future round.
+## Round 16, WP-G: Mesh.Dispatch (2026-08-30)
+
+- **[RESOLVED] #254 — `MeshDispatchRateLimiter.Prune()` could delete a concurrently-installed
+  current-minute window, silently losing an increment.** `Prune()` enumerates `_windows` and, for each
+  entry whose captured `Window.Start` is stale, removed it via the unconditional two-argument
+  `_windows.TryRemove(pair.Key, out _)` — a remove-by-key with no check that the dictionary still held
+  the same value it decided was stale. `MeshDispatchGuardMiddleware.HandleAsync` calls `Prune()`
+  immediately before every `TryAcquire`, so at a minute boundary a genuinely concurrent request for the
+  same key (the same identity or target dispatching again right after the rollover) could install a
+  fresh `Window(currentMinute, Count=1)` between Prune()'s enumeration reading the stale value and its
+  `TryRemove` call executing; the unconditional remove then deleted that fresh window, letting more
+  requests through per minute than `MaxPerMinutePerIdentity`/`MaxPerMinutePerTarget` configure. Fixed
+  by switching to the conditional `TryRemove(KeyValuePair<TKey,TValue>)` overload (.NET 5+), passing
+  the exact pair the enumeration produced, so a stale decision can never delete a concurrently-replaced
+  value. `src/Benzene.Mesh.Dispatch/MeshDispatchRateLimiter.cs`. Test:
+  `Prune_RaceAtTheMinuteBoundary_NeverDeletesAConcurrentlyInstalledFreshWindow`
+  (`MeshDispatchRateLimiterTest` in `MeshDispatchTest.cs`) — reproduces the race deterministically (not
+  probabilistically) via a custom `IEqualityComparer<string>` installed on a reflection-swapped
+  `_windows` dictionary, which fires a real concurrent `TryAcquire` pair at the exact point the real,
+  compiled `Prune()`'s `TryRemove` call looks up the key's bucket (after it has decided to remove the
+  entry but before the removal executes) — exercising the actual fixed code path, not a hand
+  re-implementation of it. Verified red against the pre-fix source (entry wrongly deleted, a
+  `limit: 1` follow-up request wrongly succeeded) before applying the fix.
+- **[RESOLVED] #255 — `MeshDispatchMessageHandler.HandleAsync`'s `NotImplemented` exit path (registered
+  service, rate limit passed, but no `IMeshServiceDispatcher` matches the entry's `Source`) never
+  called `Audit(...)`.** Every other termination path — gate-blocked, bad-request, not-found,
+  rate-limited, dispatch-failed (#186), and the `dispatched` success path — leaves an audit record;
+  this one, the routine "forgot to wire the matching `AddMeshXxxDispatcher()`" post-deploy
+  misconfiguration (not a hostile input), silently vanished from the trail. Fixed by adding an
+  `Audit("no-dispatcher", ...)` call on that branch before returning the `NotImplemented` result, same
+  fields as every sibling exit path. `src/Benzene.Mesh.Dispatch/MeshDispatchMessageHandler.cs`. Test:
+  `NoDispatcherRegisteredForSource_StillLeavesAnAuditRecord` (alongside the existing
+  `NoDispatcherForSource_ReturnsNotImplemented`, which only checked the returned status).
+
+Verified: `dotnet test test/Benzene.Mesh.Test -c Release --filter "FullyQualifiedName~MeshDispatch"` —
+30 passed, 0 failed (includes the pre-existing #185/#186/#187 regression tests, unaffected).
 
 ## Open — maintainer decisions (the real remaining backlog)
 

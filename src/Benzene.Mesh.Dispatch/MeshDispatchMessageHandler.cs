@@ -116,6 +116,11 @@ public class MeshDispatchMessageHandler : IMessageHandler<MeshDispatchRequest, R
         var dispatcher = _dispatchers.FirstOrDefault(d => string.Equals(d.Key, entry.Source, StringComparison.OrdinalIgnoreCase));
         if (dispatcher == null)
         {
+            // #255 - this is the routine post-deploy misconfiguration (service registered, but the
+            // matching transport dispatcher was never wired into the container), not a hostile input
+            // like the branches above - so it must leave the same audit trail every other exit path
+            // does, under its own outcome label, rather than vanishing silently from the trail.
+            Audit("no-dispatcher", request.Service, request.Topic);
             return BenzeneResult.SetFailed<RawStringMessage>(BenzeneResultStatus.NotImplemented,
                 $"No dispatcher is registered for source '{entry.Source}' (service '{entry.Name}'). "
                 + "Register the matching transport dispatcher (e.g. AddMeshLambdaDispatcher() for AwsLambdaInvoke).");

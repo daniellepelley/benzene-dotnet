@@ -80,6 +80,21 @@ public class MeshDispatchRateLimiter
     /// bounded by the number of distinct identities and targets a single warm instance sees, which is
     /// small, but an unbounded map on a long-lived host is a leak waiting to be found in production.
     /// </summary>
+    /// <remarks>
+    /// <b>#254.</b> The removal below is a compare-and-remove — <see cref="ConcurrentDictionary{TKey,TValue}.TryRemove(KeyValuePair{TKey,TValue})"/>
+    /// — not the unconditional by-key overload. This method decides an entry is stale from an
+    /// enumeration snapshot; between that read and this call, a concurrent <see cref="TryAcquire"/>
+    /// for the SAME key can install a fresh, still-current-minute window (e.g. the same identity or
+    /// target dispatching again right after the minute rolled). An unconditional
+    /// <c>TryRemove(key, out _)</c> would delete whatever is CURRENTLY stored — the concurrently
+    /// installed fresh window, not the genuinely stale value this method reacted to — silently losing
+    /// that request's charge and letting more than the configured limit through for the rest of the
+    /// minute. Prune runs on every guarded dispatch request (before every <see cref="TryAcquire"/> in
+    /// the guard middleware), so this is hot-path concurrency, not a rare timer edge case. The
+    /// conditional overload compares both key AND value before removing, so a stale decision can
+    /// never delete a value that was concurrently replaced — it just leaves the fresh window in place
+    /// for the next Prune to reconsider on the next pass.
+    /// </remarks>
     public void Prune()
     {
         var now = _clock();
@@ -88,7 +103,7 @@ public class MeshDispatchRateLimiter
         {
             if (pair.Value.Start < cutoff)
             {
-                _windows.TryRemove(pair.Key, out _);
+                _windows.TryRemove(pair);
             }
         }
     }
