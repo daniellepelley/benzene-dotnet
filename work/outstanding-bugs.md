@@ -3360,6 +3360,45 @@ Verified: `dotnet test test/Benzene.Mesh.Test -c Release --filter "FullyQualifie
   rethrowing, so its observable fix is "the call actually completes near the deadline" rather than a
   propagated `TimeoutException` - documented inline on that test.
 
+## Round 17, WP-I: SelfHost composite-worker fault racing (2026-08-30)
+
+- **[RESOLVED] (2026-08-30) #291 — `CompositeBenzeneWorker.StartAsync` silently and permanently
+  swallowed a sibling worker's startup (or later, mid-lifetime) fault whenever the composite also
+  contained a worker whose `StartAsync` runs its full lifetime inline (exactly `SqsConsumer`'s own
+  documented shape).** `StartAsync` awaited `Task.WhenAll` over every worker's start task with no
+  failure-racing; `Task.WhenAll` only completes once EVERY constituent task has completed, so a
+  long-running worker (never completing until cancelled) meant the rollback `catch` never ran, the
+  fault was never rethrown, `BenzeneHostedServiceAdapter.ObserveFault`'s `LogCritical` +
+  `StopApplication` path never fired, and the host ran forever with one transport silently dead.
+  Compounding it, the rollback predicate itself only stopped a worker whose task
+  `IsCompletedSuccessfully` - too narrow even for the cases that did reach the catch, since it would
+  skip stopping a sibling that was merely still running/pending rather than one that had cleanly
+  finished starting.
+  - **Fix**: race the failure instead of waiting for everyone. A first-fault `TaskCompletionSource` is
+    fed by a fault continuation attached to every worker's start task (which also observes that
+    task's exception, preventing an unobserved-task-exception warning independent of whether it wins
+    the race); `StartAsync` then `await Task.WhenAny(Task.WhenAll(startTasks), firstFault.Task)`. When
+    `Task.WhenAll` wins (the no-fault happy path, or every task having already settled including any
+    fault), behavior is byte-identical to before. When `firstFault` wins, rollback runs immediately
+    and the original fault is rethrown without waiting on the still-pending `Task.WhenAll`. The
+    rollback predicate is corrected in the same change: stop any worker whose task is NOT
+    (faulted OR cancelled) - i.e. still running/pending as well as already succeeded - rather than
+    only `IsCompletedSuccessfully`.
+  - **Files**: `src/Benzene.SelfHost/CompositeBenzeneWorker.cs`.
+  - **Tests**: `test/Benzene.Core.Test/Hosting/CompositeBenzeneWorkerTest.cs` — two new regression
+    tests: `StartAsync_LongRunningSiblingFailsToStart_FaultsPromptlyAndStopsTheLongRunningSibling`
+    (an `SqsConsumer`-shaped `LongRunningWorker` alongside an `ImmediatelyFailingWorker`: today's code
+    hangs past a 5s timeout; after the fix, `StartAsync` faults promptly with the original exception
+    and the long-running sibling's `StopAsync` is observed to have run) and
+    `StartAsync_SiblingFaultsAfterStartingSuccessfully_FaultsPromptlyAndRollsBackTheSibling` (a
+    mid-lifetime fault via a `TaskCompletionSource`-backed worker, after both siblings are already
+    "running" - proves the race isn't limited to startup-time faults). Both existing
+    `CompositeBenzeneWorkerTest` cases (`StartAsync_WhenAWorkerFails_RollsBackTheStartedWorkers`,
+    `StartAsync_WhenAllSucceed_DoesNotStopAnyWorker`) stay green unchanged, confirming the no-fault
+    and already-fully-settled paths are unaffected. Confirmed red (2 new tests failing, 2 existing
+    passing) against the pre-fix code, then green (4/4) after:
+    `dotnet test test/Benzene.Core.Test -c Release --filter "FullyQualifiedName~CompositeBenzeneWorker"`.
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.
