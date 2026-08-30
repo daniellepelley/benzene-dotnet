@@ -92,21 +92,36 @@ public sealed class HttpMeshTraceExporter : IMeshTraceExporter, IAsyncDisposable
     private async Task PumpAsync()
     {
         var batch = new List<MeshTraceEvent>(_batchSize);
+        // An ABSOLUTE deadline, computed once and reset only after an actual flush (batch-full or
+        // deadline flush) - not a per-iteration relative timeout. Recreating a relative timeout every
+        // loop iteration (the pre-fix shape) means any channel activity before the timeout fires
+        // resets the effective countdown, so a steady trickle below batchSize never reaches a
+        // time-based flush at all. An absolute deadline can't be pushed back by activity: each wait is
+        // merely bounded by however much of it remains.
+        var nextFlushDeadline = Environment.TickCount64 + (long)_flushInterval.TotalMilliseconds;
         while (true)
         {
             var flushDeadline = false;
-            try
+            var remainingMs = nextFlushDeadline - Environment.TickCount64;
+            if (remainingMs <= 0)
             {
-                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
-                timeout.CancelAfter(_flushInterval);
-                if (!await _queue.Reader.WaitToReadAsync(timeout.Token).ConfigureAwait(false))
-                {
-                    break; // writer completed: flush and exit
-                }
+                flushDeadline = true; // deadline already elapsed: flush without waiting on the channel
             }
-            catch (OperationCanceledException)
+            else
             {
-                flushDeadline = true; // interval elapsed (or stopping): flush what we have
+                try
+                {
+                    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
+                    timeout.CancelAfter(TimeSpan.FromMilliseconds(remainingMs));
+                    if (!await _queue.Reader.WaitToReadAsync(timeout.Token).ConfigureAwait(false))
+                    {
+                        break; // writer completed: flush and exit
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    flushDeadline = true; // interval elapsed (or stopping): flush what we have
+                }
             }
 
             while (batch.Count < _batchSize && _queue.Reader.TryRead(out var traceEvent))
@@ -116,6 +131,7 @@ public sealed class HttpMeshTraceExporter : IMeshTraceExporter, IAsyncDisposable
             if (batch.Count >= _batchSize || flushDeadline || _stopping.IsCancellationRequested)
             {
                 await FlushAsync(batch).ConfigureAwait(false);
+                nextFlushDeadline = Environment.TickCount64 + (long)_flushInterval.TotalMilliseconds;
             }
             if (_stopping.IsCancellationRequested && !_queue.Reader.TryPeek(out _))
             {

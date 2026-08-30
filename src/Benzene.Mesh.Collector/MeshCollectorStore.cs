@@ -101,6 +101,14 @@ public class MeshCollectorStore : IMeshFleetReadModel
     /// </remarks>
     public void Register(MeshServiceDescriptor descriptor)
     {
+        // A wire payload can deserialize "topics"/"produces": null into an actual null (nullable-
+        // reference annotations aren't enforced at runtime). Coalesce on the descriptor itself - not
+        // just a local variable - so every later read of state.Descriptor.Topics/Produces (e.g.
+        // ContainsTopic/ServiceSummaryLocked) also sees an empty list rather than null (spec §6: no
+        // missing feed ever fails ingestion).
+        descriptor.Topics ??= new List<MeshTopicDescriptor>();
+        descriptor.Produces ??= new List<MeshTopicDescriptor>();
+
         lock (_lock)
         {
             foreach (var topic in _topics.Values)
@@ -145,6 +153,10 @@ public class MeshCollectorStore : IMeshFleetReadModel
     /// deliberately outlive the window). Returns how many events were accepted.</summary>
     public int AddEvents(IReadOnlyList<MeshTraceEvent> events)
     {
+        // A wire payload can deserialize "events": null into an actual null - coalesce the same way
+        // the per-event Status/TopicVersion fields already are below (spec §6: no missing feed ever
+        // fails ingestion).
+        events ??= Array.Empty<MeshTraceEvent>();
         lock (_lock)
         {
             foreach (var traceEvent in events)
@@ -209,6 +221,11 @@ public class MeshCollectorStore : IMeshFleetReadModel
     /// the service's issue feed as wired. Returns how many entries were accepted.</summary>
     public int AddIssues(MeshIssueBatch batch)
     {
+        // A wire payload can deserialize "issues": null into an actual null - coalesce so an empty/
+        // missing list is accepted as a no-op batch (still marking the feed as wired below) rather
+        // than throwing (spec §6: no missing feed ever fails ingestion).
+        batch.Issues ??= new List<MeshIssue>();
+
         lock (_lock)
         {
             EnsureService(batch.Service).IssueFeedSeen = true;
@@ -216,6 +233,9 @@ public class MeshCollectorStore : IMeshFleetReadModel
             var accepted = 0;
             foreach (var incoming in batch.Issues)
             {
+                // Same tolerance one level down: an individual issue's exemplar list can itself
+                // deserialize to null.
+                incoming.ExemplarTraceIds ??= new List<string>();
                 if (string.IsNullOrEmpty(incoming.Fingerprint) || string.IsNullOrEmpty(incoming.Topic))
                 {
                     continue; // skipped, never rejected (§6: no feed fails ingestion)

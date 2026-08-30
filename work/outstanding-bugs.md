@@ -2226,6 +2226,67 @@ fixed in `src/Benzene.Aws.Lambda.S3`, `src/Benzene.Aws.Lambda.DynamoDb`,
   `src/Benzene.Azure.Function.EventHub/Function/DependencyInjectionExtensions.cs:84`, and
   `src/Benzene.Azure.Function.EventHub/Function/EventHubOptions.cs:18` (keeping the latter's
   ordering-tradeoff remark otherwise intact). Doc-only, no test.
+### Round 15 — WP-D: mesh exporter flush, collector null-tolerance, schema generator, dead tag (2026-08-29)
+- **[RESOLVED] #233 — `HttpMeshTraceExporter.PumpAsync` (`src/Benzene.Mesh.Wire/IMeshTraceExporter.cs`)
+  recreated its wait-timeout deadline from a fresh relative `CancelAfter(_flushInterval)` every loop
+  iteration, so any channel activity before the timeout fired reset the effective countdown — a
+  steady, moderate trickle below `batchSize` never reached a time-based flush at all, only process
+  shutdown did (verified: one event/sec for 20s against the default `batchSize=64, flushInterval=5s`
+  produced zero POSTs during the whole run).** Fixed by tracking an absolute next-flush deadline
+  (`Environment.TickCount64 + flushIntervalMs`), computed once and reset only after an actual flush
+  (batch-full or deadline flush); each wait is bounded by however much of the deadline remains, so
+  activity can no longer push it back, and an elapsed deadline flushes the buffer even if it's below
+  `batchSize`. The shutdown tail-flush is unchanged. New `HttpMeshTraceExporterTest` (3 tests): a
+  steady trickle below `batchSize` still produces a POST well before `DisposeAsync` (red before the
+  fix — zero POSTs within the wait window; green after), the batch-full path still flushes early
+  without waiting for a long deadline, and `DisposeAsync` still tail-flushes a short, unflushed
+  remainder on shutdown.
+- **[RESOLVED] #234 — `MeshCollectorStore.Register`/`AddEvents`/`AddIssues`
+  (`src/Benzene.Mesh.Collector/MeshCollectorStore.cs`) threw `NullReferenceException` on an
+  explicit-null wire list (`descriptor.Topics`/`Produces`, `MeshTraceBatch.Events`,
+  `MeshIssueBatch.Issues`), violating the mesh spec's "no missing feed ever fails ingestion" collector
+  contract — the same defect class already fixed once for a null `Status`/`TopicVersion` field,
+  recurring one level up for whole collections.** Fixed: `Register` now coalesces
+  `descriptor.Topics`/`descriptor.Produces` to an empty list on the descriptor itself (not just a
+  local variable), so every later read of the stored descriptor is safe too; `AddEvents` coalesces its
+  `events` parameter; `AddIssues` coalesces `batch.Issues` and, one level down, each issue's
+  `ExemplarTraceIds` — the one further unguarded wire-list iteration the sweep turned up. New tests in
+  `MeshCollectorStoreTest`: `Register_NullTopicsAndProduces_IsAcceptedAsAnEmptyDeclaredGraph`,
+  `AddEvents_NullEventsList_IsAcceptedAsANoOpBatch`,
+  `AddIssues_NullIssuesList_IsAcceptedAsALivenessOnlyBatch_AndMarksTheFeedWired` — all deserialize the
+  review's exact null-list payloads via `MeshJson.Options` (red before the fix — NRE on each; green
+  after). This brings the collector into conformance with the spec's existing text; no fixture edit
+  (spec change) was needed or made, per the repo's own rule against changing a fixture to match an
+  implementation.
+- **[RESOLVED] #235 — `MeshSchemaGenerator.TryGetDictionaryValueType`
+  (`src/Benzene.Mesh.Wire/MeshSchemaGenerator.cs`) only recognized string-keyed
+  `IDictionary`/`IReadOnlyDictionary`; any other key type (int/enum/Guid-keyed, etc.) fell through to
+  the enumerable fallback, deriving a wrong "array of {key,value}" schema shape — but
+  System.Text.Json actually serializes any dictionary as a JSON object with string-converted keys
+  regardless of key type, so the descriptor misdescribed the real wire format for any handler contract
+  using a non-string-keyed dictionary.** Fixed by dropping the `x.GetGenericArguments()[0] ==
+  typeof(string)` key-type restriction from the interface match (checked before the enumerable
+  fallback, unchanged ordering) — a dictionary of any key type now emits `{"type":"object",
+  "additionalProperties":<value schema>}`, matching the real wire shape. The string-keyed path's own
+  output is unchanged: `Derive_StringKeyedDictionary_SchemaIsByteIdentical_NoDescriptorHashChurnFromTheFix`
+  pins its exact JSON verbatim, byte-identical to before (no descriptor-hash churn for an
+  already-correct contract). New `Derive_NonStringKeyedDictionary_StillMapsToObjectWithAdditionalProperties_NotAnArray`
+  theory covers `Dictionary<int,string>`, an enum-keyed dictionary, and `Dictionary<Guid,string>` (red
+  before the fix — each derived the array-of-{key,value} shape; green after).
+- **[RESOLVED] #236 (minor) — `AwsLambdaDiscoveryProvider`'s `benzene:mesh-path` tag was read into
+  `SourceOptions["meshPath"]` (with test coverage asserting exactly that), but the only consumer of
+  `AwsLambdaInvoke` mesh sources, `LambdaMeshServiceSource`, never read a `meshPath` option at all — a
+  known incomplete item from the original self-discovery design doc
+  (`work/archive/mesh-self-discovery-design-2026-07.md` §6 item 1: "aligning `LambdaMeshServiceSource`
+  to ask for `mesh`" was never finished; `LambdaMeshServiceSource` still sends the fixed
+  `benzene:spec`/`benzene:healthcheck` topics through the `BenzeneMessage` envelope, which has no path
+  concept). Ruling: remove the dead tag rather than wire it — there is nothing meaningful for
+  `meshPath` to do against the envelope-only interrogation this adapter actually performs.** Removed
+  the `MeshPathTag` constant, the `options["meshPath"]` write, and the doc remarks
+  (`AwsLambdaDiscoveryProvider.cs`'s class remark, `Benzene.Mesh.Discovery.Aws/CLAUDE.md`'s Key-types
+  and Tests sections) that described it; deleted
+  `AwsLambdaDiscoveryProviderTest.Discover_CarriesMeshPathHintTag`, the test asserting the tag's
+  carry-through. This closes the paper trail the design doc's §6 item 1 left open.
 
 ## Open — maintainer decisions (the real remaining backlog)
 
