@@ -212,6 +212,58 @@ public class CodegenOutputCompilesTest
             string.Join(Environment.NewLine + "-----" + Environment.NewLine, files.Select(Text)));
     }
 
+    // #263: Discriminator.PropertyName and every mapping.Key are arbitrary caller-supplied strings
+    // (the discriminator *value*, not an identifier) - reachable via SuppliedSchemaCatalog or any
+    // hand-built EventServiceDocument, not only reflection-derived schemas - interpolated unescaped
+    // into a generated [JsonPolymorphic]/[JsonDerivedType] C# string literal. A value containing a
+    // `"` used to produce uncompilable output (7 cascading Roslyn errors from one bad character).
+    [Fact]
+    public void GeneratedClient_WithAdversarialDiscriminatorMappingKeyContainingAQuote_Compiles()
+    {
+        var schemas = new Dictionary<string, OpenApiSchema>
+        {
+            ["PaymentMethod"] = new()
+            {
+                Type = "object",
+                Properties = new Dictionary<string, OpenApiSchema> { ["currency"] = new() { Type = "string" } },
+                Discriminator = new OpenApiDiscriminator
+                {
+                    PropertyName = "type",
+                    Mapping = new Dictionary<string, string>
+                    {
+                        ["12\" wheel"] = "#/components/schemas/CardPayment"
+                    }
+                }
+            },
+            ["CardPayment"] = new()
+            {
+                Type = "object",
+                AllOf = new List<OpenApiSchema> { Ref("PaymentMethod") },
+                Properties = new Dictionary<string, OpenApiSchema> { ["cardNumber"] = new() { Type = "string" } }
+            }
+        };
+
+        var typeBuilder = new OpenApiSchemaCSharpTypeBuilder(Namespace);
+        var files = typeBuilder.BuildCodeFiles(schemas);
+
+        var trees = files
+            .Select(f => CSharpSyntaxTree.ParseText(Text(f), path: f.Name))
+            .ToArray();
+
+        var compilation = CSharpCompilation.Create(
+            "WpH_DiscriminatorEscapeCheck_" + Guid.NewGuid().ToString("N"),
+            trees,
+            ReferenceAssemblies(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        var errors = compilation.GetDiagnostics().Where(x => x.Severity == DiagnosticSeverity.Error).ToArray();
+
+        Assert.True(errors.Length == 0,
+            "Generated code failed to compile:" + Environment.NewLine +
+            string.Join(Environment.NewLine, errors.Select(x => x.ToString())) + Environment.NewLine +
+            string.Join(Environment.NewLine + "-----" + Environment.NewLine, files.Select(Text)));
+    }
+
     // Same approach as Benzene.Test.Docs.DocSnippetCompiler: TRUSTED_PLATFORM_ASSEMBLIES rather than
     // AppDomain.CurrentDomain.GetAssemblies(), since a project reference the test process hasn't
     // touched yet (e.g. Benzene.Abstractions.Results, Benzene.Clients) may not be loaded.

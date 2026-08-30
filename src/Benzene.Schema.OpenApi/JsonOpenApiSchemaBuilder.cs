@@ -22,8 +22,10 @@ public class JsonOpenApiSchemaBuilder
             JTokenType.String => CreateStringSchema(),
             JTokenType.Date => CreateDateTimeSchema(),
             JTokenType.Integer => CreateIntegerSchema(),
+            JTokenType.Float => CreateNumberSchema(),
             JTokenType.Boolean => CreateBooleanSchema(),
             JTokenType.Guid => CreateGuidSchema(),
+            JTokenType.Null => CreateNullPlaceholderSchema(),
             JTokenType.Array => CreateArraySchema(key, jToken),
             JTokenType.Object => CreateObjectSchema(key, jToken),
             _ => throw new Exception($"No map for {jToken.Type}")
@@ -53,6 +55,14 @@ public class JsonOpenApiSchemaBuilder
             Format = "int32"
         };
     }
+    private OpenApiSchema CreateNumberSchema()
+    {
+        return new OpenApiSchema
+        {
+            Type = "number",
+            Format = "double"
+        };
+    }
     private OpenApiSchema CreateBooleanSchema()
     {
         return new OpenApiSchema
@@ -66,6 +76,19 @@ public class JsonOpenApiSchemaBuilder
         {
             Type = "string",
             Format = "uuid"
+        };
+    }
+
+    // #264: a JSON `null` example value (an ordinary, legal shape for an optional/nullable field in
+    // a captured real-world example) has no case here and used to throw "No map for Null", aborting
+    // the whole document. Mirror CreateArraySchema's #242 "nothing in the example to infer from"
+    // convention exactly: an untyped schema - no `type` keyword, so it matches anything - marked
+    // Nullable, is the honest answer when a single null sample carries no type information at all.
+    private OpenApiSchema CreateNullPlaceholderSchema()
+    {
+        return new OpenApiSchema
+        {
+            Nullable = true
         };
     }
 

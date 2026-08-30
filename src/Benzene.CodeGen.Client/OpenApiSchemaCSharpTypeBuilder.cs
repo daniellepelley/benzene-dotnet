@@ -66,11 +66,11 @@ public class OpenApiSchemaCSharpTypeBuilder : ICodeBuilder<IDictionary<string, O
             // Mirror the contract's discriminator as System.Text.Json polymorphism attributes so
             // the generated hierarchy round-trips derived instances the way the spec describes.
             lineWriter.WriteLine(
-                $"[JsonPolymorphic(TypeDiscriminatorPropertyName = \"{schema.Discriminator!.PropertyName}\")]", 1);
+                $"[JsonPolymorphic(TypeDiscriminatorPropertyName = \"{EscapeCSharpString(schema.Discriminator!.PropertyName)}\")]", 1);
             foreach (var mapping in schema.Discriminator.Mapping)
             {
                 lineWriter.WriteLine(
-                    $"[JsonDerivedType(typeof({_nameFormatter.Format(RefName(mapping.Value))}), \"{mapping.Key}\")]", 1);
+                    $"[JsonDerivedType(typeof({_nameFormatter.Format(RefName(mapping.Value))}), \"{EscapeCSharpString(mapping.Key)}\")]", 1);
             }
         }
 
@@ -218,4 +218,57 @@ public class OpenApiSchemaCSharpTypeBuilder : ICodeBuilder<IDictionary<string, O
 
     private static string RefName(string reference) =>
         reference.Substring(reference.LastIndexOf('/') + 1);
+
+    // #263: PropertyName and every discriminator mapping.Key are arbitrary caller-supplied strings
+    // (the discriminator *value*, not an identifier) with no guarantee they exclude `"`, `\`, or
+    // control characters - interpolating them unescaped into a C# string-literal position produced
+    // uncompilable generated SDKs from a single stray quote. Mirrors the shape of
+    // YamlValueEscaping/NameFormatter.EscapeHclString elsewhere in this codebase; deliberately a
+    // small local escaper rather than a Roslyn (Microsoft.CodeAnalysis.CSharp) dependency, which
+    // this project does not otherwise need.
+    private static string EscapeCSharpString(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        var builder = new System.Text.StringBuilder(value.Length);
+        foreach (var c in value)
+        {
+            switch (c)
+            {
+                case '\\':
+                    builder.Append("\\\\");
+                    break;
+                case '"':
+                    builder.Append("\\\"");
+                    break;
+                case '\n':
+                    builder.Append("\\n");
+                    break;
+                case '\r':
+                    builder.Append("\\r");
+                    break;
+                case '\t':
+                    builder.Append("\\t");
+                    break;
+                case '\0':
+                    builder.Append("\\0");
+                    break;
+                default:
+                    if (char.IsControl(c))
+                    {
+                        builder.Append("\\u").Append(((int)c).ToString("x4"));
+                    }
+                    else
+                    {
+                        builder.Append(c);
+                    }
+                    break;
+            }
+        }
+
+        return builder.ToString();
+    }
 }
