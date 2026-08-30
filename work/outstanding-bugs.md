@@ -2512,6 +2512,43 @@ Full `test/Benzene.Mesh.Test` run after the fix: 560 passed, 0 failed. (One test
 single run under an exceptionally loaded shared build host — a pre-existing, WP-H-unrelated
 concurrency-timing assertion — and passed cleanly on immediate re-run with no code changes; not a
 regression from this work package.)
+### Tracked findings round 12–14, WP-I — Mesh Fleet: Tempo correlation fetch + Jaeger fan-out isolation (done)
+Decisions, rationale, and the shared-file overlap check against round-15 WP-C are ruled in
+`work/bug-fix-plan-rounds12-14-2026-08.md` §"WP-I" and `work/bug-fix-designs-round12-2026-08.md` §2.
+- **[RESOLVED] #188 — `TempoTraceSource.GetCorrelationAsync` fetched up to 100 matched traces fully
+  sequentially with zero per-trace fetch isolation, unlike `Benzene.Mesh.Fleet.Aws.XRay`'s correct
+  pattern; one trace's transient HTTP failure mid-loop discarded the entire correlation search,
+  including every trace already fetched successfully.** Per-trace fetches now run through
+  `Benzene.Core.Middleware.BoundedFanOut`, each wrapped in its own try/catch (a failing fetch is logged
+  via the new optional `ILogger?` constructor parameter and skipped; `OperationCanceledException` still
+  propagates), so a mid-loop failure degrades to "the healthy traces," never the whole search. Bounded
+  by a new `TempoTraceSourceOptions.SearchConcurrency` (default 8, matching Jaeger's
+  `SearchConcurrency` default) rather than one-at-a-time. See WP-I.
+- **[RESOLVED] #189 (minor) — Jaeger's per-service search fan-out (over the shared
+  `Benzene.Core.Middleware.BoundedFanOut`) capped concurrency but had no per-item failure isolation; one
+  faulted per-service task discarded every other service's completed results via `Task.WhenAll`'s fault
+  semantics.** Fixed at the `JaegerTraceSource.SearchAcrossServicesAsync` call site (not in
+  `BoundedFanOut.cs` itself — see the shared-file note below): each per-service body now catches its own
+  exception, logs it (new optional `ILogger?` constructor parameter) with the failed service name, and
+  contributes an empty result for that service instead of faulting the fan-out, so the healthy services'
+  results still return. See WP-I.
+- **[RESOLVED] #190 (minor) — Tempo's correlation search limit was hardcoded to 100 with no override
+  and no warning when hit, unlike Jaeger's `SearchLimitPerService` or X-Ray's #77-fixed logged-warning
+  pattern.** Lifted into `TempoTraceSourceOptions.SearchLimit` (default 100, preserving prior behavior);
+  `GetCorrelationAsync` now logs a warning via the same optional `ILogger?` when the search returns a
+  full page at the configured limit (the result may not cover every matching trace), rather than
+  truncating silently. See WP-I.
+- **Shared-file note (BoundedFanOut):** `src/Benzene.Core.Middleware/BoundedFanOut.cs` is confirmed
+  shared (Jaeger, MapReduce's `ScatterGatherExtensions`, `Benzene.Clients`' `OutboundParallelExtensions`/
+  `ParallelOutboundMiddleware`, several Azure/AWS Lambda batch applications all reference it) — **this
+  WP did not modify `BoundedFanOut.cs` at all.** Both #188's and #189's per-item isolation are
+  implemented entirely at the call site (the body lambda passed into `BoundedFanOut.WhenAllAsync`
+  catches its own exception and returns a sentinel/empty result instead of letting it fault the
+  `Task.WhenAll`), so there is **no file-level overlap and no expected merge conflict** with round-15
+  WP-C's `CancellationToken`-parameter addition to `BoundedFanOut.cs` — that file is untouched by this
+  commit. (Tempo's fetch loop newly takes a dependency on `BoundedFanOut` via a new
+  `Benzene.Core.Middleware` project reference in `Benzene.Mesh.Fleet.Tempo.csproj`, but does not touch
+  its source.)
 
 ## Open — maintainer decisions (the real remaining backlog)
 

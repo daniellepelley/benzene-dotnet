@@ -2,6 +2,7 @@ using System.Text.Json;
 using Benzene.Core.Middleware;
 using Benzene.Mesh.Collector;
 using Benzene.Mesh.Wire;
+using Microsoft.Extensions.Logging;
 
 namespace Benzene.Mesh.Fleet.Jaeger;
 
@@ -25,12 +26,14 @@ public class JaegerTraceSource : IMeshTraceSource
 {
     private readonly HttpClient _httpClient;
     private readonly JaegerTraceSourceOptions _options;
+    private readonly ILogger? _logger;
 
     /// <summary>Creates the source over an <see cref="HttpClient"/> and Jaeger endpoint/window options.</summary>
-    public JaegerTraceSource(HttpClient httpClient, JaegerTraceSourceOptions options)
+    public JaegerTraceSource(HttpClient httpClient, JaegerTraceSourceOptions options, ILogger? logger = null)
     {
         _httpClient = httpClient;
         _options = options;
+        _logger = logger;
     }
 
     public async Task<TraceView?> GetTraceAsync(string traceId, CancellationToken cancellationToken = default)
@@ -95,7 +98,9 @@ public class JaegerTraceSource : IMeshTraceSource
     /// full traces, and dedupe by trace id (a cross-service trace is returned by each of its services).
     /// Runs the per-service GETs concurrently, capped at <see cref="JaegerTraceSourceOptions.SearchConcurrency"/>
     /// (<see cref="BoundedFanOut"/>) - sequentially awaiting one GET per service would otherwise pay every
-    /// service's round-trip in series for one fleet load.</summary>
+    /// service's round-trip in series for one fleet load. Each per-service GET is isolated: one service's
+    /// failure is caught, logged, and skipped rather than discarding every other service's already-fetched
+    /// results via <see cref="Task.WhenAll(System.Threading.Tasks.Task[])"/> fault semantics.</summary>
     private async Task<List<JaegerMappedTrace>> SearchAcrossServicesAsync(
         (DateTimeOffset Start, DateTimeOffset End) window, string? tags, CancellationToken cancellationToken)
     {
@@ -110,15 +115,28 @@ public class JaegerTraceSource : IMeshTraceSource
 
         var perService = await BoundedFanOut.WhenAllAsync(services, async service =>
         {
-            var url = $"{_options.JaegerUrl}/api/traces?service={Uri.EscapeDataString(service)}"
-                      + $"&start={startMicros}&end={endMicros}&limit={_options.SearchLimitPerService}";
-            if (tags is not null)
+            try
             {
-                url += $"&tags={Uri.EscapeDataString(tags)}";
-            }
+                var url = $"{_options.JaegerUrl}/api/traces?service={Uri.EscapeDataString(service)}"
+                          + $"&start={startMicros}&end={endMicros}&limit={_options.SearchLimitPerService}";
+                if (tags is not null)
+                {
+                    url += $"&tags={Uri.EscapeDataString(tags)}";
+                }
 
-            var body = await GetStringOrNullAsync(url, cancellationToken);
-            return body is null ? new List<JaegerMappedTrace>() : JaegerTraceMapper.MapTraces(body);
+                var body = await GetStringOrNullAsync(url, cancellationToken);
+                return body is null ? new List<JaegerMappedTrace>() : JaegerTraceMapper.MapTraces(body);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Per-service isolation: one service's connection failure shouldn't discard every other
+                // service's completed results (Task.WhenAll's fault semantics would otherwise fault the
+                // whole fan-out). Logged, then degrades to that service contributing no traces this call.
+                _logger?.LogWarning(ex,
+                    "JaegerTraceSource search failed for service {Service}; skipping it and keeping the other services' results.",
+                    service);
+                return new List<JaegerMappedTrace>();
+            }
         }, _options.SearchConcurrency, cancellationToken);
 
         var byTraceId = new Dictionary<string, JaegerMappedTrace>();

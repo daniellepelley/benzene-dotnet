@@ -1,7 +1,9 @@
 using System.Globalization;
 using System.Text.Json;
+using Benzene.Core.Middleware;
 using Benzene.Mesh.Collector;
 using Benzene.Mesh.Wire;
+using Microsoft.Extensions.Logging;
 
 namespace Benzene.Mesh.Fleet.Tempo;
 
@@ -26,12 +28,14 @@ public class TempoTraceSource : IMeshTraceSource
 {
     private readonly HttpClient _httpClient;
     private readonly TempoTraceSourceOptions _options;
+    private readonly ILogger? _logger;
 
     /// <summary>Creates the source over an <see cref="HttpClient"/> and Tempo endpoint/window options.</summary>
-    public TempoTraceSource(HttpClient httpClient, TempoTraceSourceOptions options)
+    public TempoTraceSource(HttpClient httpClient, TempoTraceSourceOptions options, ILogger? logger = null)
     {
         _httpClient = httpClient;
         _options = options;
+        _logger = logger;
     }
 
     public async Task<TraceView?> GetTraceAsync(string traceId, CancellationToken cancellationToken = default)
@@ -57,22 +61,42 @@ public class TempoTraceSource : IMeshTraceSource
         // Attribute names carry dots and a hyphen, so quote the name in TraceQL.
         var traceQl = $"{{ span.\"benzene.correlation-id\" = \"{Escape(correlationId)}\" }}";
         var (start, end) = ResolveWindow(range, _options.CorrelationLookback);
-        var matches = await SearchAsync(traceQl, start, end, limit: 100, cancellationToken);
+        var matches = await SearchAsync(traceQl, start, end, _options.SearchLimit, cancellationToken);
+        if (matches.Count >= _options.SearchLimit)
+        {
+            // The search may not cover every matching trace - logged (not silent), the same posture as
+            // Jaeger's SearchLimitPerService and X-Ray's #77-fixed hard-pagination-cap warning.
+            _logger?.LogWarning(
+                "TempoTraceSource.GetCorrelationAsync hit its search limit ({SearchLimit} traces) for correlation id {CorrelationId}; the result may not include every matching trace.",
+                _options.SearchLimit, correlationId);
+        }
+
         if (matches.Count == 0)
         {
             return null;
         }
 
-        var traces = new List<TraceView>();
-        foreach (var match in matches)
+        // Fetch each matched trace concurrently (capped at SearchConcurrency) with per-trace isolation - a
+        // single trace's transient HTTP failure is caught, logged, and skipped rather than discarding the
+        // whole correlation search, including every trace already fetched successfully. Mirrors the
+        // fetch-isolation pattern Benzene.Mesh.Fleet.Aws.XRay already gets right.
+        var fetched = await BoundedFanOut.WhenAllAsync(matches, async match =>
         {
-            var events = await FetchTraceEventsAsync(match.TraceId, cancellationToken);
-            if (events.Count > 0)
+            try
             {
-                traces.Add(new TraceView { TraceId = match.TraceId, Events = events });
+                var events = await FetchTraceEventsAsync(match.TraceId, cancellationToken);
+                return events.Count > 0 ? new TraceView { TraceId = match.TraceId, Events = events } : null;
             }
-        }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger?.LogWarning(ex,
+                    "TempoTraceSource.GetCorrelationAsync failed to fetch trace {TraceId}; skipping it and keeping the rest of the correlation search.",
+                    match.TraceId);
+                return null;
+            }
+        }, _options.SearchConcurrency);
 
+        var traces = fetched.Where(t => t is not null).Select(t => t!).ToList();
         if (traces.Count == 0)
         {
             return null;
