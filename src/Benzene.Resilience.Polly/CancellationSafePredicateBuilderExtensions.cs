@@ -4,7 +4,10 @@ namespace Benzene.Resilience.Polly;
 
 /// <summary>
 /// Extension helpers for building a cancellation-safe <c>ShouldHandle</c> predicate for any Polly
-/// strategy (circuit breaker, retry, hedging, fallback, ...).
+/// strategy's own outcome-predicate API. This works on the generic <see cref="PredicateBuilder{TResult}"/>
+/// Polly itself exposes for every strategy (including generic-only ones like Hedging/Fallback that
+/// you build yourself, outside <c>PollyResilienceMiddleware</c> - see that type's remarks for why it
+/// only supports sequential-attempt strategies).
 /// </summary>
 /// <remarks>
 /// <para>

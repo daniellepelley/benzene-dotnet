@@ -7,7 +7,7 @@
     <AssemblyName>Benzene.Resilience.Polly</AssemblyName>
     <RootNamespace>Benzene.Resilience.Polly</RootNamespace>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <Description>Polly v8 resilience for Benzene: wrap a middleware pipeline (or an outbound port call) in a Polly ResiliencePipeline - retry, circuit breaker, timeout, hedging, fallback, rate limiting.</Description>
+    <Description>Polly v8 resilience for Benzene: wrap a middleware pipeline (or an outbound port call) in a Polly ResiliencePipeline - retry, circuit breaker, timeout, rate limiting (sequential-attempt strategies; concurrent-attempt strategies like hedging/fallback are not supported).</Description>
   </PropertyGroup>
 
   <ItemGroup>

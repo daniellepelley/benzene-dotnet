@@ -2,11 +2,27 @@
 
 ## What this package does
 Runs a Benzene middleware pipeline (or an outbound port call) through a [Polly v8](https://www.pollydocs.org/)
-`ResiliencePipeline`, so the full Polly strategy set — retry, circuit breaker, timeout, hedging,
-fallback, rate limiter — applies to whatever `next` wraps. It is a **sibling** to `Benzene.Resilience`,
+`ResiliencePipeline`, so any **sequential-attempt** Polly strategy — retry, circuit breaker, timeout,
+rate limiter — applies to whatever `next` wraps. It is a **sibling** to `Benzene.Resilience`,
 not a replacement: that package stays the zero-dependency homegrown retry; this one takes a
-`Polly.Core` (8.x) dependency in exchange for the whole toolkit. See the
+`Polly.Core` (8.x) dependency in exchange for a richer sequential-attempt toolkit. See the
 [Capability Matrix](../../docs/capability-matrix.md) for how the two resilience options relate.
+
+**Hedging and Fallback are not supported.** Two independent reasons: (1) Polly.Core 8.5.0 defines
+`AddHedging`/`AddFallback` only on the *generic* `ResiliencePipelineBuilder<TResult>`, and every
+`.UseResiliencePipeline(...)` overload here hands out the *non-generic* builder — Benzene results
+flow through the mutable pipeline context, not a `TResult`, so the generic result-typed strategies
+don't map onto this middleware's shape. (2) More fundamentally, `HandleAsync`'s per-attempt callback
+closes over one shared `next` continuation, one shared `TContext` instance, and one shared ambient
+`CancellationTokenAccessor` — safe only when Polly invokes it strictly one attempt at a time. Any
+concurrent-attempt strategy (hedging is the paradigm case, but also any hand-rolled strategy built
+via Polly's own public non-generic `AddStrategy(...)` extensibility point) would run `next()` — the
+entire downstream pipeline, including handler dispatch and its side effects — more than once for one
+logical message, and tear the shared context/token between attempts. Rather than allow that
+corruption, the middleware detects re-entrant attempts and throws `NotSupportedException`. Concurrent-
+attempt strategies are simply out of scope for this middleware's design (see
+`work/outstanding-bugs.md` for the open maintainer question on whether a future redesign should
+support them via per-attempt isolation).
 
 The seam is a plain wrap: `IMiddleware<TContext>.HandleAsync(context, next)` calls
 `pipeline.ExecuteAsync(...)` with a callback that invokes `next()`. The `ResiliencePipeline` is
@@ -53,8 +69,8 @@ with no resilience middleware. A **real** exception is never wrapped and propaga
 `isFailure` is `null` (the default), only thrown exceptions drive the strategies.
 
 ## When to use this package
-- You want more than exponential-backoff retry (circuit breaker, timeout, hedging, fallback, rate
-  limiting), or you already standardize on Polly elsewhere.
+- You want more than exponential-backoff retry (circuit breaker, timeout, rate limiting), or you
+  already standardize on Polly elsewhere.
 - Highest-value placement is the **outbound** `OutboundRoutingBuilder` pipeline ("calling another
   service") — Benzene's whole thesis is wrapping port calls — but it works on any inbound
   `IMiddlewarePipelineBuilder<TContext>` too.
@@ -73,7 +89,11 @@ Prefer `Benzene.Resilience`'s `.UseRetry(...)` when you want retry only and no e
   cancellation only reaches code that actually reads the accessor's token; `next()` that ignores it
   runs to completion and Polly cannot forcibly abort it (`docs/cookbooks/polly-resilience.md`).
 - The `isFailure` path costs one sentinel `throw`/`catch` per failed attempt only — the success path
-  allocates nothing beyond Polly's own `ExecuteAsync` state tuple.
+  allocates nothing beyond Polly's own `ExecuteAsync` state tuple and the one-element re-entrancy
+  counter (`int[1]`) allocated per `HandleAsync` call.
+- **Concurrent-attempt strategies are not supported** — see "What this package does" above. A
+  per-`HandleAsync` re-entrancy guard throws `NotSupportedException` (naming the problem) if a
+  second attempt starts while one is still in flight, instead of running `next()` twice.
 
 ## Dependencies
 - **Polly.Core** (8.x) — the resilience engine (BSD-3-licensed; also the engine under
@@ -90,3 +110,8 @@ timeout strategy actually throws `TimeoutRejectedException` when `next` observes
 accessor's token; a `next` that ignores the token runs to completion with no exception (the documented
 caveat); the accessor is restored after each attempt; an outer ambient token's cancellation is not
 lost when linked with Polly's own per-attempt token; construction without an accessor still works.
+
+`test/Benzene.Core.Test/Resilience/PollyResilienceMiddlewareConcurrentAttemptGuardTest.cs` (#267): a
+hand-rolled concurrent-attempt strategy built entirely from Polly's public `AddStrategy(...)`
+extensibility point throws `NotSupportedException` before `next()` can run twice, the shared ambient
+accessor is never torn between attempts, and `next()` runs at most once per `HandleAsync` call.
