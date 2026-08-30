@@ -2069,6 +2069,41 @@ top-of-file summary blockquote).
   scheme specifically) to record this explicitly as a `[DECISION]` in place, rather than leaving it
   silently misleading. Left for a future round to decide whether/how to carry the scheme onto the wire.
 
+- **[RESOLVED] #226 — `CasterFuncBuilder.CreateCasterFunc` memoized a compiled caster delegate only
+  *after* `Expression.Lambda(...).Compile()` returned, so a self-referential or mutually-recursive
+  versioned DTO shape (`Node.Child: Node`, or two types referencing each other) re-entered
+  `CreateCasterFunc` for the same `(TFrom,TTo)` pair before anything was memoized — the guard never
+  tripped, recursion was unbounded, and the process died with an uncatchable, unloggable
+  `StackOverflowException` (verified exit code 134) reachable through the documented, "fail eagerly at
+  registration" `Upcast<TFrom,TTo>()`/`CasterFactory` API on ordinary tree/graph-shaped payloads
+  (parent/child categories, org charts, comment threads).** Took the plan's primary ruling — **support
+  recursion properly via a lazy indirection cell**, not the cycle-detection-exception fallback: before
+  building the mapping expression for `(fromType, toType)`, `CreateCasterFunc` now installs a
+  `RecursionCell<TFrom,TTo>` in `_funcs` — a mutable holder plus a stable `Func<TFrom,TTo>` forwarding
+  delegate (`cell.Invoke`) bound to it. A recursive lookup for the same pair during expression building
+  (via `MapDelegate` from `CreateClassExpression`/`CreateEnumerableExpression`/`CreateListExpression`)
+  resolves to that forwarder and the generated expression embeds it as a constant, calling through the
+  cell rather than recursing into the builder again. Once `Expression.Lambda(...).Compile()` returns,
+  the cell's `Func` is filled with the real compiled delegate and the memoized `_funcs` entry is
+  replaced with the direct delegate for the non-recursive fast path — any expression already built
+  against the forwarder keeps working (it now resolves through to the real delegate). This is safe
+  because `Compile()` only builds the delegate, it never invokes the lambda body, and casters are built
+  eagerly at `Upcast`/registration time, so every cell reachable from an outer `CreateCasterFunc` call
+  is filled in before any caster is ever actually run. A build/compile failure removes the dangling
+  entry (`catch`/`_funcs.Remove(key)`) rather than leaving an unfillable forwarder behind. Null
+  termination was already correct and needed no change: `CreateClassExpression`'s existing null-guard
+  short-circuits to `default`/`null` without invoking the (possibly-recursive) delegate at all.
+  New test `test/Benzene.Core.Test/Core/Versioning/CasterRecursionTest.cs` covers: a self-referential
+  type builds and casts correctly (null child, and a 3-level-deep tree with value assertions at every
+  level); a mutually-recursive `A`↔`B` pair builds and casts correctly from either side as the root
+  type (exercising both orderings of which pair installs the indirection cell first). The crash itself
+  (pre-fix) was verified by building an equivalent probe as a separate console app referencing
+  `Benzene.Core.Versioning` and running it in a child `dotnet` process: pre-fix it aborted with exit
+  code 134 (uncaught `StackOverflowException`, "Stack overflow." dumped by the CLR, unwinding through
+  `MapDelegate`→`CreateClassExpression`→`CreatePropertyExpressions`→`BuildClassMappingExpression`→
+  `CreateCasterFunc` repeatedly); post-fix the same probe returns exit code 0. That probe was a scratch
+  file, not committed — the permanent in-proc regression coverage above is what ships.
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.
