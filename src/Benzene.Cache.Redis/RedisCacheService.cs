@@ -7,7 +7,7 @@ using StackExchange.Redis;
 
 namespace Benzene.Cache.Redis;
 
-public abstract class RedisCacheService : ICacheService, IAsyncDisposable
+public abstract class RedisCacheService : ICacheService, IAsyncDisposable, IDisposable
 {
     public ILogger Logger { get; }
     public IProcessTimerFactory ProcessTimerFactory { get; }
@@ -191,5 +191,34 @@ public abstract class RedisCacheService : ICacheService, IAsyncDisposable
         }
 
         GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// Synchronous disposal bridge for a purely-synchronous container disposal path -
+    /// <c>Benzene.Abstractions.DI.IServiceResolver</c> exposes only <see cref="IDisposable"/>, and
+    /// Microsoft.Extensions.DependencyInjection's own scope/provider <c>Dispose()</c> throws
+    /// <see cref="InvalidOperationException"/> for a container-owned instance (scoped or singleton)
+    /// that implements only <see cref="IAsyncDisposable"/> (task board #262, round 16 -
+    /// <c>work/bug-fix-plan-round16-2026-08.md</c> WP-A). This subclass's own
+    /// <c>CLAUDE.md</c> documents "register your subclass so its container disposes it on shutdown"
+    /// with no caveat that disposal must be the async one, so this bridge is required for the
+    /// documented usage pattern to actually work. Bounded wait (unlike the adapter-level #266 fix,
+    /// which is deliberately unbounded because it awaits the USER's own disposal code) - same
+    /// established pattern as <c>MeshAnnouncer.Dispose</c> / round 15's
+    /// <c>InternallyOwnedRateLimiterHolder&lt;TContext&gt;.Dispose</c> - because the work being waited
+    /// on here is this type's own <see cref="DisposeAsync"/>, which is a prompt local operation
+    /// (disposing an already-connected <see cref="StackExchange.Redis.IConnectionMultiplexer"/> or
+    /// abandoning a connect attempt that never completed).
+    /// </summary>
+    public void Dispose()
+    {
+        try
+        {
+            DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(5));
+        }
+        catch (AggregateException)
+        {
+            // DisposeAsync already swallows connect failures internally; nothing here is actionable.
+        }
     }
 }
