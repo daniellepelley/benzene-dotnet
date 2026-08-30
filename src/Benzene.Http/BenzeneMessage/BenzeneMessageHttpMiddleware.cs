@@ -1,4 +1,5 @@
-﻿using Benzene.Abstractions.DI;
+﻿using System.Threading;
+using Benzene.Abstractions.DI;
 using Benzene.Abstractions.MessageHandlers.Response;
 using Benzene.Abstractions.Messages.Mappers;
 using Benzene.Abstractions.Middleware;
@@ -134,8 +135,19 @@ public class BenzeneMessageHttpMiddleware<TContext> : IMiddleware<TContext>, ITe
                 $"Topic '{benzeneMessageRequest!.Topic}' is not available on this endpoint");
         }
 
+        // Resolve the OUTER (per-HTTP-request) scope's ambient cancellation accessor — already seeded
+        // from the real transport's cancellation signal (e.g. HttpContext.RequestAborted) by the
+        // "SeedCancellationToken" middleware in BuildHttpPipeline — and thread its token through the
+        // 3-argument HandleAsync overload so the INNER scope this envelope dispatches into is seeded
+        // with the real request's token, not CancellationToken.None (the 2-argument overload's hardcoded
+        // default). TryGetService keeps this null-tolerant: a pipeline with no accessor registered (or
+        // no transport-level seeding) behaves exactly as before. See #285.
+        var cancellationToken = _serviceResolver.TryGetService<ICancellationTokenAccessor>()?.CancellationToken
+            ?? CancellationToken.None;
+
         return await _application.HandleAsync(benzeneMessageRequest!,
-            _serviceResolver.GetService<IServiceResolverFactory>());
+            _serviceResolver.GetService<IServiceResolverFactory>(),
+            cancellationToken);
     }
 
     private static IBenzeneMessageResponse ErrorResponse(string statusCode, string message)
