@@ -98,7 +98,14 @@ public class XRayTraceSource : IMeshTraceSource
 
         // The window is chunked (MaxTraceSummariesWindow) and each chunk paged to exhaustion - a
         // correlation search must not miss matches, so there's no hard cap here (unlike recent-flows).
-        var summaries = await FetchTraceSummariesAsync(start, end, filter, hardCap: null, "GetCorrelationAsync", cancellationToken);
+        // De-duplicated by Id immediately after the fetch (#274): the window is chunked
+        // (MaxTraceSummariesWindow) and adjacent chunks touch at a shared instant whose inclusivity
+        // isn't verified either way, and GetTraceSummaries pagination can legitimately re-surface a
+        // trace under eventual consistency - either way, a duplicated id must not produce two
+        // identical TraceViews for one physical trace.
+        var summaries = (await FetchTraceSummariesAsync(start, end, filter, hardCap: null, "GetCorrelationAsync", cancellationToken))
+            .DistinctBy(s => s.Id)
+            .ToList();
         var traceIds = summaries.Select(s => s.Id).Where(id => !string.IsNullOrEmpty(id)).ToList();
 
         if (traceIds.Count == 0)
@@ -163,8 +170,13 @@ public class XRayTraceSource : IMeshTraceSource
         // could silently surface stale traces as "recent" under high volume; this samples over a much wider,
         // order-agnostic set before the client-side newest-first Take(limit) below. A hit on the cap is
         // logged (not silent) since it means the sample may not cover the full requested window.
-        var summaries = await FetchTraceSummariesAsync(
-            start, end, filter: null, hardCap: limit * RecentFlowsHardCapMultiplier, "GetRecentFlowsAsync", cancellationToken);
+        // De-duplicated by Id immediately after the fetch (#274) - see GetCorrelationAsync's comment;
+        // without this a duplicated summary would occupy two of the top-N slots below, silently
+        // displacing a genuinely different trace from the recent-flows list.
+        var summaries = (await FetchTraceSummariesAsync(
+            start, end, filter: null, hardCap: limit * RecentFlowsHardCapMultiplier, "GetRecentFlowsAsync", cancellationToken))
+            .DistinctBy(s => s.Id)
+            .ToList();
 
         // Select the newest N by the trace-id epoch (second-granularity, but enough to pick the right ~20),
         // then enrich those rows below. Ordering within a second is refined by the enriched millisecond

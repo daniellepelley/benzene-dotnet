@@ -3599,6 +3599,88 @@ Scoped verification: `dotnet test test/Benzene.Core.Test -c Release --filter
   distinct settlement-failure log fires once with the settlement exception attached. The existing
   `#117` regression tests (settlement under an already-cancelled `args.CancellationToken`) and the
   handler-throws/abandon-also-throws test all pass unchanged.
+## Round 17, WP-E: AWS/GCP transports — Kinesis, XRay, Pub/Sub (2026-08-30)
+
+- **[RESOLVED] `#273` `KinesisStreamCheckpointer`'s single monotonic max-index watermark silently
+  marked an earlier, still-failed record as "done" once a later-index record from a different
+  `StreamOperators.PartitionBy` group had been checkpointed — a real, demonstrable case of the exact
+  pattern this package's own class doc recommends causing silent data loss.** A handler that
+  partitions a batch by key (the documented way to restore per-key ordering on this transport) and
+  checkpoints as it finishes each record can checkpoint a later partition's group entirely before it
+  ever looks at an earlier record from a different, still-unprocessed group. If that earlier record
+  then fails, the old max-index watermark had already advanced past its position, so
+  `FirstUncheckpointedSequenceNumber` reported the record *after* it as the resume point — the failed
+  record was reported to AWS as already handled and would never be retried. Fixed by replacing the
+  single monotonic index with a **contiguous-prefix watermark**: a `bool[]` sized to the batch tracks
+  which original positions have been confirmed, and the resume point is the first *unconfirmed*
+  position (the longest confirmed prefix's end), not the highest confirmed individual position. The
+  reference-equality/foreign-record guard is unchanged (`IndexOf` returning -1 for a projected/foreign
+  record still can't advance or rewind anything), and a confirmed index can never become unconfirmed
+  (there's no "unconfirm" operation), preserving the old code's "only ever advance" guarantee at the
+  level of each individual record. **Accepted tradeoff, not eliminated:** under `PartitionBy`, a
+  record confirmed ahead of an earlier gap (the partition that finished first) is now redelivered
+  even though it already succeeded once — safe over-retry (at-least-once), explicitly blessed by the
+  design doc's §4 caveats, and a world apart from the silent-skip data loss this fix closes. For a
+  plain sequential handler that checkpoints strictly in order (no gaps), the fix produces
+  byte-identical resume points to the old code — verified with a dedicated regression test, not just
+  asserted. `src/Benzene.Aws.Lambda.Kinesis/KinesisStreamCheckpointer.cs`. Regression tests (both new,
+  `test/Benzene.Core.Test/Aws/Kinesis/KinesisStreamApplicationTest.cs`):
+  `HandleAsync_PartitionByCheckpointing_AnEarlierPartitionsFailure_IsNotSkippedByALaterPartitionsCheckpoint`
+  (red before the fix: reported `"B-2"`; green: reports `"B-1"`, the record that actually failed) and
+  `HandleAsync_SequentialInOrderCheckpointing_BehavesByteIdenticallyToTheOldMonotonicWatermark` (a
+  plain in-order sequential handler resumes from the same record the old max-index watermark would
+  have named). Every pre-existing `KinesisStreamApplicationTest` case stays green unmodified — all of
+  them checkpoint strictly in order, so none was asserting the bug.
+- **[RESOLVED] `#274` `XRayTraceSource.GetCorrelationAsync`/`GetRecentFlowsAsync` had no
+  de-duplication of trace-summary ids returned across `FetchTraceSummariesAsync`'s window-chunk
+  boundaries, so a duplicated id produced two identical `TraceView`s in a correlation search (or
+  displaced a genuinely different trace from the top-N in recent-flows).** The correlation window is
+  chunked into `MaxTraceSummariesWindow`-sized (6h) sub-queries whose edges touch at a shared instant
+  the code's own tests prove — whether X-Ray's `GetTraceSummaries` treats that instant as closed on
+  both sides is unverified, and separately, backend pagination under eventual consistency can
+  legitimately re-surface a trace id across two calls regardless. Neither path was deduplicated before
+  `BatchGetTraces` looked the ids up, so a duplicate id was looked up twice and appended as two
+  `TraceView` entries for one physical trace. Fixed by applying `.DistinctBy(s => s.Id)` immediately
+  after `FetchTraceSummariesAsync` returns, in both methods (first-occurrence-wins) —
+  unconditionally safe regardless of which way the boundary-inclusivity question ever resolves, and
+  removes the dependency on an assumption the code already flagged as unverified for the window's
+  *width*. `src/Benzene.Mesh.Fleet.Aws.XRay/XRayTraceSource.cs`. Regression tests (both new,
+  `test/Benzene.Mesh.Test/XRayTraceSourceTest.cs`):
+  `GetCorrelationAsync_DuplicateTraceIdAcrossWindowChunks_IsOnlyReportedOnce` (red before the fix: two
+  identical `TraceView`s; green: `Assert.Single`) and
+  `GetRecentFlowsAsync_DuplicateSummaryId_OccupiesOnlyOneTopNSlot` (a duplicated summary id no longer
+  occupies two of the top-N slots, so a genuinely distinct trace is no longer silently displaced).
+  Every pre-existing `XRayTraceSourceTest` case stays green unmodified.
+- **[RESOLVED] `#275` `PubSubMiddlewareApplication` still used the pre-`#229` "null `MessageResult` ==
+  success" convention every AWS single-context transport moved away from — a Pub/Sub message whose
+  pipeline completed without ever setting a result was silently, permanently acked.** The check at
+  (what was) line 71 read `context.MessageResult?.IsSuccessful == false`; when `MessageResult` is
+  `null` (the pipeline completed without any middleware setting an outcome — an unroutable topic, or a
+  short-circuit before `MessageRouter` runs), `null == false` is `false`, so `RaiseOnFailureStatus`
+  never escalated. `PubSubOptions.RaiseOnFailureStatus`'s own doc comment already promised
+  "safe-by-default: a returned failure is escalated and redelivered", but the implementation only
+  escalated an *explicit* failure, not an unset one — the same null-reads-as-success bug class round
+  16 fixed in `IdempotencyMiddleware.WasSuccessful` (`#260`) and this round's own AWS pass fixed
+  nowhere else needed fixing (SNS/S3/EventBridge/SQS/DynamoDB already use the corrected convention).
+  **This is a strictly worse instance than any of those siblings**: Google Cloud Functions delivers
+  exactly one Pub/Sub message per invocation with no partial-failure/batch-item-failure channel at
+  all — where an AWS single-context transport's null-result bug still had other records in the same
+  batch to fall back on (round 16's characterization), completing without throwing here means the
+  Cloud Functions Framework returns 2xx, Pub/Sub acks, and the message is gone forever: no log line,
+  no retry, no batch-level safety net of any kind. Fixed by changing the check to
+  `context.MessageResult?.IsSuccessful != true`, matching
+  `SingleContextEscalatingApplicationBase`/`#229`/`#260`'s convention exactly — a null result now
+  escalates the same way an explicit failure does; only an explicit success is accepted. Also
+  reworded `PubSubOptions.RaiseOnFailureStatus`'s doc comment to state the null-escalates behavior
+  explicitly rather than leaving it implicit in "a returned failure".
+  `src/Benzene.GoogleCloud.Functions.PubSub/PubSubMiddlewareApplication.cs`,
+  `src/Benzene.GoogleCloud.Functions.PubSub/PubSubOptions.cs`. Regression test (new,
+  `test/Benzene.Core.Test/Google/PubSubFailureHandlingTest.cs`):
+  `HandleAsync_RaiseOnFailureStatusTrue_PipelineNeverSetsAResult_ThrowsPubSubMessageProcessingException`
+  (red before the fix: no exception thrown, message silently accepted; green:
+  `PubSubMessageProcessingException` thrown with the message's id). Every pre-existing
+  `PubSubFailureHandlingTest` case (explicit failure, explicit success, both-true containment, the
+  NRE-masking regression) stays green unmodified.
 
 ## Open — maintainer decisions (the real remaining backlog)
 
