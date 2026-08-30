@@ -192,4 +192,31 @@ public class MarkdownTypeBuilderTest
 
         Assert.Contains("payment: PaymentMethod", lineWriter.GetLines().ToText());
     }
+
+    [Fact]
+    public void BuildType_ArrayProperty_WithNullItems_RendersVoidArrayPlaceholder_NotNRE()
+    {
+        // #213: MapProperty's array branch dereferenced Items.Reference/Items.Type unconditionally,
+        // NRE-ing on a hand-authored schema with Items == null. GetPropertyTypeName already
+        // null-checks the equivalent case (its own array branch recurses into GetPropertyTypeName(Items),
+        // and that method's very first check turns a null schema into the "Void" placeholder) -
+        // MapProperty now guards the same way and falls through to the generic fallback branch,
+        // which renders that same placeholder via GetPropertyTypeName instead of throwing.
+        var rootSchema = new OpenApiSchema
+        {
+            Type = "object",
+            Properties = new Dictionary<string, OpenApiSchema>
+            {
+                { "items", new OpenApiSchema { Type = "array", Items = null } }
+            }
+        };
+
+        var schemas = new Dictionary<string, OpenApiSchema> { { "Root", rootSchema } };
+        var lineWriter = new LineWriter();
+        var markdownTypeBuilder = new MarkdownTypeBuilder(new SchemaGetter(schemas));
+
+        markdownTypeBuilder.BuildType("Root", lineWriter);
+
+        Assert.Contains("items: Void[]", lineWriter.GetLines().ToText());
+    }
 }

@@ -3,7 +3,7 @@
   /rbac/user/{id}:
     options:
       tags:
-        - Rbac User
+        - 'Rbac User'
       parameters:
       - name: id
         in: path
@@ -45,7 +45,7 @@
     get:
       summary: "user:get"
       tags:
-        - Rbac User
+        - 'Rbac User'
       parameters:
       - name: id
         in: path
@@ -140,7 +140,7 @@
     put:
       summary: "user:update"
       tags:
-        - Rbac User
+        - 'Rbac User'
       parameters:
       - name: id
         in: path

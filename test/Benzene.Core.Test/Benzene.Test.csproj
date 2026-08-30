@@ -41,6 +41,11 @@
     <PackageReference Include="System.Net.Http" Version="4.3.4" />
     <PackageReference Include="System.Text.Encodings.Web" Version="7.0.0" />
     <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
+    <!-- Dev-only: parses generated YAML with a real parser in ApiGatewayBuilderV1 tests (#212) to
+         prove the output actually loads, not just that it looks right by eye. Pinned to the version
+         already resolved transitively via ByteBard.AsyncAPI.NET.Readers above, so this adds no new
+         version to the graph. -->
+    <PackageReference Include="YamlDotNet" Version="13.0.1" />
     <PackageReference Include="xunit" Version="2.4.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.4.5">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

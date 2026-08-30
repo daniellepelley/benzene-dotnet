@@ -43,8 +43,15 @@ namespace Benzene.CodeGen.ApiGateway
             // Benzene.Http.Routing.ReflectionHttpEndpointFinder's own duplicate-route check - a
             // method+path collision is a spec authoring error, not something codegen can silently
             // resolve.
+            //
+            // Case-fold Method in the grouping key, exactly as ReflectionHttpEndpointFinder already
+            // does: "GET" and "get" for the same path are the same route (YAML mapping keys collide
+            // case-sensitively but the emitted verb is always lower-cased via ToLowerInvariant() in
+            // BuildVerb, so distinct-cased Method values would otherwise slip past this guard and
+            // still collide once emitted - the same duplicate-key YAML shape #87 fixed, reached via
+            // verb casing instead of identical casing).
             var duplicates = mappings
-                .GroupBy(x => new { x.http.Method, x.http.Path })
+                .GroupBy(x => new { Method = x.http.Method.ToLowerInvariant(), x.http.Path })
                 .Where(x => x.Count() > 1)
                 .ToArray();
 
@@ -52,8 +59,11 @@ namespace Benzene.CodeGen.ApiGateway
             {
                 var duplicate = duplicates[0];
                 var topics = string.Join(", ", duplicate.Select(x => x.request.Topic));
+                // Report the first entry's original-cased Method (not the folded grouping key) so
+                // the message still reads naturally for the common identical-casing case.
+                var originalMethod = duplicate.First().http.Method;
                 throw new BenzeneException(
-                    $"Route '{duplicate.Key.Method} - {duplicate.Key.Path}' has been assigned to more than one topic ({topics}), this is not permitted");
+                    $"Route '{originalMethod} - {duplicate.Key.Path}' has been assigned to more than one topic ({topics}), this is not permitted");
             }
 
             var paths = mappings
@@ -104,7 +114,7 @@ namespace Benzene.CodeGen.ApiGateway
             var stringBuilder = new StringBuilder();
             stringBuilder.AppendLine(@"    options:");
             stringBuilder.AppendLine(@"      tags:");
-            stringBuilder.AppendLine($@"        - {tag}");
+            stringBuilder.AppendLine($@"        - {YamlValueEscaping.QuoteSingle(tag)}");
             BuildParameters(routeTemplate, stringBuilder);
             stringBuilder.AppendLine(@"      responses:");
             stringBuilder.AppendLine(@"        ""200"":");
@@ -122,7 +132,7 @@ namespace Benzene.CodeGen.ApiGateway
             stringBuilder.AppendLine(@"              method.response.header.X-Content-Type-Options: ""'nosniff'""");
             stringBuilder.AppendLine(@"              method.response.header.Referrer-Policy: ""'no-referrer'""");
             stringBuilder.AppendLine(@$"              method.response.header.Access-Control-Allow-Methods: ""'{verbsText},OPTIONS'""");
-            stringBuilder.AppendLine(@$"              method.response.header.Access-Control-Allow-Headers: ""'{_options.AllowedHeaders}'""");
+            stringBuilder.AppendLine(@$"              method.response.header.Access-Control-Allow-Headers: ""'{YamlValueEscaping.EscapeForDoubleQuoted(_options.AllowedHeaders)}'""");
             stringBuilder.AppendLine(@"            responseTemplates:");
             stringBuilder.AppendLine(@"              application/json: |");
             CorsHeaders(stringBuilder);
@@ -167,9 +177,9 @@ namespace Benzene.CodeGen.ApiGateway
 
             var stringBuilder = new StringBuilder();
             stringBuilder.AppendLine($@"    {verb.ToLowerInvariant()}:");
-            stringBuilder.AppendLine($@"      summary: ""{topic}""");
+            stringBuilder.AppendLine($@"      summary: ""{YamlValueEscaping.EscapeForDoubleQuoted(topic)}""");
             stringBuilder.AppendLine(@"      tags:");
-            stringBuilder.AppendLine($@"        - {tag}");
+            stringBuilder.AppendLine($@"        - {YamlValueEscaping.QuoteSingle(tag)}");
 
             BuildParameters(routeTemplate, stringBuilder);
 
@@ -216,7 +226,7 @@ namespace Benzene.CodeGen.ApiGateway
             stringBuilder.AppendLine(@"            statusCode: ""200""");
             stringBuilder.AppendLine(@"            responseParameters:");
             stringBuilder.AppendLine(@$"              method.response.header.Access-Control-Allow-Methods: ""'{verb},OPTIONS'""");
-            stringBuilder.AppendLine(@$"              method.response.header.Access-Control-Allow-Headers: ""'{_options.AllowedHeaders}'""");
+            stringBuilder.AppendLine(@$"              method.response.header.Access-Control-Allow-Headers: ""'{YamlValueEscaping.EscapeForDoubleQuoted(_options.AllowedHeaders)}'""");
             stringBuilder.AppendLine(@"              method.response.header.Cache-Control: ""'no-store, no-cache'""");
             stringBuilder.AppendLine(@"              method.response.header.Content-Security-Policy: ""'default-src \\'none\\';'""");
             stringBuilder.AppendLine(@"              method.response.header.Referrer-Policy: ""'no-referrer'""");

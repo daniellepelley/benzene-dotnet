@@ -9,6 +9,7 @@ using Benzene.Http.Routing;
 using Benzene.Schema.OpenApi.EventService;
 using Benzene.Test.Autogen.CodeGen.Model;
 using Xunit;
+using YamlDotNet.RepresentationModel;
 
 namespace Benzene.Test.Autogen.CodeGen.ApiGateway;
 
@@ -176,5 +177,151 @@ public class LambdaOpenApiBuilderTest
 
         Assert.Contains("'GET,OPTIONS'", options);
         Assert.DoesNotContain("'GET,GET,OPTIONS'", options);
+    }
+
+    [Fact]
+    public void BuildCodeFiles_TwoTopicsShareAPathWithDifferingMethodCasing_FailsLoudly_NotDuplicateKeyYaml()
+    {
+        // #211: the duplicate-route guard grouped on the raw Method, so "GET" and "get" for the
+        // same path passed straight through - BuildVerb always lower-cases the emitted verb
+        // (verb.ToLowerInvariant()), so the two would still both emit a "get:" block under the same
+        // path, the exact duplicate-key YAML shape #87 fixed, reached via casing instead of an
+        // identical Method value. Mirrors ReflectionHttpEndpointFinder's own case-folded guard.
+        var messageHandlerDefinitions = new IMessageHandlerDefinition[]
+        {
+            MessageHandlerDefinition.CreateInstance("user:get", typeof(GetUserMessage), typeof(GetUserMessage), typeof(UserDto)),
+            MessageHandlerDefinition.CreateInstance("user:get-legacy", typeof(GetUserMessage), typeof(GetUserMessage), typeof(UserDto)),
+        };
+        var httpEndpointDefinitions = new[]
+        {
+            HttpEndpointDefinition.CreateInstance("GET", "user/{id}", "user:get"),
+            HttpEndpointDefinition.CreateInstance("get", "user/{id}", "user:get-legacy"),
+        };
+        var eventServiceDocument = httpEndpointDefinitions.ToEventServiceDocument(messageHandlerDefinitions);
+
+        var builder = new ApiGatewayBuilderV1("MY_FUNC_URI");
+
+        var exception = Assert.Throws<BenzeneException>(() => builder.BuildCodeFiles(eventServiceDocument));
+
+        Assert.Contains("user/{id}", exception.Message);
+        Assert.Contains("user:get", exception.Message);
+        Assert.Contains("user:get-legacy", exception.Message);
+    }
+
+    [Fact]
+    public void BuildVerb_TopicContainingAQuote_ProducesValidYaml_WithTheValueIntact()
+    {
+        // #212: the topic was interpolated raw into a double-quoted `summary:` scalar. A `"` in the
+        // topic broke the scalar out of the string, producing YAML a real parser can't load.
+        var topic = "user:get \"legacy\" variant";
+
+        var document = WrapAsDocument(new ApiGatewayBuilderV1("URI").BuildVerb("GET", "user/{id}", topic));
+
+        var yaml = new YamlStream();
+        yaml.Load(new StringReader(document));
+
+        var summary = FindScalar(yaml, "summary");
+        Assert.Equal(topic, summary);
+    }
+
+    [Fact]
+    public void BuildOptions_PathSegmentContainingColonSpace_ProducesValidYaml_WithTheTagIntact()
+    {
+        // #212: CreateTag title-cases each path segment and joins them into one string emitted as
+        // an unquoted YAML sequence item under `tags:`. A ": " surviving that title-casing (e.g. a
+        // literal path segment containing it) produces something that no longer parses as a single
+        // scalar - YAML reads a bare "key: value" shape inside a sequence item as a nested mapping.
+        var path = "orders/on: hold/{id}";
+
+        var document = WrapAsDocument(new ApiGatewayBuilderV1("URI").BuildOptions(new[] { "GET" }, path, "orders:get"));
+
+        var yaml = new YamlStream();
+        yaml.Load(new StringReader(document));
+
+        var tag = FindFirstSequenceItem(yaml, "tags");
+        Assert.Equal("Orders On: Hold", tag);
+    }
+
+    // BuildVerb/BuildOptions emit fragments indented as if nested under a path mapping (they are,
+    // in BuildCodeFiles' real output) - wrap in a minimal enclosing document so the fragment is
+    // itself a structurally complete, loadable YAML document.
+    private static string WrapAsDocument(string fragment) => "root:\n" + fragment;
+
+    private static string FindScalar(YamlStream yaml, string key)
+    {
+        var root = (YamlMappingNode)yaml.Documents[0].RootNode;
+        return FindScalarRecursive(root, key) ?? throw new Xunit.Sdk.XunitException($"Key '{key}' not found");
+    }
+
+    private static string? FindScalarRecursive(YamlNode node, string key)
+    {
+        if (node is YamlMappingNode mapping)
+        {
+            foreach (var entry in mapping.Children)
+            {
+                if (entry.Key is YamlScalarNode scalarKey && scalarKey.Value == key && entry.Value is YamlScalarNode scalarValue)
+                {
+                    return scalarValue.Value;
+                }
+
+                var found = FindScalarRecursive(entry.Value, key);
+                if (found != null)
+                {
+                    return found;
+                }
+            }
+        }
+        else if (node is YamlSequenceNode sequence)
+        {
+            foreach (var item in sequence.Children)
+            {
+                var found = FindScalarRecursive(item, key);
+                if (found != null)
+                {
+                    return found;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static string FindFirstSequenceItem(YamlStream yaml, string key)
+    {
+        var root = (YamlMappingNode)yaml.Documents[0].RootNode;
+        return FindSequenceItemRecursive(root, key) ?? throw new Xunit.Sdk.XunitException($"Key '{key}' not found");
+    }
+
+    private static string? FindSequenceItemRecursive(YamlNode node, string key)
+    {
+        if (node is YamlMappingNode mapping)
+        {
+            foreach (var entry in mapping.Children)
+            {
+                if (entry.Key is YamlScalarNode scalarKey && scalarKey.Value == key && entry.Value is YamlSequenceNode sequenceValue)
+                {
+                    return ((YamlScalarNode)sequenceValue.Children[0]).Value;
+                }
+
+                var found = FindSequenceItemRecursive(entry.Value, key);
+                if (found != null)
+                {
+                    return found;
+                }
+            }
+        }
+        else if (node is YamlSequenceNode sequence)
+        {
+            foreach (var item in sequence.Children)
+            {
+                var found = FindSequenceItemRecursive(item, key);
+                if (found != null)
+                {
+                    return found;
+                }
+            }
+        }
+
+        return null;
     }
 }
