@@ -575,6 +575,33 @@ public class XRayTraceSourceTest
         mock.Verify(x => x.BatchGetTracesAsync(It.IsAny<BatchGetTracesRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    // #252 (XRay sibling): EnrichRecentFlowsAsync's FetchBatchAsync had a bare `catch { }` that swallowed a
+    // genuine caller cancellation the same way it swallows a backend failure - silently degrading the row
+    // to the summary plane instead of propagating. When the caller's own token IS cancelled, this must
+    // propagate, matching the Jaeger/Tempo trace-source fix for the same timeout-vs-cancellation confusion.
+    [Fact]
+    public async Task GetRecentFlowsAsync_PropagatesGenuineCancellation_InsteadOfDegradingToSummaryPlane()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var mock = new Mock<IAmazonXRay>();
+        mock.Setup(x => x.GetTraceSummariesAsync(It.IsAny<GetTraceSummariesRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new GetTraceSummariesResponse
+            {
+                TraceSummaries = new List<Amazon.XRay.Model.TraceSummary>
+                {
+                    new Amazon.XRay.Model.TraceSummary { Id = "1-5c000000-aaaaaaaaaaaaaaaaaaaaaaaa" }
+                }
+            });
+        mock.Setup(x => x.BatchGetTracesAsync(It.IsAny<BatchGetTracesRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException("simulated genuine host cancellation", cts.Token));
+
+        var source = new XRayTraceSource(mock.Object);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => source.GetRecentFlowsAsync(20, null, cts.Token));
+    }
+
     [Fact]
     public async Task GetRecentFlowsAsync_HonoursTheLimit()
     {

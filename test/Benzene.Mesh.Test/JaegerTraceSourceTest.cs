@@ -284,6 +284,62 @@ public class JaegerTraceSourceTest
         Assert.Equal("t-a", Assert.Single(view!.Traces).TraceId); // orders-api's result survived billing-api's failure
     }
 
+    // #252: a per-service HttpClient-level timeout throws TaskCanceledException (an OperationCanceledException
+    // subclass) completely independent of the caller's own cancellationToken - the isolation catch must not
+    // treat that the same as genuine host cancellation and let it fault the whole fan-out.
+    [Fact]
+    public async Task GetCorrelationAsync_IsolatesAPerServiceTimeout_NotTiedToTheCallersToken()
+    {
+        const string correlationId = "ticket-1";
+        var source = Source(path =>
+        {
+            Assert.Contains("benzene.correlation-id", Uri.UnescapeDataString(path));
+            return ServiceOf(path) switch
+            {
+                "orders-api" => (HttpStatusCode.OK, Data(Trace("t-a", "orders-api", "orders:create", "ok", correlationId))),
+                "billing-api" => throw new TaskCanceledException(
+                    "simulated HttpClient.Timeout for this one service, unrelated to the caller's token"),
+                _ => (HttpStatusCode.OK, Data())
+            };
+        }, TwoServices, out _);
+
+        // The caller's own cancellationToken is CancellationToken.None throughout - nothing the caller did
+        // requested cancellation, so billing-api's per-request timeout must be isolated exactly like the
+        // adjacent HttpRequestException test, not treated as genuine host cancellation.
+        var view = await source.GetCorrelationAsync(correlationId);
+
+        Assert.NotNull(view);
+        Assert.Equal("t-a", Assert.Single(view!.Traces).TraceId); // orders-api's result survived billing-api's timeout
+    }
+
+    // The complement of the above: when the CALLER's own token really is cancelled, the exception must
+    // propagate rather than being isolated away - matching MessageHandler.cs's token-verified convention.
+    // The token is cancelled from WITHIN billing-api's handler (not before the call starts) so this
+    // exercises the per-service catch's `when` filter directly, rather than a semaphore/gate short-circuit.
+    [Fact]
+    public async Task GetCorrelationAsync_PropagatesGenuineCancellation_WhenTheCallersOwnTokenIsCancelled()
+    {
+        const string correlationId = "ticket-1";
+        using var cts = new CancellationTokenSource();
+        var source = Source(path => ServiceOf(path) switch
+        {
+            "orders-api" => (HttpStatusCode.OK, Data(Trace("t-a", "orders-api", "orders:create", "ok", correlationId))),
+            "billing-api" => throw SimulateGenuineHostCancellation(cts),
+            _ => (HttpStatusCode.OK, Data())
+        }, TwoServices, out _);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => source.GetCorrelationAsync(correlationId, null, cts.Token));
+    }
+
+    // Cancels the ambient token AND throws the exception the fetch would see once it observes that
+    // cancellation - i.e. a genuine host shutdown/drain, not an unrelated per-request timeout.
+    private static Exception SimulateGenuineHostCancellation(CancellationTokenSource cts)
+    {
+        cts.Cancel();
+        return new TaskCanceledException("simulated genuine host cancellation", null, cts.Token);
+    }
+
     [Fact]
     public async Task GetCorrelationAsync_LogsTheFailedService_WhenIsolatingAFaultedSearch()
     {

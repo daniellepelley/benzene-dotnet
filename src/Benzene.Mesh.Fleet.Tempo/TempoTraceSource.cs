@@ -87,8 +87,16 @@ public class TempoTraceSource : IMeshTraceSource
                 var events = await FetchTraceEventsAsync(match.TraceId, cancellationToken);
                 return events.Count > 0 ? new TraceView { TraceId = match.TraceId, Events = events } : null;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
+                // Token-verified, not type-based: an HttpClient-level per-request Timeout throws
+                // TaskCanceledException (an OperationCanceledException subclass) regardless of whether the
+                // caller's own token was ever cancelled, so isolating on exception type alone would let
+                // one slow backend fault the whole correlation search. This isolates everything EXCEPT an
+                // OperationCanceledException while the caller's own cancellationToken is actually
+                // cancelled - that's genuine host cancellation and must propagate instead (see
+                // MessageHandler.cs's ex.CancellationToken.IsCancellationRequested checks for the same
+                // timeout-vs-cancellation distinction).
                 _logger?.LogWarning(ex,
                     "TempoTraceSource.GetCorrelationAsync failed to fetch trace {TraceId}; skipping it and keeping the rest of the correlation search.",
                     match.TraceId);

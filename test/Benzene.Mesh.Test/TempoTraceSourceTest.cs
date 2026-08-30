@@ -276,6 +276,66 @@ public class TempoTraceSourceTest
         Assert.DoesNotContain(view.Traces, t => t.TraceId == failingTraceId);
     }
 
+    // #252: a per-trace HttpClient-level timeout throws TaskCanceledException (an OperationCanceledException
+    // subclass) completely independent of the caller's own cancellationToken - the isolation catch must not
+    // treat that the same as genuine host cancellation and let it fault the whole correlation search.
+    [Fact]
+    public async Task GetCorrelationAsync_IsolatesAPerTraceTimeout_NotTiedToTheCallersToken()
+    {
+        const string correlationId = "ticket-1";
+        var traceIds = Enumerable.Range(0, 6).Select(i => $"t-{i}").ToArray();
+        const string timingOutTraceId = "t-3";
+
+        var source = Source(path =>
+        {
+            if (path.StartsWith("/api/search"))
+            {
+                return (HttpStatusCode.OK, SearchBody(traceIds));
+            }
+
+            if (path.Contains(timingOutTraceId))
+            {
+                throw new TaskCanceledException(
+                    "simulated HttpClient.Timeout for this one trace, unrelated to the caller's token");
+            }
+
+            return (HttpStatusCode.OK, TraceBody("orders:create", "ok", "orders-api", correlationId));
+        }, out _);
+
+        // The caller's own cancellationToken is CancellationToken.None throughout - nothing the caller did
+        // requested cancellation, so t-3's per-request timeout must be isolated exactly like the adjacent
+        // HttpRequestException test, not treated as genuine host cancellation.
+        var view = await source.GetCorrelationAsync(correlationId);
+
+        Assert.NotNull(view);
+        Assert.Equal(5, view!.Traces.Count); // every trace except the one whose fetch timed out
+        Assert.DoesNotContain(view.Traces, t => t.TraceId == timingOutTraceId);
+    }
+
+    // The complement of the above: when the CALLER's own token really is cancelled, the exception must
+    // propagate rather than being isolated away - matching MessageHandler.cs's token-verified convention.
+    // The token is cancelled from WITHIN the per-trace fetch handler (not before the call starts) so this
+    // exercises the per-trace catch's `when` filter directly, rather than a search-call short-circuit.
+    [Fact]
+    public async Task GetCorrelationAsync_PropagatesGenuineCancellation_WhenTheCallersOwnTokenIsCancelled()
+    {
+        using var cts = new CancellationTokenSource();
+        var source = Source(path => path.StartsWith("/api/search")
+            ? (HttpStatusCode.OK, SearchBody("t-0"))
+            : throw SimulateGenuineHostCancellation(cts), out _);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => source.GetCorrelationAsync("ticket-1", null, cts.Token));
+    }
+
+    // Cancels the ambient token AND throws the exception the fetch would see once it observes that
+    // cancellation - i.e. a genuine host shutdown/drain, not an unrelated per-request timeout.
+    private static Exception SimulateGenuineHostCancellation(CancellationTokenSource cts)
+    {
+        cts.Cancel();
+        return new TaskCanceledException("simulated genuine host cancellation", null, cts.Token);
+    }
+
     // #188(b): per-trace fetches during a correlation search must run with bounded concurrency, not fully
     // sequentially (the review's latency probe: max concurrency was 1 before the fix). Every expected
     // request must arrive before any of them is allowed to complete - only satisfiable if the fetches are
