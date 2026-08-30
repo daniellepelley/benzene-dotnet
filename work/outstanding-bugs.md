@@ -3805,6 +3805,60 @@ Scoped verification: `dotnet test test/Benzene.Core.Test -c Release --filter
   signal reaching a check is its own timeout (`TimeOutHealthCheck`, the check's `Timeout` override
   or the processor's default), so a slow custom check won't observe a caller disconnect or a host
   shutdown/drain signal early and always runs to its own timeout, even during a graceful drain.
+## Round 17, WP-H: DynamoDB stores — transact accounting + expiry boundary (2026-08-30)
+
+- **[RESOLVED] #271 — `DynamoDbEventStore.MaxEventsPerAppend` (100) counted only `events.Count`, but
+  any `expectedVersion > 0` append prepends the `#121` `ConditionCheck` item — a 100-event append onto
+  an EXISTING stream sent 101 transact items, one over AWS's hard 100-item `TransactWriteItems` limit,
+  surfacing as AWS's own raw validation error instead of the library's friendly pre-flight guard.** The
+  existing limit test only ever exercised 101 events at `expectedVersion: 0` (no `ConditionCheck` item
+  in that case, so it never caught the off-by-one). Fixed by computing an effective per-call cap —
+  `MaxEventsPerAppend - 1` (99) whenever `expectedVersion > 0`, the plain 100 only for a brand-new
+  stream (`expectedVersion == 0`, which carries no `ConditionCheck` item) — and throwing the existing
+  friendly `ArgumentException` (now explaining the reserved condition-check slot) pre-flight, before any
+  SDK call is made, when the caller's batch exceeds it. Did **not** attempt to fold the version
+  assertion into the first `Put`'s own condition (DynamoDB conditions can only reference the item being
+  written, ruled infeasible by the review) — this is a correctly-computed cap, not a workaround.
+  **Contract parity**: `InMemoryEventStore` enforced only the plain 100-event cap regardless of
+  `expectedVersion`; it now enforces the identical 99-on-an-existing-stream effective contract (with a
+  comment explaining the limit mirrors `DynamoDbEventStore`'s real transact-item constraint even though
+  this store has no physical condition-check item of its own), so app code written against either store
+  observes the same ceiling. `src/Benzene.EventSourcing.DynamoDb/DynamoDbEventStore.cs`,
+  `src/Benzene.EventSourcing/InMemoryEventStore.cs`. Regression tests (red confirmed against the
+  pre-fix code, then green):
+  `test/Benzene.Core.Test/EventSourcing/DynamoDb/DynamoDbEventStoreTest.cs`
+  (`Append_100EventsAtAnExpectedVersionGreaterThanZero_ThrowsAFriendlyErrorPreFlight`,
+  `Append_99EventsAtAnExpectedVersionGreaterThanZero_ProducesExactly100TransactItems_AndSucceeds`,
+  `Append_ExactlyTheTransactionLimit_AtExpectedVersionZero_Succeeds`) and
+  `test/Benzene.Core.Test/EventSourcing/InMemoryEventStoreTest.cs`
+  (`Append_100EventsAtAnExpectedVersionGreaterThanZero_Throws`,
+  `Append_99EventsAtAnExpectedVersionGreaterThanZero_Succeeds`,
+  `Append_Exactly100Events_AtExpectedVersionZero_Succeeds`).
+- **[RESOLVED] #272 — `DynamoDbIdempotencyStore.TryClaimAsync`'s conditional `PutItem` used a strict
+  `expiresAt < :now` write condition while `ReadRecordAsync`'s expiry check was inclusive
+  (`epoch <= now`), so a record exactly at its expiry boundary (the same whole-second `expiresAt`
+  value both sides compare against `now`) was treated as still-live by the write and already-expired
+  by the read in the very same call — contradicting the class's own documented "reclaimable the
+  instant it lapses" contract. Under a genuinely advancing wall clock this self-heals on the next
+  retry tick, but under the store's own documented fixed-clock testing seam every one of the bounded
+  `MaxClaimAttempts` retries repeated the identical disagreement, ending in a spurious
+  `IdempotencyClaimContentionException` for a key the store's own read path already considered
+  reclaimable.** Fixed by making the write condition inclusive to match: `attribute_not_exists(#pk) OR
+  expiresAt <= :now`. `ReadRecordAsync` was already correct and is unchanged.
+  `src/Benzene.Idempotency.DynamoDb/DynamoDbIdempotencyStore.cs`. Regression test (red confirmed
+  against the pre-fix code, then green):
+  `test/Benzene.Core.Test/Idempotency/DynamoDb/DynamoDbIdempotencyStoreTest.cs`
+  (`TryClaim_WhenExistingRecordExpiresAtExactlyNow_WinsTheReclaim_NotContention` — simulates DynamoDB
+  evaluating the store's own emitted `ConditionExpression` text against an existing record whose
+  `expiresAt` equals the fixed `now`, so the test exercises the actual comparison operator the store
+  builds rather than a hard-coded assumption about it).
+
+Both findings and their captured repro shapes are from `work/review-round17-aws-deep-2026-08.md` and
+`work/review-round17-reliability-2026-08.md`. Verified:
+`dotnet test test/Benzene.Core.Test -c Release --filter
+"FullyQualifiedName~DynamoDbEventStoreTest|FullyQualifiedName~InMemoryEventStoreTest|FullyQualifiedName~DynamoDbIdempotencyStoreTest"`
+— red run (pre-fix code) failed exactly the 3 new tests above (55 passed, 3 failed, 58 total); green
+run (post-fix) 58 passed, 0 failed.
 
 ## Open — maintainer decisions (the real remaining backlog)
 

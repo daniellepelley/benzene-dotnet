@@ -20,7 +20,11 @@ namespace Benzene.EventSourcing.DynamoDb;
 /// </remarks>
 public class DynamoDbEventStore : IEventStore
 {
-    // TransactWriteItems is atomic but bounded; an append larger than this must be split by the caller.
+    // TransactWriteItems is atomic but bounded at 100 items; an append larger than this must be split
+    // by the caller. When expectedVersion > 0 the transaction also carries an extra ConditionCheck
+    // item (the optimistic-concurrency check on the existing stream, see AppendAsync below) on top of
+    // one Put per event, so the effective per-call cap for an append onto an EXISTING stream is
+    // MaxEventsPerAppend - 1, not MaxEventsPerAppend (#271).
     private const int MaxEventsPerAppend = 100;
 
     // Attribute names this store writes onto every event item; a key attribute colliding with one of
@@ -103,11 +107,16 @@ public class DynamoDbEventStore : IEventStore
             throw new ArgumentOutOfRangeException(nameof(expectedVersion), expectedVersion, "Expected version cannot be negative.");
         }
 
-        if (events.Count > MaxEventsPerAppend)
+        // Appending to an existing stream (expectedVersion > 0) reserves one of the 100 transact-write
+        // items for the version ConditionCheck below, so the effective cap on event count is one less
+        // than for a brand-new stream (expectedVersion == 0, which has no ConditionCheck item).
+        var effectiveMaxEventsPerAppend = expectedVersion > 0 ? MaxEventsPerAppend - 1 : MaxEventsPerAppend;
+        if (events.Count > effectiveMaxEventsPerAppend)
         {
-            throw new ArgumentException(
-                $"Cannot append {events.Count} events atomically; DynamoDB transactions are limited to {MaxEventsPerAppend} items. Split the append.",
-                nameof(events));
+            var message = expectedVersion > 0
+                ? $"Cannot append {events.Count} events atomically at expectedVersion {expectedVersion}; appending to an existing stream reserves one of DynamoDB's {MaxEventsPerAppend}-item transact-write limit for the optimistic-concurrency check, so the effective limit is {effectiveMaxEventsPerAppend} events. Split the append."
+                : $"Cannot append {events.Count} events atomically; DynamoDB transactions are limited to {MaxEventsPerAppend} items. Split the append.";
+            throw new ArgumentException(message, nameof(events));
         }
 
         if (events.Count == 0)
