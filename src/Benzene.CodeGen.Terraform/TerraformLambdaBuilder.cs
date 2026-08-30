@@ -40,11 +40,11 @@ public class TerraformLambdaBuilder : ICodeBuilder<TerraformLambdaSettings>
         lineWriter.WriteLine($"resource \"aws_lambda_function\" \"{lambdaName}\" {{");
         using (lineWriter.StartIndent())
         {
-            lineWriter.WriteLine($"function_name = \"{settings.Name}\"");
+            lineWriter.WriteLine($"function_name = \"{NameFormatter.EscapeHclString(settings.Name)}\"");
             lineWriter.WriteLine("filename = \"${path.module}/file.zip\"");
             lineWriter.WriteLine($"role = aws_iam_role.{lambdaName}_role.arn");
-            lineWriter.WriteLine($"handler = \"{settings.EntryPoint}\"");
-            lineWriter.WriteLine($"runtime = \"{settings.Runtime}\"");
+            lineWriter.WriteLine($"handler = \"{NameFormatter.EscapeHclString(settings.EntryPoint)}\"");
+            lineWriter.WriteLine($"runtime = \"{NameFormatter.EscapeHclString(settings.Runtime)}\"");
             lineWriter.WriteLine($"timeout = {settings.Timeout}");
             lineWriter.WriteLine($"memory_size = {settings.MemorySize}");
 
@@ -97,9 +97,9 @@ public class TerraformLambdaBuilder : ICodeBuilder<TerraformLambdaSettings>
             lineWriter.WriteLine("tags = {");
             using (lineWriter.StartIndent())
             {
-                lineWriter.WriteLine($"name = \"{settings.Name}\"");
-                lineWriter.WriteLine($"domain = \"{settings.Domain}\"");
-                lineWriter.WriteLine($"subdomain = \"{settings.SubDomain}\"");
+                lineWriter.WriteLine($"name = \"{NameFormatter.EscapeHclString(settings.Name)}\"");
+                lineWriter.WriteLine($"domain = \"{NameFormatter.EscapeHclString(settings.Domain)}\"");
+                lineWriter.WriteLine($"subdomain = \"{NameFormatter.EscapeHclString(settings.SubDomain)}\"");
             }
 
             lineWriter.WriteLine("}");
@@ -118,15 +118,15 @@ public class TerraformLambdaBuilder : ICodeBuilder<TerraformLambdaSettings>
         lineWriter.WriteLine($"resource \"aws_iam_role\" \"{lambdaName}_role\" {{");
         using (lineWriter.StartIndent())
         {
-            lineWriter.WriteLine($"name = \"{settings.Name}-role\"");
+            lineWriter.WriteLine($"name = \"{NameFormatter.EscapeHclString(settings.Name)}-role\"");
             lineWriter.WriteLine("assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json");
             lineWriter.WriteLine();
             lineWriter.WriteLine("tags = {");
             using (lineWriter.StartIndent())
             {
-                lineWriter.WriteLine($"name = \"{settings.Name}-role\"");
-                lineWriter.WriteLine($"domain = \"{settings.Domain}\"");
-                lineWriter.WriteLine($"subdomain = \"{settings.SubDomain}\"");
+                lineWriter.WriteLine($"name = \"{NameFormatter.EscapeHclString(settings.Name)}-role\"");
+                lineWriter.WriteLine($"domain = \"{NameFormatter.EscapeHclString(settings.Domain)}\"");
+                lineWriter.WriteLine($"subdomain = \"{NameFormatter.EscapeHclString(settings.SubDomain)}\"");
             }
             lineWriter.WriteLine("}");
         }
