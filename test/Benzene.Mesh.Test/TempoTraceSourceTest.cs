@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Benzene.Mesh.Fleet.Tempo;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace Benzene.Mesh.Test;
@@ -217,5 +218,152 @@ public class TempoTraceSourceTest
         var flows = await source.GetRecentFlowsAsync(2);
 
         Assert.Equal(2, flows.Count);
+    }
+
+    // A minimal ILogger that records formatted messages, for asserting on the search-limit warning log
+    // without pulling in a mocking framework's extension-method plumbing for ILogger (matches
+    // XRayTraceSourceTest's RecordingLogger).
+    private sealed class RecordingLogger : ILogger
+    {
+        public List<string> Messages { get; } = new();
+
+        public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
+
+        private sealed class NullScope : IDisposable
+        {
+            public static readonly NullScope Instance = new();
+            public void Dispose() { }
+        }
+    }
+
+    private static string SearchBody(params string[] traceIds)
+        => "{ \"traces\": [ " + string.Join(", ", traceIds.Select(id => "{ \"traceID\": \"" + id + "\" }")) + " ] }";
+
+    // #188(a): a mid-loop failure among several matched traces must not discard the traces already
+    // fetched successfully. Before the fix, GetCorrelationAsync fetched sequentially with no per-trace
+    // isolation, so one trace's connection failure propagated out and lost every already-fetched trace
+    // too (CompositeMeshFleetReadModel's single outer try/catch then degrades the *entire* search).
+    [Fact]
+    public async Task GetCorrelationAsync_IsolatesAPerTraceFetchFailure_AndReturnsTheSuccessfulTraces()
+    {
+        const string correlationId = "ticket-1";
+        var traceIds = Enumerable.Range(0, 6).Select(i => $"t-{i}").ToArray();
+        const string failingTraceId = "t-3";
+
+        var source = Source(path =>
+        {
+            if (path.StartsWith("/api/search"))
+            {
+                return (HttpStatusCode.OK, SearchBody(traceIds));
+            }
+
+            if (path.Contains(failingTraceId))
+            {
+                throw new HttpRequestException("simulated transient connection failure");
+            }
+
+            return (HttpStatusCode.OK, TraceBody("orders:create", "ok", "orders-api", correlationId));
+        }, out _);
+
+        var view = await source.GetCorrelationAsync(correlationId);
+
+        Assert.NotNull(view);
+        Assert.Equal(5, view!.Traces.Count); // every trace except the one whose fetch failed
+        Assert.DoesNotContain(view.Traces, t => t.TraceId == failingTraceId);
+    }
+
+    // #188(b): per-trace fetches during a correlation search must run with bounded concurrency, not fully
+    // sequentially (the review's latency probe: max concurrency was 1 before the fix). Every expected
+    // request must arrive before any of them is allowed to complete - only satisfiable if the fetches are
+    // issued concurrently; a regression to sequential fetching deadlocks this test instead of passing it.
+    private sealed class GatedConcurrencyHandler : HttpMessageHandler
+    {
+        private readonly string _searchBody;
+        private readonly int _expectedConcurrentRequests;
+        private int _arrived;
+        private readonly TaskCompletionSource _allArrived = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public GatedConcurrencyHandler(string searchBody, int expectedConcurrentRequests)
+        {
+            _searchBody = searchBody;
+            _expectedConcurrentRequests = expectedConcurrentRequests;
+        }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri!.PathAndQuery;
+            if (path.StartsWith("/api/search"))
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(_searchBody) };
+            }
+
+            if (Interlocked.Increment(ref _arrived) == _expectedConcurrentRequests)
+            {
+                _allArrived.TrySetResult();
+            }
+
+            await _allArrived.Task; // only resolves once every expected trace fetch has arrived
+
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{ "batches": [] }""") };
+        }
+    }
+
+    [Fact]
+    public async Task GetCorrelationAsync_FetchesMatchedTracesConcurrently_NotSequentially()
+    {
+        var traceIds = new[] { "t-0", "t-1", "t-2" };
+        var handler = new GatedConcurrencyHandler(SearchBody(traceIds), traceIds.Length);
+        var options = new TempoTraceSourceOptions(TempoUrl); // SearchConcurrency default (8) >= 3
+        var source = new TempoTraceSource(new HttpClient(handler), options);
+
+        var task = source.GetCorrelationAsync("ticket-1");
+        var completed = await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(5)));
+
+        Assert.Same(task, completed); // did not deadlock - all 3 fetches were in flight together
+        Assert.Null(await task);      // each fetch returned an empty trace body → no events → filtered out
+    }
+
+    // #190: a correlation search that hits its configured SearchLimit logs a warning rather than
+    // truncating silently, mirroring Jaeger's SearchLimitPerService and X-Ray's #77-fixed pattern.
+    [Fact]
+    public async Task GetCorrelationAsync_LogsAWarning_WhenTheSearchHitsItsConfiguredLimit()
+    {
+        var traceIds = new[] { "t-0", "t-1" };
+        var handler = new RoutingHandler(path =>
+        {
+            if (path.StartsWith("/api/search"))
+            {
+                Assert.Contains("limit=2", path); // the configured SearchLimit is honoured on the wire
+                return (HttpStatusCode.OK, SearchBody(traceIds));
+            }
+            return (HttpStatusCode.OK, TraceBody("orders:create", "ok", "orders-api"));
+        });
+        var logger = new RecordingLogger();
+        var options = new TempoTraceSourceOptions(TempoUrl) { SearchLimit = 2 };
+        var source = new TempoTraceSource(new HttpClient(handler), options, logger);
+
+        await source.GetCorrelationAsync("ticket-1");
+
+        Assert.Contains(logger.Messages, m => m.Contains("limit", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task GetCorrelationAsync_DoesNotLog_WhenTheSearchIsWellUnderTheLimit()
+    {
+        var traceIds = new[] { "t-0" };
+        var handler = new RoutingHandler(path => path.StartsWith("/api/search")
+            ? (HttpStatusCode.OK, SearchBody(traceIds))
+            : (HttpStatusCode.OK, TraceBody("orders:create", "ok", "orders-api")));
+        var logger = new RecordingLogger();
+        var options = new TempoTraceSourceOptions(TempoUrl) { SearchLimit = 100 }; // default - 1 match, nowhere near it
+        var source = new TempoTraceSource(new HttpClient(handler), options, logger);
+
+        await source.GetCorrelationAsync("ticket-1");
+
+        Assert.DoesNotContain(logger.Messages, m => m.Contains("limit", StringComparison.OrdinalIgnoreCase));
     }
 }

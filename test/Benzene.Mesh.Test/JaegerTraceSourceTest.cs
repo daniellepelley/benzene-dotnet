@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Benzene.Mesh.Fleet.Jaeger;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace Benzene.Mesh.Test;
@@ -237,5 +238,68 @@ public class JaegerTraceSourceTest
 
         Assert.Same(task, completed); // did not deadlock - all 3 requests were in flight together
         Assert.Empty(await task);
+    }
+
+    // A minimal ILogger that records formatted messages, for asserting on the failed-service warning log
+    // without pulling in a mocking framework's extension-method plumbing for ILogger (matches
+    // XRayTraceSourceTest's RecordingLogger).
+    private sealed class RecordingLogger : ILogger
+    {
+        public List<string> Messages { get; } = new();
+
+        public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
+
+        private sealed class NullScope : IDisposable
+        {
+            public static readonly NullScope Instance = new();
+            public void Dispose() { }
+        }
+    }
+
+    // #189: a faulted per-service search must not discard the other services' already-fetched results via
+    // Task.WhenAll's fault semantics. Before the fix, billing-api's connection failure propagated out of
+    // BoundedFanOut.WhenAllAsync and faulted the whole fan-out, losing orders-api's successful result too.
+    [Fact]
+    public async Task GetCorrelationAsync_IsolatesAFaultedServiceSearch_AndReturnsTheHealthyServicesResults()
+    {
+        const string correlationId = "ticket-1";
+        var source = Source(path =>
+        {
+            Assert.Contains("benzene.correlation-id", Uri.UnescapeDataString(path));
+            return ServiceOf(path) switch
+            {
+                "orders-api" => (HttpStatusCode.OK, Data(Trace("t-a", "orders-api", "orders:create", "ok", correlationId))),
+                "billing-api" => throw new HttpRequestException("simulated transient connection failure"),
+                _ => (HttpStatusCode.OK, Data())
+            };
+        }, TwoServices, out _);
+
+        var view = await source.GetCorrelationAsync(correlationId);
+
+        Assert.NotNull(view);
+        Assert.Equal("t-a", Assert.Single(view!.Traces).TraceId); // orders-api's result survived billing-api's failure
+    }
+
+    [Fact]
+    public async Task GetCorrelationAsync_LogsTheFailedService_WhenIsolatingAFaultedSearch()
+    {
+        const string correlationId = "ticket-1";
+        var handler = new RoutingHandler(path => ServiceOf(path) switch
+        {
+            "orders-api" => (HttpStatusCode.OK, Data(Trace("t-a", "orders-api", "orders:create", "ok", correlationId))),
+            "billing-api" => throw new HttpRequestException("simulated transient connection failure"),
+            _ => (HttpStatusCode.OK, Data())
+        });
+        var logger = new RecordingLogger();
+        var options = new JaegerTraceSourceOptions(JaegerUrl) { Services = TwoServices };
+        var source = new JaegerTraceSource(new HttpClient(handler), options, logger);
+
+        await source.GetCorrelationAsync(correlationId);
+
+        Assert.Contains(logger.Messages, m => m.Contains("billing-api"));
     }
 }
