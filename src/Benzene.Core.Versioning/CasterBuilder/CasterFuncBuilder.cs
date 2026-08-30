@@ -20,21 +20,72 @@ public class CasterFuncBuilder
     {
         var fromType = typeof(TFrom);
         var toType = typeof(TTo);
+        var key = (fromType, toType);
 
-        if (_funcs.ContainsKey((fromType, toType)))
+        if (_funcs.TryGetValue(key, out var existing))
         {
-            return (Func<TFrom, TTo>)_funcs[(fromType, toType)];
+            return (Func<TFrom, TTo>)existing;
         }
 
-        var srcParam = Expression.Parameter(fromType, "src");
-        var body = BuildMappingExpression(srcParam, fromType, toType);
+        // Recursion guard for self-referential/mutually-recursive versioned DTO shapes (e.g. a
+        // `Node.Child: Node` tree, or two types that reference each other). Building the mapping
+        // expression below can re-enter this method for the very same (fromType, toType) pair -
+        // e.g. via CreateClassExpression's call to MapDelegate for a self-typed property - before
+        // this call has produced anything to memoize. Without an entry to find, that re-entrant
+        // call would recurse again while building its own expression, and so on forever: unbounded,
+        // uncatchable StackOverflowException.
+        //
+        // The fix: install an indirection cell in `_funcs` *before* recursing. A recursive lookup
+        // during expression building resolves to `cell.Invoke`, a stable delegate that forwards
+        // through the mutable `Func` field. The generated expression tree embeds that forwarding
+        // delegate as a constant (see CreateClassExpression/CreateEnumerableExpression/
+        // CreateListExpression), not the real compiled delegate directly, so it is safe to hand out
+        // before Compile() returns. `Compile()` only builds the delegate - it never invokes the
+        // lambda body - so the cell is always filled in before any caster is actually run: casters
+        // are built eagerly at Upcast/registration time, and the outermost CreateCasterFunc call for
+        // a given pair always finishes compiling (filling every cell reachable from it) before
+        // returning control to code that could invoke any of them.
+        var cell = new RecursionCell<TFrom, TTo>();
+        Func<TFrom, TTo> forwarder = cell.Invoke;
+        _funcs.Add(key, forwarder);
 
-        var lambda = Expression.Lambda<Func<TFrom, TTo>>(body, srcParam);
-        var func = lambda.Compile();
+        try
+        {
+            var srcParam = Expression.Parameter(fromType, "src");
+            var body = BuildMappingExpression(srcParam, fromType, toType);
 
-        _funcs.Add((fromType, toType), func);
+            var lambda = Expression.Lambda<Func<TFrom, TTo>>(body, srcParam);
+            var func = lambda.Compile();
 
-        return func;
+            cell.Func = func;
+
+            // Replace the forwarding wrapper with the real delegate for the non-recursive fast path.
+            // Any expression already built against the wrapper (a recursive reference resolved before
+            // this point) keeps working - it calls through `cell`, which now forwards to `func`.
+            _funcs[key] = func;
+
+            return func;
+        }
+        catch
+        {
+            // Building/compiling failed - don't leave a dangling, never-filled forwarding wrapper
+            // behind for a later lookup of the same pair to pick up.
+            _funcs.Remove(key);
+            throw;
+        }
+    }
+
+    // Mutable indirection cell used to break recursive-type build-time recursion (see
+    // CreateCasterFunc). `Invoke` is bound once and handed out as a stable Func<TFrom,TTo> before
+    // `Func` is known; by the time it is ever actually called, `Func` has been filled in.
+    private sealed class RecursionCell<TFrom, TTo>
+    {
+        public Func<TFrom, TTo>? Func;
+
+        public TTo Invoke(TFrom from) =>
+            (Func ?? throw new InvalidOperationException(
+                $"Recursive caster for {typeof(TFrom).FullName} -> {typeof(TTo).FullName} was invoked before its build completed."))
+            (from);
     }
 
     private Expression BuildMappingExpression(Expression fromExpression, Type fromType, Type toType)
