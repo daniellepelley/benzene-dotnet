@@ -2901,6 +2901,63 @@ Full baseline re-verified after both fixes: `Benzene.Core.Test` 3296 passed / 2 
 `Benzene.Mesh.Test` 575 passed, `Benzene.Mesh.Host.Test` 150 passed, `Benzene.Examples.sln` build 0
 errors. Pushed to `main` (`28473b0`).
 
+## Round 16, WP-C: Azure trigger family — infra escalation, ambient cancellation, CosmosDb generator validation (2026-08-30)
+
+- **[RESOLVED] #257 (high) — `AzureFunctionBatchApplicationBase.ProcessItemAsync` and
+  `TimerTickApplication.HandleAsync` silently swallowed an infrastructure/DI-wiring failure under
+  `CatchExceptions = true`.** The exact `#228` defect (fixed for AWS SNS/S3/EventBridge's
+  `SingleContextEscalatingApplicationBase.ProcessAsync`), unfixed for every Azure Functions batch
+  trigger sharing the base class (ServiceBus, EventHub, Kafka, QueueStorage, EventGrid) and
+  independently for the Timer trigger: a `BenzeneResolutionException` (or anything with one in its
+  `InnerException` chain — `BenzeneFailure.IsInfrastructure`) was logged with a differentiated message
+  but never rethrown, so a mis-wired deploy silently dropped messages (the host checkpoints on a
+  "successful" invocation) or, for ServiceBus `AckMode = Explicit`, looped abandon/redeliver forever
+  while the service reported healthy. Fixed by mirroring
+  `SingleContextEscalatingApplicationBase.ProcessAsync` exactly in both files: compute
+  `isInfrastructure` once, keep the existing differentiated log line, then `if (isInfrastructure)
+  throw;`. Composes cleanly with ServiceBus Explicit-ack's `OnExceptionCaughtAsync` abandon hook, which
+  still runs first — the message is abandoned AND the invocation now fails loudly.
+  `src/Benzene.Azure.Function.Core/AzureFunctionBatchApplicationBase.cs`,
+  `src/Benzene.Azure.Function.Timer/TimerApplication.cs`.
+- **[RESOLVED] #258 (minor) — the same catch also silently absorbed a genuine ambient-cancellation
+  `OperationCanceledException`, inconsistent with #230's own still-queued-item behavior.** An
+  already-*running* batch item (past `BoundedFanOut`'s semaphore) that observed the same ambient
+  cancellation the Functions host signaled for the invocation was caught by the unqualified `catch
+  (Exception ex) when (_catchExceptions)` and logged/swallowed like an ordinary business exception —
+  while a sibling item still *queued* at that exact moment correctly aborted the whole invocation per
+  `#230`, regardless of `CatchExceptions`. Two items hit by the identical host-cancellation event got
+  opposite severity purely by scheduling luck. Fixed in `AzureFunctionBatchApplicationBase
+  .ProcessItemAsync` only (Timer never reaches this scenario — a single tick never calls
+  `BoundedFanOut`): after the infrastructure check, also rethrow when `ex is OperationCanceledException
+  && cancellationToken.IsCancellationRequested` — the token-verified form (checked against this call's
+  own ambient token, matching `MessageHandler.cs`'s existing pattern), not a bare type-based exclusion,
+  so an application-produced OCE unrelated to host shutdown is not over-escalated. Regression tests:
+  `EventGridFailureHandlingTest.HandleAsync_CatchExceptionsTrue_AmbientCancellation_EscapesContainmentAndRethrows`
+  plus the negative `HandleAsync_CatchExceptionsTrue_UnrelatedCancellation_StaysContained`.
+- **[RESOLVED] #259 — the Azure Functions source generator never validated `BenzeneCosmosDbTrigger`'s
+  `DatabaseName`/`ContainerName`, unlike every sibling transport's destination field.** `#39`
+  (round "WP-C") gave every other non-HTTP transport reader a required-field check for the one
+  attribute value without which the binding is meaningless (`BENZ0003`-`BENZ0007`), but Cosmos DB's own
+  binding-destination fields were read with an empty-string default and never checked — a declaration
+  with `DocumentType` set but no `DatabaseName`/`ContainerName` compiled clean and emitted
+  `CosmosDBTrigger(databaseName: "", containerName: "", ...)`, failing only at Azure host
+  startup/deployment. Fixed by adding a new diagnostic, `CosmosDbTriggerMissingDestination`
+  (`BENZ0010`, the next free id — verified against `DiagnosticDescriptors.cs`, which topped out at
+  `BENZ0009`), reported when `database.Length == 0 || container.Length == 0`, following
+  `ServiceBusTriggerMissingDestination`'s exact shape (report + emit nothing) — checked alongside, not
+  instead of, the existing `DocumentType`/`BENZ0002` check (which still runs first and returns early,
+  so a `DocumentType`-only omission still reports only `BENZ0002`).
+  `src/Benzene.Azure.Function.SourceGenerators/DiagnosticDescriptors.cs`,
+  `src/Benzene.Azure.Function.SourceGenerators/Transports/MessagingTransports.cs`.
+
+Red-green recipes reproduced verbatim from `work/review-round16-azure-2026-08.md` and kept as permanent
+regression tests: `test/Benzene.Core.Test/Azure/TimerFailureHandlingTest.cs`,
+`test/Benzene.Core.Test/Azure/EventGridFailureHandlingTest.cs`,
+`test/Benzene.Core.Test/Autogen/AzureFunctions/AzureFunctionTriggerGeneratorTest.cs`. Verified:
+`dotnet test test/Benzene.Core.Test -c Release --filter
+"FullyQualifiedName~Azure|FullyQualifiedName~AzureFunctionTriggerGenerator"` — 281 passed, 0 failed
+(including the pre-existing `#230`/`#231` regression tests, unaffected).
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.

@@ -156,6 +156,50 @@ namespace App { public class OrderDoc { } }
         Assert.Contains("\"c\"", diagnostic.GetMessage());
     }
 
+    // #259 (BENZ0010): DatabaseName/ContainerName are Cosmos DB's own binding-destination fields -
+    // exactly analogous to EventHubName/Topic/QueueName/Path on the sibling transports #39 already
+    // validated (BENZ0003-BENZ0007) - and were never validated, unlike every one of those. Before the
+    // fix this compiled clean (zero diagnostics) and emitted `databaseName: "", containerName: ""`
+    // literally - a change-feed trigger bound to nothing, failing only at Azure host startup.
+    [Fact]
+    public void CosmosDb_MissingDatabaseNameAndContainerName_ReportsBENZ0010AndEmitsNothing()
+    {
+        var (output, diagnostics) = GenerateResult(@"[assembly: Benzene.Azure.Function.CosmosDb.BenzeneCosmosDbTrigger(Name = ""c"", DocumentType = typeof(App.OrderDoc))]");
+
+        Assert.DoesNotContain("CosmosDBTrigger", output);
+
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal("BENZ0010", diagnostic.Id);
+        Assert.Equal(DiagnosticSeverity.Error, diagnostic.Severity);
+        Assert.Contains("\"c\"", diagnostic.GetMessage());
+    }
+
+    // Missing only ONE of the two must still trip the check - not just "both missing".
+    [Theory]
+    [InlineData(@"[assembly: Benzene.Azure.Function.CosmosDb.BenzeneCosmosDbTrigger(Name = ""c"", DocumentType = typeof(App.OrderDoc), ContainerName = ""orders"")]")]
+    [InlineData(@"[assembly: Benzene.Azure.Function.CosmosDb.BenzeneCosmosDbTrigger(Name = ""c"", DocumentType = typeof(App.OrderDoc), DatabaseName = ""shop"")]")]
+    public void CosmosDb_MissingOnlyOneOfDatabaseNameOrContainerName_ReportsBENZ0010(string declaration)
+    {
+        var (output, diagnostics) = GenerateResult(declaration);
+
+        Assert.DoesNotContain("CosmosDBTrigger", output);
+
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal("BENZ0010", diagnostic.Id);
+    }
+
+    // DocumentType missing takes precedence in reporting only in the sense that both checks run
+    // independently - when DocumentType alone is missing (DatabaseName/ContainerName both set), only
+    // BENZ0002 fires, not BENZ0010 too, since the DocumentType check returns first.
+    [Fact]
+    public void CosmosDb_MissingOnlyDocumentType_ReportsOnlyBENZ0002()
+    {
+        var (_, diagnostics) = GenerateResult(@"[assembly: Benzene.Azure.Function.CosmosDb.BenzeneCosmosDbTrigger(Name = ""c"", DatabaseName = ""shop"", ContainerName = ""orders"")]");
+
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal("BENZ0002", diagnostic.Id);
+    }
+
     [Fact]
     public void Timer_EmitsScheduleRunOnStartupAndNoArgDispatch()
     {
