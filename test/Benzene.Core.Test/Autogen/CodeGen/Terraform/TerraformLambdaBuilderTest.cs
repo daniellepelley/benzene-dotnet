@@ -30,4 +30,20 @@ public class TerraformLambdaBuilderTest
         Assert.Equal(expectedLambda, result["lambda.tf"], ignoreLineEndingDifferences: true);
         Assert.Equal(expectedRole, result["iam_roles.tf"], ignoreLineEndingDifferences: true);
     }
+
+    // #244: a Domain/SubDomain/Name containing `"` used to be embedded straight into the generated
+    // tag/attribute string literals unescaped, producing an early-terminated string (invalid HCL).
+    [Fact]
+    public void BuildLambda_DomainContainingDoubleQuote_IsEscapedInTheTags()
+    {
+        var result = new TerraformLambdaBuilder().BuildLambda(new TerraformLambdaSettings
+        {
+            Name = "benzene_main_core_func",
+            EntryPoint = "Benzene.Main.Core.Func::benzene.main.Core.LambdaEntryPoint::FunctionHandlerAsync",
+            Domain = "benzene-\"prod\"",
+            SubDomain = "main"
+        });
+
+        Assert.Contains("    domain = \"benzene-\\\"prod\\\"\"", result);
+    }
 }

@@ -28,11 +28,11 @@ public class TerraformEventBridgeRuleBuilder : ICodeBuilder<TerraformEventBridge
         lineWriter.WriteLine($"resource \"aws_cloudwatch_event_rule\" \"{lambdaName}_event_rule\" {{");
         using (lineWriter.StartIndent())
         {
-            lineWriter.WriteLine($"name = \"{settings.LambdaName}-event-rule\"");
+            lineWriter.WriteLine($"name = \"{NameFormatter.EscapeHclString(settings.LambdaName)}-event-rule\"");
 
             if (!string.IsNullOrEmpty(settings.EventBusName))
             {
-                lineWriter.WriteLine($"event_bus_name = \"{settings.EventBusName}\"");
+                lineWriter.WriteLine($"event_bus_name = \"{NameFormatter.EscapeHclString(settings.EventBusName)}\"");
             }
 
             lineWriter.WriteLine("event_pattern = jsonencode({");
@@ -66,7 +66,7 @@ public class TerraformEventBridgeRuleBuilder : ICodeBuilder<TerraformEventBridge
 
             if (!string.IsNullOrEmpty(settings.EventBusName))
             {
-                lineWriter.WriteLine($"event_bus_name = \"{settings.EventBusName}\"");
+                lineWriter.WriteLine($"event_bus_name = \"{NameFormatter.EscapeHclString(settings.EventBusName)}\"");
             }
 
             lineWriter.WriteLine($"arn = aws_lambda_function.{lambdaName}.arn");
@@ -99,6 +99,6 @@ public class TerraformEventBridgeRuleBuilder : ICodeBuilder<TerraformEventBridge
 
     private static string QuoteList(IEnumerable<string> values)
     {
-        return string.Join(", ", values.Select(x => $"\"{x}\""));
+        return string.Join(", ", values.Select(x => $"\"{NameFormatter.EscapeHclString(x)}\""));
     }
 }

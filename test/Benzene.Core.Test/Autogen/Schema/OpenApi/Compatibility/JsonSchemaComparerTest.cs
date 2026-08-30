@@ -277,6 +277,63 @@ public class JsonSchemaComparerTest
     }
 
     [Fact]
+    public void BothWalkers_ProduceIdenticalChangeSets_DiscriminatorMatching_InlineMembersReorderedProduceNoChanges()
+    {
+        // #239: both variants are inline - no $ref (and, for the JSON walker, no title either) - so
+        // there is no ref-target name to key on and the discriminator mapping is the only identity
+        // available. Before the fix, the mapping-fallback comparison in VariantKey compared a mapping
+        // target against a refId that is guaranteed null on this branch, so it could never match and
+        // every inline member fell through to purely positional matching: reordering the members (with
+        // the mapping reordered right along with them) produced spurious changes for a byte-identical,
+        // no-op reorder.
+        var openApiReport = new SchemaCompatibilityComparer().Compare(
+            DocWithComponents(PetComponentsOpenApi(),
+                Req(Topic, OpenApi(NoFields), DiscriminatedInlineOneOfOpenApi(("dog", "Dog"), ("cat", "Cat")))),
+            DocWithComponents(PetComponentsOpenApi(),
+                Req(Topic, OpenApi(NoFields), DiscriminatedInlineOneOfOpenApi(("cat", "Cat"), ("dog", "Dog")))));
+        var viaOpenApi = openApiReport.Changes.Where(c => c.Direction == SchemaDirection.Response).Select(Tuple).ToArray();
+
+        var viaJson = JsonSchemaComparer
+            .Compare(
+                DiscriminatedInlineOneOfJson(("dog", "Dog"), ("cat", "Cat")),
+                DiscriminatedInlineOneOfJson(("cat", "Cat"), ("dog", "Dog")),
+                SchemaDirection.Response, Topic, $"{Topic}.response")
+            .Select(Tuple).ToArray();
+
+        Assert.Equal(viaOpenApi, viaJson);
+        Assert.Empty(viaJson);
+    }
+
+    [Fact]
+    public void BothWalkers_ProduceIdenticalChangeSets_DiscriminatorMatching_InlineMemberPropertyRemoved_IsFlagged()
+    {
+        // Same shape, but a real change: the "dog" variant genuinely loses its distinguishing property.
+        // The fix must still find it and attribute it to exactly one variant, not suppress it or smear
+        // it across both.
+        var baselineOpenApi = DiscriminatedInlineOneOfOpenApi(("dog", "Dog"), ("cat", "Cat"));
+        var currentOpenApi = DiscriminatedInlineOneOfOpenApi(("dog", "Dog"), ("cat", "Cat"));
+        ((OpenApiSchema)currentOpenApi.OneOf[0]).Properties.Clear();
+
+        var openApiReport = new SchemaCompatibilityComparer().Compare(
+            DocWithComponents(PetComponentsOpenApi(), Req(Topic, OpenApi(NoFields), baselineOpenApi)),
+            DocWithComponents(PetComponentsOpenApi(), Req(Topic, OpenApi(NoFields), currentOpenApi)));
+        var viaOpenApi = openApiReport.Changes.Where(c => c.Direction == SchemaDirection.Response).Select(Tuple).ToArray();
+
+        var baselineJson = DiscriminatedInlineOneOfJson(("dog", "Dog"), ("cat", "Cat"));
+        var currentJson = DiscriminatedInlineOneOfJson(("dog", "Dog"), ("cat", "Cat"));
+        ((JsonObject)currentJson["oneOf"]![0]!)["properties"] = new JsonObject();
+
+        var viaJson = JsonSchemaComparer
+            .Compare(baselineJson, currentJson, SchemaDirection.Response, Topic, $"{Topic}.response")
+            .Select(Tuple).ToArray();
+
+        Assert.Equal(viaOpenApi, viaJson);
+        Assert.Equal(2, viaJson.Length);
+        Assert.Contains(viaJson, c => c.Item1 == SchemaChangeKind.UnionVariantChanged);
+        Assert.Contains(viaJson, c => c.Item1 == SchemaChangeKind.PropertyRemoved);
+    }
+
+    [Fact]
     public void BothWalkers_ProduceIdenticalChangeSets_DiscriminatorMappingCoverageAdded_ProducesNoSpuriousChange()
     {
         // The exact round-8 probe (#53): baseline oneOf:[Dog,Cat] maps only Cat; current same
@@ -658,6 +715,47 @@ public class JsonSchemaComparerTest
         return new JsonObject
         {
             ["oneOf"] = new JsonArray(names.Select(n => (JsonNode)PetJson(n)).ToArray()),
+            ["discriminator"] = new JsonObject { ["propertyName"] = "petType", ["mapping"] = mapping }
+        };
+    }
+
+    // ---- inline (no $ref, no title) discriminator-mapped member helpers (#239) ----
+    // Each pair is (mapping key, distinguishing property name) so a test can tell which inline member
+    // a matched-pair recursion landed on without any $ref/title identity to read back.
+
+    private static OpenApiSchema InlinePetOpenApi(string distinguishingProperty) => new()
+    {
+        Type = "object",
+        Properties = new Dictionary<string, OpenApiSchema> { [distinguishingProperty] = new() { Type = "boolean" } }
+    };
+
+    private static OpenApiSchema DiscriminatedInlineOneOfOpenApi(params (string MappingKey, string DistinguishingProperty)[] members) => new()
+    {
+        OneOf = members.Select(m => InlinePetOpenApi(m.DistinguishingProperty)).Cast<OpenApiSchema>().ToList(),
+        Discriminator = new OpenApiDiscriminator
+        {
+            PropertyName = "petType",
+            Mapping = members.ToDictionary(m => m.MappingKey, m => m.MappingKey)
+        }
+    };
+
+    private static JsonObject InlinePetJson(string distinguishingProperty) => new()
+    {
+        ["type"] = "object",
+        ["properties"] = new JsonObject { [distinguishingProperty] = new JsonObject { ["type"] = "boolean" } }
+    };
+
+    private static JsonObject DiscriminatedInlineOneOfJson(params (string MappingKey, string DistinguishingProperty)[] members)
+    {
+        var mapping = new JsonObject();
+        foreach (var member in members)
+        {
+            mapping[member.MappingKey] = member.MappingKey;
+        }
+
+        return new JsonObject
+        {
+            ["oneOf"] = new JsonArray(members.Select(m => (JsonNode)InlinePetJson(m.DistinguishingProperty)).ToArray()),
             ["discriminator"] = new JsonObject { ["propertyName"] = "petType", ["mapping"] = mapping }
         };
     }

@@ -2069,6 +2069,106 @@ top-of-file summary blockquote).
   scheme specifically) to record this explicitly as a `[DECISION]` in place, rather than leaving it
   silently misleading. Left for a future round to decide whether/how to carry the scheme onto the wire.
 
+> **Tracked findings, 2026-08-29 (round 15, WP-F) — all six fixed; build/test verification pending
+> centralized re-verification.** The round-15 review pass's CodeGen/Schema sweep (task board
+> #239–#244) produced six evidence-backed findings across the discriminator-matching comparers, the
+> C# client generator, the OpenAPI document builder, the JSON-example schema inferrer, the
+> event-service deserializer, and the (explicitly experimental, non-packable) Terraform generator.
+> All six landed in one work package, each with red-before/green-after tests. Design rulings remain
+> in **[`bug-fix-designs-round15-2026-08.md`](archive/bug-fix-designs-round15-2026-08.md)** §6 (once
+> archived); consult it before touching any of this code again.
+> **Verification note:** this round landed alongside ~15 other work-package sessions all building the
+> full solution concurrently on one shared, resource-constrained host (load averages 100–270 on 4
+> cores, confirmed OOM kills) — every WP hit the same wall. Rather than 16 agents fighting the same
+> contended host in parallel, the round coordinator is running one centralized
+> `dotnet build`/`dotnet test` pass after all 16 work packages merge and the host quiets down. Before
+> that centralized pass: every project this WP touched (`Benzene.Schema.OpenApi`,
+> `Benzene.Schema.Compatibility`, `Benzene.CodeGen.Client`, `Benzene.CodeGen.Terraform`) was observed
+> compiling cleanly (0 errors) during a partial build that reached ~90% of the ~150-project solution
+> before being abandoned for time; the full-solution build and the `test/Benzene.Core.Test` run were
+> not completed end-to-end under this WP's own session.
+- **[RESOLVED] #239 — `SchemaCompatibilityComparer.VariantKey` and its twin
+  `JsonSchemaComparer.VariantKey` had dead discriminator-mapping-fallback code: reached only when the
+  member has no `$ref` (so `refId` is guaranteed `null` there), it then compared
+  `RefTargetName(entry.Value) == refId` — i.e. against `null` — which a mapping value string can never
+  equal, so it could never match.** Every inline (non-`$ref`) discriminated-union member fell through
+  to purely positional matching regardless of any discriminator mapping — a `oneOf` of two inline
+  discriminator-mapped members, purely reordered with byte-identical content, was reported as spurious
+  property changes and `HasBreakingChanges == True`, which would fail the `EnsureBackwardCompatible` CI
+  gate on a pure no-op reorder. Fixed in both twins identically: `IndexVariants` now precomputes the
+  discriminator-mapping entries that don't already name one of the union's `$ref` members
+  (`UnclaimedMappingKeys`/its JSON-walker twin) — the entries that, if they identify anything at all,
+  must be identifying one of the *inline* members — in the mapping's own declaration order, and pairs
+  the *n*-th such inline member with the *n*-th unclaimed entry, giving it a stable `disc:` identity
+  that survives the whole union being reordered (member array and mapping moving together). `$ref`-named
+  matching (round 11, #152/#53) is untouched — a `$ref` member still keys on its own target name
+  unconditionally, before the mapping fallback is ever consulted. New tests in both
+  `SchemaCompatibilityComparerTest` and `JsonSchemaComparerTest`: two inline discriminator-mapped
+  members reordered (mapping reordered along with them) now produce zero changes, and a genuine
+  property removal on one inline member is still caught and attributed to exactly that variant.
+- **[RESOLVED] #240 — `CSharpTypeName.GetName`/`GetArrayType` returned a `$ref`'s raw, unsanitized
+  `Reference.Id` as a C# type name, while the referenced type's own class declaration
+  (`OpenApiSchemaCSharpTypeBuilder`) correctly ran the same id through `CSharpNameFormatter.Format`.**
+  Reachable via the documented bring-your-own-schema `SuppliedSchemaCatalog` feature, whose schema ids
+  are arbitrary caller strings: a catalogue id `orderItem` generated a correctly Pascal-cased class
+  `OrderItem` but a property of the never-generated raw type `orderItem` (CS0246); a hyphenated id
+  (`order-item`) produced a hard C# syntax error. Fixed: `CSharpTypeName` now owns a
+  `CSharpNameFormatter` instance and routes every `Reference.Id` read (the direct `$ref` case, the
+  `oneOf`/`anyOf` shared-`allOf`-base case, and the array-of-`$ref` case in `GetArrayType`) through it,
+  so a property/parameter type name and the class it names can never diverge again.
+  `MessageClientSdkBuilder.AddMethod`'s method-signature path needed no separate fix — it already calls
+  through `_typeName.GetName`, so it picked the fix up transitively. New tests:
+  `CSharpTypeNameTest` unit-asserts the formatted-name match (and the hyphenated case's validity)
+  directly, and a new `CodegenOutputCompilesTest.GeneratedClient_WithArbitraryCatalogueSchemaId_Compiles`
+  theory drives the real builder pipeline for both `orderItem` and `order-item` catalogue ids and
+  compiles the generated output with Roslyn.
+- **[RESOLVED] #241 — `OpenApiDocumentBuilder.MapOperationType` indexed a fixed 8-verb dictionary
+  directly with `HttpEndpointAttribute.Method` (an unvalidated free-form string), so a real but
+  unsupported verb (`CONNECT`) or a plain typo (`Gett`) crashed the whole spec build with an opaque
+  `KeyNotFoundException` naming neither the bad verb nor which handler/topic/path it came from.**
+  Ruling: kept the 8-verb table (it is exactly OpenAPI's supported operation-object set — `CONNECT` has
+  no OpenAPI representation, so widening it would be wrong), replaced the raw dictionary index with a
+  case-insensitive `TryGetValue`, and on a miss throw a descriptive `InvalidOperationException` naming
+  the invalid method *and* the topic and path of the endpoint being mapped (threaded in from
+  `CreateOpenApiOperation`, which already has that context). New tests in
+  `OpenApiDocumentBuilderTest`: `Gett` and `CONNECT` both throw with the verb, topic, and path all
+  present in the message; `get`/`GET`/`Get` all map successfully to the same operation.
+- **[RESOLVED] #242 — `JsonOpenApiSchemaBuilder.CreateArraySchema` called `jToken.First()`
+  unconditionally when inferring a schema from an example JSON payload (the documented
+  `AddJsonEvent(topic, typeName, json)` extension), so an ordinary empty example array anywhere in the
+  payload (`{"id":"abc","tags":[]}`) crashed with `InvalidOperationException: Sequence contains no
+  elements`.** Fixed: guarded the empty-`JArray` case before calling `.First()`, emitting an array
+  schema with an untyped items placeholder (`new OpenApiSchema()` — no `type` keyword, matching
+  anything) rather than guessing a type with nothing in the example to infer it from; a non-empty array
+  still infers its item schema from the first element exactly as before. New test:
+  `CreateSchema("OrderCreated", "{\"id\":\"abc\",\"tags\":[]}")` (the exact review probe) now returns a
+  schema instead of throwing.
+- **[RESOLVED] #243 (minor) — `EventServiceDocumentDeserializer.GetEvents`/`GetRequests` read the
+  `"events"`/`"requests"` array with a null-forgiving `!` and no null-coalescing, unlike the adjacent
+  `GetTransports`/`GetTags`, which both null-coalesce to empty** — a document missing either key
+  (reachable via an externally-sourced or older-shape baseline passed to
+  `SchemaCompatibility.EnsureBackwardCompatible`; Benzene's own emitted documents always include both
+  arrays) crashed with `ArgumentNullException` instead of deserializing to an empty array like every
+  other missing optional collection here does. Fixed by null-coalescing both to
+  `Array.Empty<T>()`, matching the sibling getters exactly. New test:
+  `EventServiceDocumentDeserializerTest.Deserialize_DocumentMissingEventsAndRequests_...` deserializes
+  a minimal document with neither key to empty `Events`/`Requests` arrays.
+- **[RESOLVED] #244 (minor, experimental/non-packable package) — `Benzene.CodeGen.Terraform`'s HCL
+  generation (`TerraformEventBridgeRuleBuilder.QuoteList` and other interpolated fields across the
+  package) didn't escape `"`/`\` before embedding caller-supplied values (topic names, Lambda names,
+  entry points, domains) into generated `.tf` string literals** — the same unescaped-interpolation bug
+  class round 14 found in `CodeGen.ApiGateway`/Markdown, now confirmed in a third generator; a value
+  containing `"` produced invalid HCL (an early-terminated string literal). Fixed: added one
+  `NameFormatter.EscapeHclString` helper (backslash first, then double quote; null/empty-tolerant to
+  match the interpolation it replaces) and routed every interpolated string-literal value across
+  `TerraformEventBridgeRuleBuilder`, `TerraformLambdaBuilder`, and
+  `TerraformLambdaEventBusPermissionsBuilder` through it — `QuoteList`, the rule/target/lambda/role tag
+  and name attributes, and the SNS subscription `filter_policy` topic list. Resource *labels* (the
+  second quoted string in `resource "type" "label"`, already derived through `NameFormatter.UnderScoreCase`)
+  were deliberately left alone — that's a separate identifier-validity concern, not the string-literal-
+  escaping bug this fixes. New tests assert a topic containing `"` and one containing `\` each produce
+  correctly-escaped output through `QuoteList`.
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.

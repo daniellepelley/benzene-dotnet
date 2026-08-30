@@ -94,6 +94,42 @@ public class TerraformEventBridgeRuleBuilderTest
         }, result);
     }
 
+    // #244: a topic containing `"` or `\` used to be embedded straight into the generated HCL string
+    // literal unescaped, producing an early-terminated string (invalid HCL) or a dangling escape
+    // sequence.
+    [Fact]
+    public void BuildRule_TopicContainingDoubleQuote_IsEscapedInTheGeneratedDetailTypeList()
+    {
+        var settings = CreateSettings();
+        settings.Topics = new[] { "order.\"weird\".created" };
+
+        var result = new TerraformEventBridgeRuleBuilder().BuildRule(settings);
+
+        Assert.Contains("    \"detail-type\" = [\"order.\\\"weird\\\".created\"]", result);
+    }
+
+    [Fact]
+    public void BuildRule_TopicContainingBackslash_IsEscapedInTheGeneratedDetailTypeList()
+    {
+        var settings = CreateSettings();
+        settings.Topics = new[] { @"order\created" };
+
+        var result = new TerraformEventBridgeRuleBuilder().BuildRule(settings);
+
+        Assert.Contains("    \"detail-type\" = [\"order\\\\created\"]", result);
+    }
+
+    [Fact]
+    public void BuildRule_EventBusNameContainingDoubleQuote_IsEscaped()
+    {
+        var settings = CreateSettings();
+        settings.EventBusName = "orders-\"bus\"";
+
+        var result = new TerraformEventBridgeRuleBuilder().BuildRule(settings);
+
+        Assert.Contains("  event_bus_name = \"orders-\\\"bus\\\"\"", result);
+    }
+
     [Fact]
     public void BuildCodeFiles_GeneratesRuleTargetAndPermissionFiles()
     {

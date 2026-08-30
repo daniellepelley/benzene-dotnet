@@ -97,6 +97,41 @@ public class CSharpTypeNameTest
     }
 
     [Fact]
+    public void GetName_RefWithArbitraryCatalogueId_IsFormattedTheSameWayTheClassDeclarationIs()
+    {
+        // #240: SuppliedSchemaCatalog schema ids are arbitrary caller strings. The class declaration
+        // for a catalogue entry ("orderItem") is emitted through CSharpNameFormatter.Format
+        // (OpenApiSchemaCSharpTypeBuilder), producing "OrderItem" - but GetName used to return
+        // Reference.Id raw and unformatted, so a property typed from the very same $ref generated
+        // `public orderItem Item { get; set; }`, a straight CS0246 (the class "orderItem" was never
+        // generated - only "OrderItem" was).
+        var formatter = new CSharpNameFormatter();
+
+        Assert.Equal(formatter.Format("orderItem"), _typeName.GetName(Ref("orderItem")));
+    }
+
+    [Fact]
+    public void GetName_RefWithHyphenatedCatalogueId_IsAValidCSharpIdentifier()
+    {
+        // A hyphenated id ("order-item") returned raw is not merely mismatched with the class name -
+        // it's a hard C# syntax error (a bare "-" inside a type reference).
+        var name = _typeName.GetName(Ref("order-item"));
+
+        Assert.DoesNotContain("-", name);
+        Assert.Equal(new CSharpNameFormatter().Format("order-item"), name);
+    }
+
+    [Fact]
+    public void GetArrayType_RefWithArbitraryCatalogueId_IsFormattedTheSameWayTheClassDeclarationIs()
+    {
+        // Same bug, reached via the array branch (GetArrayType) instead: `orderItem[]` instead of
+        // `OrderItem[]`.
+        var schema = new OpenApiSchema { Type = "array", Items = Ref("orderItem") };
+
+        Assert.Equal("OrderItem[]", _typeName.GetName(schema));
+    }
+
+    [Fact]
     public void GetName_RefToAnEnumSchema_ResolvesToTheEnumTypeName_NotEmptyOrTheRefWrapper()
     {
         // #166: a property referencing an enum-shaped schema (Swashbuckle's shape for a real C#

@@ -50,6 +50,26 @@ public class TerraformLambdaEventBusPermissionsBuilderTest
         }, result);
     }
 
+    // #244: a message topic containing `"` used to be embedded straight into the generated
+    // filter_policy JSON-in-HCL string literal unescaped, producing an early-terminated string.
+    [Fact]
+    public void BuildSubscription_TopicContainingDoubleQuote_IsEscapedInTheFilterPolicy()
+    {
+        var result = new TerraformLambdaEventBusPermissionsBuilder()
+            .BuildSubscription("benzene-orders-func", "orders-topic", new[] { "order.\"weird\".created" });
+
+        Assert.Contains("  filter_policy = jsonencode({\"topic\" = [\"order.\\\"weird\\\".created\"]})", result);
+    }
+
+    [Fact]
+    public void BuildSubscription_TopicContainingBackslash_IsEscapedInTheFilterPolicy()
+    {
+        var result = new TerraformLambdaEventBusPermissionsBuilder()
+            .BuildSubscription("benzene-orders-func", "orders-topic", new[] { @"order\created" });
+
+        Assert.Contains("  filter_policy = jsonencode({\"topic\" = [\"order\\\\created\"]})", result);
+    }
+
     [Fact]
     public void BuildPermissions_OneEntryPerTopicInTheMap()
     {

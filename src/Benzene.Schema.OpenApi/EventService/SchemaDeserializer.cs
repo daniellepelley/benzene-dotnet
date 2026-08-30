@@ -87,16 +87,18 @@ public class EventServiceDocumentDeserializer
 
     private Event[] GetEvents(JObject jObject)
     {
+        // #243: a document missing "events" entirely (an externally-sourced or older-shape baseline
+        // passed to SchemaCompatibility.EnsureBackwardCompatible - Benzene's own emitted documents
+        // always include this array) used to throw ArgumentNullException from the null-forgiving `!`
+        // below, unlike the adjacent GetTransports/GetTags, which both null-coalesce to empty.
         var eventsJArray = jObject.GetValue("events") as JArray;
-        return eventsJArray!.Select(GetEvent)
-            .ToArray();
+        return eventsJArray?.Select(GetEvent).ToArray() ?? Array.Empty<Event>();
     }
 
     private RequestResponse[] GetRequests(JObject jObject)
     {
         var requestsJArray = jObject.GetValue("requests") as JArray;
-        return requestsJArray!.Select(GetRequest)
-            .ToArray();
+        return requestsJArray?.Select(GetRequest).ToArray() ?? Array.Empty<RequestResponse>();
     }
 
     private Event GetEvent(JToken jToken)

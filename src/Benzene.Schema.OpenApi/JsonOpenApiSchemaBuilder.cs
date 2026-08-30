@@ -24,7 +24,7 @@ public class JsonOpenApiSchemaBuilder
             JTokenType.Integer => CreateIntegerSchema(),
             JTokenType.Boolean => CreateBooleanSchema(),
             JTokenType.Guid => CreateGuidSchema(),
-            JTokenType.Array => CreateArraySchema(key, jToken.First()),
+            JTokenType.Array => CreateArraySchema(key, jToken),
             JTokenType.Object => CreateObjectSchema(key, jToken),
             _ => throw new Exception($"No map for {jToken.Type}")
         };
@@ -69,12 +69,29 @@ public class JsonOpenApiSchemaBuilder
         };
     }
 
-    private OpenApiSchema CreateArraySchema(string key, JToken jToken)
+    private OpenApiSchema CreateArraySchema(string key, JToken jArrayToken)
     {
+        // #242: an ordinary empty example array ("tags": []) carries no element to infer an item
+        // schema from. jToken.First() used to be called unconditionally here, throwing
+        // InvalidOperationException ("Sequence contains no elements") on any such array anywhere in
+        // the example payload. Match ExamplePayloadBuilder's own convention for "no known item
+        // schema" (GetValue's `resolved.Items == null` branch, elsewhere in this package) as closely
+        // as an OpenApiSchema allows: an untyped items schema - no `type` keyword, so it matches
+        // anything - is the honest answer when there is nothing in the example to infer from.
+        if (!jArrayToken.HasValues)
+        {
+            return new OpenApiSchema
+            {
+                Type = "array",
+                Items = new OpenApiSchema(),
+                Nullable = true
+            };
+        }
+
         return new OpenApiSchema
         {
             Type = "array",
-            Items = Create(key, jToken),
+            Items = Create(key, jArrayToken.First()),
             Nullable = true
         };
     }

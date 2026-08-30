@@ -148,8 +148,9 @@ public static class JsonSchemaComparer
     /// Walks a <c>oneOf</c>/<c>anyOf</c> member array pairwise between baseline and current. Matching
     /// priority: (1) <c>$ref</c> target name, when the member has one — a <c>$ref</c> already uniquely
     /// and stably identifies the target component, regardless of whether a discriminator mapping happens
-    /// to cover it; (2) discriminator mapping value, for inline (non-<c>$ref</c>) members only, where
-    /// there is no <c>$ref</c> name to key on; (3) position. Unmatched baseline members are <see cref="SchemaChangeKind.UnionVariantRemoved"/>,
+    /// to cover it; (2) for a truly inline member (no <c>$ref</c>, no <c>title</c> - see <see cref="RefId"/>),
+    /// the discriminator-mapping key it pairs with positionally (see <see cref="UnclaimedMappingKeys"/>),
+    /// where there is no name of its own to key on; (3) position. Unmatched baseline members are <see cref="SchemaChangeKind.UnionVariantRemoved"/>,
     /// unmatched current members are <see cref="SchemaChangeKind.UnionVariantAdded"/>, and a matched pair
     /// that differs recurses and is reported as/within <see cref="SchemaChangeKind.UnionVariantChanged"/>.
     /// </summary>
@@ -305,7 +306,10 @@ public static class JsonSchemaComparer
         }
 
         var mapping = owner["discriminator"] is JsonObject discriminator ? discriminator["mapping"] as JsonObject : null;
+        var memberObjects = members.OfType<JsonObject>().ToList();
+        var unclaimedMappingKeys = UnclaimedMappingKeys(mapping, memberObjects);
 
+        var inlinePosition = 0;
         for (var i = 0; i < members.Count; i++)
         {
             if (members[i] is not JsonObject member)
@@ -313,39 +317,69 @@ public static class JsonSchemaComparer
                 continue;
             }
 
-            result[VariantKey(mapping, member, i)] = member;
+            result[VariantKey(member, i, inlinePosition, unclaimedMappingKeys)] = member;
+
+            if (RefId(member) == null)
+            {
+                inlinePosition++;
+            }
         }
 
         return result;
     }
 
-    private static string VariantKey(JsonObject? mapping, JsonObject member, int index)
+    /// <summary>
+    /// The discriminator mapping entries that don't already name one of this union's <c>$ref</c>/
+    /// <c>title</c>-identified members (see <see cref="RefId"/>) - i.e. the entries that, if they
+    /// identify anything in this union at all, must be identifying one of its truly <em>inline</em>
+    /// members (no <c>$ref</c>, no <c>title</c>) - in the mapping's own declaration order.
+    /// </summary>
+    private static List<string> UnclaimedMappingKeys(JsonObject? mapping, IReadOnlyList<JsonObject> members)
+    {
+        if (mapping == null)
+        {
+            return new List<string>();
+        }
+
+        var claimedIds = new HashSet<string>(members.Select(RefId).Where(id => id != null)!);
+
+        var result = new List<string>();
+        foreach (var entry in mapping)
+        {
+            if (entry.Value is JsonValue value && value.TryGetValue<string>(out var target)
+                && !claimedIds.Contains(RefTargetName(target)))
+            {
+                result.Add(entry.Key);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// A member's matching key: its <c>$ref</c>/<c>title</c> identity (see <see cref="RefId"/>) when it
+    /// has one - this takes priority over discriminator-mapping coverage regardless of whether a
+    /// mapping entry happens to name it (keying on mapping coverage instead let an additive mapping
+    /// edit - a new entry covering a previously-unmapped <c>$ref</c> - look like the variant was
+    /// replaced: <c>disc:X</c> on one side, <c>ref:X</c> on the other, for the very same schema).
+    /// Otherwise this is a truly inline member with no name of its own to key on, so it is identified
+    /// positionally: the <paramref name="inlinePosition"/>-th such member pairs with the
+    /// <paramref name="inlinePosition"/>-th unclaimed discriminator-mapping entry, giving it a stable
+    /// <c>disc:</c> identity that survives the whole union being reordered (member array and mapping
+    /// moving together), rather than the raw array position alone.
+    /// </summary>
+    private static string VariantKey(JsonObject member, int index, int inlinePosition, IReadOnlyList<string> unclaimedMappingKeys)
     {
         var refId = RefId(member);
 
-        // A $ref already uniquely and stably identifies the target component, so it takes priority over
-        // discriminator-mapping coverage: whether a mapping entry happens to name this $ref is metadata
-        // about the variant, not part of its identity. Keying on mapping coverage instead let an
-        // additive mapping edit (a new entry covering a previously-unmapped $ref) look like the variant
-        // was replaced — disc:X on one side, ref:X on the other, for the very same schema.
         if (refId != null)
         {
             return $"ref:{refId}";
         }
 
-        // No $ref to key on - this is an inline member. Fall back to the discriminator mapping when it
-        // identifies this exact member (mapping values are $ref-shaped, so this only ever matches an
-        // inline member a mapping entry names directly).
-        if (mapping != null)
+        if (inlinePosition < unclaimedMappingKeys.Count)
         {
-            foreach (var entry in mapping)
-            {
-                if (entry.Value is JsonValue value && value.TryGetValue<string>(out var target)
-                    && RefTargetName(target) == refId)
-                {
-                    return $"disc:{entry.Key}";
-                }
-            }
+            return $"disc:{unclaimedMappingKeys[inlinePosition]}";
         }
 
         return $"idx:{index}";

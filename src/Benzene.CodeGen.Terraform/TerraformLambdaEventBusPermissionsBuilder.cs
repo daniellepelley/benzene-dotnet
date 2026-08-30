@@ -9,6 +9,29 @@ public static class NameFormatter
     {
         return name.Replace("-", "_");
     }
+
+    /// <summary>
+    /// Escapes a value for embedding inside an HCL quoted string literal (<c>"..."</c>): backslash
+    /// first, so an already-escaped sequence in the input isn't double-escaped, then the double quote
+    /// that would otherwise terminate the literal early. #244: every value interpolated into a
+    /// generated <c>.tf</c> file's string literals - a topic name, a Lambda name, an entry point -
+    /// ultimately comes from caller/reflection-supplied data (a message handler's topic id, a
+    /// deployment setting), not a fixed set of safe tokens, and none of it was escaped before this
+    /// fix. A value containing <c>"</c> produced invalid HCL (an early-terminated string followed by
+    /// dangling text); a value containing <c>\</c> produced a dangling/altered escape sequence.
+    /// </summary>
+    public static string EscapeHclString(string? value)
+    {
+        // Null-tolerant to match the interpolation this replaces: `$"{settings.Domain}"` on a null
+        // Domain/SubDomain (both un-defaulted, optional settings) silently produced "", not a thrown
+        // exception - the escaping fix must not turn that into a new crash.
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        return value.Replace("\\", "\\\\").Replace("\"", "\\\"");
+    }
 }
 
 public class TerraformLambdaEventBusPermissionsBuilder : ICodeBuilder<TerraformLambdaEventBusPermissionsSettings>
@@ -78,7 +101,7 @@ public class TerraformLambdaEventBusPermissionsBuilder : ICodeBuilder<TerraformL
             lineWriter.WriteLine("protocol = \"lambda\"");
             lineWriter.WriteLine($"endpoint = aws_lambda_function.{NameFormatter.UnderScoreCase(lambdaName)}.arn");
             lineWriter.WriteLine("endpoint_auto_confirms = true");
-            lineWriter.WriteLine($"filter_policy = jsonencode({{\"topic\" = [{string.Join(",", topics.Select(topic => $"\"{topic}\""))}]}})");
+            lineWriter.WriteLine($"filter_policy = jsonencode({{\"topic\" = [{string.Join(",", topics.Select(topic => $"\"{NameFormatter.EscapeHclString(topic)}\""))}]}})");
         }
 
         lineWriter.WriteLine("}");
