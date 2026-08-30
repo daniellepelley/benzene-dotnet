@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using Amazon.SQS;
 using Amazon.SQS.Model;
+using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Messages.BenzeneClient;
 using Benzene.Abstractions.Serialization;
 using Benzene.Clients;
@@ -25,6 +27,7 @@ public class SqsBatchMessageClient : IBenzeneBatchMessageClient
     private readonly string _queueUrl;
     private readonly string _topicAttributeKey;
     private readonly ISerializer _serializer;
+    private readonly ICancellationTokenAccessor? _cancellation;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SqsBatchMessageClient"/> class.
@@ -32,12 +35,18 @@ public class SqsBatchMessageClient : IBenzeneBatchMessageClient
     /// <param name="queueUrl">The URL of the queue to send to.</param>
     /// <param name="amazonSqs">The SQS client to send with.</param>
     /// <param name="topicAttributeKey">The message attribute the topic is written to (defaults to <see cref="SqsContextConverter{T}.DefaultTopicAttribute"/>).</param>
-    public SqsBatchMessageClient(string queueUrl, IAmazonSQS amazonSqs, string topicAttributeKey = SqsContextConverter<object>.DefaultTopicAttribute)
+    /// <param name="cancellation">
+    /// Supplies the ambient cancellation token to thread into each <c>SendMessageBatch</c> call; null
+    /// (the default) observes no cancellation.
+    /// </param>
+    public SqsBatchMessageClient(string queueUrl, IAmazonSQS amazonSqs, string topicAttributeKey = SqsContextConverter<object>.DefaultTopicAttribute,
+        ICancellationTokenAccessor? cancellation = null)
     {
         _queueUrl = queueUrl;
         _amazonSqs = amazonSqs;
         _topicAttributeKey = topicAttributeKey;
         _serializer = new JsonSerializer();
+        _cancellation = cancellation;
     }
 
     /// <inheritdoc />
@@ -81,7 +90,7 @@ public class SqsBatchMessageClient : IBenzeneBatchMessageClient
                 {
                     QueueUrl = _queueUrl,
                     Entries = entries,
-                });
+                }, _cancellation?.CancellationToken ?? CancellationToken.None);
 
                 // Guard the collection: AWS SDK v3.7 auto-initializes it to empty, but a v4 upgrade leaves
                 // an unset collection null (would NRE on every all-success batch). Matches EventBridge.

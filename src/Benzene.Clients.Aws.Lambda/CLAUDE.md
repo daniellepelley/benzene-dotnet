@@ -28,9 +28,13 @@ fixed during the Tier 2.1 split).
   surfaced in `Data`, never the message. **No internal timeout guard** — the reachability path forwards
   the ambient `CancellationToken` straight into `GetFunctionConfigurationAsync` and relies purely on the
   processor's uniform per-check timeout wrap (`HealthCheckProcessor`/`TimeOutHealthCheck`), same shape as
-  `SqsHealthCheck`. The Active-mode ping (via `AwsLambdaBenzeneMessageClient`, which has no
-  `CancellationToken` overload) is the one path here that still can't forward the token into its own SDK
-  call.
+  `SqsHealthCheck`. `AwsLambdaClient`/`AwsLambdaBenzeneMessageClient`/`AwsLambdaClientMiddleware` all have
+  an `ICancellationTokenAccessor`-resolving constructor overload (#261, mirroring `HttpClientMiddleware`)
+  that threads the ambient token into the underlying `IAmazonLambda.InvokeAsync` SDK call — that SDK
+  method has always accepted a `CancellationToken`, contrary to an earlier version of this note.
+  `AwsLambdaHealthCheck`'s Active-mode ping specifically constructs `AwsLambdaBenzeneMessageClient`
+  without an accessor today, so that one call site still doesn't forward the token — a wiring gap in
+  this type, not an SDK limitation.
   - **No auto-wiring — explicit-only (by design).** Unlike SQS/SNS/EventBridge, the Lambda client is a
     **dynamic-target invoker**: `.UseAwsLambda<T>()` carries no function name (the target is supplied
     per-invocation), so there is no fixed dependency to auto-register a check for at config time. Register

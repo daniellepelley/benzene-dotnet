@@ -1,8 +1,10 @@
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using Amazon.SQS;
 using Amazon.SQS.Model;
 using Benzene.Abstractions;
+using Benzene.Abstractions.DI;
 
 namespace Benzene.Aws.Sqs.Client;
 
@@ -15,16 +17,17 @@ public class SqsMessageClient : ISqsClient
     /// <summary>
     /// The default message-attribute key the topic is written to. It is a single default, not a
     /// hard-coded value — pass a different key to
-    /// <see cref="SqsMessageClient(IAmazonSQS, string, string)"/> to interoperate with a consumer that
-    /// routes on another attribute. Keep it in sync with the consumer's attribute key.
+    /// <see cref="SqsMessageClient(IAmazonSQS, string, string, string, ICancellationTokenAccessor)"/> to
+    /// interoperate with a consumer that routes on another attribute. Keep it in sync with the
+    /// consumer's attribute key.
     /// </summary>
     public const string DefaultTopicAttribute = BenzeneWireNames.DefaultTopic;
 
     /// <summary>
     /// The default message-attribute key the status is written to. It is a single default, not a
     /// hard-coded value — pass a different key to
-    /// <see cref="SqsMessageClient(IAmazonSQS, string, string, string)"/> to interoperate with a
-    /// consumer that reads the status from another attribute.
+    /// <see cref="SqsMessageClient(IAmazonSQS, string, string, string, ICancellationTokenAccessor)"/> to
+    /// interoperate with a consumer that reads the status from another attribute.
     /// </summary>
     public const string DefaultStatusAttribute = "status";
 
@@ -32,6 +35,7 @@ public class SqsMessageClient : ISqsClient
     private readonly string _queueUrl;
     private readonly string _topicAttributeKey;
     private readonly string _statusAttributeKey;
+    private readonly ICancellationTokenAccessor? _cancellation;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SqsMessageClient"/> class.
@@ -46,12 +50,18 @@ public class SqsMessageClient : ISqsClient
     /// The message attribute the status is written to. Defaults to
     /// <see cref="DefaultStatusAttribute"/> (<c>"status"</c>).
     /// </param>
-    public SqsMessageClient(IAmazonSQS amazonSqs, string queueUrl, string topicAttributeKey = DefaultTopicAttribute, string statusAttributeKey = DefaultStatusAttribute)
+    /// <param name="cancellation">
+    /// Supplies the ambient cancellation token to thread into the underlying <c>SendMessage</c> call;
+    /// null (the default) observes no cancellation.
+    /// </param>
+    public SqsMessageClient(IAmazonSQS amazonSqs, string queueUrl, string topicAttributeKey = DefaultTopicAttribute, string statusAttributeKey = DefaultStatusAttribute,
+        ICancellationTokenAccessor? cancellation = null)
     {
         _queueUrl = queueUrl;
         _amazonSqs = amazonSqs;
         _topicAttributeKey = topicAttributeKey;
         _statusAttributeKey = statusAttributeKey;
+        _cancellation = cancellation;
     }
 
     /// <summary>
@@ -85,7 +95,7 @@ public class SqsMessageClient : ISqsClient
                 new MessageAttributeValue { DataType = "String", StringValue = status });
         }
 
-        var response = await _amazonSqs.SendMessageAsync(request);
+        var response = await _amazonSqs.SendMessageAsync(request, _cancellation?.CancellationToken ?? CancellationToken.None);
         return response.HttpStatusCode.ToString();
     }
 }

@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using Amazon.SimpleNotificationService;
 using Amazon.SimpleNotificationService.Model;
+using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Messages.BenzeneClient;
 using Benzene.Abstractions.Serialization;
 using Benzene.Clients;
@@ -25,6 +27,7 @@ public class SnsBatchMessageClient : IBenzeneBatchMessageClient
     private readonly string _topicAttributeKey;
     private readonly SnsPublishOptions? _publishOptions;
     private readonly ISerializer _serializer;
+    private readonly ICancellationTokenAccessor? _cancellation;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SnsBatchMessageClient"/> class.
@@ -33,14 +36,20 @@ public class SnsBatchMessageClient : IBenzeneBatchMessageClient
     /// <param name="amazonSns">The SNS client to publish with.</param>
     /// <param name="topicAttributeKey">The message attribute the Benzene topic is written to (defaults to <see cref="SnsContextConverter{T}.DefaultTopicAttribute"/>).</param>
     /// <param name="publishOptions">Optional FIFO/numeric-typing publish options.</param>
+    /// <param name="cancellation">
+    /// Supplies the ambient cancellation token to thread into each <c>PublishBatch</c> call; null (the
+    /// default) observes no cancellation.
+    /// </param>
     public SnsBatchMessageClient(string topicArn, IAmazonSimpleNotificationService amazonSns,
-        string topicAttributeKey = SnsContextConverter<object>.DefaultTopicAttribute, SnsPublishOptions? publishOptions = null)
+        string topicAttributeKey = SnsContextConverter<object>.DefaultTopicAttribute, SnsPublishOptions? publishOptions = null,
+        ICancellationTokenAccessor? cancellation = null)
     {
         _topicArn = topicArn;
         _amazonSns = amazonSns;
         _topicAttributeKey = topicAttributeKey;
         _publishOptions = publishOptions;
         _serializer = new JsonSerializer();
+        _cancellation = cancellation;
     }
 
     /// <inheritdoc />
@@ -86,7 +95,7 @@ public class SnsBatchMessageClient : IBenzeneBatchMessageClient
                 {
                     TopicArn = _topicArn,
                     PublishBatchRequestEntries = entries,
-                });
+                }, _cancellation?.CancellationToken ?? CancellationToken.None);
 
                 // Guard the collection: AWS SDK v3.7 auto-initializes it to empty, but a v4 upgrade leaves
                 // an unset collection null (would NRE on every all-success batch). Matches EventBridge.

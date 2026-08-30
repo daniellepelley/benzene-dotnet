@@ -2901,6 +2901,61 @@ Full baseline re-verified after both fixes: `Benzene.Core.Test` 3296 passed / 2 
 `Benzene.Mesh.Test` 575 passed, `Benzene.Mesh.Host.Test` 150 passed, `Benzene.Examples.sln` build 0
 errors. Pushed to `main` (`28473b0`).
 
+## Round 16, WP-D: AWS idempotency convention + outbound client cancellation (2026-08-30)
+
+- **[RESOLVED] `#260` `IdempotencyMiddleware.WasSuccessful`'s "null `MessageResult` == success" fall-through
+  directly contradicted the "null == failure, redeliver" convention SQS/DynamoDb always had and `#229`
+  extended to SNS/S3/EventBridge.** When a result-bearing (`IHasMessageResult`) pipeline completed
+  without ever setting `MessageResult` (a non-standard pipeline that omits `MessageRouter` or
+  short-circuits before it runs), the middleware treated that as success and permanently marked the
+  idempotency claim `Completed` - even while the transport's own `#229` escalation was, in the very
+  same call, throwing to demand redelivery. The redelivery SNS/S3/EventBridge/SQS/DynamoDb was just
+  told to perform then hit the already-`Completed` claim and short-circuited as a duplicate success,
+  without the real handler ever running again. Fixed by distinguishing the two null cases precisely:
+  `context is IHasMessageResult hasResult` now returns `hasResult.MessageResult?.IsSuccessful ?? false`
+  (a result-bearing transport with no result set is NOT proven successful - same release-the-claim path
+  the middleware already takes for an explicit `IsSuccessful == false`), while a context type with no
+  result concept at all keeps the old no-throw-as-success behaviour unchanged.
+  `src/Benzene.Idempotency/IdempotencyMiddleware.cs`. Regression tests:
+  `test/Benzene.Core.Test/Idempotency/IdempotencyMiddlewareTest.cs`
+  (`HandlerCompletesWithoutSettingResult_TreatedAsNotSuccessful_ReleasesClaim_SoRedeliveryReprocesses`,
+  plus the three genuinely-completed-message tests updated to explicitly set `MessageResult = Ok()` so
+  they keep testing real success rather than the old null-fallback loophole) and
+  `test/Benzene.Core.Test/Idempotency/IdempotencyMiddlewareSnsInteractionTest.cs` (the full
+  `SnsApplication` + real `IdempotencyMiddleware<SnsRecordContext>` interaction: first attempt throws
+  `SnsMessageProcessingException` and releases the claim; the redelivery actually re-runs the handler).
+- **[RESOLVED] `#261` every outbound AWS SDK client middleware/client (SQS, SNS, EventBridge, Lambda,
+  Step Functions, the three batch clients, and the standalone `Benzene.Aws.Sqs` `SqsMessageClient`)
+  called its `*Async` SDK method with no `CancellationToken`, despite every one of those methods
+  actually supporting one - so `UseTimeout(...)` (or any other consumer of the ambient
+  `ICancellationTokenAccessor`, e.g. graceful-drain cancellation) around an outbound AWS send was a
+  silent no-op; a stalled call ran until the AWS SDK's own default retry/socket timeout, not the
+  configured deadline.** Fixed by giving every client the same optional
+  `ICancellationTokenAccessor`-resolving constructor overload `HttpClientMiddleware` already has
+  (`_cancellation?.CancellationToken ?? CancellationToken.None` at the point of use), threaded into the
+  existing SDK overload at every call site - purely additive, no wire or interface change. Where a
+  client is constructed via a DI extension (`UseSqsClient()`, `UseSnsClient()`,
+  `UseEventBridgeClient()`, `UseAwsLambdaClient()`, `AddStepFunctionsClient()`, `AddLambdaHealthCheck()`),
+  the accessor is resolved with `TryGetService` so pipelines without the registration keep working.
+  Also fixed the now-false claim in `Benzene.Clients.Aws.Lambda/CLAUDE.md` (and matching stale comments
+  in `AwsLambdaHealthCheck.cs`) that the Lambda invoke path "can't" forward the token into its own SDK
+  call - `IAmazonLambda.InvokeAsync` (and every other AWS SDK method touched here) has always had a
+  `CancellationToken` overload; `AwsLambdaHealthCheck`'s Active-mode ping now threads the accessor too.
+  Files: `src/Benzene.Clients.Aws.Sqs/{SqsClientMiddleware.cs,SqsBatchMessageClient.cs,Extensions.cs}`,
+  `src/Benzene.Clients.Aws.Sns/{SnsClientMiddleware.cs,SnsBatchMessageClient.cs,Extensions.cs}`,
+  `src/Benzene.Clients.Aws.EventBridge/{EventBridgeClientMiddleware.cs,EventBridgeBatchMessageClient.cs,Extensions.cs}`,
+  `src/Benzene.Clients.Aws.Lambda/{AwsLambdaClientMiddleware.cs,AwsLambdaClient.cs,
+  AwsLambdaBenzeneMessageClient.cs,AwsLambdaHealthCheck.cs,Extensions.cs,CLAUDE.md}`,
+  `src/Benzene.Clients.Aws.StepFunctions/{StepFunctionsClient.cs,StepFunctionsClientFactory.cs,Extensions.cs}`,
+  `src/Benzene.Aws.Sqs/Client/SqsMessageClient.cs`. Regression tests: one per client family in the new
+  `test/Benzene.Core.Test/Clients/Aws/OutboundClientCancellationTest.cs` (`TimeoutMiddleware` at a 50ms
+  deadline around a mocked SDK call that runs 5s unless it observes a cancelled token - before the fix
+  the call ran the full 5s regardless of the deadline; after, it aborts within a generous 2s ceiling).
+  Note: `StepFunctionsClient` wraps its own SDK calls in a catch-all that converts any exception
+  (including a genuine cancellation) into a `BenzeneResultStatus.ServiceUnavailable` result rather than
+  rethrowing, so its observable fix is "the call actually completes near the deadline" rather than a
+  propagated `TimeoutException` - documented inline on that test.
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.
