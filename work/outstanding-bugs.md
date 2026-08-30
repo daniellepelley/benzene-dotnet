@@ -3360,6 +3360,54 @@ Verified: `dotnet test test/Benzene.Mesh.Test -c Release --filter "FullyQualifie
   rethrowing, so its observable fix is "the call actually completes near the deadline" rather than a
   propagated `TimeoutException` - documented inline on that test.
 
+## Round 17, WP-C: mesh-host HTTP dispatch cancellation (2026-08-30)
+
+- **[RESOLVED] `#285` `BenzeneMessageHttpMiddleware<TContext>.DispatchAsync` called the 2-argument
+  `MiddlewareApplication.HandleAsync(request, factory)` overload, which hardcodes
+  `CancellationToken.None` into the fresh inner DI scope it creates for the dispatched envelope - so
+  the real HTTP request's cancellation, already seeded onto the OUTER per-request scope's
+  `ICancellationTokenAccessor` by the "SeedCancellationToken" pipeline middleware
+  (`BenzeneExtensions.BuildHttpPipeline`), never reached the handler's scope at all. This made round
+  16's `#250` (the `mesh:query:*` handlers resolving `ICancellationTokenAccessor` "at the point of
+  use") and round 12's `#185` (the same idiom for `MeshDispatchMessageHandler`) genuinely correct and
+  unit-tested in the library, but **inert in the shipped Mesh Host**: `deploy/Mesh/Benzene.Mesh.Host`
+  mounts both `mesh:query:*` and `mesh:dispatch` through this exact `UseBenzeneMessage` HTTP-envelope
+  transport, as does every `AwsMesh`/`AzureMesh`/`GoogleCloudMesh` example built the same way. A
+  disconnected browser tab or a load-balancer idle timeout on a `mesh:query:fleet`/`mesh:dispatch`
+  call never actually cancelled the downstream read-model/dispatch call on any of these hosts,
+  regardless of `UseTimeout(...)`/cancellation composition inside `Benzene.Mesh.Collector`/
+  `Benzene.Mesh.Dispatch` being correct in isolation. Round 16's own `#250` regression test
+  (`MeshCollectorQueryCancellationTest`) could not have caught this: it hand-shares one
+  `CancellationTokenAccessor` instance directly between the handler and `TimeoutMiddleware`'s
+  constructors, which proves the resolve-and-thread pattern works when the accessor instance is
+  shared, but cannot detect that this transport creates its own, separately-seeded inner scope -
+  it never exercises `IServiceResolverFactory.CreateScope()`/`BenzeneMessageHttpMiddleware` at all.
+  **Fix:** `DispatchAsync` now resolves `ICancellationTokenAccessor` from the OUTER (per-request)
+  scope via `TryGetService` (null-tolerant - a pipeline with no accessor registered, or a transport
+  that never seeds one, dispatches exactly as before) and calls the **existing** 3-argument
+  `MiddlewareApplication.HandleAsync(request, factory, cancellationToken)` overload - already
+  present alongside the 2-argument one, and already seeding the inner scope correctly via
+  `IServiceResolver.SeedCancellationToken` - instead of the 2-argument overload. No change to the
+  2-argument overload's signature or behaviour (other legitimate callers depend on its
+  `CancellationToken.None` default), and no change to `IHttpContext` or any other interface - a
+  narrowly-scoped fix entirely inside `DispatchAsync`'s resolution logic, matching the ruling in
+  `work/bug-fix-plan-round17-2026-08.md` WP-C. **This is what makes `#250`'s and `#185`'s
+  cancellation-propagation fixes actually effective in the shipped Mesh Host** - both fixes were
+  correct all along; the transport beneath them was silently discarding the signal they depended on.
+  File: `src/Benzene.Http/BenzeneMessage/BenzeneMessageHttpMiddleware.cs`. Regression tests (new):
+  `test/Benzene.Mesh.Test/MeshHttpDispatchCancellationTest.cs` -
+  `DispatchAsync_ThroughRealScopeCreation_SeedsTheInnerScopeWithTheOuterRequestsCancellationToken`
+  goes through REAL DI scope creation end to end (a real `MicrosoftBenzeneServiceContainer`, a real
+  `IServiceResolverFactory`, an outer scope seeded exactly as the real HTTP pipeline seeds it, and the
+  actual `BenzeneMessageHttpMiddleware.HandleAsync`/`DispatchAsync`) rather than a hand-shared
+  accessor instance - closing the exact gap the round-16 test missed - and asserts the INNER scope's
+  `FleetQueryMessageHandler` observes the outer request's cancelled token; a paired
+  `DispatchAsync_WithNoCancellationSeeded_StillDispatchesNormally` test pins that an unsignalled
+  outer scope (the common case) dispatches byte-identically to before. All pre-existing
+  `Benzene.Core.Test/Http/BenzeneMessageHttpMiddlewareTest.cs`,
+  `Benzene.Mesh.Test/MeshQueriesRoutingTest.cs`, `MeshCollectorQueryCancellationTest.cs`, and
+  `MeshDispatchTest.cs` cases verified unchanged and green.
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.
