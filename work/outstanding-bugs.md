@@ -3554,6 +3554,51 @@ Scoped verification: `dotnet test test/Benzene.Core.Test -c Release --filter
   `Benzene.Core.Test/Http/BenzeneMessageHttpMiddlewareTest.cs`,
   `Benzene.Mesh.Test/MeshQueriesRoutingTest.cs`, `MeshCollectorQueryCancellationTest.cs`, and
   `MeshDispatchTest.cs` cases verified unchanged and green.
+## Round 17, WP-D: Azure workers - Cosmos skip-mode checkpoint guard, Service Bus settlement isolation (2026-08-30)
+
+- **[RESOLVED] `#276` `BenzeneCosmosChangeFeedWorker`'s skip-mode "checkpoint the failed batch anyway"
+  call had no try/catch at all - the residual half of `#108` that the shipped fix never actually
+  reached.** `#108` (round 10) moved the success-path auto-checkpoint call outside the handler's own
+  try/catch into its own guarded try/catch, but the skip-mode branch (`CatchHandlerExceptions = true`:
+  "the handler failed, so checkpoint the batch anyway to permanently pass it over") still called
+  `await checkpointAsync();` completely unguarded. A lease-container failure there (a 429 throttle, a
+  transient network blip) escaped `OnChangesAsync` entirely unhandled and unlogged as a checkpoint
+  failure - the only prior log line named the handler as having failed, which is misleading once the
+  handler's outcome is irrelevant and the real, unlogged failure is the lease-container write. Fixed by
+  wrapping the skip-mode `checkpointAsync()` call in its own try/catch, mirroring the success path: a
+  distinct "Checkpointing the skipped change feed batch ... failed: the lease container write failed"
+  message names the lease container (not the handler) and is swallowed rather than rethrown - the batch
+  stays un-checkpointed and is redelivered/retried on the next partition scan, the same at-least-once
+  outcome `#108`'s ruling already established. `src/Benzene.Azure.CosmosDb/BenzeneCosmosChangeFeedWorker.cs`.
+  Regression test: `test/Benzene.Core.Test/Azure/CosmosDbWorker/BenzeneCosmosChangeFeedWorkerTest.cs`'s
+  `FailedBatch_CatchHandlerExceptions_SkipModeCheckpointAlsoThrows_LogsDistinctLeaseContainerFailure_AndDoesNotThrow`
+  - handler throws AND the skip-mode checkpoint call throws; asserts the worker does not throw, the
+  handler-failure log still fires once, and the new checkpoint-failure log fires once with lease-
+  container/skip-mode wording distinct from both the handler-failure log and the pre-existing
+  success-path auto-checkpoint-failure log. This test *replaces* the previously-misleadingly-named
+  `SuccessfulBatch_CheckpointThrows_SkipMode_ChecksPointsOnlyOnce_LogsAsCheckpointFailure_AndDoesNotThrow`,
+  whose pipeline mock never actually threw and so never reached the skip-mode branch at all.
+- **[RESOLVED] `#277` `BenzeneServiceBusWorker`'s `AckMode = Explicit` path ran the handler call and
+  `SettleAsync` inside one shared try/catch, so a settlement failure *after* a successful handler run
+  was caught by the handler's own catch block, logged with the handler-failure template, and the
+  already-successfully-processed message was wrongly abandoned - the same misattribution class `#108`/
+  `#116` fixed for Cosmos/EventHub, never applied to this third sibling.** Fixed by moving
+  `SettleAsync(settler, decision)` outside the handler's try/catch into its own, deliberately-placed
+  try/catch: a settlement failure (e.g. `CompleteMessageAsync` throwing because the lock was lost by
+  the time settlement runs) is now logged with a distinct "Settling Service Bus message {messageId}
+  failed after it was already successfully processed" message, and does **not** call
+  `AbandonMessageAsync()` - the lock is left to expire naturally so Service Bus redelivers the message,
+  mirroring Cosmos/EventHub's "don't force an extra side effect on top of an already-decided-successful
+  outcome" checkpoint handling. The settle-after-a-*failed*-handler path (i.e. the handler itself threw)
+  is unchanged - it still logs the handler failure, attempts `AbandonMessageAsync()` in its own nested
+  try/catch, and rethrows. `src/Benzene.Azure.ServiceBus/BenzeneServiceBusWorker.cs`. Regression test:
+  `test/Benzene.Core.Test/Azure/ServiceBusWorker/BenzeneServiceBusWorkerSettlementCancellationTest.cs`'s
+  `HandlerSucceeds_SettlementThrows_LogsDistinctSettlementFailure_DoesNotAbandon_AndDoesNotThrow` -
+  handler succeeds, `CompleteMessageAsync` throws a lock-lost-shaped exception; asserts the worker does
+  not throw, `AbandonMessageAsync` is never called, no handler-failure-template log fires, and the new
+  distinct settlement-failure log fires once with the settlement exception attached. The existing
+  `#117` regression tests (settlement under an already-cancelled `args.CancellationToken`) and the
+  handler-throws/abandon-also-throws test all pass unchanged.
 
 ## Open — maintainer decisions (the real remaining backlog)
 

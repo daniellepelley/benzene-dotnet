@@ -107,8 +107,28 @@ public class BenzeneCosmosChangeFeedWorker<TDocument> : IBenzeneWorker
             if (_config.CatchHandlerExceptions)
             {
                 // Skip mode: checkpoint the failed batch anyway so it is permanently passed over
-                // and the lease keeps moving.
-                await checkpointAsync();
+                // and the lease keeps moving. Wrapped in its own try/catch, mirroring the
+                // success-path auto-checkpoint below: a lease-container failure here (e.g. a 429
+                // throttle) is a distinct failure from the handler failure already logged above -
+                // it must be logged as such (naming the lease container, not the handler) rather
+                // than escaping OnChangesAsync entirely unhandled and unattributed, and it must be
+                // swallowed, not rethrown - the batch stays un-checkpointed and is simply
+                // redelivered/retried on the next partition scan, the same at-least-once outcome
+                // as every other checkpoint failure path in this file (#276).
+                try
+                {
+                    await checkpointAsync();
+                }
+                catch (Exception checkpointEx)
+                {
+                    using var loggingScope = _serviceResolverFactory.CreateScope();
+                    loggingScope.GetService<ILogger<BenzeneCosmosChangeFeedWorker<TDocument>>>()
+                        .LogError(checkpointEx,
+                            "Checkpointing the skipped change feed batch of {count} documents on lease " +
+                            "{leaseToken} failed: the lease container write failed. The batch will be " +
+                            "redelivered and retried on the next partition scan",
+                            changes.Count, context.LeaseToken);
+                }
             }
             else
             {

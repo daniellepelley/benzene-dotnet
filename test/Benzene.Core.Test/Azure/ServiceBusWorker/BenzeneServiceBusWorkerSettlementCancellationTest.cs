@@ -126,6 +126,59 @@ public class BenzeneServiceBusWorkerSettlementCancellationTest
     }
 
     [Fact]
+    public async Task HandlerSucceeds_SettlementThrows_LogsDistinctSettlementFailure_DoesNotAbandon_AndDoesNotThrow()
+    {
+        // Regression for #277: previously SettleAsync ran INSIDE the handler's own try/catch, so a
+        // settlement failure after a *successful* handler run was caught by the handler's catch
+        // block, logged with the handler-failure template, and the message was wrongly abandoned
+        // even though it had already been fully and successfully processed. The fix isolates
+        // settlement into its own try/catch: a distinct log message, zero abandon calls, and the
+        // exception is swallowed (the lock is left to expire naturally and Service Bus redelivers).
+        var mockPipeline = new Mock<IMiddlewarePipeline<ServiceBusConsumerContext>>();
+        mockPipeline.Setup(x => x.HandleAsync(It.IsAny<ServiceBusConsumerContext>(), It.IsAny<IServiceResolver>()))
+            .Callback<ServiceBusConsumerContext, IServiceResolver>((context, _) => context.MessageResult = BenzeneResult.Ok())
+            .Returns(Task.CompletedTask);
+
+        var (worker, logger) = CreateWorker(mockPipeline.Object);
+
+        var message = ServiceBusModelFactory.ServiceBusReceivedMessage(messageId: "settle-fails");
+
+        var settlementException = new InvalidOperationException("MessageLockLostException: the lock supplied is invalid");
+        var mockReceiver = new Mock<ServiceBusReceiver>();
+        mockReceiver
+            .Setup(x => x.CompleteMessageAsync(It.IsAny<ServiceBusReceivedMessage>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(settlementException);
+
+        var args = new ProcessMessageEventArgs(message, mockReceiver.Object, CancellationToken.None);
+
+        // Must not throw: a post-success settlement failure must be logged and swallowed, not
+        // escape the worker.
+        await InvokeOnProcessMessageAsync(worker, args);
+
+        // The already-successfully-processed message must NOT be abandoned.
+        mockReceiver.Verify(x => x.AbandonMessageAsync(It.IsAny<ServiceBusReceivedMessage>(),
+            It.IsAny<IDictionary<string, object>>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        // Must NOT be logged with the handler-failure template/exception.
+        logger.Verify(x => x.Log(
+            LogLevel.Error,
+            It.IsAny<EventId>(),
+            It.Is<It.IsAnyType>((state, _) => state.ToString()!.Contains("Processing Service Bus message") && state.ToString()!.Contains("failed")),
+            It.IsAny<Exception>(),
+            It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Never);
+
+        // Must be logged with a distinct settlement-failure message naming the settlement action,
+        // not the handler, as having failed.
+        logger.Verify(x => x.Log(
+            LogLevel.Error,
+            It.IsAny<EventId>(),
+            It.Is<It.IsAnyType>((state, _) => state.ToString()!.Contains("Settling", StringComparison.OrdinalIgnoreCase) &&
+                                               state.ToString()!.Contains("settle-fails")),
+            It.Is<Exception>(ex => ex == settlementException),
+            It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
+    }
+
+    [Fact]
     public async Task HandlerThrows_AbandonAlsoThrows_OriginalExceptionStillPropagates()
     {
         var mockPipeline = new Mock<IMiddlewarePipeline<ServiceBusConsumerContext>>();

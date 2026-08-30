@@ -228,23 +228,41 @@ public class BenzeneCosmosChangeFeedWorkerTest
     }
 
     [Fact]
-    public async Task SuccessfulBatch_CheckpointThrows_SkipMode_ChecksPointsOnlyOnce_LogsAsCheckpointFailure_AndDoesNotThrow()
+    public async Task FailedBatch_CatchHandlerExceptions_SkipModeCheckpointAlsoThrows_LogsDistinctLeaseContainerFailure_AndDoesNotThrow()
     {
+        // Replaces the previously-misnamed "SuccessfulBatch_CheckpointThrows_SkipMode..." test,
+        // whose pipeline mock never actually threw - it exercised the success-path auto-checkpoint
+        // code under an irrelevant skip-mode flag and never reached the skip-mode checkpoint call
+        // this test targets. Here BOTH the handler and the skip-mode "checkpoint the failed batch
+        // anyway" call throw, reproducing #276: without a guard, the checkpoint exception used to
+        // escape OnChangesAsync entirely unhandled and unlogged as a checkpoint failure.
         var harness = new Harness(new BenzeneCosmosChangeFeedConfig { CatchHandlerExceptions = true });
+        harness.MockPipeline
+            .Setup(x => x.HandleAsync(It.IsAny<StreamContext<OrderDocument>>(), It.IsAny<IServiceResolver>()))
+            .ThrowsAsync(new InvalidOperationException("handler failed"));
         var checkpointException = new InvalidOperationException("lease container throttled (429)");
         harness.CheckpointAsyncImpl = () => throw checkpointException;
         await harness.Worker.StartAsync(CancellationToken.None);
 
+        // Must not throw: the skip-mode checkpoint failure must be caught and swallowed, not
+        // escape the worker unhandled.
         await harness.DeliverBatchAsync("order-1");
 
-        // The bug: skip mode used to re-invoke the just-failed checkpoint a second time from its
-        // own catch block, with zero backoff. Must be exactly one call in skip mode too.
+        // Checkpoint must be attempted exactly once - no zero-backoff retry of the failing call.
         Assert.Equal(1, harness.CheckpointCalls);
 
-        harness.VerifyLoggedError(m => m.Contains("Processing change feed batch") && m.Contains("failed"), Times.Never());
+        // The original handler failure is still logged (as before).
+        harness.VerifyLoggedError(m => m.Contains("Processing change feed batch") && m.Contains("failed"), Times.Once());
+
+        // The skip-mode checkpoint failure must be logged with its own distinct message naming
+        // the lease container (not the handler) as the failing dependency - distinguishable both
+        // from the handler-failure log line above and from the success-path auto-checkpoint
+        // failure message ("Auto-checkpoint failed after successfully processing...").
         harness.VerifyLoggedError(
             m => m.Contains("checkpoint", StringComparison.OrdinalIgnoreCase) &&
-                 m.Contains("lease container", StringComparison.OrdinalIgnoreCase),
+                 m.Contains("lease container", StringComparison.OrdinalIgnoreCase) &&
+                 m.Contains("skip", StringComparison.OrdinalIgnoreCase) &&
+                 !m.Contains("successfully processing", StringComparison.OrdinalIgnoreCase),
             Times.Once());
     }
 
