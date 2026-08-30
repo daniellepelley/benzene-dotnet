@@ -418,6 +418,41 @@ public class MeshCollectorStoreTest
         Assert.Equal(0, accepted);
     }
 
+    // ---- #253: no missing feed ever fails ingestion (spec §6), one level down from #234 - a null
+    // ELEMENT inside a non-null list (legal on the wire: MeshTraceEvent/MeshIssue are reference
+    // types) must be skipped, not dereferenced, so it can't partially corrupt a batch's ingestion.
+
+    [Fact]
+    public void AddEvents_NullElementInEventsList_DoesNotThrow_AndAppliesTheOtherEvents()
+    {
+        var before = Event("trace-1", "span-1", "svc", "topic", DateTimeOffset.UtcNow);
+        var after = Event("trace-2", "span-2", "svc", "topic", DateTimeOffset.UtcNow.AddMilliseconds(1));
+        var store = new MeshCollectorStore();
+
+        var accepted = store.AddEvents(new[] { before, null!, after });
+
+        // No NullReferenceException, both real events ingested. Accepted counts only the real
+        // events processed (matching AddIssues' established convention: an entry that's skipped
+        // rather than stored - here, a null slot - is never counted as accepted).
+        Assert.Equal(2, accepted);
+        var topic = store.Topic("topic", null);
+        Assert.NotNull(topic);
+        Assert.Equal(2, topic!.Invocations);
+    }
+
+    [Fact]
+    public void AddIssues_NullElementInIssuesList_DoesNotThrow_AndAppliesTheOtherIssues()
+    {
+        var store = new MeshCollectorStore();
+        var real = new MeshIssue { Fingerprint = "fp-1", Topic = "topic", FirstSeen = DateTimeOffset.UtcNow, LastSeen = DateTimeOffset.UtcNow, Count = 1 };
+        var batch = new MeshIssueBatch { Service = "svc", Issues = new List<MeshIssue> { real, null! } };
+
+        var accepted = store.AddIssues(batch);
+
+        Assert.Equal(1, accepted);
+        Assert.Single(store.Fleet().Issues);
+    }
+
     [Fact]
     public void AddIssues_NullIssuesList_IsAcceptedAsALivenessOnlyBatch_AndMarksTheFeedWired()
     {

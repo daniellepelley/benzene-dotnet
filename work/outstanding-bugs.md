@@ -2997,6 +2997,99 @@ regression tests: `test/Benzene.Core.Test/Azure/TimerFailureHandlingTest.cs`,
 `dotnet test test/Benzene.Core.Test -c Release --filter
 "FullyQualifiedName~Azure|FullyQualifiedName~AzureFunctionTriggerGenerator"` — 281 passed, 0 failed
 (including the pre-existing `#230`/`#231` regression tests, unaffected).
+## Round 16 WP-E: mesh collector/query (2026-08-30)
+
+- **[RESOLVED] #250 — the five `mesh:query:*` handlers never resolved `ICancellationTokenAccessor`,
+  so `UseTimeout(...)` around the query envelope was inert.** `FleetQueryMessageHandler`,
+  `ServiceQueryMessageHandler`, `TopicQueryMessageHandler`, `TraceQueryMessageHandler`, and
+  `CorrelationQueryMessageHandler` (`src/Benzene.Mesh.Collector/Handlers.cs`) took only an
+  `IMeshFleetReadModel` and always called it with the default (never-cancelled) token, even though
+  `IMeshFleetReadModel` and every downstream trace source (X-Ray/Jaeger/Tempo, including the
+  #230-fixed `BoundedFanOut`) were built to honor one. Fixed by giving all five the same optional
+  `ICancellationTokenAccessor? cancellation = null` constructor parameter `MeshDispatchMessageHandler`
+  already has (#185), resolved at the point of use (`_cancellation?.CancellationToken ??
+  CancellationToken.None`) and threaded into the read-model call. Purely additive (an optional
+  trailing constructor parameter); no DI registration change needed — the existing message-handler
+  resolution already supplies an unregistered optional collaborator as `null`, exactly as it does for
+  `MeshDispatchMessageHandler` today. `test/Benzene.Mesh.Test/MeshCollectorQueryCancellationTest.cs`
+  (inverted from the round-16 review's committed red evidence test to its green form, covering
+  Fleet + Trace; the other three handlers are mechanical clones of the same one-line fix).
+- **[RESOLVED] #251 — `MeshCollectorStore` had no catalog slot for more than one live
+  `(service, serviceVersion)`, so a side-by-side canary/blue-green deployment was reported as
+  contract drift.** Spec §2.4 requires the catalog key to be the pair `(service, serviceVersion)`:
+  two different versions reporting different `descriptorHash`es is the expected side-by-side
+  deployment state, not drift. `MeshCollectorStore._services` (`ServiceState`) held exactly one
+  `Descriptor`, wholesale-replaced on every `Register` call regardless of version — so a canary's
+  second version silently evicted the first's topics/produces/hash from the catalog, and every still-
+  healthy instance of the evicted version was then compared against the survivor's descriptor and
+  flagged as a false hash mismatch. Fixed: `ServiceState` now keys every live descriptor by
+  `ServiceVersion ?? ""` (`Descriptors`, a `Dictionary<string, MeshServiceDescriptor>`); `Register`
+  retracts only the specific version's OWN previously declared provider/consumer edges before
+  re-adding its new ones (`RetractEdges`) — a re-registration of the SAME `(service, version)` pair
+  still replaces wholesale (unchanged behavior), but a DIFFERENT version registering never touches a
+  still-live sibling version's edges. `InstanceView.HashMatches` is now computed
+  (`MeshCollectorStore.HashMatches`) against EVERY currently registered version's hash for the
+  service, not just the single "current" row, so an instance matches whichever live version it's
+  actually running, and only a hash matching none of the service's live descriptors reads as drift
+  (including the case where the SAME version re-registers with a genuinely different hash — a real
+  contract drift without a version bump — which still correctly flags, because the old hash is no
+  longer present anywhere in the live set). **[RESOLVED] view-shape choice:**
+  `MeshCollectorStore.Service(name)`/`Fleet().Services` still return exactly ONE row per service
+  NAME — the most-recently-registered version's scalar Runtime/Binding/Placement/Topics/
+  ServiceVersion/Descriptor fields — preserving today's shape for every existing caller/test keying
+  by name alone (in particular `Reregistration_ReplacesServiceVersion_WithTheLatestDescriptors`,
+  which asserts exactly one `Fleet().Services` row named "orders" after two versions register). Both
+  live versions' full descriptors remain available underneath that one row for the topic catalog
+  (`mesh:query:topic`, queried by topic id, naturally reports both versions' declared edges without
+  needing a second service-level row) and for per-instance hash comparison. A dedicated per-version
+  breakdown on `ServiceView` itself (e.g. a `Versions` list) was NOT added this round — not required
+  by any of the three behaviors spec §2.4 actually mandates, and speculative until a caller needs to
+  render "which versions are live" as its own list; a natural follow-up if the mesh UI wants it.
+  `src/Benzene.Mesh.Collector/MeshCollectorStore.cs`.
+  `test/Benzene.Mesh.Test/MeshCollectorSideBySideVersionTest.cs` (inverted from the round-16 review's
+  committed red evidence test: both catalog entries now stay live, each instance hash-matches its own
+  version, and a new drift-positive case proves a genuine same-version hash change still flags).
+  Every pre-existing `MeshCollectorStoreTest`/conformance fixture case stayed green unmodified.
+- **[RESOLVED] #253 — `MeshCollectorStore.AddEvents`/`AddIssues` threw `NullReferenceException` on a
+  null ELEMENT inside a non-null list, partially corrupting a batch's ingestion.** #234 (round 15)
+  fixed a null WHOLE list (`"events": null`); `MeshTraceEvent`/`MeshIssue` are reference types, so a
+  wire payload can also legally deserialize `"events": [null, {...}, {...}]` — a non-null list
+  containing a null element — which the loop dereferenced unconditionally, throwing mid-batch:
+  everything before the null had already mutated state, everything after was silently dropped, and
+  the caller never got its `Ack`. Fixed by skipping a null element in both loops, matching the file's
+  existing null-tolerance conventions (the null-`Status`-field guard immediately above `AddEvents`'
+  loop is the model). `AddEvents`'s returned `Accepted` count now reflects only elements actually
+  processed (a skipped null is not counted), matching `AddIssues`' pre-existing convention of only
+  counting entries it actually stored, not the raw batch length.
+  `src/Benzene.Mesh.Collector/MeshCollectorStore.cs`.
+  `test/Benzene.Mesh.Test/MeshCollectorStoreTest.cs`
+  (`AddEvents_NullElementInEventsList_DoesNotThrow_AndAppliesTheOtherEvents`,
+  `AddIssues_NullElementInIssuesList_DoesNotThrow_AndAppliesTheOtherIssues`).
+- **[RESOLVED] #256 — `CompositeMeshFleetReadModel.TraceAsync`/`CorrelationAsync`'s bare
+  `catch { return null; }` swallowed a genuine caller cancellation and misreported it as an
+  authoritative "not found".** The bare catch exists for fetch isolation (a failing trace-source
+  backend degrades a single lookup to "not found" rather than throwing out of the composite), which
+  is correct for a real backend failure — but it also caught an `OperationCanceledException` raised
+  because the CALLER'S OWN `cancellationToken` (e.g. a `mesh:query:trace`/`correlation` request
+  wrapped in `UseTimeout(...)`, or a disconnected HTTP client) was cancelled, silently reporting
+  "not found" instead of propagating the cancellation — a caller/UI couldn't distinguish a cancelled
+  request from an authoritative "that trace doesn't exist". Fixed by narrowing the catch filter:
+  rethrow when `ex is OperationCanceledException && cancellationToken.IsCancellationRequested` (the
+  method's OWN token, token-verified, matching `MessageHandler.cs`'s existing pattern rather than a
+  bare exception-type exclusion), keep swallowing everything else exactly as before.
+  `src/Benzene.Mesh.Collector/CompositeMeshFleetReadModel.cs`.
+  `test/Benzene.Mesh.Test/CompositeMeshFleetReadModelTest.cs`
+  (`TraceAsync_PropagatesRealCancellation_InsteadOfReportingNotFound`,
+  `CorrelationAsync_PropagatesRealCancellation_InsteadOfReportingNotFound`, plus the negative
+  `TraceAsync_PlainException_StillDegradesToNull_WhenTheCallersTokenIsNotCancelled`). Out of scope
+  this round (unchanged, noted for a future pass): `RecentFlowsAsync`/`TopicsFromUsageAsync`'s own
+  bare catches share the same class of gap, as does `XRayTraceSource.FetchBatchAsync`'s bare
+  `catch { }` — neither was in WP-E's task list (#252/XRay is WP-F's scope).
+
+Full `dotnet test test/Benzene.Mesh.Test -c Release`: 584 passed / 0 failed (the whole project, not a
+filtered subset, per the WP's own instruction given #251's behavioral surface).
+`dotnet test test/Benzene.Conformance.Test -c Release --filter FullyQualifiedName~Mesh`: 84 passed / 0
+failed.
 
 ## Open — maintainer decisions (the real remaining backlog)
 
