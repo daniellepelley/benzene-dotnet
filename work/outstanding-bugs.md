@@ -2069,6 +2069,51 @@ top-of-file summary blockquote).
   scheme specifically) to record this explicitly as a `[DECISION]` in place, rather than leaving it
   silently misleading. Left for a future round to decide whether/how to carry the scheme onto the wire.
 
+### Round 15, WP-E — Polly cancellation + Xml serializer contract (#237, #238, done)
+Design/rationale in [`bug-fix-designs-round15-2026-08.md`](archive/bug-fix-designs-round15-2026-08.md)
+§5. Plan in [`bug-fix-plan-round15-2026-08.md`](archive/bug-fix-plan-round15-2026-08.md) WP-E.
+- **[RESOLVED] #237** — `PollyResilienceMiddleware<TContext>.HandleAsync` discarded the
+  `CancellationToken` Polly passes its `ExecuteAsync` callback, silently defeating every
+  cancellation-driven Polly strategy (Timeout, Hedging, RateLimiter); the published cookbook
+  (`docs/cookbooks/polly-resilience.md`) additionally claimed the token was passed through, which was
+  false against the actual source (verified: its own "Testing" sample threw no exception). **Ruling
+  applied: fixed it for real, not a doc retreat.** The middleware now exposes Polly's per-attempt token
+  to the downstream pipeline via the ambient `CancellationTokenAccessor` — exactly the pattern the
+  sibling `Benzene.Resilience.TimeoutMiddleware<TContext>` already uses: for the duration of each Polly
+  attempt it links the attempt's token with whatever ambient token was already set
+  (`CancellationTokenSource.CreateLinkedTokenSource`, so an outer `UseTimeout` or any host-seeded token
+  is never lost), sets the accessor to the linked token before invoking `next()`, and restores the
+  prior token in a `finally` once the attempt finishes. `PollyResilienceMiddleware<TContext>` gained an
+  optional `CancellationTokenAccessor? accessor` constructor parameter (a private one is created when
+  omitted, so direct construction without DI still works); the four `.UseResiliencePipeline(...)`
+  overloads now resolve it from the same DI scope as the rest of the pipeline (mirroring
+  `.UseTimeout`'s `resolver.GetService<CancellationTokenAccessor>()`), so real usage shares one
+  instance with everything else in the scope. This resolves the open design question flagged in
+  `work/archive/polly-resilience-plan-2026-08.md` (ship unresolved, "resolve via
+  `ICancellationTokenAccessor`, the pattern `TimeoutMiddleware` already uses correctly"). The cookbook's
+  "Testing" sample, cancellation section, and the package `CLAUDE.md` are corrected to describe the
+  real mechanism and — matching `TimeoutMiddleware`'s own documented caveat — state plainly that this
+  can only cancel work that *observes* the ambient token: a `next()` that ignores it still runs to
+  completion, and Polly (like .NET cancellation generally) cannot forcibly abort a running `Task`, so
+  no `TimeoutRejectedException` is raised either in that case. Tests (`PollyResilienceMiddlewareTest.cs`):
+  a Polly timeout strategy actually throws `TimeoutRejectedException` when `next` observes the ambient
+  accessor's token (the corrected cookbook sample, run verbatim); the accessor is restored after each
+  attempt; an outer ambient token's cancellation survives being linked with Polly's own per-attempt
+  token; a `next` that ignores the token runs to completion with no exception even past the deadline
+  (the documented caveat, both with and without an explicitly-supplied accessor).
+- **[RESOLVED] #238** — `Benzene.Xml.XmlSerializer.Deserialize` broke its own documented null-round-trip
+  contract: `Serialize(type, null)` deliberately returns `""` (matching Avro/MessagePack's null-tolerant
+  pattern per its own doc comment), but `Deserialize(type, "")` threw `InvalidOperationException` and
+  `Deserialize(type, null)` NRE'd outright (unguarded dereference checking for a leading BOM character).
+  Fixed by guarding `Deserialize(Type, string)` with `string.IsNullOrEmpty(payload)` → return `null`
+  before any parsing, mirroring `Serialize`'s own null guard and matching Avro/MessagePack's
+  `string.IsNullOrEmpty(payload) ? null : ...` pattern exactly. The generic `Deserialize<T>(string)`
+  overload delegates to the guarded untyped overload, so both are covered by one guard. Malformed
+  non-empty XML still throws (unchanged; the guard only short-circuits null/empty). Tests
+  (`XmlSerializerTest.cs`): `Serialize(null)` → `Deserialize` round-trips to `null`; `Deserialize` of
+  `null` and of `""` (both overloads) return `null` without throwing; a genuinely malformed non-empty
+  payload still throws `InvalidOperationException`.
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.

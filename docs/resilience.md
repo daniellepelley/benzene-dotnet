@@ -213,7 +213,8 @@ opt-in for the rest. The Polly package also bridges Benzene's dual failure model
 (non-throwing) failure `IBenzeneResult` can be treated as a Polly-handled outcome via an `isFailure`
 predicate, so it can drive retry/breaker/fallback too. See the
 [Polly Resilience Pipelines](cookbooks/polly-resilience.md) cookbook for the full walkthrough,
-including the outcome-aware bridge, outbound-client usage, and the cancellation caveat.
+including the outcome-aware bridge, outbound-client usage, and how it exposes Polly's per-attempt
+cancellation token via the ambient accessor (and the caveat that comes with it).
 
 ## See Also
 

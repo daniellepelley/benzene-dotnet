@@ -49,6 +49,51 @@ public class XmlSerializerTest
     }
 
     [Fact]
+    public void Serialize_Then_Deserialize_NullPayload_RoundTripsToNull()
+    {
+        // Serialize(type, null) deliberately returns "" (see Serialize_NullPayload_ReturnsEmptyString).
+        // The doc comment on Deserialize claims a matching round-trip, mirroring Avro/MessagePack's
+        // null-tolerant pattern - but until #238 is fixed, Deserialize("") throws
+        // InvalidOperationException instead of completing the round-trip. (#238.)
+        var serializer = new XmlSerializer();
+
+        var xml = serializer.Serialize<ExampleRequestPayload>(null);
+        var result = serializer.Deserialize<ExampleRequestPayload>(xml);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void Deserialize_EmptyPayload_ReturnsNull()
+    {
+        var serializer = new XmlSerializer();
+
+        Assert.Null(serializer.Deserialize(typeof(ExampleRequestPayload), string.Empty));
+        Assert.Null(serializer.Deserialize<ExampleRequestPayload>(string.Empty));
+    }
+
+    [Fact]
+    public void Deserialize_NullPayload_ReturnsNull_DoesNotThrow()
+    {
+        // Deserialize(type, null) used to NRE outright (unguarded dereference at the BOM-strip check).
+        // (#238.)
+        var serializer = new XmlSerializer();
+
+        Assert.Null(serializer.Deserialize(typeof(ExampleRequestPayload), null!));
+        Assert.Null(serializer.Deserialize<ExampleRequestPayload>(null!));
+    }
+
+    [Fact]
+    public void Deserialize_MalformedNonEmptyPayload_StillThrows()
+    {
+        // The null/empty guard must not over-swallow: genuine garbage still throws.
+        var serializer = new XmlSerializer();
+
+        Assert.Throws<System.InvalidOperationException>(() =>
+            serializer.Deserialize(typeof(ExampleRequestPayload), "not xml at all"));
+    }
+
+    [Fact]
     public void Deserialize_PayloadWithDoctype_IsRejected_NoEntityExpansion()
     {
         // The deserialize path reads an untrusted, content-negotiated request body. A DOCTYPE with

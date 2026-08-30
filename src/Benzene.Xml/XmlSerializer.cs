@@ -72,10 +72,18 @@ public class XmlSerializer : ISerializer
 
     /// <summary>Deserializes an XML string as <paramref name="type"/>.</summary>
     /// <param name="type">The runtime type to deserialize into.</param>
-    /// <param name="payload">The XML string.</param>
+    /// <param name="payload">The XML string; <c>null</c> or empty deserializes to <c>null</c>.</param>
     /// <returns>The deserialized object.</returns>
     public object? Deserialize(Type type, string payload)
     {
+        // Mirror Serialize's own null-tolerant contract (and match Avro/MessagePack's round-trip
+        // pattern): Serialize(type, null) produces "", so the inverse of that - not malformed XML -
+        // must accept both null and "" and hand back null rather than throwing.
+        if (string.IsNullOrEmpty(payload))
+        {
+            return null;
+        }
+
         // ASP.NET Core's own StreamReader-based body-reading path defaults to
         // detectEncodingFromByteOrderMarks: true, which strips a leading UTF-8 BOM before the string
         // ever reaches a serializer. XmlReader has no equivalent leniency over an in-memory string (a

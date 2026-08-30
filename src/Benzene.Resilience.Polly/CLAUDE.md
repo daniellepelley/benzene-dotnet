@@ -9,13 +9,16 @@ not a replacement: that package stays the zero-dependency homegrown retry; this 
 [Capability Matrix](../../docs/capability-matrix.md) for how the two resilience options relate.
 
 The seam is a plain wrap: `IMiddleware<TContext>.HandleAsync(context, next)` calls
-`pipeline.ExecuteAsync(_ => next(), ...)`. The `ResiliencePipeline` is supplied ready-built, so the
-per-message cost is just `ExecuteAsync`.
+`pipeline.ExecuteAsync(...)` with a callback that invokes `next()`. The `ResiliencePipeline` is
+supplied ready-built, so the per-message cost is just `ExecuteAsync`. For the duration of each Polly
+attempt, that callback also exposes Polly's per-attempt `CancellationToken` to `next()` via the
+ambient `CancellationTokenAccessor` — see Cancellation below.
 
 ## Key types/interfaces
 - **`PollyResilienceMiddleware<TContext>`** — wraps `next()` in a supplied `ResiliencePipeline`.
-  Constructor takes the pipeline plus an optional `Func<TContext, bool>? isFailure` (see outcome
-  awareness below).
+  Constructor takes the pipeline, an optional `Func<TContext, bool>? isFailure` (see outcome
+  awareness below), and an optional `CancellationTokenAccessor? accessor` (resolved from DI when
+  constructed via `.UseResiliencePipeline(...)`; a private one is created if omitted).
 - **`Extensions.UseResiliencePipeline<TContext>(...)`** — four pipeline-builder overloads:
   - `(ResiliencePipeline pipeline)` — bring your own fully-configured Polly pipeline.
   - `(ResiliencePipeline pipeline, Func<TContext, bool> isFailure)` — same, but outcome-aware.
@@ -62,9 +65,13 @@ Prefer `Benzene.Resilience`'s `.UseRetry(...)` when you want retry only and no e
 - **Resilience re-invokes the whole downstream pipeline.** As with `RetryMiddleware`, do not place it
   on an inbound context that has already written a response — a re-run would repeat those steps. It's
   intended for outbound/port calls that are safe to re-run.
-- **Cancellation.** Benzene middleware has no `CancellationToken` parameter; the middleware passes
-  the token Polly threads through `ExecuteAsync`. Where the transport has no deadline this is
-  effectively `CancellationToken.None`.
+- **Cancellation.** Benzene middleware has no `CancellationToken` parameter, so the middleware can't
+  hand Polly's per-attempt token to `next` directly. It instead exposes that token (linked with
+  whatever ambient token was already set, so an outer `UseTimeout` isn't lost) via the ambient
+  `CancellationTokenAccessor` for the duration of each attempt — exactly `TimeoutMiddleware`'s
+  save/restore pattern — then restores the prior token. Same caveat as `TimeoutMiddleware`:
+  cancellation only reaches code that actually reads the accessor's token; `next()` that ignores it
+  runs to completion and Polly cannot forcibly abort it (`docs/cookbooks/polly-resilience.md`).
 - The `isFailure` path costs one sentinel `throw`/`catch` per failed attempt only — the success path
   allocates nothing beyond Polly's own `ExecuteAsync` state tuple.
 
@@ -78,4 +85,8 @@ Prefer `Benzene.Resilience`'s `.UseRetry(...)` when you want retry only and no e
 `test/Benzene.Core.Test/Resilience/PollyResilienceMiddlewareTest.cs`: passing `next` runs once;
 throw-then-succeed retries; an always-throwing `next` propagates the real exception; a failure
 *result* + `isFailure` retries; retries-exhausted swallows the sentinel and leaves the failure result
-on the context; without `isFailure` a failure result does not retry.
+on the context; without `isFailure` a failure result does not retry. Cancellation (#237): a Polly
+timeout strategy actually throws `TimeoutRejectedException` when `next` observes the ambient
+accessor's token; a `next` that ignores the token runs to completion with no exception (the documented
+caveat); the accessor is restored after each attempt; an outer ambient token's cancellation is not
+lost when linked with Polly's own per-attempt token; construction without an accessor still works.
