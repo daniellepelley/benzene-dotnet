@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using BenzeneHealthCheckStatus = Benzene.HealthChecks.Core.HealthCheckStatus;
 using IBenzeneHealthCheck = Benzene.HealthChecks.Core.IHealthCheck;
+using IBenzeneHealthCheckResult = Benzene.HealthChecks.Core.IHealthCheckResult;
 
 namespace Benzene.Grpc.AspNet;
 
@@ -77,22 +78,48 @@ public class BenzeneHealthCheckBridge : IHealthCheck
         // the reported data instead of the second silently clobbering the first (round-10 #110).
         var namer = new DuplicateTypeSuffixer();
         var data = new Dictionary<string, object>();
-        foreach (var result in results)
+        var effectiveStatuses = new string[results.Length];
+        for (var i = 0; i < results.Length; i++)
         {
-            data[namer.GetName(result.Type)] = result.Status;
+            // Applies the same non-critical downgrade Benzene.HealthChecks.HealthCheckProcessor.RunTimedAsync
+            // does (#281), so the reported per-check status (and the aggregate decision below) agrees with
+            // what the HTTP/message-handler health-check path would report for the identical check/state.
+            var status = ApplyNonCriticalDowngrade(results[i], checks[i]);
+            effectiveStatuses[i] = status;
+            data[namer.GetName(results[i].Type)] = status;
         }
 
-        if (results.Any(x => x.Status == BenzeneHealthCheckStatus.Failed))
+        if (effectiveStatuses.Any(x => x == BenzeneHealthCheckStatus.Failed))
         {
             return HealthCheckResult.Unhealthy("One or more Benzene health checks failed.", data: data);
         }
 
-        if (results.Any(x => x.Status == BenzeneHealthCheckStatus.Warning))
+        if (effectiveStatuses.Any(x => x == BenzeneHealthCheckStatus.Warning))
         {
             return HealthCheckResult.Degraded("One or more Benzene health checks reported a warning.", data: data);
         }
 
         return HealthCheckResult.Healthy("All Benzene health checks passed.", data: data);
+    }
+
+    /// <summary>
+    /// Duplicates (does not share - see this class's own <see cref="DuplicateTypeSuffixer"/> for the same
+    /// precedent) <c>Benzene.HealthChecks.HealthCheckProcessor.RunTimedAsync</c>'s non-critical downgrade
+    /// rule: a <see cref="BenzeneHealthCheckStatus.Failed"/> result from a check whose
+    /// <see cref="IBenzeneHealthCheck.IsNonCritical"/> is <c>true</c> is reported as
+    /// <see cref="BenzeneHealthCheckStatus.Warning"/> instead, so it degrades this probe rather than
+    /// flipping it unhealthy - <em>unless</em> the failure is <see cref="IBenzeneHealthCheckResult.IsPersistent"/>,
+    /// which escapes the downgrade and stays <see cref="BenzeneHealthCheckStatus.Failed"/> (#281: before this,
+    /// the bridge read <see cref="IBenzeneHealthCheckResult.Status"/> unconditionally, so the same
+    /// non-critical/non-persistent failing check reported "serving" over HTTP and <c>NOT_SERVING</c> over
+    /// grpc.health.v1 - including for the auto-wired <c>DependencyHealthCheck</c> category, which is always
+    /// non-critical).
+    /// </summary>
+    private static string ApplyNonCriticalDowngrade(IBenzeneHealthCheckResult result, IBenzeneHealthCheck healthCheck)
+    {
+        return result.Status == BenzeneHealthCheckStatus.Failed && healthCheck.IsNonCritical && !result.IsPersistent
+            ? BenzeneHealthCheckStatus.Warning
+            : result.Status;
     }
 
     /// <summary>

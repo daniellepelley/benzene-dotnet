@@ -3360,6 +3360,74 @@ Verified: `dotnet test test/Benzene.Mesh.Test -c Release --filter "FullyQualifie
   rethrowing, so its observable fix is "the call actually completes near the deadline" rather than a
   propagated `TimeoutException` - documented inline on that test.
 
+## Round 17, WP-G: gRPC streaming + health-bridge parity (2026-08-30)
+
+- **[RESOLVED] `#280` A server-streaming/duplex handler exception thrown mid-stream bypassed every
+  layer of Benzene's error classification and left a stale `benzene-status: ok` trailer on the
+  failed call.** `GrpcMethodHandler.ServerStreamingAsync`/`DuplexStreamingAsync` ran
+  `RunPipelineAsync` (which had already written the success `benzene-status` trailer and returned
+  OK, since nothing had thrown yet) and only then handed the still-unconsumed
+  `IAsyncEnumerable<TResponse>` to `GrpcStreamAdapter.WriteAll`, which had no try/catch of its own -
+  so a handler that threw partway through producing items propagated unclassified, past
+  `DefaultGrpcStatusCodeMapper`/`AddRichErrorDetails`, straight out to grpc-dotnet's own generic
+  `RpcException(Unknown, "Exception was thrown by handler.")`, with the earlier-written
+  `benzene-status: ok` trailer still attached - actively contradicting the outcome. Fixed for the
+  two streaming shapes only (unary/client-streaming untouched): `RunPipelineAsync` now takes a
+  `deferSuccessTrailer` flag - on a successful pipeline result it skips writing the `benzene-status`
+  trailer immediately, leaving that to a new `GrpcMethodHandler.WriteStreamAsync`, which drains the
+  stream and only then writes the trailer (gRPC trailers are sent once, at call end, so this is
+  safe). A mid-drain exception is classified the same way
+  `Benzene.Core.MessageHandlers.MessageHandler.HandleAsync` classifies a unary handler's exception
+  (`ArgumentException` → ValidationError, `TimeoutException` → Timeout, a genuine
+  `OperationCanceledException` → the same Cancelled/DeadlineExceeded translation
+  `RunPipelineAsync` already used, anything else → ServiceUnavailable), then run through
+  `DefaultGrpcStatusCodeMapper` + `AddRichErrorDetails` + a truthful failure `benzene-status`
+  trailer before the classified `RpcException` is thrown. A pipeline-level failure decided before
+  any stream item is produced (e.g. request validation) is unaffected - it still writes its trailer
+  and throws immediately, exactly as before. Files: `src/Benzene.Grpc/GrpcMethodHandler.cs`.
+  Regression tests (red confirmed against the pre-fix code, now green):
+  `test/Benzene.Grpc.Test/GrpcMethodHandlerStreamingTest.cs`
+  (`ServerStreamingAsync_WhenHandlerThrowsMidStream_ClassifiesTheExceptionAndWritesAFailureTrailer`,
+  `DuplexStreamingAsync_WhenHandlerThrowsMidStream_ClassifiesTheExceptionAndWritesAFailureTrailer`),
+  using two new throwing test handlers
+  (`test/Benzene.Grpc.Test/Handlers/{SubscribeThrowingMidStreamMessageHandler,ChatThrowingMidStreamMessageHandler}.cs`).
+  All pre-existing `GrpcMethodHandlerStreamingTest`/`GrpcStreamingHostingTest` happy-path and
+  no-handler/cancellation tests stay green unchanged.
+- **[RESOLVED] `#281` `BenzeneHealthCheckBridge` ignored `IHealthCheck.IsNonCritical`, while
+  `HealthCheckProcessor` honours it - the same check/state reported "serving" over HTTP and
+  `NOT_SERVING` over grpc.health.v1.** `HealthCheckProcessor.RunTimedAsync` downgrades a
+  `Failed` result to `Warning` when the check is non-critical and the failure isn't persistent
+  (`result.Status == Failed && healthCheck.IsNonCritical && !result.IsPersistent`), so a
+  non-critical dependency being down degrades the instance rather than taking it out of service.
+  `BenzeneHealthCheckBridge.CheckHealthAsync` - a second, independent aggregation path over the same
+  `IHealthCheck` contract, deliberately without a `Benzene.HealthChecks` project reference - read
+  `result.Status` unconditionally, so a non-critical/non-persistent failing check (including the
+  always-non-critical `DependencyHealthCheck` category) flipped the gRPC health bridge to
+  `Unhealthy` even though the HTTP/message-handler path correctly reported it as merely degraded.
+  Fixed by duplicating `RunTimedAsync`'s exact downgrade rule locally in the bridge (the same
+  "no direct reference, so mirror the logic" precedent this class already follows for
+  `DuplicateTypeSuffixer`/`HealthCheckNamer`), applied per-check before the aggregate Unhealthy/
+  Degraded/Healthy decision - and the downgraded status is also what's reported in the bridge's
+  per-check `data` dictionary, matching what `HealthCheckProcessor` itself would report for the
+  identical check/state. Files: `src/Benzene.Grpc.AspNet/BenzeneHealthCheckBridge.cs`. Regression
+  tests (red confirmed against the pre-fix code, now green):
+  `test/Benzene.Grpc.Test/BenzeneHealthCheckBridgeTest.cs`
+  (`CheckHealthAsync_NonCriticalFailingCheck_DowngradesToDegradedNotUnhealthy`,
+  `CheckHealthAsync_CriticalFailingCheck_StillReportsUnhealthy`,
+  `CheckHealthAsync_NonCriticalPersistentFailingCheck_StillReportsUnhealthy`). All pre-existing
+  `BenzeneHealthCheckBridgeTest` cases (no-checks, all-pass, any-fails, warns, `IncludeTypes`
+  wiring-time validation, duplicate-`Type` suffixing) stay green unchanged.
+- **Doc-only (no task number): `HealthCheckProcessor`'s deliberate "no ambient `CancellationToken`"
+  behaviour was documented only in a private `//` comment**, undiscoverable from
+  `IHealthCheckProcessor`'s public XML doc, the class doc, or `docs/health-checks.md`. Added a
+  `<remarks>` block on `IHealthCheckProcessor.PerformHealthChecksAsync`
+  (`src/Benzene.HealthChecks.Core/IHealthCheckProcessor.cs`) and a one-line note in
+  `docs/health-checks.md`'s `TimeOutHealthCheck`/`ExceptionHandlingHealthCheck` section, both
+  stating: `PerformHealthChecksAsync` takes no ambient `CancellationToken` - the only cancellation
+  signal reaching a check is its own timeout (`TimeOutHealthCheck`, the check's `Timeout` override
+  or the processor's default), so a slow custom check won't observe a caller disconnect or a host
+  shutdown/drain signal early and always runs to its own timeout, even during a graceful drain.
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.
