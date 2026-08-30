@@ -68,6 +68,26 @@ arrays → Avro arrays. Reference-typed and `Nullable<T>` members become a `["nu
 round-trip. For full Avro logical types (native `decimal`, `timestamp-millis`, `uuid`) register an
 explicit schema.
 
+## Maps and multi-branch unions (explicit schemas only)
+Reflection never emits an Avro `map` (there's no CLR shape it infers one from) or a union with more
+than one non-null branch (a nullable member always emits the 2-branch `["null", X]` shape) — both are
+reachable only via an **explicit** registered schema (`RegisterSchema<T>`), and `AvroDatumConverter`
+supports both fully:
+- **`map`** — values are converted recursively against the map's value schema, so a map of
+  records/arrays/maps round-trips, not just primitives. Avro map keys are **always strings** per spec;
+  a CLR dictionary target keyed by anything other than `string` (`Dictionary<int,string>`, etc.)
+  throws `NotSupportedException` rather than silently coercing the key. Supported CLR targets:
+  `Dictionary<string,V>`, `IDictionary<string,V>`, `IReadOnlyDictionary<string,V>`.
+- **Unions with 3+ non-null branches** (e.g. `["null","string","long","boolean"]`) — the branch is
+  resolved by the value's actual runtime CLR type on write and by the datum's actual runtime type (as
+  already resolved by the underlying Avro reader) on read, not always the first non-null branch.
+  Ambiguous numeric widths (e.g. an `int` value against a union offering only `long`) prefer the
+  exact-width branch when present, else the next-wider one. Two or more branches sharing the same
+  underlying CLR shape (e.g. two different record branches with identical property sets) can't be
+  disambiguated this way and fall back to the first declared — a documented approximation, not a
+  crash. The common 2-branch `["null", X]` shape is unaffected either way (there's only ever one
+  non-null candidate to resolve to).
+
 ## Dependencies
 - **Apache.Avro** — the official Apache Avro .NET library (binary encode/decode + schema model).
 - **Benzene.Abstractions.MessageHandlers** / **Benzene.Core.MessageHandlers** — `IMediaFormat`,

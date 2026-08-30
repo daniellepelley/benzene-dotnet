@@ -3681,6 +3681,63 @@ Scoped verification: `dotnet test test/Benzene.Core.Test -c Release --filter
   `PubSubMessageProcessingException` thrown with the message's id). Every pre-existing
   `PubSubFailureHandlingTest` case (explicit failure, explicit success, both-true containment, the
   NRE-masking regression) stays green unmodified.
+## Round 17, WP-F: Avro map + multi-branch union support (2026-08-30)
+
+- **[RESOLVED] `#278` `AvroDatumConverter` had no `Schema.Type.Map` switch arm at all — any Avro
+  `map` field crashed on serialize (complex values) or deserialize (primitive values).** Reachable
+  through the package's own advertised "explicit/registered schema" use case
+  (`AvroOptions.RegisterSchema<T>`), not exotic misuse: a `map` field fell through to the primitive
+  `default` branch on both `ToDatum` and `FromDatum`, so a map's values never got recursively
+  converted to/from the datum shape `GenericDatumWriter`/`GenericDatumReader` expect. The simplest
+  case (`Dictionary<string,string>`) round-tripped through `Serialize` but threw
+  `InvalidCastException` on `Deserialize` (`Convert.ChangeType` can't target a `Dictionary<,>`); a map
+  of arrays-of-records threw `AvroException` on `Serialize` itself (`GenericDatumWriter` handed a raw
+  `List<InnerRecord>` instead of a converted `object[]`). Fixed by adding `Schema.Type.Map` arms
+  mirroring the existing `Array` handling: `ToMap` recursively converts each value against the map's
+  value schema into a plain `Dictionary<string, object?>`; `FromMap` builds a
+  `Dictionary<string, TValue>` sized from the target property's declared value type (supports
+  `Dictionary<string,V>`, `IDictionary<string,V>`, `IReadOnlyDictionary<string,V>`), converting each
+  value recursively. Avro map keys are always strings per spec — a non-string-keyed CLR dictionary
+  target (checked via the value's/target type's own `IDictionary<TKey,TValue>` generic argument, not
+  just per-entry, so it's caught even for an empty map) throws `NotSupportedException` naming the
+  constraint, rather than silently coercing the key. `src/Benzene.Avro/AvroDatumConverter.cs`.
+  Regression tests: `test/Benzene.Core.Test/Plugins/Avro/AvroMapTest.cs`
+  (`RoundTrips_PrimitiveValuedMap`, `RoundTrips_RecordWithinArrayWithinMap`,
+  `Serialize_NonStringKeyedDictionaryTarget_ThrowsNotSupportedException`,
+  `Deserialize_NonStringKeyedDictionaryTarget_ThrowsNotSupportedException`) — all four confirmed red
+  against the pre-fix code, green after.
+- **[RESOLVED] `#279` `AvroDatumConverter.NonNullBranch` always picked the FIRST non-null branch of
+  every union, on both serialize and deserialize — correct only for the common 2-branch
+  `["null", X]` "optional field" shape, and silently type/value-corrupting for a union with 3+
+  non-null branches.** A hand-authored `["null","string","long","boolean"]` union (reachable via
+  `RegisterSchema<T>`, the "polymorphic value field" shape) always serialized through the `string`
+  branch regardless of the value's actual type: a `bool` value round-tripped back as the *string*
+  `"True"`, a `long` as the string `"42"` — not merely mis-formatted, the CLR type of the result
+  changed, and for some type/value combinations (e.g. `Convert.ToBoolean(42L)`) the original value was
+  lost outright rather than just its type. Fixed by resolving the branch by actual runtime type in
+  both directions instead of always taking the first non-null branch: `ResolveWriteBranch` (serialize)
+  matches the CLR value's actual type against each candidate branch's Avro tag (exact-width match
+  first — e.g. `bool`→Boolean, `long`→Long — then a numeric-widening fallback — e.g. `int` against a
+  union offering only `long` — then, for anything still unmatched such as multiple record branches of
+  similar shape, the first declared branch, same as the old always-first behaviour); `ResolveReadBranch`
+  (deserialize) matches the *datum's* actual runtime type — `GenericDatumReader` already resolved the
+  wire's real branch by the time the datum reaches this converter (`bool`/`long`/`string`/
+  `GenericRecord`/etc.), so this recovers that information from the datum's CLR shape instead of
+  discarding it. Both branch-resolution helpers see exactly one non-null candidate for the common
+  2-branch shape, so that path is unconditionally unchanged (byte-identical, not just tested-to-look
+  unchanged). `src/Benzene.Avro/AvroDatumConverter.cs`. Regression tests:
+  `test/Benzene.Core.Test/Plugins/Avro/AvroMultiBranchUnionTest.cs`
+  (`RoundTrips_BooleanValue_ThroughAThreePlusBranchUnion`,
+  `RoundTrips_LongValue_ThroughAThreePlusBranchUnion`,
+  `RoundTrips_StringValue_ThroughAThreePlusBranchUnion` — all three confirmed red against the pre-fix
+  code, green after; plus the required 2-branch-nullable-union regression pinning the unchanged
+  behaviour: `TwoBranchNullableUnion_ReferenceTypeValuePresent_StillRoundTrips`,
+  `TwoBranchNullableUnion_ReferenceTypeValueNull_StillRoundTrips`,
+  `TwoBranchNullableUnion_ValueTypePresent_StillRoundTrips`,
+  `TwoBranchNullableUnion_ValueTypeNull_StillRoundTrips`). All pre-existing `Benzene.Avro` tests
+  (`AvroSerializerTest`, `AvroSchemaMismatchTest`, `AvroDepthGuardTest`, `AvroSchemaResolverTest`,
+  `AvroRequestResponseRoundTripTest`, `AvroMediaFormatTest`, including the #56/#57 regression tests)
+  verified unchanged and green.
 
 ## Open — maintainer decisions (the real remaining backlog)
 
