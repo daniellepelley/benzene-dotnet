@@ -1,6 +1,7 @@
 ﻿using Benzene.Clients.Aws.Lambda;
 using Benzene.CodeGen.Cli.Core.Commands.Build;
 using Microsoft.Extensions.Logging.Abstractions;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace Benzene.CodeGen.Cli.Core.Commands.HealthCheck;
@@ -81,7 +82,20 @@ public class HealthCheckCommand : CommandBase<HealthCheckPayload>
 
     private static bool IsHealthy(string json)
     {
-        var jObject = JObject.Parse(json);
+        JObject jObject;
+        try
+        {
+            jObject = JObject.Parse(json);
+        }
+        catch (JsonException)
+        {
+            // Non-JSON body (empty, plain text, an HTML error page, etc.) isn't a recognized
+            // health-check response shape at all, so it can't carry an explicit `isHealthy:
+            // false` - treat it the same as the "absent isHealthy" case below rather than
+            // failing loud on a shape this tool doesn't recognize.
+            return true;
+        }
+
         var isHealthyToken = jObject["isHealthy"];
 
         // Absent/unparseable `isHealthy`: don't fail-loud on a response shape this tool doesn't
