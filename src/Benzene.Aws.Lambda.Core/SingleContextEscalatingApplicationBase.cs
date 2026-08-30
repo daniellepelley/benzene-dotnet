@@ -46,8 +46,14 @@ public abstract class SingleContextEscalatingApplicationBase<TSelf, TContext>
     /// </param>
     /// <param name="raiseOnFailureStatus">
     /// Whether a context whose <see cref="IHasMessageResult.MessageResult"/> comes back unsuccessful
-    /// (and didn't itself throw) is escalated into a thrown exception via
-    /// <paramref name="exceptionFactory"/>.
+    /// <em>or unset</em> (and didn't itself throw) is escalated into a thrown exception via
+    /// <paramref name="exceptionFactory"/>. A <c>null</c> result - the pipeline completed without any
+    /// middleware setting an outcome, e.g. a non-standard pipeline that omits <c>MessageRouter</c> or
+    /// short-circuits before it runs - is treated the same as an explicit failure, not a silent
+    /// success: "err toward redelivery, never toward loss", the same convention
+    /// <c>Benzene.Aws.Lambda.Sqs</c>/<c>Benzene.Aws.Lambda.DynamoDb</c> state explicitly. In normal
+    /// wiring <c>MessageRouter</c> always sets a non-null result, so this only bites a pipeline that
+    /// doesn't use it.
     /// </param>
     /// <param name="idSelector">Extracts the transport's own correlation id from a context (e.g. an SNS <c>MessageId</c>).</param>
     /// <param name="exceptionFactory">Builds the transport's own <c>*MessageProcessingException</c> from that id.</param>
@@ -88,7 +94,11 @@ public abstract class SingleContextEscalatingApplicationBase<TSelf, TContext>
                 await _pipeline.HandleAsync(context, scope);
             }
 
-            if (_raiseOnFailureStatus && context.MessageResult?.IsSuccessful == false)
+            // A null result (the pipeline completed without any middleware setting an outcome, e.g. an
+            // unroutable message whose topic matched no handler) is treated the same as an explicit
+            // failure, not a silent success - "err toward redelivery, never toward loss", matching
+            // SQS/DynamoDb's own `!= true` convention. Only an explicit success is exempt from escalation.
+            if (_raiseOnFailureStatus && context.MessageResult?.IsSuccessful != true)
             {
                 // _idSelector runs here, inside the try, deliberately - not unconditionally before it.
                 // Some transports' selectors (SNS, EventBridge) dereference nested event properties with
@@ -101,11 +111,26 @@ public abstract class SingleContextEscalatingApplicationBase<TSelf, TContext>
         }
         catch (Exception ex) when (_catchExceptions)
         {
-            using var loggingScope = serviceResolverFactory.CreateScope();
-            loggingScope.GetService<ILogger<TSelf>>()
-                .LogError(ex, BenzeneFailure.IsInfrastructure(ex)
-                    ? BenzeneFailure.InfrastructureLogPrefix + " " + _failureLogMessage + " — this service is mis-wired; the message is not at fault"
-                    : _failureLogMessage, SafeId(context));
+            var isInfrastructure = BenzeneFailure.IsInfrastructure(ex);
+
+            using (var loggingScope = serviceResolverFactory.CreateScope())
+            {
+                loggingScope.GetService<ILogger<TSelf>>()
+                    .LogError(ex, isInfrastructure
+                        ? BenzeneFailure.InfrastructureLogPrefix + " " + _failureLogMessage + " — this service is mis-wired; the message is not at fault. Infrastructure failure — rethrowing despite CatchExceptions."
+                        : _failureLogMessage, SafeId(context));
+            }
+
+            // An infrastructure failure is not this message's fault and is not retryable per message.
+            // Unlike a business failure (a handler exception, or the failure result escalated above),
+            // this transport has no partial-failure channel to report it on - swallowing it here would
+            // mean the whole invocation reports success while every message fails the same way, forever.
+            // So it escapes CatchExceptions entirely and fails the invocation, exactly as SqsApplication's
+            // own unconditional infra rethrow does for the same reason.
+            if (isInfrastructure)
+            {
+                throw;
+            }
         }
     }
 

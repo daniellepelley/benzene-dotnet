@@ -28,10 +28,12 @@ public static class DependencyInjectionExtensions
     public static IBenzeneServiceContainer AddDynamoDb(this IBenzeneServiceContainer services)
     {
         services.TryAddScoped<JsonSerializer>();
+        services.TryAddScoped<PresetTopicHolder>();
 
         // TryAdd: a user registration made earlier (ConfigureServices runs before Configure, where
         // UseDynamoDb calls this) wins over these per-context defaults, matching Benzene.Aws.Lambda.Sns.
-        services.TryAddScoped<IMessageTopicGetter<DynamoDbRecordContext>, DynamoDbMessageTopicGetter>();
+        services.TryAddScoped<IMessageTopicGetter<DynamoDbRecordContext>>(resolver =>
+            new PresetTopicMessageTopicGetter<DynamoDbRecordContext>(new DynamoDbMessageTopicGetter(), resolver.GetService<PresetTopicHolder>()));
         services.TryAddHeaderMessageVersionGetter<DynamoDbRecordContext>();
         services.TryAddScoped<IMessageHeadersGetter<DynamoDbRecordContext>, DynamoDbMessageHeadersGetter>();
         services.TryAddScoped<IMessageBodyGetter<DynamoDbRecordContext>, DynamoDbMessageBodyGetter>();

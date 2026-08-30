@@ -2069,6 +2069,69 @@ top-of-file summary blockquote).
   scheme specifically) to record this explicitly as a `[DECISION]` in place, rather than leaving it
   silently misleading. Left for a future round to decide whether/how to carry the scheme onto the wire.
 
+## Resolved in round 15, WP-B (AWS trigger family gaps)
+
+Findings from the round-15 review pass (task board #227–#229, `work/bug-fix-plan-round15-2026-08.md`
+WP-B; rationale and rejected alternatives in `work/bug-fix-designs-round15-2026-08.md` §2). All three
+fixed in `src/Benzene.Aws.Lambda.S3`, `src/Benzene.Aws.Lambda.DynamoDb`,
+`src/Benzene.Aws.Lambda.Kafka`, `src/Benzene.Aws.Lambda.Core`, and
+`src/Benzene.Core.MessageHandlers/Extensions.cs`.
+
+- **[RESOLVED] #227 — `.UsePresetTopic()`/`.UseTopicFrom()` crashed forever (a
+  `BenzeneResolutionException` on every single message) on S3, DynamoDB Streams, and Kafka pipelines,
+  because those packages' `AddS3`/`AddDynamoDb`/`AddKafka` DI extensions never registered
+  `PresetTopicHolder` or wrapped their topic getter in `PresetTopicMessageTopicGetter<TContext>`, unlike
+  Sns/Sqs/EventBridge.** Fixed by registering `PresetTopicHolder` and wrapping
+  `S3MessageTopicGetter`/`DynamoDbMessageTopicGetter`/`KafkaMessageTopicGetter` in
+  `PresetTopicMessageTopicGetter<TContext>`, copying the shape from
+  `Benzene.Aws.Lambda.Sns/DependencyInjectionExtensions.cs`. `UseTopicFrom`'s doc comment
+  (`Benzene.Core.MessageHandlers/Extensions.cs`) now lists all three among the supported transports.
+  **Scope correction from the plan: Kinesis (the plan's fourth named transport) is not fixed and will
+  not be** — investigation found it structurally different from the other three, not merely missing the
+  same wiring. `Benzene.Aws.Lambda.Kinesis` has no `IMessageTopicGetter<TContext>`, no `MessageRouter`,
+  and no `.UseMessageHandlers()` call site at all: it fans a batch *in* to one
+  `StreamContext<KinesisEventRecord>` (its own `CLAUDE.md`: "unlike the SQS/SNS/S3 adapters there are no
+  topic/body/header getters to register"), so there is no topic getter to wrap and no
+  `PresetTopicMiddleware<TContext>` for a preset to feed. Forcing in an unused topic-getter registration
+  would be dead code implying a routing capability the package cannot exercise. `UseTopicFrom`'s doc
+  comment and the capability matrix's "Message routing" row both now say so explicitly, so this isn't
+  silently re-litigated as a missed spot in a future pass. New tests:
+  `S3MessagePipelineTest.Send_UnknownEventName_WithPresetTopic_RoutesToPresetTopic`,
+  `DynamoDbMessagePipelineTest.Send_UnknownTopic_WithPresetTopic_RoutesToPresetTopic`,
+  `KafkaMessagePipelineTest.Send_UnknownTopic_WithPresetTopic_RoutesToPresetTopic` — each builds an event
+  whose native topic/event-name matches no handler and asserts `.UsePresetTopic()` still routes it
+  successfully (red before the DI fix: `BenzeneResolutionException` resolving `PresetTopicHolder`).
+- **[RESOLVED] #228 — SNS/S3/EventBridge's shared `SingleContextEscalatingApplicationBase.ProcessAsync`
+  swallowed infrastructure/DI-wiring failures (e.g. `BenzeneResolutionException`) under
+  `CatchExceptions=true`, reporting the invocation healthy while every message failed the same way,
+  forever.** Fixed by adding an unconditional rethrow carve-out for `BenzeneFailure.IsInfrastructure(ex)`
+  inside the `catch (Exception ex) when (_catchExceptions)` block, mirroring `SqsApplication.cs`'s
+  existing carve-out and its stated reasoning (an infra failure isn't the message's fault, isn't
+  retryable per-message, and these transports have no partial-failure channel to report it on one record
+  at a time). The existing log line is kept and extended with "Infrastructure failure — rethrowing
+  despite CatchExceptions" wording so operators see why the invocation failed instead of being logged
+  and swallowed. New tests (one per concrete application, since all three share the base class):
+  `SnsFailureHandlingTest`/`S3FailureHandlingTest`/`EventBridgeFailureHandlingTest`
+  `.HandleAsync_CatchExceptionsTrue_InfrastructureFailure_RethrowsDespiteCatchExceptions` — a pipeline
+  mock throwing `BenzeneResolutionException` with `CatchExceptions=true` now rethrows instead of
+  completing silently (red before the fix).
+- **[RESOLVED] #229 (minor) — SNS/S3/EventBridge treated a null/unset `MessageResult` (the pipeline
+  completed without any middleware setting an outcome) as an accepted message, while SQS/DynamoDb
+  explicitly treat the same case as a failure ("err toward redelivery, never toward loss").** Fixed by
+  changing `SingleContextEscalatingApplicationBase.ProcessAsync`'s escalation check from
+  `context.MessageResult?.IsSuccessful == false` to `!= true`, aligning the shared base class on
+  SQS/DynamoDb's convention; only an explicit success is now exempt from escalation. The null-result
+  semantics are now documented on the base class's `raiseOnFailureStatus` constructor-parameter doc
+  comment. Impact is deliberately narrow: normal wiring's `MessageRouter` always sets a non-null result,
+  so only a non-standard pipeline that omits it (or short-circuits before it runs) changes behavior — and
+  it changes toward failure-visibility, matching `RaiseOnFailureStatus`'s safe-by-default intent. Kafka's
+  own null-skip choice (separately documented and justified in `Benzene.Aws.Lambda.Kafka/CLAUDE.md`) was
+  deliberately left untouched, per the plan's ruling. New tests: `SnsFailureHandlingTest`/
+  `S3FailureHandlingTest`/`EventBridgeFailureHandlingTest`
+  `.HandleAsync_DefaultOptions_HandlerNeverSetsMessageResult_Throws*MessageProcessingException` — a
+  pipeline mock that never sets `MessageResult` now escalates (throws, with default
+  `RaiseOnFailureStatus=true`) instead of completing silently (red before the fix).
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.

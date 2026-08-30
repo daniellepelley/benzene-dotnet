@@ -77,4 +77,37 @@ public class DynamoDbMessagePipelineTest
         var failure = Assert.Single(batchResponse.BatchItemFailures);
         Assert.Equal("1", failure.ItemIdentifier);
     }
+
+    [Fact]
+    public async Task Send_UnknownTopic_WithPresetTopic_RoutesToPresetTopic()
+    {
+        // #227: .UsePresetTopic() previously threw a BenzeneResolutionException on every DynamoDB
+        // record because AddDynamoDb() never registered PresetTopicHolder or wrapped
+        // DynamoDbMessageTopicGetter in PresetTopicMessageTopicGetter<DynamoDbRecordContext>.
+        var services = ServiceResolverMother.CreateServiceCollection();
+        services
+            .AddTransient<ILogger<MessageRouter<DynamoDbRecordContext>>>(_ => NullLogger<MessageRouter<DynamoDbRecordContext>>.Instance)
+            .AddTransient<ILogger>(_ => NullLogger.Instance)
+            .UsingBenzene(x => x.AddDynamoDb());
+
+        bool? isSuccessful = null;
+        var pipeline = new MiddlewarePipelineBuilder<DynamoDbRecordContext>(new MicrosoftBenzeneServiceContainer(services));
+        pipeline
+            .UsePresetTopic(Defaults.Topic)
+            .OnResponse("Check Response", context => isSuccessful = context.MessageResult?.IsSuccessful)
+            .UseMessageHandlers();
+
+        var application = new DynamoDbApplication(pipeline.Build());
+        var factory = new MicrosoftServiceResolverFactory(services);
+
+        // No handler is registered for "example-orders:UNKNOWN" - the preset supplies the route.
+        var request = MessageBuilder
+            .Create("example-orders:UNKNOWN", Defaults.MessageAsObject)
+            .AsDynamoDb();
+
+        var batchResponse = await application.HandleAsync(request, factory);
+
+        Assert.True(isSuccessful);
+        Assert.Empty(batchResponse.BatchItemFailures);
+    }
 }

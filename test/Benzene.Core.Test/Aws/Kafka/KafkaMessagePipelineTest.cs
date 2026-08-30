@@ -127,6 +127,41 @@ public class KafkaMessagePipelineTest
     }
 
     [Fact]
+    public async Task Send_UnknownTopic_WithPresetTopic_RoutesToPresetTopic()
+    {
+        // #227: .UsePresetTopic() previously threw a BenzeneResolutionException on every Kafka
+        // record because AddKafka() never registered PresetTopicHolder or wrapped
+        // KafkaMessageTopicGetter in PresetTopicMessageTopicGetter<KafkaContext>.
+        var services = ServiceResolverMother.CreateServiceCollection();
+        services
+            .AddTransient<ILogger<MessageRouter<KafkaContext>>>(_ =>
+                NullLogger<MessageRouter<KafkaContext>>.Instance)
+            .AddTransient<ILogger>(_ => NullLogger.Instance)
+            .UsingBenzene(x => x
+                .AddKafka());
+
+        var pipeline = new MiddlewarePipelineBuilder<KafkaContext>(new MicrosoftBenzeneServiceContainer(services));
+
+        IBenzeneResult messageResult = null;
+
+        pipeline
+                .UsePresetTopic(Defaults.Topic)
+                .OnResponse("Check Response", context =>
+                {
+                    messageResult = context.MessageResult;
+                }).UseMessageHandlers();
+
+        var aws = new KafkaApplication(pipeline.Build());
+
+        // No handler is registered for this Kafka topic - the preset supplies the route.
+        var request = MessageBuilder.Create("no-such-kafka-topic", Defaults.MessageAsObject).AsAwsKafkaEvent();
+
+        var serviceResolverFactory = new MicrosoftServiceResolverFactory(services);
+        await aws.HandleAsync(request, serviceResolverFactory);
+        Assert.True(messageResult.IsSuccessful);
+    }
+
+    [Fact]
     public async Task Send_FromStream()
     {
         KafkaContext kafkaContext = null;

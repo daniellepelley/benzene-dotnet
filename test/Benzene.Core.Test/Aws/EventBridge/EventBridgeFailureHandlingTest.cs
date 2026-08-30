@@ -5,6 +5,7 @@ using Benzene.Abstractions.DI;
 using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Abstractions.Middleware;
 using Benzene.Aws.Lambda.EventBridge;
+using Benzene.Core.Exceptions;
 using Benzene.Core.MessageHandlers;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -75,5 +76,37 @@ public class EventBridgeFailureHandlingTest
         // Safe-by-default: a returned failure result is escalated so AWS retries it, not silently accepted.
         await Assert.ThrowsAsync<EventBridgeMessageProcessingException>(
             () => application.HandleAsync(CreateEvent(), CreateResolverFactory().Object));
+    }
+
+    [Fact]
+    public async Task HandleAsync_CatchExceptionsTrue_InfrastructureFailure_RethrowsDespiteCatchExceptions()
+    {
+        // #228: an infrastructure/DI-wiring failure (BenzeneResolutionException) fails the whole
+        // invocation even when CatchExceptions opts into swallowing ordinary handler exceptions -
+        // EventBridge has no partial-failure channel, so swallowing this means
+        // 100%-loss-reported-as-success.
+        var mockPipeline = new Mock<IMiddlewarePipeline<EventBridgeContext>>();
+        mockPipeline.Setup(x => x.HandleAsync(It.IsAny<EventBridgeContext>(), It.IsAny<IServiceResolver>()))
+            .ThrowsAsync(new BenzeneResolutionException("Unable to resolve type IExampleService"));
+
+        var application = new EventBridgeApplication(mockPipeline.Object, new EventBridgeOptions { CatchExceptions = true });
+
+        await Assert.ThrowsAsync<BenzeneResolutionException>(() => application.HandleAsync(CreateEvent(), CreateResolverFactory().Object));
+    }
+
+    [Fact]
+    public async Task HandleAsync_DefaultOptions_HandlerNeverSetsMessageResult_ThrowsEventBridgeMessageProcessingException()
+    {
+        // #229: a null/unset MessageResult is treated as a failure, not a silent success, aligning
+        // with SQS/DynamoDb's "err toward redelivery, never toward loss" convention.
+        var mockPipeline = new Mock<IMiddlewarePipeline<EventBridgeContext>>();
+        mockPipeline.Setup(x => x.HandleAsync(It.IsAny<EventBridgeContext>(), It.IsAny<IServiceResolver>()))
+            .Returns(Task.CompletedTask);
+
+        var application = new EventBridgeApplication(mockPipeline.Object);
+
+        var exception = await Assert.ThrowsAsync<EventBridgeMessageProcessingException>(
+            () => application.HandleAsync(CreateEvent("evt-3"), CreateResolverFactory().Object));
+        Assert.Equal("evt-3", exception.EventId);
     }
 }

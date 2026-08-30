@@ -22,11 +22,15 @@ public class S3TestHelpersTest
         var app = new MiddlewarePipelineBuilder<AwsEventStreamContext>(new MicrosoftBenzeneServiceContainer(services));
 
         app.UseS3(message => message
-            .Use(null, (context, next) =>
-            {
-                capturedContext = context;
-                return next();
-            })
+                .Use(null, (context, next) =>
+                {
+                    capturedContext = context;
+                    return next();
+                }),
+            // This test is about the test-helper-built event reaching the pipeline, not message
+            // routing - the inline middleware never sets a MessageResult, so escalating on that
+            // (#229's null-result fix) would be unrelated noise here.
+            configure: options => options.RaiseOnFailureStatus = false
         );
 
         var s3Event = MessageBuilder.Create("ObjectCreated:Put", Defaults.MessageAsObject).AsS3(bucketName: "my-bucket", key: "my-key");

@@ -29,11 +29,15 @@ public class EventBridgeBenzeneInvocationExtensionsTest
         var services = new ServiceCollection();
         var app = new MiddlewarePipelineBuilder<AwsEventStreamContext>(new MicrosoftBenzeneServiceContainer(services));
         app.UseEventBridge(eventBridge => eventBridge
-            .Use(null, (resolver, _, next) =>
-            {
-                resolved = resolver.GetService<IBenzeneInvocation>();
-                return next();
-            })
+                .Use(null, (resolver, _, next) =>
+                {
+                    resolved = resolver.GetService<IBenzeneInvocation>();
+                    return next();
+                }),
+            // This test is about invocation-id/platform resolution, not message routing - the inline
+            // middleware never sets a MessageResult, so escalating on that (#229's null-result fix)
+            // would be unrelated noise here.
+            options => options.RaiseOnFailureStatus = false
         );
 
         var request = MessageBuilder.Create(Defaults.Topic, Defaults.MessageAsObject).AsEventBridge();
