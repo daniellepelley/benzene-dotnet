@@ -2069,6 +2069,62 @@ top-of-file summary blockquote).
   scheme specifically) to record this explicitly as a `[DECISION]` in place, rather than leaving it
   silently misleading. Left for a future round to decide whether/how to carry the scheme onto the wire.
 
+### Tracked findings round 12, WP-H — Mesh.Dispatch: cancellation, audit trail, limiter charging (#185–#187, done)
+Ruled in [`bug-fix-designs-round12-2026-08.md`](archive/bug-fix-designs-round12-2026-08.md) §1 (see
+`bug-fix-plan-rounds12-14-2026-08.md` for the WP-H task text). Files:
+`src/Benzene.Mesh.Dispatch/MeshDispatchMessageHandler.cs`,
+`src/Benzene.Mesh.Dispatch/MeshDispatchRateLimiter.cs` (no code change needed there — see #187).
+
+- **[RESOLVED] #185 — `MeshDispatchMessageHandler.HandleAsync` hardcoded `CancellationToken.None` into
+  the dispatch call**, so `UseTimeout(...)` wrapping `UseMeshDispatch()` gave zero real protection: the
+  real, side-effecting dispatch ran to completion regardless of the configured deadline. Fixed by
+  resolving the ambient token via an optional `ICancellationTokenAccessor` constructor parameter,
+  read at the point of use — the exact idiom `HttpBenzeneMessageClient` already uses
+  (`_cancellation?.CancellationToken ?? CancellationToken.None`). No new DI registration was needed:
+  `Benzene.Core.MessageHandlers`'s DI extensions already register a scoped `ICancellationTokenAccessor`,
+  and `MeshDispatchMessageHandler` is itself registered scoped, so the container resolves it
+  automatically. New test `MeshDispatchMessageHandlerTest.ResolvesCancellationTokenFromTheAccessor_AndPassesItToTheDispatcher`
+  asserts the exact token flows through to the dispatcher (not `CancellationToken.None`); the review's
+  own probe — `UseTimeout(...)` wrapping the handler with a slow mock dispatcher —
+  is `UseTimeout_AroundTheDispatchHandler_ActuallyBoundsTheRealDispatchCall`: pre-fix, the dispatch runs
+  the mock's full simulated delay regardless of a 50ms deadline; post-fix, it observes cancellation
+  well short of that (the assertion bound is deliberately generous — a fraction of the mock's
+  simulated work — so it is a mechanism check, not a scheduler-precision check).
+- **[RESOLVED] #186 — a thrown dispatch exception (target unreachable, DNS failure, malformed URL)
+  left zero audit trail**, unlike every other exit path in the handler, which calls `Audit(...)` first.
+  Ruling: audit-then-fail-as-result, never a silent raw throw. Fixed by wrapping the
+  `dispatcher.DispatchAsync(...)` call in try/catch; on exception, `Audit(...)` now takes an optional
+  `Exception?` parameter (added to the existing private method, same log-call shape every other exit
+  path uses — outcome/service/topic/caller-identity, now also carrying the exception when there is
+  one) recording outcome `"dispatch-failed"`, then the handler returns
+  `BenzeneResult.ServiceUnavailable<RawStringMessage>(ex.Message)` — the same status this codebase's
+  other outbound-call boundaries (`HttpBenzeneMessageClient`, `GrpcBenzeneMessageClient`) already use
+  for a transport-level send failure, not a new status. New test
+  `MeshDispatchMessageHandlerTest.DispatcherThrows_AuditsTheFailure_AndReturnsServiceUnavailable_InsteadOfThrowing`:
+  pre-fix, a throwing mock dispatcher's exception propagated raw out of `HandleAsync` with zero logger
+  invocations; post-fix, exactly one `LogInformation` call carrying the failure and a
+  `service-unavailable` result returned instead.
+- **[RESOLVED] #187 (minor) — `MeshDispatchRateLimiter` charged/created a per-target window for
+  arbitrary/unregistered service names before the registry validated the service exists**, leaking a
+  permanent dictionary entry per distinct garbage name (500 nonexistent names = 500 permanent entries),
+  never pruned from within `Benzene.Mesh.Dispatch` itself. Ruling: validate before charging. Fixed by
+  reordering `HandleAsync` so the registry existence check (`_registry.Services.FirstOrDefault(...)`)
+  now runs *before* `_limiter.TryAcquire(...)` — no change needed inside
+  `MeshDispatchRateLimiter` itself, since the fix is entirely about when the handler calls it. An
+  unregistered service name is now rejected (`not-found`) without the limiter ever creating an entry
+  for it, and a legitimately rate-limited *registered* target is unaffected (the limiter still runs,
+  just one step later). New test
+  `MeshDispatchMessageHandlerTest.UnregisteredServiceNames_AreRejected_WithoutEverChargingTheRateLimiterWindow`:
+  drives 500 distinct nonexistent service names through the handler (each asserted `not-found`, never
+  `rate-limited`), then reflects into the limiter's private `_windows` dictionary and asserts a count
+  of 0 — pre-fix this was 500.
+
+Full `test/Benzene.Mesh.Test` run after the fix: 560 passed, 0 failed. (One test,
+`JaegerTraceSourceTest.GetRecentFlowsAsync_QueriesServicesConcurrently_NotSequentially`, failed on a
+single run under an exceptionally loaded shared build host — a pre-existing, WP-H-unrelated
+concurrency-timing assertion — and passed cleanly on immediate re-run with no code changes; not a
+regression from this work package.)
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.
