@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Amazon.EventBridge;
 using Amazon.EventBridge.Model;
+using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Messages.BenzeneClient;
 using Benzene.Abstractions.Serialization;
 using Benzene.Clients;
@@ -30,6 +32,7 @@ public class EventBridgeBatchMessageClient : IBenzeneBatchMessageClient
     private readonly string _source;
     private readonly string? _eventBusName;
     private readonly ISerializer _serializer;
+    private readonly ICancellationTokenAccessor? _cancellation;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="EventBridgeBatchMessageClient"/> class.
@@ -37,12 +40,18 @@ public class EventBridgeBatchMessageClient : IBenzeneBatchMessageClient
     /// <param name="source">The event source to publish under.</param>
     /// <param name="amazonEventBridge">The EventBridge client to put events with.</param>
     /// <param name="eventBusName">The target event bus name, or null for the default bus.</param>
-    public EventBridgeBatchMessageClient(string source, IAmazonEventBridge amazonEventBridge, string? eventBusName = null)
+    /// <param name="cancellation">
+    /// Supplies the ambient cancellation token to thread into each <c>PutEvents</c> call; null (the
+    /// default) observes no cancellation.
+    /// </param>
+    public EventBridgeBatchMessageClient(string source, IAmazonEventBridge amazonEventBridge, string? eventBusName = null,
+        ICancellationTokenAccessor? cancellation = null)
     {
         _source = source;
         _amazonEventBridge = amazonEventBridge;
         _eventBusName = eventBusName;
         _serializer = new JsonSerializer();
+        _cancellation = cancellation;
     }
 
     /// <inheritdoc />
@@ -82,7 +91,7 @@ public class EventBridgeBatchMessageClient : IBenzeneBatchMessageClient
                 var response = await _amazonEventBridge.PutEventsAsync(new PutEventsRequest
                 {
                     Entries = built.Select(b => b.Entry).ToList(),
-                });
+                }, _cancellation?.CancellationToken ?? CancellationToken.None);
 
                 if (response.FailedEntryCount > 0 && response.Entries != null)
                 {

@@ -1,6 +1,7 @@
 using System;
 using System.Threading.Tasks;
 using Amazon.Lambda;
+using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Messages.BenzeneClient;
 using Benzene.Abstractions.Results;
 using Benzene.Abstractions.Serialization;
@@ -23,16 +24,30 @@ namespace Benzene.Clients.Aws.Lambda
         private readonly ISerializer _serializer;
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="AwsLambdaBenzeneMessageClient"/> class.
+        /// Initializes a new instance of the <see cref="AwsLambdaBenzeneMessageClient"/> class with no
+        /// cancellation-token accessor.
         /// </summary>
         /// <param name="lambdaName">The name of the target Lambda function.</param>
         /// <param name="amazonLambda">The Lambda client used to invoke the function.</param>
         /// <param name="logger">The logger used to record invocation outcomes and failures.</param>
         public AwsLambdaBenzeneMessageClient(string lambdaName, IAmazonLambda amazonLambda, ILogger logger)
+            : this(lambdaName, amazonLambda, logger, null)
+        {
+        }
+
+        /// <summary>
+        /// Initializes the client, additionally resolving the ambient cancellation token so an
+        /// upstream cancel/timeout aborts the outbound invoke instead of running it to completion.
+        /// </summary>
+        /// <param name="lambdaName">The name of the target Lambda function.</param>
+        /// <param name="amazonLambda">The Lambda client used to invoke the function.</param>
+        /// <param name="logger">The logger used to record invocation outcomes and failures.</param>
+        /// <param name="cancellation">Supplies the ambient cancellation token; null observes no cancellation.</param>
+        public AwsLambdaBenzeneMessageClient(string lambdaName, IAmazonLambda amazonLambda, ILogger logger, ICancellationTokenAccessor? cancellation)
         {
             ArgumentNullException.ThrowIfNull(logger);
 
-            _awsLambdaClient = new AwsLambdaClient(amazonLambda);
+            _awsLambdaClient = new AwsLambdaClient(amazonLambda, cancellation);
             _lambdaName = lambdaName;
             _logger = logger;
             _serializer = new JsonSerializer();

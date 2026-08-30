@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Amazon.Lambda;
 using Amazon.Runtime;
+using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Results;
 using Benzene.HealthChecks.Core;
 using Benzene.Results;
@@ -31,9 +32,10 @@ namespace Benzene.Clients.Aws.Lambda;
 /// <c>TimeOutHealthCheck</c>), which genuinely cancels the in-flight call on timeout rather than merely
 /// abandoning the awaited task. Same shape as <c>SqsHealthCheck</c>/<c>SnsHealthCheck</c>/
 /// <c>EventBridgeHealthCheck</c>. The <see cref="HealthCheckMode.Active"/> ping (via
-/// <see cref="AwsLambdaBenzeneMessageClient"/>) is the one path here that still cannot forward the token
-/// into its own SDK call, unchanged from before — that client has no <see cref="CancellationToken"/>
-/// overload, out of this fix's scope.
+/// <see cref="AwsLambdaBenzeneMessageClient"/>) resolves the ambient
+/// <see cref="Benzene.Abstractions.DI.ICancellationTokenAccessor"/> (#261) and threads it into the
+/// underlying invoke's SDK call the same way the reachability path does, so a wrapping
+/// <c>UseTimeout(...)</c>/graceful-drain cancel aborts an in-flight active-mode ping too.
 /// </para>
 /// </remarks>
 public class AwsLambdaHealthCheck : IHealthCheck
@@ -43,18 +45,33 @@ public class AwsLambdaHealthCheck : IHealthCheck
     private readonly string _lambdaName;
     private readonly HealthCheckMode _mode;
 
-    /// <summary>Initializes a new instance of the <see cref="AwsLambdaHealthCheck"/> class.</summary>
+    /// <summary>Initializes a new instance of the <see cref="AwsLambdaHealthCheck"/> class with no cancellation-token accessor.</summary>
     /// <param name="lambdaName">The name of the Lambda function to check.</param>
     /// <param name="amazonLambda">The Lambda client used to run the check.</param>
     /// <param name="logger">The logger used by the active-mode invoke path.</param>
     /// <param name="mode">Reachability (default, read-only) or Active (invokes the function — side-effecting).</param>
     public AwsLambdaHealthCheck(string lambdaName, IAmazonLambda amazonLambda, ILogger<AwsLambdaHealthCheck> logger,
         HealthCheckMode mode = HealthCheckMode.Reachability)
+        : this(lambdaName, amazonLambda, logger, mode, null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes the check, additionally resolving the ambient cancellation token so the Active-mode
+    /// ping's outbound invoke can be aborted the same way the Reachability path already is.
+    /// </summary>
+    /// <param name="lambdaName">The name of the Lambda function to check.</param>
+    /// <param name="amazonLambda">The Lambda client used to run the check.</param>
+    /// <param name="logger">The logger used by the active-mode invoke path.</param>
+    /// <param name="mode">Reachability (default, read-only) or Active (invokes the function — side-effecting).</param>
+    /// <param name="cancellation">Supplies the ambient cancellation token; null observes no cancellation.</param>
+    public AwsLambdaHealthCheck(string lambdaName, IAmazonLambda amazonLambda, ILogger<AwsLambdaHealthCheck> logger,
+        HealthCheckMode mode, ICancellationTokenAccessor? cancellation)
     {
         _lambdaName = lambdaName;
         _amazonLambda = amazonLambda;
         _mode = mode;
-        _awsLambdaBenzeneMessageClient = new AwsLambdaBenzeneMessageClient(lambdaName, amazonLambda, logger);
+        _awsLambdaBenzeneMessageClient = new AwsLambdaBenzeneMessageClient(lambdaName, amazonLambda, logger, cancellation);
     }
 
     /// <summary>Runs the check and reports the outcome.</summary>
@@ -62,12 +79,12 @@ public class AwsLambdaHealthCheck : IHealthCheck
     {
         var dependencies = new[] { new HealthCheckDependency("Lambda", _lambdaName) };
 
-        // AwsLambdaBenzeneMessageClient.SendMessageAsync has no CancellationToken overload (a separate
-        // client abstraction, out of WP-7's scope), so Active mode's ping cannot forward the token into
-        // the invoke itself; GetFunctionConfigurationAsync does accept one and gets it below. No internal
-        // timeout guard here (unlike an earlier version of this type): the reachability path forwards its
-        // token straight into the SDK call and relies purely on the processor's uniform per-check timeout
-        // wrap (HealthCheckProcessor via TimeOutHealthCheck), matching SqsHealthCheck's current shape.
+        // GetFunctionConfigurationAsync (Reachability) forwards THIS call's token directly. The
+        // Active-mode ping instead forwards the ambient ICancellationTokenAccessor token resolved at
+        // construction (#261) into AwsLambdaBenzeneMessageClient's own invoke - a different token
+        // source, but both paths now reach their SDK call. No internal timeout guard here (unlike an
+        // earlier version of this type): both paths rely on the processor's uniform per-check timeout
+        // wrap (HealthCheckProcessor via TimeOutHealthCheck).
         return _mode == HealthCheckMode.Active
             ? RunAsync(_awsLambdaBenzeneMessageClient.SendMessageAsync<Void, Void>(Benzene.Abstractions.BenzeneTopic.Ping, null),
                 r => r.Status == BenzeneResultStatus.Accepted, r => ("Status", (object)r.Status), dependencies)

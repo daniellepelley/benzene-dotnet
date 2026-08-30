@@ -1,6 +1,8 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using Amazon.SQS;
+using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Middleware;
 
 namespace Benzene.Clients.Aws.Sqs;
@@ -12,14 +14,28 @@ namespace Benzene.Clients.Aws.Sqs;
 public class SqsClientMiddleware : IMiddleware<SqsSendMessageContext>, ITerminalMiddleware
 {
     private readonly IAmazonSQS _amazonSqs;
+    private readonly ICancellationTokenAccessor? _cancellation;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="SqsClientMiddleware"/> class.
+    /// Initializes a new instance of the <see cref="SqsClientMiddleware"/> class with no
+    /// cancellation-token accessor.
     /// </summary>
     /// <param name="amazonSqs">The SQS client used to send the message.</param>
     public SqsClientMiddleware(IAmazonSQS amazonSqs)
+        : this(amazonSqs, null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes the middleware, additionally resolving the ambient cancellation token so an
+    /// upstream cancel/timeout aborts the outbound send instead of running it to completion.
+    /// </summary>
+    /// <param name="amazonSqs">The SQS client used to send the message.</param>
+    /// <param name="cancellation">Supplies the ambient cancellation token; null observes no cancellation.</param>
+    public SqsClientMiddleware(IAmazonSQS amazonSqs, ICancellationTokenAccessor? cancellation)
     {
         _amazonSqs = amazonSqs;
+        _cancellation = cancellation;
     }
 
     /// <summary>
@@ -35,6 +51,7 @@ public class SqsClientMiddleware : IMiddleware<SqsSendMessageContext>, ITerminal
     /// <param name="next">Unused; this middleware does not delegate further down the pipeline.</param>
     public async Task HandleAsync(SqsSendMessageContext context, Func<Task> next)
     {
-        context.Response = await _amazonSqs.SendMessageAsync(context.Request);
+        var cancellationToken = _cancellation?.CancellationToken ?? CancellationToken.None;
+        context.Response = await _amazonSqs.SendMessageAsync(context.Request, cancellationToken);
     }
 }

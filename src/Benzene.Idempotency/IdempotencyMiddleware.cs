@@ -142,13 +142,17 @@ public class IdempotencyMiddleware<TContext> : IMiddleware<TContext>
 
     private static bool WasSuccessful(TContext context)
     {
-        // Prefer the pipeline's own result signal when the transport sets one; otherwise treat
-        // "the handler did not throw" as success.
-        if (context is IHasMessageResult { MessageResult: not null } hasResult)
+        // Prefer the pipeline's own result signal when the transport sets one. A result-bearing
+        // transport (IHasMessageResult) that completed without ever setting MessageResult has not
+        // proven success - matching the "null == failure, redeliver" convention SQS/DynamoDb always
+        // had and #229 extended to SNS/S3/EventBridge - so that case must NOT fall through to true.
+        if (context is IHasMessageResult hasResult)
         {
-            return hasResult.MessageResult.IsSuccessful;
+            return hasResult.MessageResult?.IsSuccessful ?? false;
         }
 
+        // A transport with no result concept at all has no signal to be consistent with: no-throw
+        // still means success here, unchanged.
         return true;
     }
 }

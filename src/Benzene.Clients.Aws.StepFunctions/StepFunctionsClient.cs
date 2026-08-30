@@ -1,9 +1,11 @@
 using System;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Amazon.StepFunctions;
 using Amazon.StepFunctions.Model;
+using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Results;
 using Benzene.Abstractions.Serialization;
 using Benzene.Results;
@@ -20,19 +22,37 @@ public class StepFunctionsClient : IStepFunctionsClient
     private readonly string _stateMachineArn;
     private readonly IAmazonStepFunctions _amazonStepFunctionsClient;
     private readonly ISerializer _serializer;
+    private readonly ICancellationTokenAccessor? _cancellation;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="StepFunctionsClient"/> class.
+    /// Initializes a new instance of the <see cref="StepFunctionsClient"/> class with no
+    /// cancellation-token accessor.
     /// </summary>
     /// <param name="stateMachineArn">The ARN of the state machine to start executions on.</param>
     /// <param name="amazonStepFunctionsClient">The Step Functions client used to start executions.</param>
     /// <param name="logger">The logger used to record send failures.</param>
     public StepFunctionsClient(string stateMachineArn, IAmazonStepFunctions amazonStepFunctionsClient, ILogger<StepFunctionsClient> logger)
+        : this(stateMachineArn, amazonStepFunctionsClient, logger, null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes the client, additionally resolving the ambient cancellation token so an upstream
+    /// cancel/timeout aborts an in-flight <c>StartExecution</c>/<c>DescribeExecution</c> call instead of
+    /// running it to completion.
+    /// </summary>
+    /// <param name="stateMachineArn">The ARN of the state machine to start executions on.</param>
+    /// <param name="amazonStepFunctionsClient">The Step Functions client used to start executions.</param>
+    /// <param name="logger">The logger used to record send failures.</param>
+    /// <param name="cancellation">Supplies the ambient cancellation token; null observes no cancellation.</param>
+    public StepFunctionsClient(string stateMachineArn, IAmazonStepFunctions amazonStepFunctionsClient, ILogger<StepFunctionsClient> logger,
+        ICancellationTokenAccessor? cancellation)
     {
         _amazonStepFunctionsClient = amazonStepFunctionsClient;
         _logger = logger;
         _stateMachineArn = stateMachineArn;
         _serializer = new JsonSerializer();
+        _cancellation = cancellation;
     }
 
     /// <summary>
@@ -66,6 +86,8 @@ public class StepFunctionsClient : IStepFunctionsClient
         var name = SanitizeExecutionName(executionName);
         var input = _serializer.Serialize(message);
 
+        var cancellationToken = _cancellation?.CancellationToken ?? CancellationToken.None;
+
         try
         {
             await _amazonStepFunctionsClient.StartExecutionAsync(new StartExecutionRequest
@@ -75,13 +97,13 @@ public class StepFunctionsClient : IStepFunctionsClient
                 // Null Name lets AWS generate a UUID (the original behavior); a supplied name makes the
                 // start idempotent for the same (state machine, name, input).
                 Name = name
-            });
+            }, cancellationToken);
 
             return BenzeneResult.Accepted<TResponse>();
         }
         catch (ExecutionAlreadyExistsException)
         {
-            return await HandleExecutionAlreadyExistsAsync<TResponse>(name, input);
+            return await HandleExecutionAlreadyExistsAsync<TResponse>(name, input, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -104,7 +126,7 @@ public class StepFunctionsClient : IStepFunctionsClient
     /// reason to suspect its payload never ran). A verified match is <see cref="BenzeneResultStatus.Accepted"/>;
     /// anything else is an explicit failure. See <c>work/bug-fix-designs-2026-08.md</c> WP-6b.
     /// </remarks>
-    private async Task<IBenzeneResult<TResponse>> HandleExecutionAlreadyExistsAsync<TResponse>(string? name, string input)
+    private async Task<IBenzeneResult<TResponse>> HandleExecutionAlreadyExistsAsync<TResponse>(string? name, string input, CancellationToken cancellationToken)
     {
         if (name is null)
         {
@@ -121,7 +143,7 @@ public class StepFunctionsClient : IStepFunctionsClient
             existingExecution = await _amazonStepFunctionsClient.DescribeExecutionAsync(new DescribeExecutionRequest
             {
                 ExecutionArn = BuildExecutionArn(name)
-            });
+            }, cancellationToken);
         }
         catch (Exception ex)
         {

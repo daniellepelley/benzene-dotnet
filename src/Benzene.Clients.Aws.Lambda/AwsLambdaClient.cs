@@ -1,8 +1,10 @@
 using System.IO;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Amazon.Lambda;
 using Amazon.Lambda.Model;
+using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Serialization;
 
 namespace Benzene.Clients.Aws.Lambda
@@ -15,15 +17,29 @@ namespace Benzene.Clients.Aws.Lambda
     {
         private readonly IAmazonLambda _amazonLambda;
         private readonly ISerializer _serializer;
+        private readonly ICancellationTokenAccessor? _cancellation;
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="AwsLambdaClient"/> class.
+        /// Initializes a new instance of the <see cref="AwsLambdaClient"/> class with no
+        /// cancellation-token accessor.
         /// </summary>
         /// <param name="amazonLambda">The Lambda client used to invoke functions.</param>
         public AwsLambdaClient(IAmazonLambda amazonLambda)
+            : this(amazonLambda, null)
+        {
+        }
+
+        /// <summary>
+        /// Initializes the client, additionally resolving the ambient cancellation token so an
+        /// upstream cancel/timeout aborts the outbound invoke instead of running it to completion.
+        /// </summary>
+        /// <param name="amazonLambda">The Lambda client used to invoke functions.</param>
+        /// <param name="cancellation">Supplies the ambient cancellation token; null observes no cancellation.</param>
+        public AwsLambdaClient(IAmazonLambda amazonLambda, ICancellationTokenAccessor? cancellation)
         {
             _amazonLambda = amazonLambda;
             _serializer = new JsonSerializer();
+            _cancellation = cancellation;
         }
 
         /// <summary>
@@ -55,7 +71,8 @@ namespace Benzene.Clients.Aws.Lambda
                 Payload = _serializer.Serialize(request)
             };
 
-            var lambdaResponse = await _amazonLambda.InvokeAsync(invokeRequest);
+            var cancellationToken = _cancellation?.CancellationToken ?? CancellationToken.None;
+            var lambdaResponse = await _amazonLambda.InvokeAsync(invokeRequest, cancellationToken);
 
             if (InvocationType.Event == invocationType)
             {
