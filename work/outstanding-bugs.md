@@ -3360,6 +3360,41 @@ Verified: `dotnet test test/Benzene.Mesh.Test -c Release --filter "FullyQualifie
   rethrowing, so its observable fix is "the call actually completes near the deadline" rather than a
   propagated `TimeoutException` - documented inline on that test.
 
+## Round 17, WP-J: CLI healthcheck non-JSON-body tolerance (2026-08-30)
+
+- **[RESOLVED] `#282` `benzene healthcheck` crashed with a raw, unhandled
+  `Newtonsoft.Json.JsonReaderException` on a non-JSON (or empty) health-check response body, even
+  though the command already special-cased "a response shape this tool doesn't recognize" one line
+  later.** `HealthCheckCommand.ExecuteAsync` calls `Console.Out.WriteJson(json)` before evaluating
+  `Trips`/`IsHealthy`, and `Extensions.WriteJson` called `JValue.Parse(json)` with no exception
+  handling at all - so an empty body, a plain-text error body, or an HTML error page (a target
+  Lambda not running `UseHealthCheck()`'s standard shape, or an intermediate proxy/adapter
+  returning something other than the health contract's `{isHealthy, healthChecks}` JSON) crashed
+  the whole CLI invocation with a Newtonsoft stack trace instead of a diagnosable result, one line
+  before `IsHealthy`'s own "don't fail-loud on a response shape this tool doesn't recognize" comment
+  was ever reached. `IsHealthy` had the identical gap one level down: `JObject.Parse(json)` with no
+  handling, so even reordering the two calls wouldn't have been enough on its own. Fixed both:
+  `Extensions.WriteJson` now wraps `JValue.Parse` in `try`/`catch (JsonException)` and writes the
+  raw body verbatim on a parse failure instead of throwing; `HealthCheckCommand.IsHealthy` wraps
+  `JObject.Parse` the same way and returns `true` (not tripped) on a parse failure - matching the
+  existing "absent `isHealthy`" tolerance immediately below it, so `--fail-on unhealthy` never treats
+  an unparseable body as an explicit `isHealthy: false`. Files:
+  `src/Benzene.CodeGen.Cli.Core/Commands/HealthCheck/Extensions.cs`,
+  `src/Benzene.CodeGen.Cli.Core/Commands/HealthCheck/HealthCheckCommand.cs`. Regression tests added
+  to `test/Benzene.Core.Test/Autogen/CodeGen/Cli/HealthCheckCommandFailOnTest.cs`:
+  `ExecuteAsync_EmptyBody_DoesNotThrow_AndWritesRawBody`,
+  `ExecuteAsync_NonJsonBody_DoesNotThrow_AndWritesRawBodyVerbatim` (plain-text body, asserts the raw
+  body is written to `Console.Out` verbatim), and
+  `ExecuteAsync_HtmlErrorBody_FailOnUnhealthy_DoesNotThrow` (an HTML error page under the default
+  `--fail-on unhealthy` must not be treated as an explicit unhealthy signal). Confirmed red before
+  the fix (`Newtonsoft.Json.JsonReaderException` from `Extensions.WriteJson` at `Extensions.cs:10`,
+  called from `HealthCheckCommand.ExecuteAsync` at `HealthCheckCommand.cs:49`, for all three new
+  cases) and green after -
+  `dotnet test test/Benzene.Core.Test/Benzene.Test.csproj -c Release --filter
+  "FullyQualifiedName~HealthCheckCommandFailOnTest|FullyQualifiedName~HealthCheckCommandTest|FullyQualifiedName~HealthCheckClientTest"`:
+  23 passed (8 existing/updated in `HealthCheckCommandFailOnTest` + the rest of the `HealthCheck` CLI
+  suite unchanged), 0 failed.
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.
