@@ -154,7 +154,8 @@ public abstract class AzureFunctionBatchApplicationBase<TContext, TState>
         return BoundedFanOut.WhenAllAsync(
             entries,
             entry => ProcessItemAsync(entry.Context, entry.State, serviceResolverFactory, cancellationToken),
-            _maxDegreeOfParallelism);
+            _maxDegreeOfParallelism,
+            cancellationToken);
     }
 
     private async Task ProcessItemAsync(TContext context, TState state, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)

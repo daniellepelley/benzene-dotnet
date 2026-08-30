@@ -40,16 +40,34 @@ buildTransitive). The hand-written form still works. See `docs/azure-functions.m
 - `TimerTriggerInfo` / `TimerScheduleStatus` — dependency-free models (`IsPastDue`,
   `Last`/`Next`/`LastUpdated`).
 - `TimerContext : IHasMessageResult` — diagnostics-only result; a tick has no caller to answer.
-- `TimerApplication` — `EntryPointMiddlewareApplication<TimerTriggerInfo>`, transport tag
-  `"timer"`, one DI scope per tick.
-- `UseTimerTrigger(action)` (both builders, no-op off-Azure), `AddAzureTimer()`,
-  `TimerRegistrations`, `UseTick(...)`, `HandleTimer(TimerTriggerInfo)` / `HandleTimer()`.
+- `TimerApplication` — `EntryPointMiddlewareApplication<TimerTriggerInfo>` wrapping
+  `TimerTickApplication`, transport tag `"timer"`, one DI scope per tick.
+- `TimerTickApplication` — runs one tick through the pipeline and applies `TimerOptions`.
+- `TimerOptions` / `TimerMessageProcessingException` — see "Failure handling" above.
+- `UseTimerTrigger(action)` / `UseTimerTrigger(action, configure)` (both builders, no-op off-Azure),
+  `AddAzureTimer()`, `TimerRegistrations`, `UseTick(...)`, `HandleTimer(TimerTriggerInfo)` / `HandleTimer()`.
 
 ## Failure handling
-None in-package: a pipeline exception propagates to the host, which logs the failed invocation.
-Note the platform reality: the timer trigger does **not** retry a failed tick — the next
+`TimerOptions` mirrors every sibling Azure Function trigger package's `*Options` type, applied here
+to Timer's single tick rather than a batch: `RaiseOnFailureStatus` (default `true`, safe-by-default)
+escalates a message handler's *explicit* failure result on `TimerContext.MessageResult`
+(`IsSuccessful == false` — a `UsePresetTopic(...).UseMessageHandlers()` tick whose handler returned
+`BenzeneResult.UnexpectedError()` rather than throwing) into a thrown
+`TimerMessageProcessingException`, so the Functions host records a failed invocation instead of
+completing silently. **Deliberately `== false`, not the `!= true` convention** the message-routed
+batch triggers use (round 15, WP-C): those transports run every item through `MessageRouter`, which
+unconditionally records a result, so an unset result there only ever means the router never got to
+run. A timer tick has no such guarantee — the **direct** `UseTick(...)` consumption mode never
+touches `MessageResult` at all — so treating an unset result as failure would escalate every plain
+tick by default; only a message handler that actually ran and reported failure triggers it.
+`CatchExceptions` (default `false`, matching every sibling) optionally contains that exception — or
+any exception the pipeline itself threw — logging it instead of letting it cascade. Configure via the
+ctor's optional `TimerOptions?` parameter or `UseTimerTrigger(pipeline, configure)`'s
+`Action<TimerOptions>` overload.
+Note the platform reality either way: the timer trigger does **not** retry a failed tick — the next
 occurrence just runs on schedule — so a job needing at-least-once semantics should enqueue work
-(queue/Service Bus) rather than doing it inline in the tick.
+(queue/Service Bus) rather than doing it inline in the tick. `RaiseOnFailureStatus` only affects
+whether the failure is visible (failed-invocation telemetry), not whether it is retried.
 
 ## Tests
 - `test/Benzene.Core.Test/Azure/TimerPipelineTest.cs` — tick delivery with schedule info,

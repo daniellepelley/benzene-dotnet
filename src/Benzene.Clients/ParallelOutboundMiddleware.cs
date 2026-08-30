@@ -55,7 +55,10 @@ internal class ParallelOutboundMiddleware : IMiddleware<OutboundContext>, ITermi
                 // still runs, and the aggregate can then name all of the ones that failed.
                 return new BranchOutcome(branch.Name, null, ex);
             }
-        }, _maxDegreeOfParallelism);
+        },
+        // IMiddleware<TContext>.HandleAsync carries no CancellationToken parameter - default is the
+        // honest signal there is none to observe here.
+        _maxDegreeOfParallelism, default);
 
         var failures = outcomes
             .Where(outcome => outcome.Exception is not null || outcome.Result is null || !outcome.Result.IsSuccessful)

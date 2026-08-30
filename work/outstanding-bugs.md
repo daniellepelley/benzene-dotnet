@@ -2167,6 +2167,66 @@ fixed in `src/Benzene.Aws.Lambda.S3`, `src/Benzene.Aws.Lambda.DynamoDb`,
   pipeline mock that never sets `MessageResult` now escalates (throws, with default
   `RaiseOnFailureStatus=true`) instead of completing silently (red before the fix).
 
+### Round 15, WP-C — Azure cancellation + Timer escalation (#230–#232, done)
+- **[RESOLVED] #230 — `BoundedFanOut.WhenAllAsync`'s concurrency-limiting semaphore took no
+  `CancellationToken`, so an item still queued behind `MaxDegreeOfParallelism` never observed
+  cancellation and simply waited for a free slot** (verified: cap of 1, 3 items, item 0 sleeps 300ms,
+  cancel at 50ms — all three ran to completion, ~300ms+, zero `OperationCanceledException`). Fixed:
+  both `WhenAllAsync` overloads (`src/Benzene.Core.Middleware/BoundedFanOut.cs`) now take an optional
+  `CancellationToken cancellationToken = default`, threaded into `semaphore.WaitAsync(cancellationToken)`;
+  a queued item cancelled while waiting throws `OperationCanceledException` out of `WhenAllAsync`, which
+  every Azure batch trigger already treats as a failed invocation → redelivery (the correct
+  drain-abort behavior). `Task.WhenAll` already awaits every started task to completion before
+  returning/throwing, so an already-running item is never abandoned un-awaited — confirmed by a
+  dedicated regression test, no extra aggregation logic needed. Audited **every** call site repo-wide
+  (`grep BoundedFanOut.WhenAllAsync` across `src/`): `AzureFunctionBatchApplicationBase.HandleBatchAsync`,
+  `MiddlewareMultiApplication<TEvent,TContext,TResult>`/`<TEvent,TContext>` (×2), `SqsConsumerApplication`,
+  and `JaegerTraceSource.SearchAcrossServicesAsync` had a real ambient token in scope and now pass it;
+  `KafkaApplication`, `SqsApplication` (Lambda), `S3Application`, `SnsApplication`,
+  `ParallelOutboundMiddleware`, and `ScatterGatherExtensions.ScatterGatherAsync` have no
+  `CancellationToken` reaching their `HandleAsync`/public signature today, so each now passes `default`
+  explicitly with a one-line comment recording why — no unaudited caller left. New tests:
+  `BoundedFanOutTest.WhenAllAsync_Bounded_ItemQueuedBehindTheSemaphore_ObservesCancellation`,
+  `..._Void_Bounded_ItemQueuedBehindTheSemaphore_ObservesCancellation`,
+  `..._Bounded_OnCancellation_AlreadyStartedItemStillRunsToCompletion`
+  (`test/Benzene.Core.Test/Core/Middleware/BoundedFanOutTest.cs`).
+- **[RESOLVED] #231 — `TimerApplication` never escalated a message-handler's returned failure result,
+  unlike every sibling Azure Function batch trigger** (verified: a tick whose handler returned
+  `BenzeneResult.UnexpectedError()` completed without throwing — no retry, no failed-invocation
+  telemetry). Fixed: new `TimerOptions` (`src/Benzene.Azure.Function.Timer/TimerOptions.cs`) with
+  `RaiseOnFailureStatus` defaulting `true` and `CatchExceptions` defaulting `false`, matching every
+  sibling package's safe-by-default contract; accepted as an optional third ctor parameter on
+  `TimerApplication` (existing two-arg ctor call sites keep compiling unchanged). The escalation/catch
+  logic itself moved into a new `TimerTickApplication` (mirroring the `EventGridApplication`/
+  `EventGridBatchApplication` split) that `TimerApplication` now wraps: after the pipeline completes, if
+  `RaiseOnFailureStatus` and `context.MessageResult?.IsSuccessful == false`, it throws
+  `TimerMessageProcessingException`
+  (`src/Benzene.Azure.Function.Timer/TimerMessageProcessingException.cs`, carrying the tick's
+  `ScheduledFor` — `TimerTriggerInfo.ScheduleStatus?.Next` — mirroring the sibling `*MessageProcessingException`
+  shape); `CatchExceptions` contains that throw (or the pipeline's own exception) with a logged error,
+  same as every batch trigger. **Deliberate deviation from WP-B's `!= true` convention**: the
+  message-routed batch triggers run every item through `MessageRouter`, which unconditionally records
+  a result, so an unset result there only ever means the router never ran; Timer has no such
+  guarantee — its primary, documented **direct** consumption mode (`UseTick(...)`) never touches
+  `MessageResult` at all, so `!= true` would have escalated *every* plain tick by default (a real
+  regression against the existing `TimerPipelineTest`/`AzureFunctionCancellationTest` coverage, caught
+  by running them before committing). Using `== false` instead escalates only a message handler that
+  actually ran (via `UsePresetTopic(...).UseMessageHandlers()`) and explicitly reported failure — which
+  is exactly the review's probe — while leaving the direct-tick mode behaviour-preserving. Exposed
+  through `UseTimerTrigger(action, Action<TimerOptions> configure)` overloads on both
+  `IAzureFunctionAppBuilder` and `IBenzeneApplicationBuilder`. Package `CLAUDE.md`'s "Failure handling"
+  section rewritten to document the new default and flags. New tests:
+  `test/Benzene.Core.Test/Azure/TimerFailureHandlingTest.cs` (defaults, exception cascade,
+  failure-result escalation, `RaiseOnFailureStatus=false` opt-out, `CatchExceptions=true` containment
+  of both an exception and an escalated failure result).
+- **[RESOLVED] #232 (minor) — three stale "(both flags off)" doc comments left over from the
+  `RaiseOnFailureStatus` safe-by-default flip, describing a default that no longer matched reality.**
+  Reworded to the sibling packages' "safe-by-default: `RaiseOnFailureStatus` on, `CatchExceptions` off"
+  phrasing in `src/Benzene.Azure.Function.EventGrid/EventGridApplication.cs:29`,
+  `src/Benzene.Azure.Function.EventHub/Function/DependencyInjectionExtensions.cs:84`, and
+  `src/Benzene.Azure.Function.EventHub/Function/EventHubOptions.cs:18` (keeping the latter's
+  ordering-tradeoff remark otherwise intact). Doc-only, no test.
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.
