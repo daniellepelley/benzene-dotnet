@@ -30,6 +30,8 @@ namespace Benzene.Clients.Aws.Lambda
         /// <param name="logger">The logger used to record invocation outcomes and failures.</param>
         public AwsLambdaBenzeneMessageClient(string lambdaName, IAmazonLambda amazonLambda, ILogger logger)
         {
+            ArgumentNullException.ThrowIfNull(logger);
+
             _awsLambdaClient = new AwsLambdaClient(amazonLambda);
             _lambdaName = lambdaName;
             _logger = logger;

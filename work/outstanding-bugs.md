@@ -2069,6 +2069,47 @@ top-of-file summary blockquote).
   scheme specifically) to record this explicitly as a `[DECISION]` in place, rather than leaving it
   silently misleading. Left for a future round to decide whether/how to carry the scheme onto the wire.
 
+### Tracked findings rounds 12-14, WP-N — S3 TestHelpers key encoding + ServiceBus client logger guard (#191, #192, done)
+Ruling and rationale are in [`bug-fix-plan-rounds12-14-2026-08.md`](bug-fix-plan-rounds12-14-2026-08.md) WP-N and
+[`bug-fix-designs-round12-2026-08.md`](archive/bug-fix-designs-round12-2026-08.md) §3.
+- **[RESOLVED] #191 — `Benzene.Aws.Lambda.S3.TestHelpers`'s `AsS3` builder produced a fake object key
+  that was never URL-encoded, so the real `S3ObjectKeyCodec.Decode` step (added by #158's fix) silently
+  corrupted any test-constructed key containing `+`, `%`, or other S3-reserved characters** — verified:
+  `"invoice+2024-08-27.pdf"` through `AsS3` and the real production getters came back as
+  `"invoice 2024-08-27.pdf"`. Fixed by adding `S3ObjectKeyCodec.Encode` — the exact inverse of
+  `Decode` (`WebUtility.UrlEncode` alongside `Decode`'s `WebUtility.UrlDecode`) — and using it in
+  `MessageBuilderExtensions.AsS3` to encode the caller's real (decoded) key before storing it on the
+  fake record, so the codec pair round-trips by construction: `Decode(Encode(key)) == key` for any
+  key, including one containing `+`, `%`, or non-ASCII characters. Regression tests in
+  `S3TestHelpersTest.AsS3_ReservedOrUnicodeCharactersInKey_RoundTripThroughTheRealProductionGetters`
+  (a `[Theory]` covering the review's exact `+` probe plus a `%`-containing key and a unicode key),
+  asserting the round-trip through both the raw record's `Decode` and the real
+  `S3MessageBodyGetter`/`S3MessageHeadersGetter`.
+- **[RESOLVED] #192 (minor) — `ServiceBusBenzeneMessageClient`'s failure-handling catch block itself
+  threw if constructed with a null logger (its own `LogError` call null-guards), and every other
+  `*BenzeneMessageClient` in the codebase shared the same constructor shape.** Fixed by adding
+  `ArgumentNullException.ThrowIfNull(logger)` as the first statement in every constructor that takes a
+  required (non-optional, non-nullable) `ILogger`/`ILogger<T>` across the client family, so a null
+  logger fails fast at construction instead of inside the catch block at the worst possible moment.
+  `HttpBenzeneMessageClient` was deliberately left unchanged — its `ILogger? logger = null` parameter
+  is optional by design and every use is already null-conditional (`_logger?.LogError(...)`).
+  Classes touched (both constructor overloads on each, where two exist):
+  `Benzene.Clients.Azure.ServiceBus.ServiceBusBenzeneMessageClient`,
+  `Benzene.Clients.Aws.EventBridge.EventBridgeBenzeneMessageClient`,
+  `Benzene.Clients.Aws.Lambda.AwsLambdaBenzeneMessageClient` (single constructor),
+  `Benzene.Clients.Aws.Sns.SnsBenzeneMessageClient`, `Benzene.Clients.Aws.Sqs.SqsBenzeneMessageClient`,
+  `Benzene.Clients.Azure.EventGrid.EventGridBenzeneMessageClient`,
+  `Benzene.Clients.Azure.EventHub.EventHubBenzeneMessageClient`,
+  `Benzene.Clients.Azure.QueueStorage.QueueStorageBenzeneMessageClient`,
+  `Benzene.Grpc.Client.GrpcBenzeneMessageClient`, `Benzene.Kafka.Core.Kafka.KafkaBenzeneMessageClient`,
+  `Benzene.RabbitMq.RabbitMqSendMessage.RabbitMqBenzeneMessageClient`. Regression tests: a
+  `Constructor_NullLogger_ThrowsImmediately`/`Constructor_PrebuiltPipelineOverload_NullLogger_ThrowsImmediately`
+  fact per class (new test files for ServiceBus/EventGrid/EventHub/QueueStorage/EventBridge; added to
+  the existing Kafka/RabbitMq/Sns/Sqs/AwsLambda/Grpc client test files), plus a normal-construction,
+  failing-send test using `FakeLogger`/`FakeLogCollector` (or the existing `RecordingLogger` for gRPC)
+  confirming the catch block still logs the real exception and returns a failure result without
+  throwing.
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.

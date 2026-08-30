@@ -20,6 +20,20 @@ namespace Benzene.Grpc.Test;
 public class GrpcBenzeneMessageClientTest
 {
     [Fact]
+    public void Constructor_PrebuiltPipelineOverload_NullLogger_ThrowsImmediately()
+    {
+        var invoker = new TestCallInvoker();
+        var registry = new GrpcClientRouteRegistry();
+        var adapter = new ProtobufJsonGrpcMessageAdapter();
+        var pipeline = new MiddlewarePipelineBuilder<GrpcSendMessageContext>(new NullBenzeneServiceContainer())
+            .UseGrpcClient(invoker, registry, adapter)
+            .Build();
+
+        Assert.Throws<ArgumentNullException>(() =>
+            new GrpcBenzeneMessageClient(pipeline, adapter, new DefaultGrpcStatusReverseMapper(), null!, new NullServiceResolver()));
+    }
+
+    [Fact]
     public async Task SendMessageAsync_WhenTheCallSucceeds_ReturnsTheMappedResponse()
     {
         var invoker = new TestCallInvoker { Response = new EchoReply { Message = "hello" } };

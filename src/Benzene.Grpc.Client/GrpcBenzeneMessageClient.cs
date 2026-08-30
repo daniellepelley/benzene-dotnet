@@ -41,6 +41,8 @@ public class GrpcBenzeneMessageClient : IBenzeneMessageClient
     public GrpcBenzeneMessageClient(GrpcChannel channel, IGrpcClientRouteRegistry routeRegistry, IGrpcMessageAdapter adapter,
         IGrpcStatusReverseMapper statusReverseMapper, ILogger<GrpcBenzeneMessageClient> logger, IServiceResolver serviceResolver)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _adapter = adapter;
         _statusReverseMapper = statusReverseMapper;
         _logger = logger;
@@ -62,6 +64,8 @@ public class GrpcBenzeneMessageClient : IBenzeneMessageClient
     public GrpcBenzeneMessageClient(IMiddlewarePipeline<GrpcSendMessageContext> middlewarePipeline, IGrpcMessageAdapter adapter,
         IGrpcStatusReverseMapper statusReverseMapper, ILogger<GrpcBenzeneMessageClient> logger, IServiceResolver serviceResolver)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _middlewarePipeline = middlewarePipeline;
         _adapter = adapter;
         _statusReverseMapper = statusReverseMapper;

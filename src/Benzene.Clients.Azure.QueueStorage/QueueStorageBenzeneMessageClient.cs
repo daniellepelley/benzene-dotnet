@@ -36,6 +36,8 @@ public class QueueStorageBenzeneMessageClient : IBenzeneMessageClient
     /// <param name="serviceResolver">The service resolver used to run the pipeline.</param>
     public QueueStorageBenzeneMessageClient(QueueClient queueClient, ILogger<QueueStorageBenzeneMessageClient> logger, IServiceResolver serviceResolver)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _serviceResolver = serviceResolver;
         _logger = logger;
 
@@ -55,6 +57,8 @@ public class QueueStorageBenzeneMessageClient : IBenzeneMessageClient
     /// <param name="serviceResolver">The service resolver used to run the pipeline.</param>
     public QueueStorageBenzeneMessageClient(IMiddlewarePipeline<QueueStorageSendMessageContext> middlewarePipeline, ILogger<QueueStorageBenzeneMessageClient> logger, IServiceResolver serviceResolver)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _serviceResolver = serviceResolver;
         _middlewarePipeline = middlewarePipeline;
         _logger = logger;

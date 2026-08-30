@@ -37,6 +37,8 @@ public class EventGridBenzeneMessageClient : IBenzeneMessageClient
     /// <param name="serviceResolver">The service resolver used to run the pipeline.</param>
     public EventGridBenzeneMessageClient(string source, EventGridPublisherClient publisherClient, ILogger<EventGridBenzeneMessageClient> logger, IServiceResolver serviceResolver)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _serviceResolver = serviceResolver;
         _source = source;
         _logger = logger;
@@ -58,6 +60,8 @@ public class EventGridBenzeneMessageClient : IBenzeneMessageClient
     /// <param name="serviceResolver">The service resolver used to run the pipeline.</param>
     public EventGridBenzeneMessageClient(string source, IMiddlewarePipeline<EventGridSendMessageContext> middlewarePipeline, ILogger<EventGridBenzeneMessageClient> logger, IServiceResolver serviceResolver)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _serviceResolver = serviceResolver;
         _source = source;
         _middlewarePipeline = middlewarePipeline;

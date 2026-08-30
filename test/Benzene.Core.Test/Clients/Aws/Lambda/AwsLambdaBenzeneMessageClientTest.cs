@@ -8,6 +8,7 @@ using Benzene.Clients.Aws.Lambda;
 using Benzene.Results;
 using Benzene.Test.Clients.Aws.Samples;
 using Benzene.Test.Examples;
+using Benzene.Test.Logging.Helpers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -17,6 +18,33 @@ namespace Benzene.Test.Clients.Aws.Lambda;
 
 public class AwsLambdaBenzeneMessageClientTest
 {
+    [Fact]
+    public void Constructor_NullLogger_ThrowsImmediately()
+    {
+        var mockInnerAwsLambdaClient = new Mock<IAmazonLambda>();
+
+        Assert.Throws<ArgumentNullException>(() =>
+            new AwsLambdaBenzeneMessageClient(Defaults.LambdaName, mockInnerAwsLambdaClient.Object, null!));
+    }
+
+    [Fact]
+    public async Task Failure_LogsThroughTheErrorPathWithoutThrowing()
+    {
+        var mockInnerAwsLambdaClient = new Mock<IAmazonLambda>();
+        mockInnerAwsLambdaClient.Setup(x =>
+                x.InvokeAsync(It.IsAny<InvokeRequest>(), It.IsAny<CancellationToken>()))
+            .Throws(new Exception("boom"));
+
+        var collector = new FakeLogCollector();
+        var logger = new FakeLogger<AwsLambdaBenzeneMessageClient>(collector);
+
+        var client = new AwsLambdaBenzeneMessageClient(Defaults.LambdaName, mockInnerAwsLambdaClient.Object, logger);
+        var result = await client.SendMessageAsync<ExamplePayload, ExamplePayload>("some-topic", new ExamplePayload());
+
+        Assert.Equal(BenzeneResultStatus.ServiceUnavailable, result.Status);
+        Assert.Contains(collector.Entries, e => e.Exception?.Message == "boom");
+    }
+
     [Fact]
     public async Task RequestAndResponse()
     {

@@ -32,6 +32,8 @@ public class EventBridgeBenzeneMessageClient : IBenzeneMessageClient
     public EventBridgeBenzeneMessageClient(string source, IAmazonEventBridge amazonEventBridge,
         ILogger<EventBridgeBenzeneMessageClient> logger, IServiceResolver serviceResolver, string? eventBusName = null)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _source = source;
         _eventBusName = eventBusName;
         _serviceResolver = serviceResolver;
@@ -47,6 +49,8 @@ public class EventBridgeBenzeneMessageClient : IBenzeneMessageClient
     public EventBridgeBenzeneMessageClient(string source, IMiddlewarePipeline<EventBridgeSendMessageContext> middlewarePipeline,
         ILogger<EventBridgeBenzeneMessageClient> logger, IServiceResolver serviceResolver, string? eventBusName = null)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _source = source;
         _eventBusName = eventBusName;
         _middlewarePipeline = middlewarePipeline;

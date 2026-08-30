@@ -38,6 +38,8 @@ public class KafkaBenzeneMessageClient : IBenzeneMessageClient
     /// <param name="serviceResolver">The resolver the produce pipeline runs in.</param>
     public KafkaBenzeneMessageClient(IProducer<string, string> producer, ILogger<KafkaBenzeneMessageClient> logger, IServiceResolver serviceResolver)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _serviceResolver = serviceResolver;
         _logger = logger;
 
@@ -54,6 +56,8 @@ public class KafkaBenzeneMessageClient : IBenzeneMessageClient
     /// <param name="serviceResolver">The resolver the produce pipeline runs in.</param>
     public KafkaBenzeneMessageClient(IMiddlewarePipeline<KafkaSendMessageContext> middlewarePipeline, ILogger<KafkaBenzeneMessageClient> logger, IServiceResolver serviceResolver)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _serviceResolver = serviceResolver;
         _logger = logger;
         _middlewarePipeline = middlewarePipeline;

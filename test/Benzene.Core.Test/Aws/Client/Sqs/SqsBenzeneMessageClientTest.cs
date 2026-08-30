@@ -9,6 +9,7 @@ using Benzene.Clients;
 using Benzene.Clients.Aws.Sqs;
 using Benzene.Core.Middleware;
 using Benzene.Results;
+using Benzene.Test.Logging.Helpers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -17,6 +18,43 @@ namespace Benzene.Test.Aws.Client.Sqs;
 
 public class SqsBenzeneMessageClientTest
 {
+    [Fact]
+    public void Constructor_NullLogger_ThrowsImmediately()
+    {
+        var mockSqsClient = new Mock<IAmazonSQS>();
+
+        Assert.Throws<ArgumentNullException>(() =>
+            new SqsBenzeneMessageClient("some-queue-url", mockSqsClient.Object, null!, new NullServiceResolver()));
+    }
+
+    [Fact]
+    public void Constructor_PrebuiltPipelineOverload_NullLogger_ThrowsImmediately()
+    {
+        var pipeline = new MiddlewarePipelineBuilder<SqsSendMessageContext>(new NullBenzeneServiceContainer()).Build();
+
+        Assert.Throws<ArgumentNullException>(() =>
+            new SqsBenzeneMessageClient("some-queue-url", pipeline, null!, new NullServiceResolver()));
+    }
+
+    [Fact]
+    public async Task SendMessageAsync_ThrowingClient_LogsThroughTheErrorPathWithoutThrowing()
+    {
+        var mockSqsClient = new Mock<IAmazonSQS>();
+        mockSqsClient
+            .Setup(x => x.SendMessageAsync(It.IsAny<SendMessageRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new Exception("boom"));
+
+        var collector = new FakeLogCollector();
+        var logger = new FakeLogger<SqsBenzeneMessageClient>(collector);
+
+        var client = new SqsBenzeneMessageClient("some-queue-url", mockSqsClient.Object, logger, new NullServiceResolver());
+
+        var result = await client.SendMessageAsync<string, string>("some-topic", "some-message");
+
+        Assert.Equal(BenzeneResultStatus.ServiceUnavailable, result.Status);
+        Assert.Contains(collector.Entries, e => e.Exception?.Message == "boom");
+    }
+
     [Fact]
     public async Task SendMessageAsync_OkResponse_ReturnsAccepted()
     {
