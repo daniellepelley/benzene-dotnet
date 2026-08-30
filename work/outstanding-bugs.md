@@ -2712,6 +2712,44 @@ Ruling and rationale are in [`bug-fix-plan-rounds12-14-2026-08.md`](bug-fix-plan
   failing-send test using `FakeLogger`/`FakeLogCollector` (or the existing `RecordingLogger` for gRPC)
   confirming the catch block still logs the real exception and returns a failure result without
   throwing.
+### Tracked findings round 12–14, WP-O — Mesh UI vendoring doc + upstream items (#204–#207)
+Round 14's client-side review of `src/Benzene.Mesh.Ui` (`work/bug-fix-designs-round14-2026-08.md`
+§1) found that `mesh-ui.html`/`mesh-spec-ui.html` are not hand-written vanilla JS as
+`src/Benzene.Mesh.Ui/CLAUDE.md` extensively described — they are a minified React + Redux Toolkit
+build vendored verbatim from the external `benzene-ui` repo, kept honest by
+`.github/workflows/mesh-ui-drift-check.yml` ("never hand-edit"). The doc's mismatch with reality was
+itself the headline finding (#204); three further findings (#205–#207) are real client-side behavior
+gaps inside that vendored bundle.
+- **[RESOLVED] #204 — `src/Benzene.Mesh.Ui/CLAUDE.md` documented features/conventions absent from
+  the real shipped bundle, and never mentioned the vendoring relationship at all.** An agent trusting
+  the doc verbatim could plausibly hand-edit the generated `.html` files directly — exactly what the
+  drift check exists to prevent. Fixed by rewriting the doc: a prominent vendoring notice now leads
+  the file (never hand-edit; changes go upstream in `benzene-ui` then get re-vendored; the drift-check
+  workflow enforces it), the large dated changelog of hand-written-vanilla-JS implementation history
+  was removed rather than patched (it no longer describes the real bundle and there is no reliable way
+  to tell which parts, if any, still applied), and the accurate server-side/deployment material — the
+  `MeshUiPage`/`MeshUiMiddleware`/`MeshUiExtensions`/`MeshSpecUiPage`/`MeshSpecUiMiddleware` C# API
+  surface, the opt-in-parameter rules, and the static-file-host deployment guidance, all verified
+  against current source — was kept and, where the doc had fallen behind the actual method signature
+  (the undocumented `environment` parameter), corrected. No code changed; the vendored `.html` files
+  were not touched.
+- **[UPSTREAM] #205 — the Refresh control has no confirmation step, despite the package's own doc
+  calling it "real money per click" (fans out to every service in the mesh on every press).** The
+  sibling Test Console Send action requires an explicit checkbox before submitting; Refresh does not.
+  This is inside the vendored `benzene-ui` bundle, so it cannot be fixed by editing the `.html` files
+  in this repo — needs a fix in `benzene-ui` (add an equivalent confirmation gate to Refresh) followed
+  by a re-vendor of `mesh-ui.html` here. Documented in `src/Benzene.Mesh.Ui/CLAUDE.md`'s new "Known
+  upstream items" section. Out of scope for this repo's fix rounds.
+- **[UPSTREAM] #206 (minor) — the Sign-out control has no pending/disabled state**, unlike Refresh
+  and Send, so a rapid double-click can fire two concurrent logout requests. Same disposition as
+  #205: needs a `benzene-ui` fix (disable/pending-state Sign-out while its request is in flight) plus
+  a re-vendor. Documented in `src/Benzene.Mesh.Ui/CLAUDE.md`. Out of scope for this repo's fix rounds.
+- **[UPSTREAM] #207 (minor) — Sign-out's `fetch()` doesn't pass `credentials: "same-origin"`
+  explicitly**, unlike the other two write-action helpers (Refresh, Send). Not an active bug (the
+  browser default is same-origin) but an inconsistency worth normalizing upstream for consistency and
+  to avoid the omission reading as an oversight. Same disposition as #205/#206: needs a `benzene-ui`
+  fix plus a re-vendor. Documented in `src/Benzene.Mesh.Ui/CLAUDE.md`. Out of scope for this repo's
+  fix rounds.
 
 ## Open — maintainer decisions (the real remaining backlog)
 
