@@ -58,7 +58,11 @@ public class S3TestHelpersTest
             {
                 capturedContext = context;
                 return next();
-            })
+            }),
+            // This test is about key round-tripping through the wire/getters, not message routing -
+            // the inline middleware never sets a MessageResult, so escalating on that (#229's
+            // null-result fix) would be unrelated noise here, same as the sibling test above.
+            configure: options => options.RaiseOnFailureStatus = false
         );
 
         var s3Event = MessageBuilder.Create("ObjectCreated:Put", Defaults.MessageAsObject).AsS3(bucketName: "my-bucket", key: realKey);

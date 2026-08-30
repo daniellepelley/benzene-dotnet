@@ -305,8 +305,12 @@ public static class Extensions
     /// working through this extra layer of indirection: the container only disposes what it resolved
     /// (this holder), not fields buried inside it, so #133's fix (the limiter must be disposed when
     /// the container is) would otherwise silently stop working the moment the registration is wrapped.
+    /// Also implements <see cref="IDisposable"/>: a synchronous container disposal (e.g. the Microsoft
+    /// DI adapter's <c>ServiceProviderEngineScope.Dispose()</c>) throws if a resolved singleton implements
+    /// only <see cref="IAsyncDisposable"/>, so the sync path bridges to the async one, matching the same
+    /// pattern used by <c>MeshAnnouncer.Dispose()</c>.
     /// </summary>
-    internal sealed class InternallyOwnedRateLimiterHolder<TContext> : IAsyncDisposable
+    internal sealed class InternallyOwnedRateLimiterHolder<TContext> : IAsyncDisposable, IDisposable
     {
         public RateLimiter RateLimiter { get; }
 
@@ -316,6 +320,19 @@ public static class Extensions
         }
 
         public ValueTask DisposeAsync() => RateLimiter.DisposeAsync();
+
+        public void Dispose()
+        {
+            try
+            {
+                DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(5));
+            }
+            catch (AggregateException)
+            {
+                // Best-effort: the underlying RateLimiter's DisposeAsync is expected to complete
+                // promptly and without faulting under normal disposal.
+            }
+        }
     }
 
     private static TokenBucketRateLimiter CreateTokenBucket(int tokenLimit, int tokensPerPeriod,

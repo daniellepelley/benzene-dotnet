@@ -325,6 +325,14 @@ public class RateLimitingPipelineTest
         // container, must NOT throw - before the fix this always threw InvalidOperationException.
         var secondPipeline = firstPipeline.Create<SecondPipelineContext>();
         secondPipeline.UseFixedWindowRateLimiting(1, TimeSpan.FromMinutes(1));
+        // A terminal middleware that records an Ok result once the rate limiter admits the message -
+        // the rate limiter itself only writes a result on rejection (TooManyRequests), so without this
+        // the success path would leave secondResultSetter.LastResult null.
+        secondPipeline.Use((resolver, context, next) =>
+        {
+            var setter = resolver.GetService<Benzene.Abstractions.MessageHandlers.Mappers.IMessageHandlerResultSetter<SecondPipelineContext>>();
+            return setter.SetResultAsync(context, new MessageHandlerResult(BenzeneResult.Ok()));
+        });
         var secondBuiltPipeline = secondPipeline.Build();
 
         var resolverFactory = new MicrosoftServiceResolverFactory(serviceCollection.BuildServiceProvider());
