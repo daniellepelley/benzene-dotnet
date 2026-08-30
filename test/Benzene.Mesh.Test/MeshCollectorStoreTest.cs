@@ -470,4 +470,122 @@ public class MeshCollectorStoreTest
         var summary = Assert.Single(fleet.Services, s => s.Service == "svc");
         Assert.DoesNotContain("issues", summary.MissingFeeds);
     }
+
+    // ---- #283: RecordObservedActivityAndDrift must be version-aware like HashMatches - a topic
+    // declared by ANY currently live version of a service is "declared", not just the most-recently-
+    // registered ("headline") version's own list. Without this, the moment a second version
+    // registers, every message an older-but-still-live version legitimately handles is misfiled as
+    // contract-drift - the same false-positive class #251 fixed for HashMatches, 90 lines above.
+
+    [Fact]
+    public void OlderLiveVersion_HandlingItsOwnDeclaredTopic_IsNotFlaggedAsDrift_OnceANewerVersionRegisters()
+    {
+        var store = new MeshCollectorStore();
+        var v1 = Descriptor("orders", topics: new[] { "topic-a" }, serviceVersion: "1.0.0");
+        var v2 = Descriptor("orders", topics: new[] { "topic-b" }, serviceVersion: "2.0.0");
+        store.Register(v1);
+        store.Register(v2); // v2 becomes CurrentVersionKey - the "headline" row
+
+        // A v1 instance handles topic-a - exactly what v1's OWN live, registered descriptor declares.
+        store.AddEvents(new[] { Event("trace-1", "span-1", "orders", "topic-a", DateTimeOffset.UtcNow) });
+
+        Assert.Empty(store.Fleet().Issues);
+    }
+
+    [Fact]
+    public void TopicNoLiveVersionDeclares_IsStillFlaggedAsDrift_EvenWithMultipleLiveVersions()
+    {
+        var store = new MeshCollectorStore();
+        var v1 = Descriptor("orders", topics: new[] { "topic-a" }, serviceVersion: "1.0.0");
+        var v2 = Descriptor("orders", topics: new[] { "topic-b" }, serviceVersion: "2.0.0");
+        store.Register(v1);
+        store.Register(v2);
+
+        // Neither live version declares "topic-c" - a genuine drift must still be caught.
+        store.AddEvents(new[] { Event("trace-1", "span-1", "orders", "topic-c", DateTimeOffset.UtcNow) });
+
+        var issue = Assert.Single(store.Fleet().Issues);
+        Assert.Equal(MeshIssueClassification.ContractDrift, issue.Classification);
+        Assert.Equal("topic-c", issue.Topic);
+    }
+
+    // ---- #290: ServiceState.Descriptors has no eviction policy - a service that legitimately
+    // re-registers under a new ServiceVersion on every deploy accumulates one permanent entry per
+    // historical deploy, forever. A max-versions-per-service cap (default 8) bounds it, evicting the
+    // least-recently-registered non-current version (preferring one with no live instance) and
+    // retracting its topic edges so nothing dangles.
+
+    private static int DescriptorCountFor(MeshCollectorStore store, string serviceName)
+    {
+        var servicesField = typeof(MeshCollectorStore)
+            .GetField("_services", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        var services = (System.Collections.IDictionary)servicesField.GetValue(store)!;
+        var state = services[serviceName]!;
+        var descriptorsField = state.GetType()
+            .GetField("Descriptors", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)!;
+        var descriptors = (System.Collections.IDictionary)descriptorsField.GetValue(state)!;
+        return descriptors.Count;
+    }
+
+    [Fact]
+    public void Register_ManyDistinctVersions_DescriptorsAreCappedAtTheConfiguredMax()
+    {
+        var store = new MeshCollectorStore(maxVersionsPerService: 8);
+        const int deployCount = 5000; // simulates 5,000 CI/CD deploys of one logical service
+        for (var i = 0; i < deployCount; i++)
+        {
+            store.Register(Descriptor("orders-api", topics: new[] { $"topic-{i}" }, serviceVersion: $"deploy-{i}"));
+        }
+
+        Assert.Equal(8, DescriptorCountFor(store, "orders-api"));
+    }
+
+    [Fact]
+    public void Register_OverCap_EvictsTheLeastRecentlyRegisteredVersionWithNoLiveInstance_NotACurrentOrLiveOne()
+    {
+        var store = new MeshCollectorStore(maxVersionsPerService: 2);
+        store.Register(new MeshServiceDescriptor
+        {
+            Service = "orders", ServiceVersion = "v1", DescriptorHash = "hash-v1",
+            Topics = new List<MeshTopicDescriptor> { new() { Id = "topic-old" } }
+        });
+        // v1 has a live instance reporting ITS hash - it must survive eviction in favor of a dead version.
+        store.Heartbeat(new MeshHeartbeat { Service = "orders", InstanceId = "i1", DescriptorHash = "hash-v1" });
+        store.Register(new MeshServiceDescriptor
+        {
+            Service = "orders", ServiceVersion = "v2", DescriptorHash = "hash-v2",
+            Topics = new List<MeshTopicDescriptor> { new() { Id = "topic-mid" } }
+        }); // no instance ever reports hash-v2
+
+        // Registering v3 exceeds the cap of 2: v2 (no live instance) must be evicted over v1 (live instance).
+        store.Register(new MeshServiceDescriptor
+        {
+            Service = "orders", ServiceVersion = "v3", DescriptorHash = "hash-v3",
+            Topics = new List<MeshTopicDescriptor> { new() { Id = "topic-new" } }
+        });
+
+        Assert.Equal(2, DescriptorCountFor(store, "orders"));
+        // v1's edge survives...
+        Assert.Equal(new List<string> { "orders" }, store.Topic("topic-old", null)!.Consumers);
+        // ...v2's edge was retracted (evicted), not left dangling in the topic catalog...
+        Assert.Empty(store.Topic("topic-mid", null)!.Consumers);
+        // ...and v3 (the newly registered, current version) is present.
+        Assert.Equal(new List<string> { "orders" }, store.Topic("topic-new", null)!.Consumers);
+    }
+
+    [Fact]
+    public void Register_OverCap_NeverEvictsTheCurrentVersion()
+    {
+        var store = new MeshCollectorStore(maxVersionsPerService: 1);
+        store.Register(Descriptor("orders", topics: new[] { "topic-a" }, serviceVersion: "v1"));
+
+        // Registering v2 exceeds the cap of 1 - v1 (the only other version) is evicted, never v2
+        // itself (the version just registered, which becomes current).
+        store.Register(Descriptor("orders", topics: new[] { "topic-b" }, serviceVersion: "v2"));
+
+        Assert.Equal(1, DescriptorCountFor(store, "orders"));
+        var summary = store.Fleet().Services.Single(s => s.Service == "orders");
+        Assert.Equal("v2", summary.ServiceVersion);
+        Assert.Empty(store.Topic("topic-a", null)!.Consumers); // v1's edge retracted on eviction
+    }
 }

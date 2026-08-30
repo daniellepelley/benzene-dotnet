@@ -3360,6 +3360,90 @@ Verified: `dotnet test test/Benzene.Mesh.Test -c Release --filter "FullyQualifie
   rethrowing, so its observable fix is "the call actually completes near the deadline" rather than a
   propagated `TimeoutException` - documented inline on that test.
 
+## Round 17, WP-B — Mesh collector: drift detector, RecentFlows cancellation, descriptor eviction (2026-08-30)
+
+- **[RESOLVED] #283 — `RecordObservedActivityAndDrift` still read only the single "headline"
+  version's descriptor (`Descriptors[CurrentVersionKey]`), so a topic declared only by an
+  older-but-still-live version was wrongly flagged as undeclared drift the moment a second version
+  registered - the same false-positive class #251 fixed for `HashMatches`, reintroduced 90 lines
+  lower in the same file, in the same commit.** A canary/blue-green rollout of a service (v1
+  declaring `topic-a`, v2 declaring `topic-b`, both live) had every message v1 legitimately handled
+  on `topic-a` misfiled as a synthetic `contract-drift` issue the instant v2 registered, even though
+  v1's own descriptor was still correctly registered and live. Fixed by making the traffic-observed
+  drift signal reason about live versions the same way `HashMatches` already does: a topic now
+  counts as declared when it appears in the `Topics`/`Produces` list of ANY currently live version
+  of the service, not just the most-recently-registered one. New helpers
+  `IsDeclared(ServiceState, string)` and `ContainsTopicInAnyLiveVersion(ServiceState, (string, string),
+  bool)` replace the old single-descriptor `IsDeclared(MeshServiceDescriptor?, string)`/`ContainsTopic`
+  call sites in `RecordObservedActivityAndDrift`, both iterating `state.Descriptors.Values` exactly
+  as `HashMatches` does. Accepted, documented trade-off (not a silent false positive): `MeshTraceEvent`
+  carries no per-event `ServiceVersion`, so a genuine single-version drift on an edge that another
+  live version also happens to declare goes undetected until that other version retires - see the
+  `[OPEN]` entry below for the wire-shape question this would need to close cleanly.
+  `src/Benzene.Mesh.Collector/MeshCollectorStore.cs`. Tests (`test/Benzene.Mesh.Test/MeshCollectorStoreTest.cs`):
+  `OlderLiveVersion_HandlingItsOwnDeclaredTopic_IsNotFlaggedAsDrift_OnceANewerVersionRegisters` (the
+  false-positive repro, inverted to green) and
+  `TopicNoLiveVersionDeclares_IsStillFlaggedAsDrift_EvenWithMultipleLiveVersions` (the positive case:
+  a real drift on an edge no live version declares is still caught). Every pre-existing
+  `MeshCollectorStoreTest`/`MeshCollectorSideBySideVersionTest` case (in particular #251's own
+  regression tests) stayed green unmodified.
+- **[RESOLVED] #284 — `CompositeMeshFleetReadModel.RecentFlowsAsync` (and `TopicsFromUsageAsync`)
+  never got #256's cancellation-vs-failure catch filter: a bare `catch` swallowed a genuine caller
+  cancellation on `mesh:query:fleet` - the exact call #250 wired a real ambient token into - and
+  reported a normal, silently-degraded empty `FleetView` instead of propagating
+  `OperationCanceledException`.** #256 narrowed the fetch-isolation catch on `TraceAsync`/
+  `CorrelationAsync` to exclude the method's own cancelled token, but `RecentFlowsAsync` and the
+  usage-source fetch loop inside `TopicsFromUsageAsync` kept their original bare catches, undoing
+  #252's careful work of letting a genuine cancellation escape the trace-source backends' own
+  per-item fetch isolation. `TimeoutMiddleware` only converts a *thrown* `OperationCanceledException`
+  into `BenzeneResultStatus.Timeout`; with the bare catch, a caller wrapping `mesh:query:fleet` in
+  `UseTimeout(...)` against a trace-backed composite plane got a 200 OK with empty
+  `Traces`/`Services` on every deadline, not a timeout result. Fixed by applying #256's exact filter,
+  `catch (Exception ex) when (!(ex is OperationCanceledException && cancellationToken.IsCancellationRequested))`,
+  to both methods; a genuinely failing (non-cancellation) source still degrades to empty
+  flows/topics exactly as before.
+  `src/Benzene.Mesh.Collector/CompositeMeshFleetReadModel.cs`. Tests
+  (`test/Benzene.Mesh.Test/CompositeMeshFleetReadModelTest.cs`):
+  `FleetAsync_RecentFlowsSource_PropagatesRealCancellation_InsteadOfReportingEmptyFlows`,
+  `FleetAsync_UsageSource_PropagatesRealCancellation_InsteadOfReportingEmptyTopics`, plus the negative
+  cases `FleetAsync_FailingTraceSource_StillDegradesToEmptyFlows_WhenTheCallersTokenIsNotCancelled` and
+  `FleetAsync_FailingUsageSource_StillDegradesToEmptyTopics_WhenTheCallersTokenIsNotCancelled`. The
+  existing #256 `TraceAsync`/`CorrelationAsync` regression tests stayed green unmodified.
+- **[RESOLVED] #290 — `MeshCollectorStore`'s per-version `Descriptors` dictionary (new in #251) had
+  no eviction policy at all: a service that legitimately re-registers under a new `ServiceVersion` on
+  every deploy (ordinary CI/CD practice) accumulated one permanent entry per historical deploy for
+  the entire life of the collector process, degrading `HashMatches` from an O(1) comparison to an
+  unboundedly-growing O(v) scan per query.** Proven at 5,000 synthetic deploys retaining 5,000
+  entries. Fixed by adding a max-versions-per-service cap, `maxVersionsPerService` (default 8,
+  a new optional constructor parameter alongside the existing `maxTraceEvents`/`maxIssues` bounds -
+  side-by-side deployments realistically hold 2-3 live versions; 8 gives generous headroom).
+  `ServiceState` now also tracks a monotonic `DescriptorRegisteredAt` stamp per version key, set on
+  every registration, making "least-recently-registered" well-defined. When a brand-new version
+  registration would push a service's `Descriptors` over the cap, `EvictOneVersion` evicts the
+  least-recently-registered version that has no live instance currently reporting its
+  `DescriptorHash` (checked against `state.Instances`, via the new `HasLiveInstance` helper); if
+  every retained version has a live instance, the cap still wins and the least-recently-registered
+  version is evicted regardless (an in-memory diagnostic store, not a health signal - nothing is
+  logged or counted on eviction). The version just being registered is never itself a candidate (it
+  isn't in `Descriptors` yet, and is about to become `CurrentVersionKey`), so the current version is
+  never evicted. The evicted version's edges are retracted via the same `RetractEdges` call a
+  same-key re-registration already uses, so nothing is left dangling in the topic catalog.
+  `src/Benzene.Mesh.Collector/MeshCollectorStore.cs`. Tests
+  (`test/Benzene.Mesh.Test/MeshCollectorStoreTest.cs`):
+  `Register_ManyDistinctVersions_DescriptorsAreCappedAtTheConfiguredMax` (5,000-deploy growth test,
+  inverted: retained count is now 8, not 5,000),
+  `Register_OverCap_EvictsTheLeastRecentlyRegisteredVersionWithNoLiveInstance_NotACurrentOrLiveOne`
+  (a version with a live instance survives eviction over a dead sibling, and the evicted version's
+  topic edges are gone from the catalog), and `Register_OverCap_NeverEvictsTheCurrentVersion`. Cap
+  policy vs. a heartbeat-TTL-based alternative is recorded as an `[OPEN]` maintainer question below.
+
+  Full `dotnet test test/Benzene.Mesh.Test -c Release`: 600 passed / 0 failed (two transient timing
+  failures on the first run - `TempoTraceSourceTest.GetCorrelationAsync_FetchesMatchedTracesConcurrently_NotSequentially`
+  and `MeshCollectorQueryCancellationTest.UseTimeout_AroundATraceQuery_ActuallyBoundsTheRealReadModelCall`,
+  both timing-sensitive and unrelated to any file this WP touched - both passed cleanly re-run in
+  isolation, confirming CPU contention from other work packages building concurrently on the shared
+  host, not a regression).
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.
@@ -3565,6 +3649,39 @@ regressed by this work package.
   whether concurrent-attempt strategies are worth that redesign at all, or whether the middleware's
   documented position should simply stay "sequential-attempt only, hedge at a different layer."
   (`work/review-round16-performance-2026-08.md` Finding 1, recommendation 2(b).)
+
+### New from round 17, WP-B — Mesh collector (2026-08-30)
+- **[OPEN] Should the mesh spec's `MeshTraceEvent` wire shape grow a `serviceVersion` field so
+  contract drift can be attributed per-version?** #283's fix makes `RecordObservedActivityAndDrift`
+  treat a topic as declared when ANY currently live version of a service declares it, mirroring
+  `HashMatches`'s any-live-version rule - but that's a documented approximation, not a precise
+  attribution. `MeshTraceEvent` (`src/Benzene.Mesh.Wire/MeshTraceEvent.cs`) carries no field
+  identifying which specific version of the service emitted it, so there is no clean way, without a
+  wire-shape change, to check a trace event against the ONE version that actually produced it. The
+  practical consequence: a genuine single-version drift (v1 calls an edge v1 never declared) goes
+  undetected for as long as ANY other live version (e.g. v2) happens to also declare that same edge -
+  it only surfaces once every other declaring version retires. Closing this precisely would mean the
+  mesh spec's wire contract growing a `serviceVersion` field on the trace event shape - a
+  cross-language spec change (`docs/specification/mesh.md` + every port's wire type +
+  `conformance/*.json` fixtures), not a change this repo can make unilaterally in one port. Needs a
+  maintainer/spec-owner decision on whether the attribution gain is worth the wire-shape churn across
+  every language port. (`work/review-round17-mesh-composition-2026-08.md` Finding 1;
+  `work/bug-fix-plan-round17-2026-08.md` WP-B ruling 1.)
+- **[OPEN] Is a hard max-versions-per-service cap the right retention policy for `MeshCollectorStore`'s
+  `Descriptors`, or should it be a heartbeat-TTL-based eviction instead?** #290 implements the cap
+  ruling specified for this round - `maxVersionsPerService` (default 8), evicting the
+  least-recently-registered non-current version, preferring one with no live instance, when a new
+  version registration would exceed it. That is a deliberately simpler policy than a TTL/heartbeat-
+  absence-driven one (e.g. "retire a version once no instance has heartbeated it for N minutes,
+  regardless of registration count"), which would track actual liveness over time rather than just
+  registration order at cap time, but is a materially bigger design surface (a new timer/sweep
+  concern, a policy for what "no heartbeat" means when heartbeats are themselves optional/degraded
+  per spec §6). A hard cap can, in principle, evict a version that is still receiving live traffic if
+  enough OTHER versions register in a burst before it heartbeats again; a TTL policy would not have
+  that failure mode but trades it for unbounded growth if instances stop heartbeating without ever
+  formally retiring. Needs a maintainer decision on whether the cap is the durable policy or an
+  interim guardrail pending a TTL-based redesign. (`work/review-round17-performance-2026-08.md`
+  Finding 3; `work/bug-fix-plan-round17-2026-08.md` WP-B ruling 3.)
 
 ---
 

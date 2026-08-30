@@ -234,4 +234,60 @@ public class CompositeMeshFleetReadModelTest
 
         Assert.Null(view);
     }
+
+    // #284: RecentFlowsAsync/TopicsFromUsageAsync never got #256's cancellation-vs-failure filter -
+    // mesh:query:fleet (the exact call #250 wired a real ambient token into) swallowed a genuine
+    // caller cancellation and reported a normal, silently-degraded empty response instead of
+    // propagating OperationCanceledException the way TraceAsync/CorrelationAsync already do.
+
+    private sealed class CancellingUsageSource : IMeshUsageSource
+    {
+        public Task<MeshUsage?> FetchUsageAsync(MeshUsageWindow? window = null, CancellationToken cancellationToken = default)
+            => throw new OperationCanceledException(cancellationToken);
+    }
+
+    [Fact]
+    public async Task FleetAsync_RecentFlowsSource_PropagatesRealCancellation_InsteadOfReportingEmptyFlows()
+    {
+        var model = new CompositeMeshFleetReadModel(new CancellingTraceSource(), Array.Empty<IMeshUsageSource>());
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => model.FleetAsync(null, includeFlows: true, cts.Token));
+    }
+
+    [Fact]
+    public async Task FleetAsync_UsageSource_PropagatesRealCancellation_InsteadOfReportingEmptyTopics()
+    {
+        var model = new CompositeMeshFleetReadModel(new FakeTraceSource(), new IMeshUsageSource[] { new CancellingUsageSource() });
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => model.FleetAsync(null, includeFlows: true, cts.Token));
+    }
+
+    // The negative case: a genuinely failing (non-cancellation) source must still degrade to
+    // empty flows/topics even when a live, non-cancelled token is in scope - the fetch-isolation
+    // rule is unaffected by the narrower catch filter.
+    [Fact]
+    public async Task FleetAsync_FailingTraceSource_StillDegradesToEmptyFlows_WhenTheCallersTokenIsNotCancelled()
+    {
+        var model = new CompositeMeshFleetReadModel(new FakeTraceSource { ThrowOnRecent = true }, Array.Empty<IMeshUsageSource>());
+        using var cts = new CancellationTokenSource(); // never cancelled
+
+        var fleet = await model.FleetAsync(null, includeFlows: true, cts.Token);
+
+        Assert.Empty(fleet.Traces);
+    }
+
+    [Fact]
+    public async Task FleetAsync_FailingUsageSource_StillDegradesToEmptyTopics_WhenTheCallersTokenIsNotCancelled()
+    {
+        var model = new CompositeMeshFleetReadModel(new FakeTraceSource(), new IMeshUsageSource[] { new FakeUsageSource { Throw = true } });
+        using var cts = new CancellationTokenSource(); // never cancelled
+
+        var fleet = await model.FleetAsync(null, includeFlows: true, cts.Token);
+
+        Assert.Empty(fleet.Topics);
+    }
 }
