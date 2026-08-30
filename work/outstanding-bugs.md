@@ -2901,6 +2901,89 @@ Full baseline re-verified after both fixes: `Benzene.Core.Test` 3296 passed / 2 
 `Benzene.Mesh.Test` 575 passed, `Benzene.Mesh.Host.Test` 150 passed, `Benzene.Examples.sln` build 0
 errors. Pushed to `main` (`28473b0`).
 
+## Resolved in round 16, WP-A (Core disposal architecture) (2026-08-30)
+
+Findings from the round-16 review pass (task board #266, #262; `work/bug-fix-plan-round16-2026-08.md`
+WP-A; evidence in `work/review-round16-core-2026-08.md` §1 and
+`work/review-round16-infrastructure-2026-08.md`'s Redis finding). Fixed in
+`src/Benzene.Microsoft.Dependencies/MicrosoftServiceResolverAdapter.cs`,
+`src/Benzene.Microsoft.Dependencies/MicrosoftServiceResolverFactory.cs`,
+`src/Benzene.Cache.Redis/RedisCacheService.cs`.
+
+- **[RESOLVED] #266 — `MicrosoftServiceResolverAdapter.Dispose()` disposed the wrapped MS DI scope
+  synchronously; Microsoft.Extensions.DependencyInjection's own `ServiceProviderEngineScope.Dispose()`
+  throws `InvalidOperationException` the moment it has to tear down a container-owned instance
+  (scoped, transient, or singleton) that implements only `IAsyncDisposable` — an entirely ordinary
+  shape for an async-native client/connection.** Every transport built on `Benzene.Core.Middleware`
+  tears its per-message scope down through exactly this path
+  (`MiddlewareApplication.HandleAsync`'s `using var serviceResolver = ...`), so any application
+  registering such a service crashed on every single message that resolved it — and the resource's
+  own `DisposeAsync` never ran (crash **and** leak). The Autofac adapter never had this defect: Autofac's
+  own `ILifetimeScope.Dispose()` already bridges an `IAsyncDisposable`-only component correctly. Fixed
+  generically (not per-type) in `MicrosoftServiceResolverAdapter.Dispose()` and, for the root
+  provider/container, `MicrosoftServiceResolverFactory.Dispose()`: both now bridge to the wrapped
+  scope/provider's own `DisposeAsync()` — with an **unbounded** wait, not the bounded-5s pattern used
+  for best-effort telemetry flushes (`MeshAnnouncer`) — whenever it implements `IAsyncDisposable`,
+  falling back to the plain synchronous `Dispose()` only when it doesn't. The wait is deliberately
+  unbounded because it's awaiting the caller's *own* disposal code, not a network flush — abandoning it
+  early would silently leak resources by design, and this now matches Autofac's own unbounded blocking
+  semantics for the identical shape rather than introducing new behavior. Side effect (intentional,
+  not a regression): a container-owned instance implementing **both** `IDisposable` and
+  `IAsyncDisposable` now observes its `DisposeAsync`, not its `Dispose`, when torn down via
+  `MicrosoftServiceResolverFactory.Dispose()`/`MicrosoftServiceResolverAdapter.Dispose()` — matching
+  the preference `MicrosoftServiceResolverFactory.DisposeAsync()` already had — because the adapter has
+  no way to know in advance, without attempting disposal, whether *any* other container-owned instance
+  needs the async path; `MicrosoftDITest.Dispose_ProviderBuiltByFactory_DisposesSingletons` updated
+  accordingly (asserts `DisposedAsync`, not `Disposed`). New tests:
+  `MicrosoftDITest.Issue266_ScopedAsyncOnlyDisposable_ScopeDisposal_DoesNotThrow_AndActuallyDisposesAsync`,
+  `MicrosoftDITest.Issue266_SingletonAsyncOnlyDisposable_FactoryDisposal_DoesNotThrow_AndActuallyDisposesAsync`
+  (both red before the fix: `InvalidOperationException`), plus the permanent parity test
+  `AsyncOnlyDisposableParityTest` (new file) asserting both the Autofac and Microsoft DI adapters
+  dispose an `IAsyncDisposable`-only container-owned service — singleton and scoped — identically,
+  without throwing, and actually run its `DisposeAsync`.
+- **[RESOLVED] #262 — `RedisCacheService` is `IAsyncDisposable`-only, so it tripped the identical
+  #266 defect whenever container-owned, including through `MicrosoftServiceResolverFactory.Dispose()`'s
+  `(_serviceProvider as IDisposable)?.Dispose()` — the *only* disposal path `Benzene.Aws.Lambda.Core`
+  has at all (its whole disposal chain, `IAwsLambdaEntryPoint`/`AwsLambdaHost<TStartUp>`, is
+  `IDisposable`-only, with no `DisposeAsync` anywhere in that chain for a caller to prefer instead).**
+  Fixed independently of #266 per the plan's explicit ruling (the #266 adapter fix alone would mask
+  this one, since it covers Benzene-managed containers — but `RedisCacheService`'s own `CLAUDE.md` tells
+  consumers to register it in *their own* container, which may not be Benzene's adapter at all): added
+  `IDisposable` to `RedisCacheService`, bridging synchronously to its existing `DisposeAsync()` with the
+  established **bounded** 5-second wait (`DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(5))`,
+  swallowing the resulting `AggregateException`) — the same pattern as `MeshAnnouncer.Dispose()` and
+  round 15's `InternallyOwnedRateLimiterHolder<TContext>.Dispose()`. Bounded (unlike #266's adapter-level
+  fix) because the work being awaited here is `RedisCacheService`'s own disposal, a prompt local
+  operation (disposing an already-connected `IConnectionMultiplexer`, or abandoning a connect that never
+  completed) — not arbitrary user code. New test file
+  `test/Benzene.Core.Test/Cache/Redis/RedisCacheServiceContainerDisposalTest.cs`
+  (`ScopedRedisCacheService_PerMessageScopeDisposal_DoesNotThrow`,
+  `SingletonRedisCacheService_SyncFactoryDisposal_DoesNotThrow`), both red before the fix
+  (`InvalidOperationException` via `MicrosoftServiceResolverAdapter`/`MicrosoftServiceResolverFactory`)
+  and green after — reproducing both the `AddScoped` per-message-scope path (mirroring
+  `AwsLambdaEntryPoint.FunctionHandlerAsync`'s per-invocation scope) and the `AddSingleton`
+  container/factory-disposal path (mirroring `AwsLambdaHost<TStartUp>.Dispose()`'s only disposal route).
+
+Scoped verification: `dotnet test test/Benzene.Core.Test -c Release --filter
+"FullyQualifiedName~Cache.Redis|FullyQualifiedName~Microsoft|FullyQualifiedName~AsyncOnlyDisposableParityTest|FullyQualifiedName~Autofac"`
+— 90 passed, 0 failed. Full `Benzene.Test.Cache` namespace also re-run standalone — 67 passed, 0
+failed. The centralized post-merge baseline (all round-16 work packages) is the coordinator's
+responsibility per the round's execution protocol.
+
+**[OPEN] — should `IServiceResolver` grow an async disposal contract?** #266's fix bridges the
+existing purely-synchronous `IServiceResolver : IDisposable` contract to `DisposeAsync()` underneath,
+inside each adapter, rather than adding `IAsyncDisposable` to `IServiceResolver` itself and switching
+`MiddlewareApplication`'s per-message `using var serviceResolver = ...` to `await using`. That would be
+a public-contract change rippling through every DI adapter (Microsoft, Autofac, any third-party
+implementation) and every call site that constructs/disposes an `IServiceResolver` — explicitly ruled
+out of scope for round 16 (`work/bug-fix-plan-round16-2026-08.md` WP-A ruling 3) because the sync
+bridge already resolves the user-visible defect without it. Worth a maintainer decision before 1.0:
+would a genuinely async per-message disposal path (no blocking wait at all, even bounded) be worth the
+breaking-change cost across every adapter and hosting integration, or does the sync-bridge-with-
+unbounded-wait resolve this permanently? If the abstraction never grows one, document that
+`IServiceResolver.Dispose()` blocking on a user's `DisposeAsync()` is a deliberate, permanent design
+choice (not a stopgap) so it isn't re-litigated as an oversight in a future round.
+
 ## Open — maintainer decisions (the real remaining backlog)
 
 None of these is a clean self-contained bug; each changes behaviour, a public API, or a policy.

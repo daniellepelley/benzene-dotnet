@@ -5,16 +5,25 @@ Redis-backed implementation of the `Benzene.Cache.Core` abstractions, using Stac
 distributed caching shared across instances.
 
 ## Key types/interfaces
-- `RedisCacheService` - **abstract** `ICacheService`, `IAsyncDisposable`. You subclass it and
-  implement `GetConfigurationOptionsAsync()` (returns a StackExchange.Redis `ConfigurationOptions`);
-  its constructor also optionally takes an `ISerializer` (DI-resolved automatically for you when your
-  subclass is constructed through DI), shared by every cache entry this service creates, via its
-  public `Serializer` property. Holds a lazily-established, cached `IConnectionMultiplexer`;
-  `CanConnectAsync(cancellationToken)` issues a `PING`. `DisposeAsync()` disposes that cached
-  multiplexer (a no-op if a connect was never started or never completed) - register your subclass so
-  its container disposes it on shutdown; after it runs, any further `RedisSetup`/`StartConnection`/
-  connect-driven call throws `ObjectDisposedException` rather than silently opening (and leaking) a
-  new multiplexer. Factory methods build the concrete entry/action types below.
+- `RedisCacheService` - **abstract** `ICacheService`, `IAsyncDisposable`, `IDisposable`. You subclass
+  it and implement `GetConfigurationOptionsAsync()` (returns a StackExchange.Redis
+  `ConfigurationOptions`); its constructor also optionally takes an `ISerializer` (DI-resolved
+  automatically for you when your subclass is constructed through DI), shared by every cache entry
+  this service creates, via its public `Serializer` property. Holds a lazily-established, cached
+  `IConnectionMultiplexer`; `CanConnectAsync(cancellationToken)` issues a `PING`. `DisposeAsync()`
+  disposes that cached multiplexer (a no-op if a connect was never started or never completed) -
+  register your subclass so its container disposes it on shutdown; after it runs, any further
+  `RedisSetup`/`StartConnection`/connect-driven call throws `ObjectDisposedException` rather than
+  silently opening (and leaking) a new multiplexer. `Dispose()` (#262, round 16) bridges to that same
+  `DisposeAsync()` with a bounded 5-second wait, swallowing the resulting `AggregateException` - added
+  because `Benzene.Abstractions.DI.IServiceResolver`, the only container-scope abstraction this
+  codebase's transports use, exposes solely `IDisposable`; without this bridge, a container's
+  synchronous scope/provider teardown threw `InvalidOperationException` the moment it needed to
+  dispose an `IAsyncDisposable`-only instance, on the very first message for an `AddScoped`
+  registration. You can still call `DisposeAsync()` directly (e.g. from an async `IHostedService`
+  shutdown) to get the identical bounded-time-free async path; `Dispose()` exists so "register your
+  subclass so its container disposes it" (above) is actually safe regardless of which disposal
+  contract that container's scope uses. Factory methods build the concrete entry/action types below.
   `CreatePrefixActions(prefix)` throws `ArgumentException` for a null/empty/whitespace `prefix`
   (#198) before ever building the wildcard pattern - an empty prefix would otherwise silently become
   the literal glob `"*"`, matching (and so invalidating) the entire keyspace.
