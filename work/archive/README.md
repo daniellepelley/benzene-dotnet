@@ -184,3 +184,56 @@ it had one, otherwise 2026-08).
   `deploy/Mesh/Benzene.Mesh.Host.Test` 150/150; `Benzene.Examples.sln` 0 errors); the per-finding
   summaries live in [`../outstanding-bugs.md`](../outstanding-bugs.md)'s Resolved section (search
   "Tracked findings round 11"), each pointing back here for the full record.
+
+## Dated review and fix-design records (2026-08-27/29, rounds 12–14)
+
+Three independent review passes, run after round 11's fix round landed: round 12 (task board
+#185–#197, 4 parallel agents covering the last previously-unreviewed corners of `src/`), round 13
+(#198–#203, a controlled blind re-audit experiment measuring whether the find-rate declines on
+re-review), and round 14 (#204–#224, the mesh UI client-side review plus early-round re-passes at
+the mature review standard). All three review docs' worth-fixing findings were consolidated into one
+fix plan and landed as ten work packages (WP-G through WP-P):
+
+- `bug-fix-designs-round12-2026-08.md`, `bug-fix-designs-round13-2026-08.md`,
+  `bug-fix-designs-round14-2026-08.md` — the three review records (findings, evidence, and — where a
+  ruling was made inline — rationale).
+- `bug-fix-plan-rounds12-14-2026-08.md` — the fix plan consolidating all three reviews plus the
+  long-pending #47 into WP-G through WP-P, with the landing merge commits in its stamp.
+
+All ten work packages landed and were pushed to `main` via 10 merge commits, in landing order:
+`d5ae33e` (WP-G, #47), `08bbab8` (WP-H, #185–187), `50293fd` (WP-I, #188–190), `aab6f7b` (WP-J,
+#198–202), `0ae9d23` (WP-K, #208–209), `473ab59` (WP-L, #210), `298f704` (WP-M, #211–213), `8efbd20`
+(WP-N, #191–192), `dd6b911` (WP-O, #204; #205–207 dispositioned `[UPSTREAM]` — need a `benzene-ui`
+fix, not this repo), `61bbf08` (WP-P, #193–196,#214–223). Archived 2026-08-30 after the centralized
+post-merge baseline (which also surfaced and fixed two integration bugs at the intersection of this
+round and round 15 below — see `work/outstanding-bugs.md`'s "Round 15 + rounds 12–14" section):
+`Benzene.sln` build 0 errors; `Benzene.Core.Test` 3296 passed/2 skipped/0 failed; `Benzene.Mesh.Test`
+575 passed; `Benzene.Mesh.Host.Test` 150 passed; `Benzene.Examples.sln` build 0 errors. Per-finding
+summaries live in [`../outstanding-bugs.md`](../outstanding-bugs.md)'s "Rounds 12–14 fixes
+(2026-08-29)" section (search "Tracked findings round" for WP-G through WP-P), each pointing back to
+the relevant review doc above for the full record.
+
+## Dated review and fix-design record (2026-08-29/30, round 15)
+
+- `bug-fix-designs-round15-2026-08.md` — the round-15 review record (task board #226–#245: six
+  parallel review agents spanning the whole tree — core messaging pipeline, AWS Lambda triggers,
+  Azure Function triggers/clients, the mesh ecosystem, cross-cutting infra
+  (serialization/resilience/DI), and the CodeGen/Schema suite), successor to the round-12–14 reviews
+  above.
+- `bug-fix-plan-round15-2026-08.md` — the fix plan, six work packages (WP-A through WP-F).
+
+All six work packages landed and were pushed to `main` via 6 merge commits, in landing order:
+`6f199f1` (WP-A, #226), `09333f0` (WP-B, #227–229), `23ec329` (WP-C, #230–232), `3692ecf` (WP-D,
+#233–236), `f648ffb` (WP-E, #237–238), `d05aa29` (WP-F, #239–244). Archived 2026-08-30 after the
+centralized post-merge baseline, run once this round and rounds 12–14 above had both fully landed on
+`main` together — the baseline surfaced two integration bugs invisible to either round's own isolated
+verification (`S3TestHelpersTest` and `RateLimitingPipelineTest`, each caused by two independently-
+correct work packages interacting only once merged), fixed and recorded in
+[`../outstanding-bugs.md`](../outstanding-bugs.md)'s "Round 15 + rounds 12–14: two integration bugs
+found only by the post-merge baseline (2026-08-30)" section. Final baseline: `Benzene.sln` build 0
+errors; `Benzene.Core.Test` 3296 passed/2 skipped/0 failed; `Benzene.Mesh.Test` 575 passed;
+`Benzene.Mesh.Host.Test` 150 passed; `Benzene.Examples.sln` build 0 errors. Per-finding summaries live
+in [`../outstanding-bugs.md`](../outstanding-bugs.md) (search "Round 15"), each pointing back to the
+review doc above for the full record. One deliberate scope correction: #227's fourth named transport,
+Kinesis, was found structurally unable to support preset topics and was left unfixed by design — see
+the WP-B resolved entry.

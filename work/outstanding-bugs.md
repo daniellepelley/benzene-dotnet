@@ -770,7 +770,7 @@ codegen correctness (P10, P11)".
   `.Distinct()`ed as defense-in-depth for direct callers. See WP-H.
 
 ### Tracked findings rounds 12–14, WP-M — CodeGen.ApiGateway/Markdown escaping + guards (done)
-Ruling in [`bug-fix-plan-rounds12-14-2026-08.md`](bug-fix-plan-rounds12-14-2026-08.md) §"WP-M". Direct
+Ruling in [`bug-fix-plan-rounds12-14-2026-08.md`](archive/bug-fix-plan-rounds12-14-2026-08.md) §"WP-M". Direct
 continuation of #86/#87 above — same bug class, reached through different inputs.
 - **[RESOLVED] #211 — `ApiGatewayBuilderV1`'s duplicate-route guard (`BuildCodeFiles`) grouped on the
   raw `Method`, unlike the `ReflectionHttpEndpointFinder` guard it mirrors (which explicitly
@@ -2153,8 +2153,8 @@ top-of-file summary blockquote).
 
 ## Resolved in round 15, WP-B (AWS trigger family gaps)
 
-Findings from the round-15 review pass (task board #227–#229, `work/bug-fix-plan-round15-2026-08.md`
-WP-B; rationale and rejected alternatives in `work/bug-fix-designs-round15-2026-08.md` §2). All three
+Findings from the round-15 review pass (task board #227–#229, `work/archive/bug-fix-plan-round15-2026-08.md`
+WP-B; rationale and rejected alternatives in `work/archive/bug-fix-designs-round15-2026-08.md` §2). All three
 fixed in `src/Benzene.Aws.Lambda.S3`, `src/Benzene.Aws.Lambda.DynamoDb`,
 `src/Benzene.Aws.Lambda.Kafka`, `src/Benzene.Aws.Lambda.Core`, and
 `src/Benzene.Core.MessageHandlers/Extensions.cs`.
@@ -2506,7 +2506,7 @@ Design/rationale in [`bug-fix-designs-round15-2026-08.md`](archive/bug-fix-desig
   every test project): 0 errors.
 ### Tracked findings round 12, WP-H — Mesh.Dispatch: cancellation, audit trail, limiter charging (#185–#187, done)
 Ruled in [`bug-fix-designs-round12-2026-08.md`](archive/bug-fix-designs-round12-2026-08.md) §1 (see
-`bug-fix-plan-rounds12-14-2026-08.md` for the WP-H task text). Files:
+`work/archive/bug-fix-plan-rounds12-14-2026-08.md` for the WP-H task text). Files:
 `src/Benzene.Mesh.Dispatch/MeshDispatchMessageHandler.cs`,
 `src/Benzene.Mesh.Dispatch/MeshDispatchRateLimiter.cs` (no code change needed there — see #187).
 
@@ -2561,7 +2561,7 @@ concurrency-timing assertion — and passed cleanly on immediate re-run with no 
 regression from this work package.)
 ### Tracked findings round 12–14, WP-I — Mesh Fleet: Tempo correlation fetch + Jaeger fan-out isolation (done)
 Decisions, rationale, and the shared-file overlap check against round-15 WP-C are ruled in
-`work/bug-fix-plan-rounds12-14-2026-08.md` §"WP-I" and `work/bug-fix-designs-round12-2026-08.md` §2.
+`work/archive/bug-fix-plan-rounds12-14-2026-08.md` §"WP-I" and `work/archive/bug-fix-designs-round12-2026-08.md` §2.
 - **[RESOLVED] #188 — `TempoTraceSource.GetCorrelationAsync` fetched up to 100 matched traces fully
   sequentially with zero per-trace fetch isolation, unlike `Benzene.Mesh.Fleet.Aws.XRay`'s correct
   pattern; one trace's transient HTTP failure mid-loop discarded the entire correlation search,
@@ -2598,9 +2598,9 @@ Decisions, rationale, and the shared-file overlap check against round-15 WP-C ar
   its source.)
 ### Tracked findings round 12–14, WP-K — Saga: rollback on state-store failure + multi-failure surfacing (done)
 Ruling and rationale are recorded in
-[`bug-fix-plan-rounds12-14-2026-08.md`](bug-fix-plan-rounds12-14-2026-08.md) §"WP-K — Saga: rollback
+[`bug-fix-plan-rounds12-14-2026-08.md`](archive/bug-fix-plan-rounds12-14-2026-08.md) §"WP-K — Saga: rollback
 on state-store failure + multi-failure surfacing (#208, #209)" and
-[`bug-fix-designs-round14-2026-08.md`](bug-fix-designs-round14-2026-08.md) §2.
+[`bug-fix-designs-round14-2026-08.md`](archive/bug-fix-designs-round14-2026-08.md) §2.
 - **[RESOLVED] #208 — a saga-state-store failure aborted the run with zero rollback attempt, silently
   breaking `Saga`'s own documented "all-or-nothing" guarantee.** A state-store exception thrown right
   after a real, effect-producing stage completed (`ISagaStateStore.RecordStageCompletedAsync`, and the
@@ -2639,8 +2639,8 @@ on state-store failure + multi-failure surfacing (#208, #209)" and
   cross-contaminated) - this WP's `RunOnceAsync` changes added only local/parameter state, no new
   shared mutable state.
 ### Tracked findings rounds 12–14, WP-L — Autofac closed-generic routing (done)
-Ruled in [`bug-fix-plan-rounds12-14-2026-08.md`](bug-fix-plan-rounds12-14-2026-08.md) WP-L, from the
-round-14 finding in [`bug-fix-designs-round14-2026-08.md`](bug-fix-designs-round14-2026-08.md) §3. Read
+Ruled in [`bug-fix-plan-rounds12-14-2026-08.md`](archive/bug-fix-plan-rounds12-14-2026-08.md) WP-L, from the
+round-14 finding in [`bug-fix-designs-round14-2026-08.md`](archive/bug-fix-designs-round14-2026-08.md) §3. Read
 the round-9 #82–#85 `[RESOLVED]` entries above (WP-Q) before touching this file again — these are the
 same six methods those fixes touched, and their regression tests (32-way concurrent resolution,
 `TryAdd*` idempotency, `CreateServiceResolverFactory()` repeat-call safety) must stay green.
@@ -2673,7 +2673,7 @@ same six methods those fixes touched, and their regression tests (32-way concurr
   capability statement to correct — parity with the Microsoft adapter is exactly what the adapter is
   meant to provide and was never claimed otherwise.
 ### Tracked findings rounds 12-14, WP-N — S3 TestHelpers key encoding + ServiceBus client logger guard (#191, #192, done)
-Ruling and rationale are in [`bug-fix-plan-rounds12-14-2026-08.md`](bug-fix-plan-rounds12-14-2026-08.md) WP-N and
+Ruling and rationale are in [`bug-fix-plan-rounds12-14-2026-08.md`](archive/bug-fix-plan-rounds12-14-2026-08.md) WP-N and
 [`bug-fix-designs-round12-2026-08.md`](archive/bug-fix-designs-round12-2026-08.md) §3.
 - **[RESOLVED] #191 — `Benzene.Aws.Lambda.S3.TestHelpers`'s `AsS3` builder produced a fake object key
   that was never URL-encoded, so the real `S3ObjectKeyCodec.Decode` step (added by #158's fix) silently
@@ -2713,7 +2713,7 @@ Ruling and rationale are in [`bug-fix-plan-rounds12-14-2026-08.md`](bug-fix-plan
   confirming the catch block still logs the real exception and returns a failure result without
   throwing.
 ### Tracked findings round 12–14, WP-O — Mesh UI vendoring doc + upstream items (#204–#207)
-Round 14's client-side review of `src/Benzene.Mesh.Ui` (`work/bug-fix-designs-round14-2026-08.md`
+Round 14's client-side review of `src/Benzene.Mesh.Ui` (`work/archive/bug-fix-designs-round14-2026-08.md`
 §1) found that `mesh-ui.html`/`mesh-spec-ui.html` are not hand-written vanilla JS as
 `src/Benzene.Mesh.Ui/CLAUDE.md` extensively described — they are a minified React + Redux Toolkit
 build vendored verbatim from the external `benzene-ui` repo, kept honest by
@@ -2985,8 +2985,8 @@ None of these is a clean self-contained bug; each changes behaviour, a public AP
   back to the max version (`VersionSelector.cs:21-29`). A documented per-policy behaviour.
 
 ### Tracked findings rounds 12–14, WP-J — Cache + RateLimiting round-13 residue (done)
-Ruled in [`bug-fix-plan-rounds12-14-2026-08.md`](bug-fix-plan-rounds12-14-2026-08.md) §"WP-J" and
-[`bug-fix-designs-round13-2026-08.md`](bug-fix-designs-round13-2026-08.md) — round 13's blind
+Ruled in [`bug-fix-plan-rounds12-14-2026-08.md`](archive/bug-fix-plan-rounds12-14-2026-08.md) §"WP-J" and
+[`bug-fix-designs-round13-2026-08.md`](archive/bug-fix-designs-round13-2026-08.md) — round 13's blind
 re-audit of the round-11-fixed `Benzene.RateLimiting`/`Benzene.Cache.Core`/`.Redis` packages (#198–202,
 3 worth-fixing + 2 minor). Read alongside the round-11 `#133`–`#147` entries above, none of which are
 regressed by this work package.

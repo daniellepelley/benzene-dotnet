@@ -1,3 +1,21 @@
+> ARCHIVED 2026-08-30: actioned. All ten work packages (WP-G through WP-P — task board #47,
+> #185–#196, #198–#202, #204–#223) landed and were pushed to `main` via 10 merge commits, in landing
+> order: `d5ae33e` (WP-G, #47), `08bbab8` (WP-H, #185–187), `50293fd` (WP-I, #188–190), `aab6f7b`
+> (WP-J, #198–202), `0ae9d23` (WP-K, #208–209), `473ab59` (WP-L, #210), `298f704` (WP-M, #211–213),
+> `8efbd20` (WP-N, #191–192), `dd6b911` (WP-O, #204; #205–207 dispositioned `[UPSTREAM]` — need a
+> `benzene-ui` fix, not a change in this repo), `61bbf08` (WP-P, #193–196,#214–223), plus follow-up
+> `76a186b` recording a confirmed build result. Full baseline re-verified after the last merge (and
+> after two additional post-merge integration bugs found only once this round and round 15 were both
+> fully merged together — see `work/outstanding-bugs.md`'s "Round 15 + rounds 12–14: two integration
+> bugs found only by the post-merge baseline" section): `Benzene.sln` build 0 errors;
+> `Benzene.Core.Test` 3296 passed/2 skipped/0 failed; `Benzene.Mesh.Test` 575 passed;
+> `Benzene.Mesh.Host.Test` 150 passed; `Benzene.Examples.sln` build 0 errors. Per-finding summaries
+> live in `work/outstanding-bugs.md`'s "Rounds 12–14 fixes (2026-08-29)" section (search "Tracked
+> findings round" for WP-G through WP-P), each pointing back to the originating review ruling in
+> [`bug-fix-designs-round12-2026-08.md`](bug-fix-designs-round12-2026-08.md),
+> [`bug-fix-designs-round13-2026-08.md`](bug-fix-designs-round13-2026-08.md), or
+> [`bug-fix-designs-round14-2026-08.md`](bug-fix-designs-round14-2026-08.md) for the full record.
+
 # Rounds 12–14 (+ #47) fix plan (2026-08) — covers task board #47, #185–#196, #198–#202, #204–#223
 
 **Status: READY FOR EXECUTION — not yet started.** This is the fix-design ruling doc for every

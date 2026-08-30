@@ -1,3 +1,11 @@
+> ARCHIVED 2026-08-30: actioned. The round-15 review record (task board #226–#245: six parallel review
+> agents spanning the whole tree — core messaging pipeline, AWS Lambda triggers, Azure Function
+> triggers/clients, the mesh ecosystem, cross-cutting infra (serialization/resilience/DI), and the
+> CodeGen/Schema suite). All six work packages this review produced (WP-A through WP-F) landed and
+> were pushed to `main` — see [`bug-fix-plan-round15-2026-08.md`](bug-fix-plan-round15-2026-08.md) for
+> the fix plan and landing commits. Per-finding summaries live in `work/outstanding-bugs.md` (search
+> "Round 15"), each pointing back here for the full rationale/rejected-alternatives record.
+
 # Round 15 review findings (2026-08)
 
 **Status: ACTIVE — findings only, not yet fixed.** This round was explicitly scoped by the user as

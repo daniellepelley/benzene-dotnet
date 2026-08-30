@@ -1,3 +1,12 @@
+> ARCHIVED 2026-08-30: actioned. The round-14 review record (task board #204–#224: the mesh UI
+> client-side review, plus early-round (1 and 9) re-passes at the mature "execute real adversarial
+> probes" standard). Its worth-fixing findings landed as part of the rounds 12–14 fix plan: §1
+> (#204–207) as WP-O (#204 fixed in-repo; #205–207 dispositioned `[UPSTREAM]`, not fixed here), §2
+> (#208–209) as WP-K, §3 (#210–213) as WP-L/WP-M, §4 (#214–223) as part of WP-P — see
+> [`bug-fix-plan-rounds12-14-2026-08.md`](bug-fix-plan-rounds12-14-2026-08.md) for the fix plan and
+> landing commits. Per-finding summaries live in `work/outstanding-bugs.md` (search "round 14"), each
+> pointing back here for the full record.
+
 # Round 14 review findings (2026-08)
 
 **Status: ACTIVE — findings only, not yet fixed.** With every `src/` package now touched by at least

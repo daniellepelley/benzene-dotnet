@@ -1,3 +1,18 @@
+> ARCHIVED 2026-08-30: actioned. All six work packages (WP-A through WP-F, task board #226–#244)
+> landed and were pushed to `main` via 6 merge commits, in landing order: `6f199f1` (WP-A, #226),
+> `09333f0` (WP-B, #227–229), `23ec329` (WP-C, #230–232), `3692ecf` (WP-D, #233–236), `f648ffb`
+> (WP-E, #237–238), `d05aa29` (WP-F, #239–244). Full baseline re-verified after the last merge (and
+> after two additional post-merge integration bugs found only once this round and rounds 12–14 were
+> both fully merged together — see `work/outstanding-bugs.md`'s "Round 15 + rounds 12–14: two
+> integration bugs found only by the post-merge baseline" section): `Benzene.sln` build 0 errors;
+> `Benzene.Core.Test` 3296 passed/2 skipped/0 failed; `Benzene.Mesh.Test` 575 passed;
+> `Benzene.Mesh.Host.Test` 150 passed; `Benzene.Examples.sln` build 0 errors. Per-finding summaries
+> live in `work/outstanding-bugs.md` (search "Round 15"), each pointing back to the design ruling in
+> [`bug-fix-designs-round15-2026-08.md`](bug-fix-designs-round15-2026-08.md) for the full record. One
+> deliberate scope correction from this plan: #227's fourth named transport, Kinesis, was found
+> structurally unable to support preset topics (no topic getter or `MessageRouter` at all) and was
+> left unfixed by design — see the WP-B resolved entry.
+
 # Round 15 fix plan (2026-08) — covers task board #226–#244
 
 **Status: READY FOR EXECUTION — not yet started.** This is the fix-design ruling doc for the

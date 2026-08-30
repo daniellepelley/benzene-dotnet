@@ -1,3 +1,12 @@
+> ARCHIVED 2026-08-30: actioned. The round-13 blind re-audit record (task board #198–#203: a
+> controlled experiment re-reviewing `Benzene.RateLimiting`/`Benzene.Cache.Core`/`.Redis` blind to
+> round 11's prior findings, to measure whether the find-rate genuinely declines on re-review). Its
+> worth-fixing findings (#198–202) landed as WP-J of the rounds 12–14 fix plan and were pushed to
+> `main` (`aab6f7b`) — see
+> [`bug-fix-plan-rounds12-14-2026-08.md`](bug-fix-plan-rounds12-14-2026-08.md) for the fix plan.
+> Per-finding summaries live in `work/outstanding-bugs.md` (search "Tracked findings rounds 12–14,
+> WP-J"), each pointing back here for the full record.
+
 # Round 13 — blind re-audit experiment (2026-08)
 
 **Status: ACTIVE — findings only, not yet fixed.** This round is different in kind from rounds 1–12:

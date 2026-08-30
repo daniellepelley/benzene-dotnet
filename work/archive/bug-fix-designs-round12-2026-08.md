@@ -1,3 +1,11 @@
+> ARCHIVED 2026-08-30: actioned. The round-12 review record (task board #185–#197: 4 parallel review
+> agents covering the last previously-unreviewed corners of `src/` after round 11). Its worth-fixing
+> findings landed as part of the rounds 12–14 fix plan: §1 (#185–187) as WP-H, §2 (#188–190) jointly
+> with round 14 as WP-I, §3 (#191–192) as WP-N, §4 (#193–196) as part of WP-P — see
+> [`bug-fix-plan-rounds12-14-2026-08.md`](bug-fix-plan-rounds12-14-2026-08.md) for the fix plan and
+> landing commits. Per-finding summaries live in `work/outstanding-bugs.md` (search "round 12"), each
+> pointing back here for the full rationale/rejected-alternatives record.
+
 # Round 12 review findings (2026-08)
 
 **Status: ACTIVE — findings only, not yet fix-designed or implemented.** This round was scoped
