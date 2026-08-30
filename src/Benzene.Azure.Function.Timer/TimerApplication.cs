@@ -109,11 +109,23 @@ public class TimerTickApplication : IMiddlewareApplication<TimerTriggerInfo>
         }
         catch (Exception ex) when (_options.CatchExceptions)
         {
+            var isInfrastructure = BenzeneFailure.IsInfrastructure(ex);
+
             using var loggingScope = serviceResolverFactory.CreateScope();
             var logger = loggingScope.GetService<ILogger<TimerApplication>>();
-            logger.LogError(ex, BenzeneFailure.IsInfrastructure(ex)
+            logger.LogError(ex, isInfrastructure
                 ? BenzeneFailure.InfrastructureLogPrefix + " Processing timer tick scheduled for {scheduledFor} failed — this service is mis-wired; the tick is not at fault"
                 : "Processing timer tick scheduled for {scheduledFor} failed", context.Timer.ScheduleStatus?.Next);
+
+            // #257: mirrors AzureFunctionBatchApplicationBase.ProcessItemAsync's fix (and #228's
+            // original SingleContextEscalatingApplicationBase.ProcessAsync fix) - an infrastructure/
+            // DI-wiring failure is not this tick's fault and will fail identically for every tick, so
+            // swallowing it would mean the invocation reports success while every tick fails the same
+            // way, forever. It escapes CatchExceptions entirely and fails the invocation loudly.
+            if (isInfrastructure)
+            {
+                throw;
+            }
         }
     }
 }

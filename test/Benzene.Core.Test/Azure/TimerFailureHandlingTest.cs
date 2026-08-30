@@ -4,6 +4,7 @@ using Benzene.Abstractions.DI;
 using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Abstractions.Middleware;
 using Benzene.Azure.Function.Timer;
+using Benzene.Core.Exceptions;
 using Benzene.Core.MessageHandlers;
 using Benzene.Results;
 using Microsoft.Extensions.Logging;
@@ -109,5 +110,26 @@ public class TimerFailureHandlingTest
 
         // CatchExceptions also contains the escalation throw itself, not only the pipeline's own exceptions.
         await application.HandleAsync(new TimerTriggerInfo(), CreateResolverFactory().Object);
+    }
+
+    /// <summary>
+    /// Regression coverage for #257: under <c>CatchExceptions = true</c>, an infrastructure/DI-wiring
+    /// failure (<see cref="BenzeneFailure.IsInfrastructure"/>) is not this tick's fault - it will fail
+    /// identically for every tick - so it must escape containment and fail the invocation loudly,
+    /// mirroring <c>SingleContextEscalatingApplicationBase.ProcessAsync</c>'s #228 fix. Before the fix,
+    /// this completed without throwing (logged only), exactly the "whole invocation reports success
+    /// while every tick fails the same way, forever" defect #228 fixed for AWS SNS/S3/EventBridge.
+    /// </summary>
+    [Fact]
+    public async Task HandleAsync_CatchExceptionsTrue_InfrastructureFailure_EscapesContainmentAndRethrows()
+    {
+        var mockPipeline = new Mock<IMiddlewarePipeline<TimerContext>>();
+        mockPipeline.Setup(x => x.HandleAsync(It.IsAny<TimerContext>(), It.IsAny<IServiceResolver>()))
+            .ThrowsAsync(new BenzeneResolutionException("Unable to resolve ISomeService"));
+
+        var application = new TimerTickApplication(mockPipeline.Object, new TimerOptions { CatchExceptions = true });
+
+        await Assert.ThrowsAsync<BenzeneResolutionException>(
+            () => application.HandleAsync(new TimerTriggerInfo(), CreateResolverFactory().Object));
     }
 }

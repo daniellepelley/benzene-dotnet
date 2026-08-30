@@ -61,9 +61,13 @@ run. A timer tick has no such guarantee — the **direct** `UseTick(...)` consum
 touches `MessageResult` at all — so treating an unset result as failure would escalate every plain
 tick by default; only a message handler that actually ran and reported failure triggers it.
 `CatchExceptions` (default `false`, matching every sibling) optionally contains that exception — or
-any exception the pipeline itself threw — logging it instead of letting it cascade. Configure via the
-ctor's optional `TimerOptions?` parameter or `UseTimerTrigger(pipeline, configure)`'s
-`Action<TimerOptions>` overload.
+any exception the pipeline itself threw — logging it instead of letting it cascade. One carve-out
+(#257, mirroring `SingleContextEscalatingApplicationBase`'s #228 fix): an infrastructure/DI-wiring
+failure (`BenzeneFailure.IsInfrastructure`, e.g. a missing container registration) is not this tick's
+fault and will fail identically for every tick, so it's logged with a distinguishing message and then
+**rethrown regardless of `CatchExceptions`** — swallowing it would mean the invocation reports success
+while every tick fails the same way, forever. Configure via the ctor's optional `TimerOptions?`
+parameter or `UseTimerTrigger(pipeline, configure)`'s `Action<TimerOptions>` overload.
 Note the platform reality either way: the timer trigger does **not** retry a failed tick — the next
 occurrence just runs on schedule — so a job needing at-least-once semantics should enqueue work
 (queue/Service Bus) rather than doing it inline in the tick. `RaiseOnFailureStatus` only affects
