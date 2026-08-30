@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using Benzene.Abstractions.DI;
 using Microsoft.Extensions.DependencyInjection;
@@ -59,6 +60,14 @@ public class MicrosoftServiceResolverFactory : IServiceResolverFactory, IAsyncDi
     /// have at all (e.g. <c>Benzene.Aws.Lambda.Core</c>'s whole disposal chain is
     /// <see cref="IDisposable"/>-only), so silently failing to dispose such a singleton (or throwing)
     /// is not acceptable. Same rationale/pattern as <see cref="MicrosoftServiceResolverAdapter.Dispose"/>.
+    /// The wait deliberately suppresses the ambient <see cref="SynchronizationContext"/> (restored in
+    /// a <c>finally</c>) around the blocking call: without this, a container-owned singleton's own
+    /// <c>DisposeAsync()</c> that awaits without <c>ConfigureAwait(false)</c> (ordinary application
+    /// code) can deadlock this thread FOREVER under a single-thread-affinity context (WinForms/WPF/
+    /// Blazor-Server-shaped) - and because this disposes the WHOLE root provider, typically once at
+    /// process/host shutdown, that hang can mean the entire application never finishes shutting down
+    /// (task board #289, round 17). This is the standard sync-over-async mitigation, not the
+    /// bounded-5s pattern - it keeps the wait unbounded while removing the deadlock vector.
     /// </summary>
     public void Dispose()
     {
@@ -69,7 +78,16 @@ public class MicrosoftServiceResolverFactory : IServiceResolverFactory, IAsyncDi
 
         if (_serviceProvider is IAsyncDisposable asyncDisposable)
         {
-            asyncDisposable.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            var previousContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+            try
+            {
+                asyncDisposable.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            }
+            finally
+            {
+                SynchronizationContext.SetSynchronizationContext(previousContext);
+            }
         }
         else if (_serviceProvider is IDisposable disposable)
         {
