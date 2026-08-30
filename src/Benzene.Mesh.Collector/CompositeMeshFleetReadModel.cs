@@ -49,10 +49,14 @@ public class CompositeMeshFleetReadModel : IMeshFleetReadModel
         {
             return await _traceSource.GetTraceAsync(traceId, cancellationToken);
         }
-        catch
+        catch (Exception ex) when (!(ex is OperationCanceledException && cancellationToken.IsCancellationRequested))
         {
             // Fetch isolation: a failing trace source degrades a single trace lookup to "not found"
             // rather than throwing out of the composite, matching RecentFlowsAsync/TopicsFromUsageAsync.
+            // But a genuine caller cancellation (this method's OWN cancellationToken firing - e.g. a
+            // mesh:query:trace request wrapped in UseTimeout(...), or a disconnected caller) is not a
+            // backend failure to isolate; it must propagate rather than being misreported as an
+            // authoritative "not found" (#256).
             return null;
         }
     }
@@ -63,10 +67,11 @@ public class CompositeMeshFleetReadModel : IMeshFleetReadModel
         {
             return await _traceSource.GetCorrelationAsync(correlationId, range, cancellationToken);
         }
-        catch
+        catch (Exception ex) when (!(ex is OperationCanceledException && cancellationToken.IsCancellationRequested))
         {
             // Fetch isolation: a failing trace source degrades a correlation lookup to "not found"
             // rather than throwing out of the composite, matching RecentFlowsAsync/TopicsFromUsageAsync.
+            // Same genuine-cancellation carve-out as TraceAsync above (#256).
             return null;
         }
     }

@@ -1,3 +1,5 @@
+using System.Threading;
+using Benzene.Abstractions.DI;
 using Benzene.Abstractions.MessageHandlers;
 using Benzene.Abstractions.Results;
 using Benzene.Core.MessageHandlers;
@@ -121,14 +123,24 @@ public class IssuesMessageHandler : IMessageHandler<MeshIssueBatch, Ack>
 public class FleetQueryMessageHandler : IMessageHandler<FleetQuery, FleetView>
 {
     private readonly IMeshFleetReadModel _readModel;
+    private readonly ICancellationTokenAccessor? _cancellation;
 
-    public FleetQueryMessageHandler(IMeshFleetReadModel readModel) => _readModel = readModel;
+    public FleetQueryMessageHandler(IMeshFleetReadModel readModel, ICancellationTokenAccessor? cancellation = null)
+    {
+        _readModel = readModel;
+        _cancellation = cancellation;
+    }
 
     public async Task<IBenzeneResult<FleetView>> HandleAsync(FleetQuery request)
     {
+        // The ambient token, resolved at the point of use (not captured earlier) - the same idiom
+        // MeshDispatchMessageHandler uses (#185), so UseTimeout(...) wrapping the query envelope
+        // actually bounds a real, potentially I/O-bound read-model call (#250).
+        var token = _cancellation?.CancellationToken ?? CancellationToken.None;
+
         // IncludeFlows is a cost hint (absent ⇒ true, today's behavior); planes that pay per flow lookup
         // may honor it, the in-memory ring ignores it.
-        return BenzeneResult.Ok(await _readModel.FleetAsync(request.Window, request.IncludeFlows ?? true));
+        return BenzeneResult.Ok(await _readModel.FleetAsync(request.Window, request.IncludeFlows ?? true, token));
     }
 }
 
@@ -137,8 +149,13 @@ public class FleetQueryMessageHandler : IMessageHandler<FleetQuery, FleetView>
 public class ServiceQueryMessageHandler : IMessageHandler<ServiceQuery, ServiceView>
 {
     private readonly IMeshFleetReadModel _readModel;
+    private readonly ICancellationTokenAccessor? _cancellation;
 
-    public ServiceQueryMessageHandler(IMeshFleetReadModel readModel) => _readModel = readModel;
+    public ServiceQueryMessageHandler(IMeshFleetReadModel readModel, ICancellationTokenAccessor? cancellation = null)
+    {
+        _readModel = readModel;
+        _cancellation = cancellation;
+    }
 
     public async Task<IBenzeneResult<ServiceView>> HandleAsync(ServiceQuery request)
     {
@@ -146,7 +163,8 @@ public class ServiceQueryMessageHandler : IMessageHandler<ServiceQuery, ServiceV
         {
             return BenzeneResult.BadRequest<ServiceView>("service is required");
         }
-        var view = await _readModel.ServiceAsync(request.Service!, request.Window);
+        var token = _cancellation?.CancellationToken ?? CancellationToken.None;
+        var view = await _readModel.ServiceAsync(request.Service!, request.Window, token);
         return view == null
             ? BenzeneResult.NotFound<ServiceView>($"unknown service {request.Service}")
             : BenzeneResult.Ok(view);
@@ -158,8 +176,13 @@ public class ServiceQueryMessageHandler : IMessageHandler<ServiceQuery, ServiceV
 public class TopicQueryMessageHandler : IMessageHandler<TopicQuery, TopicSummary>
 {
     private readonly IMeshFleetReadModel _readModel;
+    private readonly ICancellationTokenAccessor? _cancellation;
 
-    public TopicQueryMessageHandler(IMeshFleetReadModel readModel) => _readModel = readModel;
+    public TopicQueryMessageHandler(IMeshFleetReadModel readModel, ICancellationTokenAccessor? cancellation = null)
+    {
+        _readModel = readModel;
+        _cancellation = cancellation;
+    }
 
     public async Task<IBenzeneResult<TopicSummary>> HandleAsync(TopicQuery request)
     {
@@ -167,7 +190,8 @@ public class TopicQueryMessageHandler : IMessageHandler<TopicQuery, TopicSummary
         {
             return BenzeneResult.BadRequest<TopicSummary>("topic is required");
         }
-        var view = await _readModel.TopicAsync(request.Topic!, request.Version, request.Window);
+        var token = _cancellation?.CancellationToken ?? CancellationToken.None;
+        var view = await _readModel.TopicAsync(request.Topic!, request.Version, request.Window, token);
         return view == null
             ? BenzeneResult.NotFound<TopicSummary>($"unknown topic {request.Topic}")
             : BenzeneResult.Ok(view);
@@ -179,8 +203,13 @@ public class TopicQueryMessageHandler : IMessageHandler<TopicQuery, TopicSummary
 public class TraceQueryMessageHandler : IMessageHandler<TraceQuery, TraceView>
 {
     private readonly IMeshFleetReadModel _readModel;
+    private readonly ICancellationTokenAccessor? _cancellation;
 
-    public TraceQueryMessageHandler(IMeshFleetReadModel readModel) => _readModel = readModel;
+    public TraceQueryMessageHandler(IMeshFleetReadModel readModel, ICancellationTokenAccessor? cancellation = null)
+    {
+        _readModel = readModel;
+        _cancellation = cancellation;
+    }
 
     public async Task<IBenzeneResult<TraceView>> HandleAsync(TraceQuery request)
     {
@@ -188,7 +217,8 @@ public class TraceQueryMessageHandler : IMessageHandler<TraceQuery, TraceView>
         {
             return BenzeneResult.BadRequest<TraceView>("traceId is required");
         }
-        var view = await _readModel.TraceAsync(request.TraceId!);
+        var token = _cancellation?.CancellationToken ?? CancellationToken.None;
+        var view = await _readModel.TraceAsync(request.TraceId!, token);
         return view == null
             ? BenzeneResult.NotFound<TraceView>($"unknown trace {request.TraceId}")
             : BenzeneResult.Ok(view);
@@ -202,8 +232,13 @@ public class TraceQueryMessageHandler : IMessageHandler<TraceQuery, TraceView>
 public class CorrelationQueryMessageHandler : IMessageHandler<CorrelationQuery, CorrelationView>
 {
     private readonly IMeshFleetReadModel _readModel;
+    private readonly ICancellationTokenAccessor? _cancellation;
 
-    public CorrelationQueryMessageHandler(IMeshFleetReadModel readModel) => _readModel = readModel;
+    public CorrelationQueryMessageHandler(IMeshFleetReadModel readModel, ICancellationTokenAccessor? cancellation = null)
+    {
+        _readModel = readModel;
+        _cancellation = cancellation;
+    }
 
     public async Task<IBenzeneResult<CorrelationView>> HandleAsync(CorrelationQuery request)
     {
@@ -211,7 +246,8 @@ public class CorrelationQueryMessageHandler : IMessageHandler<CorrelationQuery, 
         {
             return BenzeneResult.BadRequest<CorrelationView>("correlationId is required");
         }
-        var view = await _readModel.CorrelationAsync(request.CorrelationId!, request.Window);
+        var token = _cancellation?.CancellationToken ?? CancellationToken.None;
+        var view = await _readModel.CorrelationAsync(request.CorrelationId!, request.Window, token);
         return view == null
             ? BenzeneResult.NotFound<CorrelationView>($"no flows for correlation {request.CorrelationId}")
             : BenzeneResult.Ok(view);

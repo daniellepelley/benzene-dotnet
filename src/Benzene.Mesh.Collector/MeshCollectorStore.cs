@@ -59,7 +59,12 @@ public class MeshCollectorStore : IMeshFleetReadModel
 
     private class ServiceState
     {
-        public MeshServiceDescriptor? Descriptor;
+        /// <summary>Every currently live <c>(service, serviceVersion)</c> descriptor, keyed by
+        /// <c>ServiceVersion ?? ""</c> - the catalog key spec §2.4 requires: two releases deployed
+        /// side by side (a canary/blue-green) are two independent entries here, neither evicting the
+        /// other. A re-registration of the SAME key replaces that key's entry wholesale (today's
+        /// behavior, unchanged); a DIFFERENT key is added alongside, never removing a sibling.</summary>
+        public readonly Dictionary<string, MeshServiceDescriptor> Descriptors = new();
         public readonly Dictionary<string, InstanceState> Instances = new();
         public DateTimeOffset LastSeen;
         public long Invocations;
@@ -67,6 +72,18 @@ public class MeshCollectorStore : IMeshFleetReadModel
         // True once ANY mesh:issues batch (including an empty liveness batch) named this service —
         // what lets "quiet wired feed" be distinguished from "feed not wired" (spec §4.1).
         public bool IssueFeedSeen;
+
+        /// <summary>The most recently registered version's key. The service-NAME-level summary row
+        /// (<see cref="ServiceSummary"/>/<see cref="ServiceView"/>'s scalar Runtime/Binding/Placement/
+        /// Topics/ServiceVersion/Descriptor fields) reports THIS version, preserving today's
+        /// one-row-per-name shape for every caller that queries by name alone. Older still-live
+        /// versions remain fully present in <see cref="Descriptors"/> (and in the topic catalog's
+        /// Providers/Consumers) for hash comparison and the declared graph - they're just not the
+        /// name-level "headline" row.</summary>
+        public string? CurrentVersionKey;
+
+        public MeshServiceDescriptor? Descriptor =>
+            CurrentVersionKey != null && Descriptors.TryGetValue(CurrentVersionKey, out var d) ? d : null;
     }
 
     private class InstanceState
@@ -109,16 +126,25 @@ public class MeshCollectorStore : IMeshFleetReadModel
         descriptor.Topics ??= new List<MeshTopicDescriptor>();
         descriptor.Produces ??= new List<MeshTopicDescriptor>();
 
+        var versionKey = descriptor.ServiceVersion ?? string.Empty;
+
         lock (_lock)
         {
-            foreach (var topic in _topics.Values)
+            var state = EnsureService(descriptor.Service);
+
+            // Retract only what THIS version previously declared, not every topic the service name
+            // has ever touched (spec §2.4): a re-registration of the SAME (service, version) pair
+            // replaces its edges wholesale, exactly like before; a DIFFERENT version registering
+            // alongside it must never evict a still-live sibling version's edges - two versions
+            // producing/consuming different topics side by side is the expected canary/blue-green
+            // state, not something to silently retire.
+            if (state.Descriptors.TryGetValue(versionKey, out var previous))
             {
-                topic.Providers.Remove(descriptor.Service);
-                topic.Consumers.Remove(descriptor.Service);
+                RetractEdges(previous, descriptor.Service);
             }
 
-            var state = EnsureService(descriptor.Service);
-            state.Descriptor = descriptor;
+            state.Descriptors[versionKey] = descriptor;
+            state.CurrentVersionKey = versionKey;
             state.LastSeen = DateTimeOffset.UtcNow;
 
             // topics -> Consumers, produces -> Providers. Handling a topic makes you its consumer.
@@ -129,6 +155,27 @@ public class MeshCollectorStore : IMeshFleetReadModel
             foreach (var topic in descriptor.Produces)
             {
                 EnsureTopic((topic.Id, topic.Version ?? string.Empty)).Providers.Add(descriptor.Service);
+            }
+        }
+    }
+
+    /// <summary>Removes exactly the provider/consumer edges <paramref name="descriptor"/> (one
+    /// specific service+version's prior registration) contributed, leaving every other version's
+    /// edges - and any other service's edges - on the shared <see cref="TopicState"/> untouched.</summary>
+    private void RetractEdges(MeshServiceDescriptor descriptor, string service)
+    {
+        foreach (var topic in descriptor.Topics)
+        {
+            if (_topics.TryGetValue((topic.Id, topic.Version ?? string.Empty), out var topicState))
+            {
+                topicState.Consumers.Remove(service);
+            }
+        }
+        foreach (var topic in descriptor.Produces)
+        {
+            if (_topics.TryGetValue((topic.Id, topic.Version ?? string.Empty), out var topicState))
+            {
+                topicState.Providers.Remove(service);
             }
         }
     }
@@ -159,8 +206,21 @@ public class MeshCollectorStore : IMeshFleetReadModel
         events ??= Array.Empty<MeshTraceEvent>();
         lock (_lock)
         {
+            var accepted = 0;
             foreach (var traceEvent in events)
             {
+                // MeshTraceEvent is a reference type, so a wire payload can legally deserialize
+                // "events": [null, {...}] - a non-null list that itself contains a null element
+                // (#253, one level down from #234's whole-null-list fix). Skip it rather than
+                // dereferencing it: the same §6 "no missing feed ever fails ingestion" rule this
+                // file already applies to a null whole-list, a null status, and a null topic
+                // version applies here too - one malformed element must not partially corrupt the
+                // batch and fail every event after it.
+                if (traceEvent == null)
+                {
+                    continue;
+                }
+
                 if (_ring.Count < _capacity)
                 {
                     _ring.Add(traceEvent);
@@ -209,8 +269,10 @@ public class MeshCollectorStore : IMeshFleetReadModel
                         service.Errors++;
                     }
                 }
+
+                accepted++;
             }
-            return events.Count;
+            return accepted;
         }
     }
 
@@ -233,6 +295,16 @@ public class MeshCollectorStore : IMeshFleetReadModel
             var accepted = 0;
             foreach (var incoming in batch.Issues)
             {
+                // MeshIssue is a reference type, so a wire payload can legally deserialize
+                // "issues": [null, {...}] - a non-null list that itself contains a null element
+                // (#253, the same exposure AddEvents had for MeshTraceEvent). Skip it rather than
+                // dereferencing it - never rejected, matching the missing-fingerprint/topic skip
+                // just below.
+                if (incoming == null)
+                {
+                    continue;
+                }
+
                 // Same tolerance one level down: an individual issue's exemplar list can itself
                 // deserialize to null.
                 incoming.ExemplarTraceIds ??= new List<string>();
@@ -363,9 +435,7 @@ public class MeshCollectorStore : IMeshFleetReadModel
                         Healthy = pair.Value.Healthy,
                         LastHeartbeat = pair.Value.LastHeartbeat,
                         DescriptorHash = pair.Value.DescriptorHash,
-                        HashMatches = state.Descriptor?.DescriptorHash != null && pair.Value.DescriptorHash != null
-                            ? pair.Value.DescriptorHash == state.Descriptor.DescriptorHash
-                            : null
+                        HashMatches = HashMatches(state, pair.Value.DescriptorHash)
                     })
                     .ToList(),
                 // The service's counts are cumulative-since-start; a requested window is reported (with
@@ -466,6 +536,27 @@ public class MeshCollectorStore : IMeshFleetReadModel
             _services[name] = state;
         }
         return state;
+    }
+
+    /// <summary>Whether an instance's reported hash matches the descriptor of ITS OWN live version
+    /// (spec §2.4). Compared against EVERY currently registered <c>(service, version)</c> pair's
+    /// hash for this service, not just the name-level "current" row - so two different, live
+    /// versions each reporting their own correct-but-different hash both read as matching (the
+    /// expected side-by-side deployment state), and only a hash that matches none of the service's
+    /// live descriptors reads as drift. Null when either side has nothing to compare - no hash
+    /// reported by the instance, or no live descriptor for the service carries a hash at all -
+    /// unknown, never treated as drift.</summary>
+    private static bool? HashMatches(ServiceState state, string? reportedHash)
+    {
+        if (reportedHash == null)
+        {
+            return null;
+        }
+        var knownHashes = state.Descriptors.Values
+            .Select(d => d.DescriptorHash)
+            .Where(hash => hash != null)
+            .ToList();
+        return knownHashes.Count == 0 ? null : knownHashes.Contains(reportedHash);
     }
 
     private TopicState EnsureTopic((string Id, string Version) key)

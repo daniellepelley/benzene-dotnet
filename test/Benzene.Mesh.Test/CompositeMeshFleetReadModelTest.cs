@@ -187,4 +187,51 @@ public class CompositeMeshFleetReadModelTest
 
         Assert.Null(view);
     }
+
+    private sealed class CancellingTraceSource : IMeshTraceSource
+    {
+        public Task<TraceView?> GetTraceAsync(string traceId, CancellationToken cancellationToken = default)
+            => throw new OperationCanceledException(cancellationToken);
+        public Task<CorrelationView?> GetCorrelationAsync(string correlationId, MeshTimeRange? range = null, CancellationToken cancellationToken = default)
+            => throw new OperationCanceledException(cancellationToken);
+        public Task<IReadOnlyList<TraceSummary>> GetRecentFlowsAsync(int limit = 20, MeshTimeRange? range = null, CancellationToken cancellationToken = default)
+            => throw new OperationCanceledException(cancellationToken);
+    }
+
+    // #256: the fetch-isolation catch on TraceAsync/CorrelationAsync exists to degrade a FAILING
+    // backend to "not found" - it must not also swallow a genuine cancellation of the caller's OWN
+    // token (e.g. mesh:query:trace/correlation wrapped in UseTimeout(...), or a disconnected caller).
+    [Fact]
+    public async Task TraceAsync_PropagatesRealCancellation_InsteadOfReportingNotFound()
+    {
+        var model = new CompositeMeshFleetReadModel(new CancellingTraceSource(), Array.Empty<IMeshUsageSource>());
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => model.TraceAsync("t1", cts.Token));
+    }
+
+    [Fact]
+    public async Task CorrelationAsync_PropagatesRealCancellation_InsteadOfReportingNotFound()
+    {
+        var model = new CompositeMeshFleetReadModel(new CancellingTraceSource(), Array.Empty<IMeshUsageSource>());
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => model.CorrelationAsync("c1", cancellationToken: cts.Token));
+    }
+
+    // The negative case: a source throwing a plain (non-cancellation) exception must still degrade to
+    // null even when a live, non-cancelled token is in scope - the fetch-isolation rule is unaffected
+    // by the narrower catch filter.
+    [Fact]
+    public async Task TraceAsync_PlainException_StillDegradesToNull_WhenTheCallersTokenIsNotCancelled()
+    {
+        var model = new CompositeMeshFleetReadModel(new FakeTraceSource { ThrowOnTrace = true }, Array.Empty<IMeshUsageSource>());
+        using var cts = new CancellationTokenSource(); // never cancelled
+
+        var view = await model.TraceAsync("t1", cts.Token);
+
+        Assert.Null(view);
+    }
 }
