@@ -769,6 +769,53 @@ codegen correctness (P10, P11)".
   `ReflectionHttpEndpointFinder`'s own duplicate-route check; `BuildOptions`'s CORS verb list is also
   `.Distinct()`ed as defense-in-depth for direct callers. See WP-H.
 
+### Tracked findings rounds 12–14, WP-M — CodeGen.ApiGateway/Markdown escaping + guards (done)
+Ruling in [`bug-fix-plan-rounds12-14-2026-08.md`](bug-fix-plan-rounds12-14-2026-08.md) §"WP-M". Direct
+continuation of #86/#87 above — same bug class, reached through different inputs.
+- **[RESOLVED] #211 — `ApiGatewayBuilderV1`'s duplicate-route guard (`BuildCodeFiles`) grouped on the
+  raw `Method`, unlike the `ReflectionHttpEndpointFinder` guard it mirrors (which explicitly
+  case-folds `Method`, with a comment about this exact risk).** Two topics mapped to `"GET"` and
+  `"get"` for the same path passed the guard silently and then both emitted a `get:` block under the
+  same path (`BuildVerb` always lower-cases the emitted verb) — the identical duplicate-key YAML
+  shape #87 fixed, reached via verb casing instead of identical casing. The grouping key now folds
+  `Method` with `ToLowerInvariant()`, exactly like `ReflectionHttpEndpointFinder`; the thrown
+  message still reports the first entry's original-cased `Method` so the common identical-casing
+  case reads unchanged. See WP-M.
+- **[RESOLVED] #212 — `ApiGatewayBuilderV1` interpolated user-controlled strings (topic names, the
+  path-derived `tags:` entry, the configured CORS allow-headers value) straight into the generated
+  YAML with no escaping.** A `"` in a topic name broke the double-quoted `summary:` scalar it landed
+  in; a `: ` surviving `CreateTag`'s title-casing into the unquoted `tags:` sequence item made that
+  item parse as a nested mapping instead of a scalar — both produced YAML a real parser rejects, the
+  same root cause as #87 reached through different adversarial content instead of a structural
+  duplicate. Fixed by routing every such interpolation through a small escaping helper
+  (`YamlValueEscaping`, `src/Benzene.CodeGen.ApiGateway/YamlValueEscaping.cs`) instead of raw string
+  interpolation: `QuoteSingle` always wraps a value in a single-quoted YAML scalar (doubling internal
+  `'`s — the only escape a single-quoted scalar has, and sufficient for arbitrary content), used for
+  the `tags:` sequence item (both `BuildOptions` and `BuildVerb`, previously emitted bare/unquoted);
+  `EscapeForDoubleQuoted` escapes `\` and `"` for embedding inside a double-quoted scalar the call
+  site already wraps in literal `"..."`, used for `summary:`'s topic and the two
+  `Access-Control-Allow-Headers` header lines' `AllowedHeaders` value (preserving their existing
+  double-quoted/AWS-required-single-quote-literal shape rather than changing it). Verified by
+  actually loading the generated YAML with a real parser (`YamlDotNet`, added as a pinned dev
+  dependency to `test/Benzene.Core.Test` — it was already present transitively via
+  `ByteBard.AsyncAPI.NET.Readers` at the same version, so this adds nothing new to the dependency
+  graph) rather than eyeballing the output. **Flag for reuse:** `YamlValueEscaping` is a small,
+  self-contained, dependency-free static helper (no code shared with `ApiGatewayBuilderV1` beyond
+  being in the same package) — round 15's WP-F fixes the same bug class in the Terraform/HCL
+  generator (#244); if that generator's escaping need is YAML rather than HCL-specific, lifting
+  `QuoteSingle`'s single-quoted-scalar approach (or the file itself, generalized and moved to
+  `Benzene.CodeGen.Core`) may be worth it, though no code is shared as of this fix. See WP-M.
+- **[RESOLVED] #213 — `MarkdownTypeBuilder.MapProperty` dereferenced an array schema's `Items`
+  (`Items.Reference`/`Items.Type`) with no null check, throwing `NullReferenceException` for a
+  hand-authored schema with `Items == null`, unlike the sibling `GetPropertyTypeName` (reached via
+  the same method's final fallback branch), which already null-checks the equivalent case and
+  renders a `"Void"` placeholder.** Added the same null check to `MapProperty`'s array branch
+  (`openApiSchema.Items != null`, alongside the existing `Reference`/`Type` checks); a null `Items`
+  now falls through to the method's generic fallback, which calls `GetPropertyTypeName` and renders
+  the same `Void[]` placeholder the sibling method's guard already produces for a null schema, rather
+  than throwing. Not reachable through Benzene's own `SchemaBuilder`-produced schemas, but the method
+  is public and callable with any hand-authored schema. See WP-M.
+
 ### Tracked findings round 7–10, WP-J — Schema comparer discriminator matching + coverage (done)
 Decision, rationale, and rejected alternatives are ruled in
 [`bug-fix-designs-round7-10-2026-08.md`](archive/bug-fix-designs-round7-10-2026-08.md) §"WP-J — Schema comparer

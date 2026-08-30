@@ -86,7 +86,7 @@ public class MarkdownTypeBuilder
                 lineWriter.WriteLine("{}");
             }
         }
-        else if (openApiSchema.Type == "array" && (openApiSchema.Items.Reference != null || openApiSchema.Items.Type == "object"))
+        else if (openApiSchema.Type == "array" && openApiSchema.Items != null && (openApiSchema.Items.Reference != null || openApiSchema.Items.Type == "object"))
         {
             // Collapse to "{...}[]" only for a genuine reference cycle (the item points back at a
             // type we're already rendering), mirroring the single-object branch below. The original

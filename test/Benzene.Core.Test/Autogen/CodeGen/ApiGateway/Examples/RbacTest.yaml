@@ -3,7 +3,7 @@
   /rbac/test:
     options:
       tags:
-        - Rbac Test
+        - 'Rbac Test'
       responses:
         "200":
           $ref: "#/components/responses/corsResponse"
@@ -39,7 +39,7 @@
     get:
       summary: "rbac:test"
       tags:
-        - Rbac Test
+        - 'Rbac Test'
       responses:
         "200":
           $ref: "#/components/responses/200OkEmpty"
