@@ -253,7 +253,10 @@ completed by then, it returns a `Failed` result with `Data["Error"] = "Timed Out
 indefinitely). The timeout **is** configurable: the processor-wide default comes from
 `new HealthCheckProcessor(TimeSpan)` (registered with `TryAddSingleton`, so your own registration
 wins), and an individual check can override it by setting `IHealthCheck.Timeout`. The exception
-catch-all itself is not configurable — every check gets it automatically.
+catch-all itself is not configurable — every check gets it automatically. Note also that
+`PerformHealthChecksAsync` takes no ambient `CancellationToken` — the check's own timeout above is
+the only cancellation signal it ever sees, so a slow check won't observe a caller disconnect or a
+host shutdown/drain early; it always runs to its own timeout.
 
 ### `HttpPingHealthCheck` (`Benzene.HealthChecks.Http`)
 

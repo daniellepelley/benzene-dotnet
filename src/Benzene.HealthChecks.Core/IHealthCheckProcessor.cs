@@ -15,5 +15,13 @@ public interface IHealthCheckProcessor
     /// <see cref="BenzeneResultStatus.Ok"/> (HTTP 200) when healthy or
     /// <see cref="BenzeneResultStatus.ServiceUnavailable"/> (HTTP 503) when not.
     /// </summary>
+    /// <remarks>
+    /// <see cref="PerformHealthChecksAsync"/> takes no ambient <see cref="System.Threading.CancellationToken"/> -
+    /// the only cancellation signal that reaches an individual check is the timeout it's wrapped in
+    /// (<c>TimeOutHealthCheck</c>: the check's own <see cref="IHealthCheck.Timeout"/> override, or the
+    /// processor's default). A slow custom <see cref="IHealthCheck"/> will not observe a caller
+    /// disconnecting or the host shutting down/draining early - it always runs to its own timeout
+    /// regardless, even during a graceful drain.
+    /// </remarks>
     Task<IBenzeneResult> PerformHealthChecksAsync(IHealthCheck[] healthChecks);
 }
