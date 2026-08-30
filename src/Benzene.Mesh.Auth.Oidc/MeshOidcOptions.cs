@@ -200,9 +200,10 @@ public class MeshOidcOptions
         // many distinct characters) - it is a cheap floor on the distinct byte values actually used for
         // signing (see Extensions.UseMeshOidcAuth: the raw UTF-8 bytes of this string, exactly as
         // written - never decoded from hex/base64), pragmatic enough to catch the obvious placeholder
-        // shapes (a single repeated character, or too few distinct values overall) without pretending to
-        // certify genuine randomness. A real generated secret - typed as hex, base64, or a mixed-case/
-        // digit/symbol passphrase - clears this by a wide margin.
+        // shapes (a single repeated character, or too few distinct values overall). By itself it does
+        // NOT catch every low-entropy shape - see the period check immediately below for the one this
+        // floor alone misses (#286). A real generated secret - typed as hex, base64, or a mixed-case/
+        // digit/symbol passphrase - clears BOTH checks by a wide margin.
         if (DistinctByteCount(signingKeyBytes) < MinimumDistinctSigningKeyBytes)
         {
             throw new System.ArgumentException(
@@ -210,6 +211,28 @@ public class MeshOidcOptions
                 $"fewer than {MinimumDistinctSigningKeyBytes} distinct byte values across its whole " +
                 "length. A repeated or near-constant string (e.g. \"kkkk...k\") is a full session-forgery " +
                 "vector: this key signs a session cookie that is otherwise a deterministic function of " +
+                "{Email, Exp}. Use a real generated secret (e.g. Terraform's random_password, " +
+                "`openssl rand -base64 32`), never a hand-typed placeholder.",
+                nameof(SigningKey));
+        }
+
+        // #286: the distinct-byte floor above counts distinct VALUES anywhere in the key, so it does
+        // not catch a short block repeated to fill the key - e.g. "ABCDEFGH" x 4 = 32 bytes with
+        // exactly 8 distinct byte values, clearing MinimumDistinctSigningKeyBytes, while actually being
+        // only 8 bytes (64 bits) of real keyspace. Catch that shape directly: reject a key that is an
+        // exact tiling of a proper substring whose period is under HALF the key's total length. A key
+        // built from exactly two tiles of its own half (e.g. a 16-byte block repeated twice to fill 32
+        // bytes) is deliberately still accepted - there is no shorter period to catch there, and two-
+        // tile repetition of a long-enough block is indistinguishable from a real secret by this cheap
+        // check (see HasLowPeriodRepeatingBlock's remarks).
+        if (HasLowPeriodRepeatingBlock(signingKeyBytes))
+        {
+            throw new System.ArgumentException(
+                $"{nameof(SigningKey)} does not look like a real, randomly-generated secret - it is an " +
+                "exact repetition of a much shorter block (its period is under half its total length). " +
+                "A repeating block like \"ABCDEFGH\" tiled to reach the length floor can have plenty of " +
+                "distinct byte values while still being a small, guessable amount of real keyspace - and " +
+                "this key signs a session cookie that is otherwise a deterministic function of " +
                 "{Email, Exp}. Use a real generated secret (e.g. Terraform's random_password, " +
                 "`openssl rand -base64 32`), never a hand-typed placeholder.",
                 nameof(SigningKey));
@@ -259,5 +282,47 @@ public class MeshOidcOptions
         }
 
         return seen.Count;
+    }
+
+    /// <summary>
+    /// #286: true when <paramref name="bytes"/> is an exact repetition of one of its own proper
+    /// prefixes whose length (period) is strictly under half the array's total length - i.e. the array
+    /// tiles a block at least three times, or tiles a block exactly twice where that block is itself
+    /// under half the total length (impossible - two tiles of a block always sum to exactly double the
+    /// block, so "under half" only ever fires for three-or-more tiles). Deliberately does NOT flag a
+    /// key made of exactly two tiles of a block that IS half the key's length (e.g. a 16-byte block
+    /// repeated twice to fill 32 bytes) - a real 16+ byte secret duplicated once is not meaningfully
+    /// distinguishable from 32 bytes of real keyspace by a cheap structural check, and flagging it would
+    /// reject shapes like <c>"0123456789abcdef" x 2</c> that this file's own tests already treat as
+    /// acceptable. What this DOES catch: a short block (e.g. 8 bytes) tiled 3+ times to reach the
+    /// length floor - real keyspace equal to the block, not the whole key.
+    /// </summary>
+    private static bool HasLowPeriodRepeatingBlock(byte[] bytes)
+    {
+        var length = bytes.Length;
+        for (var period = 1; period < length / 2; period++)
+        {
+            if (length % period != 0)
+            {
+                continue;
+            }
+
+            var isTiled = true;
+            for (var i = period; i < length; i++)
+            {
+                if (bytes[i] != bytes[i % period])
+                {
+                    isTiled = false;
+                    break;
+                }
+            }
+
+            if (isTiled)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

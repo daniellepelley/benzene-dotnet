@@ -37,6 +37,45 @@ public static class MeshPathCanonicalizer
         var segments = (beforeQuery ?? string.Empty).Split('/', StringSplitOptions.RemoveEmptyEntries);
         return ("/" + string.Join("/", segments)).ToLowerInvariant();
     }
+
+    /// <summary>
+    /// The shared path-OR-topic predicate: true when <paramref name="requestPath"/> canonicalizes to
+    /// <paramref name="guardedCanonicalPath"/>, OR (when both a <paramref name="topic"/> and a
+    /// <paramref name="routeFinder"/> are available) when the route finder resolves
+    /// <paramref name="requestMethod"/>/<paramref name="requestPath"/> to that same topic — a route
+    /// alias that reaches the guarded topic under a different literal path cannot slip past either
+    /// check this way.
+    /// </summary>
+    /// <remarks>
+    /// #287: <see cref="MeshDispatchGuardMiddleware{TContext}"/>'s own <c>IsGuarded</c> below calls
+    /// this. <c>MeshAuthGate</c> (a different assembly, in <c>deploy/Mesh/Benzene.Mesh.Host</c>) calls
+    /// it too for its <c>dispatchRole</c> check, which used to compare only the literal
+    /// <c>DispatchPath</c> — a route alias mapping to the same <c>benzene:mesh:dispatch</c> topic under
+    /// a different path would have reached the real handler with the role requirement never evaluated,
+    /// even though this guard's own CSRF/identity/rate-limit checks would still have caught it. Routing
+    /// both callers through this one predicate means they can never drift apart on what counts as "the
+    /// guarded endpoint" again.
+    /// </remarks>
+    public static bool IsPathOrTopicMatch(
+        string? requestMethod,
+        string? requestPath,
+        string guardedCanonicalPath,
+        string? topic,
+        IRouteFinder? routeFinder)
+    {
+        if (Canonicalize(requestPath) == guardedCanonicalPath)
+        {
+            return true;
+        }
+
+        if (string.IsNullOrEmpty(topic) || routeFinder == null)
+        {
+            return false;
+        }
+
+        var matchedTopic = routeFinder.Find(requestMethod ?? string.Empty, requestPath ?? string.Empty)?.Topic;
+        return matchedTopic != null && string.Equals(matchedTopic, topic, StringComparison.OrdinalIgnoreCase);
+    }
 }
 
 /// <summary>
@@ -193,23 +232,13 @@ public class MeshDispatchGuardMiddleware<TContext> : IMiddleware<TContext>
 
     /// <summary>
     /// Path match, plus a topic match through the route finder, so a route alias that reaches the
-    /// handler cannot reach it around this guard. The same two-way matching the refresh guard uses.
+    /// handler cannot reach it around this guard. The same two-way matching the refresh guard uses -
+    /// via the shared <see cref="MeshPathCanonicalizer.IsPathOrTopicMatch"/> predicate (#287), so this
+    /// and <c>MeshAuthGate</c>'s <c>dispatchRole</c> check can never drift on what counts as "the
+    /// dispatch endpoint".
     /// </summary>
-    private bool IsGuarded(HttpRequest request)
-    {
-        if (MeshPathCanonicalizer.Canonicalize(request.Path) == _guardedPath)
-        {
-            return true;
-        }
-
-        if (string.IsNullOrEmpty(_options.Topic) || _routeFinder == null)
-        {
-            return false;
-        }
-
-        var topic = _routeFinder.Find(request.Method ?? string.Empty, request.Path ?? string.Empty)?.Topic;
-        return topic != null && string.Equals(topic, _options.Topic, StringComparison.OrdinalIgnoreCase);
-    }
+    private bool IsGuarded(HttpRequest request) =>
+        MeshPathCanonicalizer.IsPathOrTopicMatch(request.Method, request.Path, _guardedPath, _options.Topic, _routeFinder);
 
     /// <summary>
     /// Measures the size check should bound against: the ACTUAL body byte count when the transport has

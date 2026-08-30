@@ -3897,6 +3897,61 @@ run (post-fix) 58 passed, 0 failed.
     and already-fully-settled paths are unaffected. Confirmed red (2 new tests failing, 2 existing
     passing) against the pre-fix code, then green (4/4) after:
     `dotnet test test/Benzene.Core.Test -c Release --filter "FullyQualifiedName~CompositeBenzeneWorker"`.
+## Round 17, WP-K: auth hardening (2026-08-30)
+
+- **[RESOLVED] #286 (minor) — `MeshOidcOptions.Validate()`'s distinct-byte-count entropy floor did not
+  catch a short block repeated to fill the key.** The `#177` floor (fewer than 8 distinct byte values
+  across the whole `SigningKey` is rejected) counts distinct VALUES anywhere in the key, so
+  `"ABCDEFGH"` repeated 4x to reach the 32-byte minimum has exactly 8 distinct byte values and cleared
+  the check, while actually being only 8 bytes (64 bits) of real keyspace repeating with period 8 - far
+  weaker than the doc comment's claim that "a real generated secret ... clears this by a wide margin."
+  This key signs both the CSRF state token and the session cookie (a deterministic function of
+  `{Email, Exp}`), so a weak key here is a full session-forgery vector. Fixed by adding a second,
+  independent check alongside the existing distinct-byte floor: reject a key that is an exact tiling of
+  a proper substring whose period is under HALF the key's total length. A key built from exactly two
+  tiles of its own half (e.g. a 16-byte block repeated twice to fill 32 bytes) is deliberately still
+  accepted - two-tile repetition of a long-enough block is indistinguishable from a real secret by a
+  cheap structural check, and this shape was already asserted acceptable by this file's own
+  pre-existing test (`SigningKeyWithEnoughDistinctBytes_IsAccepted`'s `"0123456789abcdef"` x 2 case).
+  Also updated the doc comments (class remarks, `Validate()`'s inline comments, and the
+  `MinimumDistinctSigningKeyBytes` remarks) to describe both criteria honestly rather than
+  over-promising on the distinct-byte floor alone. Files:
+  `src/Benzene.Mesh.Auth.Oidc/MeshOidcOptions.cs` (new `HasLowPeriodRepeatingBlock`, called from
+  `Validate()`). Regression tests:
+  `test/Benzene.Mesh.Auth.Oidc.Test/MeshOidcOptionsValidateTest.cs`
+  (`EightByteRepeatingPatternPaddedTo32Bytes_Throws`, `EightByteRepeatingPatternPaddedTo64Bytes_Throws`,
+  plus `SixteenByteBlockRepeatedTwiceToFill32Bytes_IsAccepted` pinning the two-tile boundary
+  explicitly). All pre-existing tests in that file (including the distinct-byte-floor and
+  alternating-pattern rejections) stay green unchanged.
+- **[RESOLVED] #287 (minor, latent - not currently exploitable) — `MeshAuthGate`'s `dispatchRole` check
+  matched only the literal `DispatchPath`, unlike its sibling `MeshDispatchGuardMiddleware.IsGuarded`,
+  which deliberately matches on canonical path OR topic (via the route finder) specifically so a route
+  alias reaching the same handler cannot reach it around the guard.** If a future change ever exposed a
+  second HTTP route to the same `benzene:mesh:dispatch` topic (none exists today - `Startup.Configure`
+  mounts dispatch at exactly one path, with no config knob to move it independently), a caller with
+  valid identity but without the configured `dispatchRole` could have reached
+  `MeshDispatchMessageHandler` via that alias while the role gate silently never fired, even though the
+  guard's own CSRF/identity/rate-limit checks would still have applied. Fixed by extracting
+  `IsGuarded`'s path-OR-topic predicate into a new shared static
+  `MeshPathCanonicalizer.IsPathOrTopicMatch` (in the same file/assembly as `IsGuarded`, which now calls
+  it too), and having `MeshAuthGate`'s `dispatchRole` check call the identical predicate - resolving
+  `IRouteFinder` null-tolerantly from `context.RequestServices` (this host's ASP.NET Core container does
+  not carry one today, since the Benzene pipeline's own registrations live in a separately-built
+  provider - see `MeshAuthGate`'s class remarks - so this currently still falls back to the path-only
+  comparison, byte-identical to before; if that ever changes, the topic fallback is already wired up
+  with nothing further to update). Also added `MeshAuthGate.DispatchTopic`, read off the same
+  `MeshDispatchGuardOptions` default as the pre-existing `DispatchPath`, so neither literal can drift
+  from `Startup`'s own options instance. Files:
+  `src/Benzene.Mesh.Artifacts/MeshDispatchGuardMiddleware.cs` (new
+  `MeshPathCanonicalizer.IsPathOrTopicMatch`; `IsGuarded` now delegates to it),
+  `deploy/Mesh/Benzene.Mesh.Host/MeshAuthGate.cs` (`DispatchTopic`, `InvokeAsync`'s `dispatchRole`
+  check). Regression tests: `test/Benzene.Mesh.Test/MeshPathCanonicalizerTest.cs` (new - unit coverage
+  of the extracted predicate's path-match, topic-match, and topic-absent-falls-back-to-path-only cases)
+  and `deploy/Mesh/Benzene.Mesh.Host.Test/MeshAuthGateTest.cs`
+  (`DispatchRole_RouteAliasResolvingToTheDispatchTopic_IsAlsoGated`, confirmed red against the
+  literal-path-only check and green after routing through the shared predicate; plus
+  `DispatchRole_UnrelatedRouteResolvingToADifferentTopic_IsNotGated` as the negative case). No
+  end-to-end alias-route test - there is no second route to mount one against.
 
 ## Open — maintainer decisions (the real remaining backlog)
 

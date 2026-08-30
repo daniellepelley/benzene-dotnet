@@ -144,6 +144,53 @@ public class MeshOidcOptionsValidateTest
         options.Validate();
     }
 
+    /// <summary>
+    /// #286: the distinct-byte-count floor alone is defeated by a short block repeated to reach the
+    /// 32-byte minimum - "ABCDEFGH" x 4 has exactly 8 distinct byte values (clearing
+    /// <c>MinimumDistinctSigningKeyBytes</c>) but is really only 8 bytes (64 bits) of actual keyspace,
+    /// repeating with period 8 across a 32-byte key - well under half the key length. This key signs
+    /// both the CSRF state token and the session cookie (a deterministic function of {Email, Exp}), so
+    /// this is a full session-forgery vector hiding behind a check whose doc comment claims a real
+    /// generated secret "clears this by a wide margin."
+    /// </summary>
+    [Fact]
+    public void EightByteRepeatingPatternPaddedTo32Bytes_Throws()
+    {
+        var options = Valid();
+        options.SigningKey = string.Concat(System.Linq.Enumerable.Repeat("ABCDEFGH", 4));
+        Assert.Equal(32, System.Text.Encoding.UTF8.GetByteCount(options.SigningKey));
+        Assert.Throws<ArgumentException>(() => options.Validate());
+    }
+
+    /// <summary>
+    /// The period-based check must not reject a key whose shortest repeating block is HALF the key's
+    /// length (two tiles) - that is exactly the shape <see cref="SigningKeyWithEnoughDistinctBytes_IsAccepted"/>'s
+    /// first case already asserts must be accepted ("0123456789abcdef" x 2), so this pins the boundary
+    /// explicitly rather than leaving it to one shared theory case.
+    /// </summary>
+    [Fact]
+    public void SixteenByteBlockRepeatedTwiceToFill32Bytes_IsAccepted()
+    {
+        var options = Valid();
+        options.SigningKey = string.Concat(System.Linq.Enumerable.Repeat("0123456789abcdef", 2));
+        Assert.Equal(32, System.Text.Encoding.UTF8.GetByteCount(options.SigningKey));
+        options.Validate();
+    }
+
+    /// <summary>
+    /// A longer key built from a short repeated block must still be caught even when the block itself
+    /// has plenty of distinct bytes and the overall key is well over the 32-byte floor - the period
+    /// check is a property of the WHOLE key, not just the 32-byte minimum case.
+    /// </summary>
+    [Fact]
+    public void EightByteRepeatingPatternPaddedTo64Bytes_Throws()
+    {
+        var options = Valid();
+        options.SigningKey = string.Concat(System.Linq.Enumerable.Repeat("ABCDEFGH", 8));
+        Assert.Equal(64, System.Text.Encoding.UTF8.GetByteCount(options.SigningKey));
+        Assert.Throws<ArgumentException>(() => options.Validate());
+    }
+
     [Fact]
     public void EmptyAllowedEmails_DoesNotThrow()
     {
