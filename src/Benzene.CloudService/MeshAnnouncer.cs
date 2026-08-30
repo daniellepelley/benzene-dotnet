@@ -60,7 +60,21 @@ internal sealed class MeshAnnouncer : IAsyncDisposable, IDisposable
             return;
         }
 
-        var descriptor = resolver == null ? _descriptorSource.TryGet() : _descriptorSource.Get(resolver);
+        MeshServiceDescriptor? descriptor;
+        try
+        {
+            descriptor = resolver == null ? _descriptorSource.TryGet() : _descriptorSource.Get(resolver);
+        }
+        catch
+        {
+            // Deriving the descriptor threw (e.g. the registry isn't ready yet) - per the class's
+            // own §6 contract, swallow it and let the next invocation retry, rather than failing
+            // the invocation that happened to trigger the lazy start or leaving _started stuck at
+            // 1 forever (#47).
+            Interlocked.Exchange(ref _started, 0);
+            return;
+        }
+
         if (descriptor == null)
         {
             // No descriptor available yet (lazy path started without a resolver) - let the next

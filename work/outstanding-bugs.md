@@ -2430,6 +2430,33 @@ Design/rationale in [`bug-fix-designs-round15-2026-08.md`](archive/bug-fix-desig
   were deliberately left alone — that's a separate identifier-validity concern, not the string-literal-
   escaping bug this fixes. New tests assert a topic containing `"` and one containing `\` each produce
   correctly-escaped output through `QuoteList`.
+## Rounds 12–14 fixes (2026-08-29)
+
+- **[RESOLVED] #47 — `MeshAnnouncer.EnsureStarted` permanently disabled the announcer (and could fail
+  the triggering invocation) if descriptor derivation threw, rather than only if it returned null.**
+  This was the oldest open item on the board; the null-descriptor half had already been fixed since
+  #47 was originally filed — `EnsureStarted` correctly reset `_started` to 0 and let the next
+  invocation retry when `_descriptorSource.TryGet()`/`.Get(resolver)` returned null. The residual gap
+  this closes: if that call **threw** instead — e.g. the invocation's registry (lazy path) genuinely
+  isn't ready yet — the exception propagated straight out of `EnsureStarted`, failing whatever
+  invocation happened to trigger the lazy start, and left `_started` stuck at 1 forever with the
+  announce loop never starting on any later invocation either. Both halves of the class's own
+  documented contract (spec §6 — every failure here is swallowed and retried on the next invocation,
+  and nothing here ever fails an invocation) were violated. Fixed: wrapped the descriptor-derivation
+  call in `MeshAnnouncer.cs` in try/catch; on any exception, reset `_started` to 0 and return without
+  throwing — identical reset to the existing null-descriptor path, so a later invocation (with a
+  ready registry) retries and starts the announce loop normally. New test
+  `MeshAnnouncerTest.EnsureStarted_WhenDescriptorDerivationThrows_SwallowsAndRetriesOnNextInvocation`
+  (`test/Benzene.Core.Test/CloudService/MeshAnnouncerTest.cs`) white-box tests `MeshAnnouncer` directly
+  against a resolver stub whose `TryGetService<IMessageHandlerDefinitionLookUp>()` throws once then
+  succeeds (added `InternalsVisibleTo` from `Benzene.CloudService` to the test assembly, since a
+  throwing lazy-path derivation is otherwise unreachable through the public `UseBenzeneCloudService`
+  builder API); it confirmed red against the prior source (first call threw to the caller and the
+  second call was a permanent no-op — the collector never saw a register POST) and green after the fix
+  (first call returns quietly, second call's announce loop registers, observed via a stub
+  `HttpMessageHandler` receiving the `benzene:mesh:register` envelope). Full CloudService suite
+  (`Benzene.Test`, `FullyQualifiedName~CloudService`): 34/34 passed; full `Benzene.sln` build (incl.
+  every test project): 0 errors.
 
 ## Open — maintainer decisions (the real remaining backlog)
 
