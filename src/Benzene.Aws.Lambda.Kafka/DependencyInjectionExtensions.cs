@@ -24,8 +24,10 @@ public static class DependencyInjectionExtensions
     public static IBenzeneServiceContainer AddKafka(this IBenzeneServiceContainer services)
     {
         services.TryAddScoped<JsonSerializer>();
+        services.TryAddScoped<PresetTopicHolder>();
 
-        services.AddScoped<IMessageTopicGetter<KafkaContext>, KafkaMessageTopicGetter>();
+        services.AddScoped<IMessageTopicGetter<KafkaContext>>(resolver =>
+            new PresetTopicMessageTopicGetter<KafkaContext>(new KafkaMessageTopicGetter(), resolver.GetService<PresetTopicHolder>()));
         services.AddHeaderMessageVersionGetter<KafkaContext>();
         services.AddScoped<IMessageHeadersGetter<KafkaContext>, KafkaMessageHeadersGetter>();
         services.AddScoped<IMessageBodyGetter<KafkaContext>, KafkaMessageBodyGetter>();

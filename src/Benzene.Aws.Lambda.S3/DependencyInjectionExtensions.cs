@@ -29,10 +29,12 @@ public static class DependencyInjectionExtensions
     public static IBenzeneServiceContainer AddS3(this IBenzeneServiceContainer services)
     {
         services.TryAddScoped<JsonSerializer>();
+        services.TryAddScoped<PresetTopicHolder>();
 
         // TryAdd: a user registration made earlier (ConfigureServices runs before Configure, where
         // UseS3 calls this) wins over these per-context defaults, matching Benzene.Aws.Lambda.Sns.
-        services.TryAddScoped<IMessageTopicGetter<S3RecordContext>, S3MessageTopicGetter>();
+        services.TryAddScoped<IMessageTopicGetter<S3RecordContext>>(resolver =>
+            new PresetTopicMessageTopicGetter<S3RecordContext>(new S3MessageTopicGetter(), resolver.GetService<PresetTopicHolder>()));
         services.TryAddHeaderMessageVersionGetter<S3RecordContext>();
         services.TryAddScoped<IMessageHeadersGetter<S3RecordContext>, S3MessageHeadersGetter>();
         services.TryAddScoped<IMessageBodyGetter<S3RecordContext>, S3MessageBodyGetter>();
