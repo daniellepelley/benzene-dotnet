@@ -832,7 +832,12 @@ resource "aws_apigatewayv2_stage" "mesh" {
   # in memory, so on a host that scales to N instances it bounds one warm instance; API Gateway counts
   # across all of them, and refuses before the invoke is billed.
   route_settings {
-    route_key              = "POST /mesh/dispatch"
+    # Referencing the route resource's own attribute (not a hardcoded literal) so Terraform's
+    # dependency graph forces aws_apigatewayv2_route.mesh_dispatch to exist before this stage is
+    # created - a bare string here has no graph edge to that resource, so the stage's creation could
+    # race the route's and fail with "Unable to find Route by key ... within the provided
+    # RouteSettings" whenever the stage happened to land first.
+    route_key              = aws_apigatewayv2_route.mesh_dispatch.route_key
     throttling_rate_limit  = var.mesh_dispatch_throttling_rate_limit
     throttling_burst_limit = var.mesh_dispatch_throttling_burst_limit
   }
