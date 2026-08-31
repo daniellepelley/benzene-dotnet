@@ -1,0 +1,82 @@
+name: Mesh Example AWS Logs
+
+# Manual-only diagnostic: tails the mesh Lambda's CloudWatch Logs for a given filter pattern, using
+# the same AWS credentials examples/AwsMesh's own deploy workflow uses. Read-only - makes no changes
+# to the deployed stack. Useful when the Mesh UI reports a server-side error (e.g. a 503 on an
+# artifact fetch) whose real exception is deliberately redacted from the HTTP response
+# (Benzene.Mesh.Artifacts.MeshArtifactMiddleware logs it server-side but never returns it to the
+# client - see that file's remarks).
+on:
+  workflow_dispatch:
+    inputs:
+      region:
+        description: "AWS region"
+        required: true
+        default: "eu-west-1"
+      function_name:
+        description: "Lambda function name to read logs from"
+        required: true
+        default: "benzene-mesh-mesh"
+      filter_pattern:
+        description: 'CloudWatch Logs filter pattern (e.g. "Mesh artifact read failed" or "ERROR")'
+        required: false
+        default: ""
+      since_minutes:
+        description: "How far back to search, in minutes"
+        required: true
+        default: "60"
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-logs:
+    runs-on: ubuntu-latest
+    environment: test
+    steps:
+      - name: Verify AWS credentials are available
+        env:
+          KEY_ID: ${{ vars.AWS_ACCESS_KEY_ID || secrets.AWS_ACCESS_KEY_ID }}
+          SECRET: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          missing=0
+          [ -z "$KEY_ID" ] && { echo "::error::AWS_ACCESS_KEY_ID is empty (checked both vars and secrets)."; missing=1; }
+          [ -z "$SECRET" ] && { echo "::error::AWS_SECRET_ACCESS_KEY is empty in this job."; missing=1; }
+          if [ "$missing" = "1" ]; then
+            echo "::error::In the 'test' GitHub Environment: set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY."
+            exit 1
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID || secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ inputs.region }}
+
+      - name: Fetch CloudWatch Logs
+        env:
+          FUNCTION_NAME: ${{ inputs.function_name }}
+          FILTER_PATTERN: ${{ inputs.filter_pattern }}
+          SINCE_MINUTES: ${{ inputs.since_minutes }}
+        run: |
+          LOG_GROUP="/aws/lambda/${FUNCTION_NAME}"
+          START_TIME_MS=$(( ($(date +%s) - SINCE_MINUTES * 60) * 1000 ))
+          echo "Log group: $LOG_GROUP"
+          echo "Since: $(date -u -d "@$((START_TIME_MS / 1000))" 2>/dev/null || date -u -r $((START_TIME_MS / 1000)))"
+          echo "Filter pattern: ${FILTER_PATTERN:-<none>}"
+          echo "---"
+          if [ -n "$FILTER_PATTERN" ]; then
+            aws logs filter-log-events \
+              --log-group-name "$LOG_GROUP" \
+              --start-time "$START_TIME_MS" \
+              --filter-pattern "$FILTER_PATTERN" \
+              --query 'events[*].message' \
+              --output text
+          else
+            aws logs filter-log-events \
+              --log-group-name "$LOG_GROUP" \
+              --start-time "$START_TIME_MS" \
+              --query 'events[*].message' \
+              --output text
+          fi
