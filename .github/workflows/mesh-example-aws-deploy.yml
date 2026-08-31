@@ -164,12 +164,21 @@ jobs:
       # Normal path: adopt already-created resources into state so apply updates them in place instead
       # of colliding (409 AlreadyExists). Idempotent — a no-op once state is populated. Skipped when
       # recreating (nothing to adopt after a clean slate).
+      #
+      # adopt-existing.sh's tf_import() calls `terraform import`, which — like `terraform apply` below
+      # — evaluates the WHOLE root module to build its plan, including variables.tf's
+      # google_oauth_client_id/google_oauth_client_secret (no default, interpolated into a Lambda
+      # environment block). Without these, the first import in the script fails outright with
+      # "No value for required variable", identical to the fix already applied to `terraform apply`
+      # and to the destroy workflow's `terraform destroy`.
       - name: Adopt any pre-existing resources into state
         if: ${{ ! inputs.recreate }}
         working-directory: examples/AwsMesh/deploy
         env:
           REGION: ${{ inputs.region }}
           PROJECT: benzene-mesh
+          TF_VAR_google_oauth_client_id: ${{ vars.GOOGLE_OAUTH_CLIENT_ID }}
+          TF_VAR_google_oauth_client_secret: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
         run: |
           chmod +x adopt-existing.sh
           ./adopt-existing.sh
