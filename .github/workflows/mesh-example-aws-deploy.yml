@@ -17,6 +17,10 @@ on:
         description: "Clean slate: delete all app resources first, then recreate. Use once to recover from duplicate/partial resources left by a failed run."
         type: boolean
         default: false
+      mesh_extra_services:
+        description: 'Option B admin allowlist (work/mesh-external-service-discovery-scope-2026-08.md): JSON list of external services to seed into the mesh, e.g. [{"name":"wetsticks-admin","specUrl":"https://.../benzene/spec","healthUrl":"https://.../benzene/health"}]. Not sticky - every run applies exactly this value (blank = none), so pass it again on each run you want it to stay set.'
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -188,8 +192,18 @@ jobs:
         env:
           TF_VAR_google_oauth_client_id: ${{ vars.GOOGLE_OAUTH_CLIENT_ID }}
           TF_VAR_google_oauth_client_secret: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+          # Passed via env, not interpolated straight into the script, so a JSON value carrying shell
+          # metacharacters can't break out of the command - see mesh_extra_services's workflow_dispatch
+          # input above (Option B, work/mesh-external-service-discovery-scope-2026-08.md). Blank input
+          # (the default) means "no extra services" - the -var is only added when non-blank, so a bare
+          # run falls through to variables.tf's own default ([]), same as before this input existed.
+          MESH_EXTRA_SERVICES_INPUT: ${{ inputs.mesh_extra_services }}
         run: |
-          terraform apply -input=false -auto-approve -var "region=${{ inputs.region }}"
+          args=(-input=false -auto-approve -var "region=${{ inputs.region }}")
+          if [ -n "$MESH_EXTRA_SERVICES_INPUT" ]; then
+            args+=(-var "mesh_extra_services=$MESH_EXTRA_SERVICES_INPUT")
+          fi
+          terraform apply "${args[@]}"
 
       # The mesh Lambda only aggregates on its own schedule (deploy/variables.tf's
       # aggregate_schedule, default rate(15 minutes)) — EventBridge rate schedules don't fire the
