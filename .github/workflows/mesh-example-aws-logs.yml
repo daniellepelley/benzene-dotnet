@@ -17,6 +17,10 @@ on:
         description: "Lambda function name to read logs from"
         required: true
         default: "benzene-mesh-mesh"
+      s3_bucket:
+        description: "If set, also head/get these artifact keys directly from this S3 bucket (bypassing the Lambda entirely) - e.g. to check object size/existence independent of the serving Lambda."
+        required: false
+        default: ""
       filter_pattern:
         description: 'CloudWatch Logs filter pattern (e.g. "Mesh artifact read failed" or "ERROR")'
         required: false
@@ -108,3 +112,30 @@ jobs:
           echo "--- Fault trace detail (raw segment documents - each is its own JSON string) ---"
           aws xray batch-get-traces --trace-ids $SUMMARIES \
             --query 'Traces[*].Segments[*].Document' --output json
+
+      # Reads the artifacts straight from S3, bypassing the Lambda/API-Gateway/OIDC gate entirely -
+      # tells us whether the objects genuinely exist and are readable (a Lambda-side issue) or are
+      # themselves broken/oversized/inaccessible even to a completely different client (a real S3/
+      # content issue). Only runs when s3_bucket is set.
+      - name: Head/get artifacts directly from S3
+        if: ${{ inputs.s3_bucket != '' }}
+        env:
+          BUCKET: ${{ inputs.s3_bucket }}
+        run: |
+          for key in manifest.json topics.json topology.json usage.json asyncapi.json; do
+            echo "=== $key ==="
+            if aws s3api head-object --bucket "$BUCKET" --key "$key" 2>&1; then
+              size=$(aws s3api head-object --bucket "$BUCKET" --key "$key" --query ContentLength --output text)
+              echo "ContentLength: $size bytes"
+              if aws s3api get-object --bucket "$BUCKET" --key "$key" "/tmp/$key" >/dev/null 2>&1; then
+                echo "Direct S3 GetObject: OK, $(wc -c < "/tmp/$key") bytes downloaded, first 200 chars:"
+                head -c 200 "/tmp/$key"
+                echo
+              else
+                echo "Direct S3 GetObject: FAILED"
+              fi
+            else
+              echo "head-object failed (object missing or inaccessible)"
+            fi
+            echo
+          done
