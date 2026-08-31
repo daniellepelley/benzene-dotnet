@@ -21,6 +21,10 @@ on:
         description: "If set, also head/get these artifact keys directly from this S3 bucket (bypassing the Lambda entirely) - e.g. to check object size/existence independent of the serving Lambda."
         required: false
         default: ""
+      s3_prefix:
+        description: "Key prefix the artifacts are stored under in s3_bucket (matches deploy/variables.tf's MESH_ARTIFACT_PREFIX, e.g. 'mesh' - no leading/trailing slash needed)."
+        required: false
+        default: ""
       filter_pattern:
         description: 'CloudWatch Logs filter pattern (e.g. "Mesh artifact read failed" or "ERROR")'
         required: false
@@ -121,15 +125,23 @@ jobs:
         if: ${{ inputs.s3_bucket != '' }}
         env:
           BUCKET: ${{ inputs.s3_bucket }}
+          PREFIX: ${{ inputs.s3_prefix }}
         run: |
-          for key in manifest.json topics.json topology.json usage.json asyncapi.json; do
+          key_prefix=""
+          [ -n "$PREFIX" ] && key_prefix="${PREFIX%/}/"
+          echo "Listing objects under s3://$BUCKET/$key_prefix"
+          aws s3api list-objects-v2 --bucket "$BUCKET" --prefix "$key_prefix" \
+            --query 'Contents[*].[Key,Size,LastModified]' --output table || true
+          echo
+          for name in manifest.json topics.json topology.json usage.json asyncapi.json; do
+            key="${key_prefix}${name}"
             echo "=== $key ==="
             if aws s3api head-object --bucket "$BUCKET" --key "$key" 2>&1; then
               size=$(aws s3api head-object --bucket "$BUCKET" --key "$key" --query ContentLength --output text)
               echo "ContentLength: $size bytes"
-              if aws s3api get-object --bucket "$BUCKET" --key "$key" "/tmp/$key" >/dev/null 2>&1; then
-                echo "Direct S3 GetObject: OK, $(wc -c < "/tmp/$key") bytes downloaded, first 200 chars:"
-                head -c 200 "/tmp/$key"
+              if aws s3api get-object --bucket "$BUCKET" --key "$key" "/tmp/$name" >/dev/null 2>&1; then
+                echo "Direct S3 GetObject: OK, $(wc -c < "/tmp/$name") bytes downloaded, first 200 chars:"
+                head -c 200 "/tmp/$name"
                 echo
               else
                 echo "Direct S3 GetObject: FAILED"
