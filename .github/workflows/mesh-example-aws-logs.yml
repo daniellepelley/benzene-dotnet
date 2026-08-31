@@ -80,3 +80,31 @@ jobs:
               --query 'events[*].message' \
               --output text
           fi
+
+      # Fallback for exactly the case CloudWatch Logs can't answer: MeshArtifactMiddleware's own
+      # exception is deliberately never returned to the HTTP client (no detail leakage - see its
+      # remarks and MeshArtifactMiddlewareTest's "no leakage" assertion) and, in practice, may also
+      # never reach CloudWatch if this Lambda has no ILogger sink wired up. X-Ray captures a fault on
+      # the failing AWS SDK subsegment (S3 GetObject) with the real exception regardless of app-level
+      # logging, as long as the request was sampled.
+      - name: Fetch X-Ray fault traces
+        env:
+          SINCE_MINUTES: ${{ inputs.since_minutes }}
+        run: |
+          START_TIME=$(date -u -d "@$(( $(date +%s) - SINCE_MINUTES * 60 ))" +%Y-%m-%dT%H:%M:%S 2>/dev/null \
+            || date -u -r $(( $(date +%s) - SINCE_MINUTES * 60 )) +%Y-%m-%dT%H:%M:%S)
+          END_TIME=$(date -u +%Y-%m-%dT%H:%M:%S)
+          echo "Window: $START_TIME .. $END_TIME (UTC)"
+          echo "--- Fault trace summaries ---"
+          SUMMARIES=$(aws xray get-trace-summaries \
+            --start-time "$START_TIME" --end-time "$END_TIME" \
+            --filter-expression 'fault' \
+            --query 'TraceSummaries[*].Id' --output text)
+          echo "$SUMMARIES"
+          if [ -z "$SUMMARIES" ]; then
+            echo "No faulted traces found in this window."
+            exit 0
+          fi
+          echo "--- Fault trace detail (raw segment documents - each is its own JSON string) ---"
+          aws xray batch-get-traces --trace-ids $SUMMARIES \
+            --query 'Traces[*].Segments[*].Document' --output json
