@@ -704,6 +704,18 @@ resource "aws_lambda_function" "mesh" {
       MESH_ARTIFACT_PREFIX = "mesh"
       # The lookback window the CloudWatch usage source counts over (and the window the Mesh UI shows).
       MESH_USAGE_WINDOW_HOURS = tostring(var.usage_window_hours)
+      # Option B admin-managed seed (work/mesh-external-service-discovery-scope-2026-08.md): services
+      # outside this account entirely, unioned into the discovered registry (winning on a name clash) by
+      # Mesh/Startup.cs's ParseExtraServices, reusing the exact mesh.json shape MeshRegistryJson already
+      # reads/writes. Always set, even for the default empty list, so the Lambda's env is deterministic
+      # across applies — an empty services array parses to a no-op seed, byte-identical to unset.
+      MESH_EXTRA_SERVICES = jsonencode({
+        services = [for s in var.mesh_extra_services : {
+          name      = s.name
+          specUrl   = s.specUrl
+          healthUrl = s.healthUrl
+        }]
+      })
       # Google OAuth login gate (Benzene.Mesh.Auth.Oidc, wired in Mesh/Startup.cs) - see
       # examples/AwsMesh/README.md's "Auth setup" section. The signing key is Terraform-generated
       # (random_id.mesh_oidc_signing_key above), never hand-typed.

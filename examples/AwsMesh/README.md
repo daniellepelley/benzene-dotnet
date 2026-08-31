@@ -659,6 +659,45 @@ artifacts) with `{ "discovered": N }` — or `401`/`403`/`429` per **Protecting 
   `lambda:InvokeFunction` scoped to the six services (interrogate), and `s3:*Object`/`ListBucket`
   on the artifact bucket. Read + describe-invoke only.
 
+## Adding an external service to the mesh (admin-managed allowlist)
+
+AWS Lambda discovery only ever finds tagged Lambdas in **this** AWS account — it can't reach a
+Benzene service deployed from a different repo/account. `var.mesh_extra_services` is an admin-managed
+allowlist for exactly that case (see
+`work/mesh-external-service-discovery-scope-2026-08.md`'s Option B): a list of
+`{ name, specUrl, healthUrl }` entries, wired to the mesh Lambda's `MESH_EXTRA_SERVICES` environment
+variable as a `mesh.json`-shaped JSON blob (the same shape `MeshRegistryJson`/a hand-written
+`mesh.json` already use elsewhere) and unioned into the discovered registry every aggregation pass
+(`Mesh/MeshAggregateHandler.cs`, via `MeshDiscoveryRunner.DiscoverAsync`'s `staticSeed` parameter — a
+seed entry **wins** over anything AWS discovery finds under the same name).
+
+```hcl
+mesh_extra_services = [
+  {
+    name      = "wetsticks-admin"
+    specUrl   = "https://wetsticks-admin.example.com/benzene/spec"
+    healthUrl = "https://wetsticks-admin.example.com/benzene/health"
+  }
+]
+```
+
+- **No AWS coupling at all.** A seeded entry is fetched over plain HTTP by the aggregator's default
+  `HttpMeshServiceSource` (`GET specUrl` / `GET healthUrl`) — never `lambda:Invoke` — so it works
+  regardless of which account, cloud, or repo the target lives in. Nothing in this stack's IAM changes:
+  no cross-account role, no wildcard `InvokeFunction`, no widened blast radius. The target just needs to
+  already run `UseBenzeneCloudService(...)` and expose `/benzene/spec` + `/benzene/health` on a URL this
+  mesh Lambda can reach (public, or behind whatever auth `HttpMeshServiceSource` supports today — none;
+  it's an unauthenticated `GET`).
+- Leave `mesh_extra_services` at its default `[]` and nothing changes — an empty list still sets
+  `MESH_EXTRA_SERVICES` (to `{"services":[]}`), which parses to a no-op seed, byte-identical to the
+  variable being unset entirely.
+- A malformed `MESH_EXTRA_SERVICES` value (should only happen if you set it by hand outside Terraform)
+  fails the mesh Lambda's cold start with a clear `InvalidOperationException` rather than silently
+  discovering nothing — see `Mesh/Startup.cs`'s `ParseExtraServices`.
+- **Not covered by this mechanism**: opening discovery to *every* Lambda in the account regardless of
+  tag (that's "Option A" in the scope doc above — a separate, IAM-widening decision, not implemented
+  here).
+
 ## Cost: this demo is not free while it merely exists
 
 A standing deploy costs money without anyone using it. The scheduled aggregation invokes the mesh

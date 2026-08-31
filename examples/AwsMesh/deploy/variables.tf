@@ -51,6 +51,16 @@ variable "discovery_tag_key" {
   default     = "benzene"
 }
 
+variable "mesh_extra_services" {
+  description = "Admin-managed allowlist of extra services to catalog that live entirely outside this AWS account/Terraform stack — e.g. a Benzene service deployed from a different repo (work/mesh-external-service-discovery-scope-2026-08.md, Option B). Reached over plain HTTP (specUrl/healthUrl, via the aggregator's default HttpMeshServiceSource), never AWS Lambda Invoke — no IAM change, no cross-account role, no widening of this stack's blast radius. Wins over anything AWS discovery finds under the same name (MeshDiscoveryRunner.DiscoverAsync's static-seed union). Wired into the mesh Lambda as MESH_EXTRA_SERVICES, a mesh.json-shaped JSON blob parsed by Mesh/Startup.cs. Empty by default — this demo's own six services are found by discovery alone."
+  type = list(object({
+    name       = string
+    specUrl    = string
+    healthUrl  = string
+  }))
+  default = []
+}
+
 variable "lambda_architecture" {
   description = "Lambda architecture. Must match the self-contained publish RID in CI (x86_64 -> linux-x64, arm64 -> linux-arm64)."
   type        = string

@@ -24,6 +24,7 @@ using Benzene.Microsoft.Dependencies;
 using Benzene.Examples.AwsMesh.Shared;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using System.Text.Json;
 
 namespace Benzene.Examples.AwsMesh.Mesh;
 
@@ -55,6 +56,7 @@ public class Startup : BenzeneStartUp
         var bucket = Environment.GetEnvironmentVariable("MESH_ARTIFACT_BUCKET")
                      ?? throw new InvalidOperationException("MESH_ARTIFACT_BUCKET is required.");
         var prefix = Environment.GetEnvironmentVariable("MESH_ARTIFACT_PREFIX") ?? "";
+        var extraServices = ParseExtraServices();
 
         // The AWS API Gateway (v1 payload) binding for Benzene.Mesh.Auth.Oidc's query-string
         // abstraction - see ApiGatewayOidcQueryStringReader's remarks and that package's CLAUDE.md.
@@ -110,6 +112,13 @@ public class Startup : BenzeneStartUp
             benzene.AddScoped<IOidcSessionSink>(resolver =>
                 new OidcDispatchIdentitySink(resolver.GetService<MeshDispatchIdentity>()));
             benzene.AddMeshAwsLambdaDiscovery();    // AwsLambdaDiscoveryProvider + MeshDiscoveryRunner
+            // Option B (work/mesh-external-service-discovery-scope-2026-08.md): an admin-managed seed
+            // of services entirely outside this AWS account/Terraform stack, reached over plain HTTP
+            // (HttpMeshServiceSource, already the default IMeshServiceSource - no new source wiring
+            // needed). Its own wrapper type, not a third MeshServiceRegistry registration - see
+            // MeshExtraServicesSeed's remarks for why that would collide with the two MeshServiceRegistry
+            // registrations already in this container.
+            benzene.AddSingleton(new MeshExtraServicesSeed(extraServices));
             // Usage feed: read the benzene.messages.processed counter (exported to CloudWatch by the ADOT
             // collector's EMF exporter — see collector.yaml) back as per-topic request counts over a
             // window, merged into usage.json each run. The window is tweakable via MESH_USAGE_WINDOW_HOURS.
@@ -280,6 +289,38 @@ public class Startup : BenzeneStartUp
         }
 
         return options;
+    }
+
+    /// <summary>
+    /// Parses the optional <c>MESH_EXTRA_SERVICES</c> admin seed (Option B,
+    /// work/mesh-external-service-discovery-scope-2026-08.md) - a <c>mesh.json</c>-shaped JSON blob
+    /// (<c>{"services":[{"name","specUrl","healthUrl"}]}</c>) naming services entirely outside this AWS
+    /// account, reused as-is via <see cref="MeshRegistryJson.Deserialize"/> rather than a second parser
+    /// for the same shape. Unset or blank (Terraform's default) is NOT an error - it returns <c>null</c>,
+    /// which <see cref="MeshDiscoveryRunner.DiscoverAsync"/> treats identically to "no seed passed at
+    /// all", so an unconfigured mesh behaves byte-for-byte as it did before this variable existed.
+    /// Unlike that lenient case, a variable that IS set but fails to parse throws - a config typo (bad
+    /// JSON, a field of the wrong shape) should fail loud at cold start, not silently vanish and leave
+    /// an admin wondering why their service never shows up.
+    /// </summary>
+    private static MeshServiceRegistry? ParseExtraServices()
+    {
+        var json = Environment.GetEnvironmentVariable("MESH_EXTRA_SERVICES");
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return MeshRegistryJson.Deserialize(json);
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException(
+                "MESH_EXTRA_SERVICES is set but is not valid mesh.json-shaped JSON " +
+                "(expected {\"services\":[{\"name\":...,\"specUrl\":...,\"healthUrl\":...}]}).", ex);
+        }
     }
 
     /// <summary>
