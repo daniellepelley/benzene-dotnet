@@ -679,24 +679,41 @@ resource "aws_lambda_function" "mesh" {
   # S3 keys (registry.json, manifest.json, services/*.json - all unconditional PutObject, no
   # conditional-write/ETag guard).
   #
-  # WHAT THIS DOES: caps the mesh Lambda to exactly one concurrent execution across BOTH triggers - a
-  # cheap platform-level serializer requiring no new infrastructure. A second invocation that would
-  # exceed the reservation while one is in flight is throttled (EventBridge retries per its own retry
-  # policy; the refresh route's caller sees a Lambda throttling error, which the browser reports as a
-  # failed refresh, not a corrupted catalog).
+  # WHAT THIS ORIGINALLY DID (and why it changed, 2026-08-31): reserved_concurrent_executions was set
+  # to exactly 1, capping the mesh Lambda to one concurrent execution across BOTH aggregation
+  # triggers - a cheap platform-level serializer requiring no new infrastructure. The problem: this
+  # ceiling applies to the WHOLE function, not just the two aggregation triggers - every ordinary read
+  # (manifest.json/topics.json/topology.json/usage.json/services/*.json via MeshArtifactMiddleware, the
+  # Mesh UI page itself, the OIDC routes) shares it too, and none of those write anything. A single
+  # page load fires several of those reads in parallel (loadCatalog's topics/topology/usage
+  # Promise.all, plus the manifest fetch), so live CloudWatch metrics showed the Lambda's own reads
+  # throttling each other continuously - Throttles tracking API Gateway's 5xx count 1:1, all day, with
+  # Duration spiking past 6s whenever a request queued behind whichever invocation was already
+  # running. Reported as "the site is performing badly" and confirmed from the metrics, not a guess.
+  #
+  # WHAT IT DOES NOW: var.mesh_lambda_reserved_concurrency (default 10, see its own description) -
+  # high enough that ordinary concurrent reads stop throttling each other, while still bounding the
+  # aggregation-write race this value originally existed for. That race is already narrow independent
+  # of this number: the EventBridge schedule fires every aggregate_schedule interval and
+  # MeshRefreshGuardMiddleware throttles the manual route to one call per refresh_min_interval_seconds,
+  # so raising the ceiling makes the "exactly one aggregation pass at a time" guarantee probabilistic
+  # rather than absolute without meaningfully increasing how often it's actually exercised.
   #
   # WHAT THIS DOES NOT DO: it is not a queue and not a distributed lock with fairness/ordering
   # guarantees - it is a hard concurrency ceiling, the same "not a distributed lock" caveat
   # MeshRefreshGuardMiddleware's own remarks give its throttle (see that class's XML docs). A burst of
-  # near-simultaneous triggers can still throttle a legitimate request rather than queueing it, and a
-  # long-running pass (this function's `timeout` above) holds the single slot for its full duration,
-  # so the scheduled pass and an operator's on-demand refresh compete for the same one slot rather than
-  # running independently. If true single-flight semantics (queueing instead of throttling, ordering
-  # guarantees) are ever needed, the fuller fix is an S3 conditional-write/lease (e.g. a
-  # `registry.lock` object written with `If-None-Match: *` before a pass starts, removed after) - NOT
-  # adopting `MeshAggregationPass`'s in-process semaphore here, which would compile and appear to help
-  # but cannot cross the Lambda execution-environment boundary this finding is actually about.
-  reserved_concurrent_executions = 1
+  # near-simultaneous triggers beyond the ceiling can still throttle a legitimate request rather than
+  # queueing it, and a long-running pass (this function's `timeout` above) holds its slot for its full
+  # duration. If true single-flight semantics for the aggregation writers specifically (queueing
+  # instead of throttling, ordering guarantees, with NO probabilistic race window at any concurrency)
+  # are ever needed, the fuller fix is an S3 conditional-write/lease (e.g. a `registry.lock` object
+  # written with `If-None-Match: *` before a pass starts, removed after) - NOT adopting
+  # `MeshAggregationPass`'s in-process semaphore here, which would compile and appear to help but
+  # cannot cross the Lambda execution-environment boundary this finding is actually about. The other
+  # real fix (out of scope for this pass) is splitting this Lambda in two - one for the two aggregation
+  # triggers (reserved_concurrent_executions = 1, correct there), one for serving reads (uncapped) -
+  # which would restore the absolute guarantee AND remove the read-path throttling entirely.
+  reserved_concurrent_executions = var.mesh_lambda_reserved_concurrency
 
   environment {
     variables = merge({

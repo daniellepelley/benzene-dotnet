@@ -51,6 +51,12 @@ variable "discovery_tag_key" {
   default     = "benzene"
 }
 
+variable "mesh_lambda_reserved_concurrency" {
+  description = "aws_lambda_function.mesh's reserved_concurrent_executions - see that resource's own comment for the full history (#73/WP-E) and tradeoff. Was 1 (a hard concurrency ceiling meant only to keep the EventBridge aggregation schedule and the on-demand /mesh/refresh from racing each other's S3 writes) but that caps the WHOLE Lambda, including every ordinary read - manifest.json/topics.json/topology.json/usage.json/services/*.json/the Mesh UI page itself - none of which write anything. A single page load fires several of those reads in parallel; at 1, live CloudWatch metrics showed them throttling each other continuously (Lambda Throttles matching API Gateway 5xx 1:1) plus multi-second Duration spikes whenever a throttled request queued behind the one running. Raised well above the two-writer count so ordinary concurrent reads stop throttling each other; the aggregation-write race this value originally existed to prevent is already bounded independently (the schedule fires every aggregate_schedule interval, and MeshRefreshGuardMiddleware throttles the manual route to one call per refresh_min_interval_seconds), so a modest ceiling still keeps that race rare without reintroducing read-path throttling."
+  type        = number
+  default     = 10
+}
+
 variable "mesh_extra_services" {
   description = "Admin-managed allowlist of extra services to catalog that live entirely outside this AWS account/Terraform stack — e.g. a Benzene service deployed from a different repo (work/mesh-external-service-discovery-scope-2026-08.md, Option B). Reached over plain HTTP (specUrl/healthUrl, via the aggregator's default HttpMeshServiceSource), never AWS Lambda Invoke — no IAM change, no cross-account role, no widening of this stack's blast radius. Wins over anything AWS discovery finds under the same name (MeshDiscoveryRunner.DiscoverAsync's static-seed union). Wired into the mesh Lambda as MESH_EXTRA_SERVICES, a mesh.json-shaped JSON blob parsed by Mesh/Startup.cs. Empty by default — this demo's own six services are found by discovery alone."
   type = list(object({
