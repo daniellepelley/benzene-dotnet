@@ -33,6 +33,10 @@ on:
         description: "How far back to search, in minutes"
         required: true
         default: "60"
+      s3_full_dump_keys:
+        description: "Comma-separated keys (relative to s3_prefix, e.g. 'topics.json,services/benzene-mesh-orders.json') to print IN FULL rather than the standard steps' 200-char preview - for inspecting a specific artifact's actual content/shape, not just confirming it's readable. Requires s3_bucket."
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -148,6 +152,33 @@ jobs:
               fi
             else
               echo "head-object failed (object missing or inaccessible)"
+            fi
+            echo
+          done
+
+      # The loop above only ever prints a 200-char preview - enough to confirm an artifact reads
+      # cleanly, not enough to inspect its actual shape (e.g. whether a specific service's name
+      # appears in topics.json's consumers/producers arrays). This prints named keys in full instead.
+      - name: Full-dump specific S3 keys
+        if: ${{ inputs.s3_bucket != '' && inputs.s3_full_dump_keys != '' }}
+        env:
+          BUCKET: ${{ inputs.s3_bucket }}
+          PREFIX: ${{ inputs.s3_prefix }}
+          KEYS_INPUT: ${{ inputs.s3_full_dump_keys }}
+        run: |
+          key_prefix=""
+          [ -n "$PREFIX" ] && key_prefix="${PREFIX%/}/"
+          IFS=',' read -ra keys <<< "$KEYS_INPUT"
+          for name in "${keys[@]}"; do
+            name="$(echo "$name" | xargs)"
+            [ -z "$name" ] && continue
+            key="${key_prefix}${name}"
+            echo "=== FULL: $key ==="
+            if aws s3api get-object --bucket "$BUCKET" --key "$key" "/tmp/full-$$" >/dev/null 2>&1; then
+              cat "/tmp/full-$$"
+              rm -f "/tmp/full-$$"
+            else
+              echo "get-object failed (object missing or inaccessible)"
             fi
             echo
           done
