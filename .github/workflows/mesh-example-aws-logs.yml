@@ -93,6 +93,86 @@ jobs:
               --output text
           fi
 
+      # Answers "is this actually slow, and why": Lambda Duration (p50/p90/p99, and max - a cold
+      # start can blow past the average without moving it much), Throttles (non-zero means requests
+      # queued or were rejected - the likely story on this function, whose Terraform config caps it
+      # at reserved_concurrent_executions = 1, shared between the EventBridge aggregation schedule
+      # and every browser request), and ConcurrentExecutions (whether that cap is actually being hit).
+      # Plus API Gateway's own Latency/IntegrationLatency split, which separates "Lambda is slow" from
+      # "something between the browser and Lambda is slow" (auth, network, API Gateway itself).
+      - name: Fetch Lambda + API Gateway performance metrics
+        env:
+          FUNCTION_NAME: ${{ inputs.function_name }}
+          SINCE_MINUTES: ${{ inputs.since_minutes }}
+        run: |
+          START_TIME=$(date -u -d "@$(( $(date +%s) - SINCE_MINUTES * 60 ))" +%Y-%m-%dT%H:%M:%S 2>/dev/null \
+            || date -u -r $(( $(date +%s) - SINCE_MINUTES * 60 )) +%Y-%m-%dT%H:%M:%S)
+          END_TIME=$(date -u +%Y-%m-%dT%H:%M:%S)
+          PERIOD=300
+          echo "Window: $START_TIME .. $END_TIME (UTC), period ${PERIOD}s"
+
+          echo ""
+          echo "--- Lambda Duration (ms) ---"
+          aws cloudwatch get-metric-statistics \
+            --namespace AWS/Lambda --metric-name Duration \
+            --dimensions Name=FunctionName,Value="$FUNCTION_NAME" \
+            --start-time "$START_TIME" --end-time "$END_TIME" --period "$PERIOD" \
+            --statistics Average Maximum --extended-statistics p50 p90 p99 \
+            --query 'sort_by(Datapoints,&Timestamp)[].{t:Timestamp,avg:Average,max:Maximum,p50:ExtendedStatistics.p50,p90:ExtendedStatistics.p90,p99:ExtendedStatistics.p99}' \
+            --output table || true
+
+          echo ""
+          echo "--- Lambda Invocations / Errors / Throttles (sum per period) ---"
+          for metric in Invocations Errors Throttles; do
+            echo "  $metric:"
+            aws cloudwatch get-metric-statistics \
+              --namespace AWS/Lambda --metric-name "$metric" \
+              --dimensions Name=FunctionName,Value="$FUNCTION_NAME" \
+              --start-time "$START_TIME" --end-time "$END_TIME" --period "$PERIOD" \
+              --statistics Sum \
+              --query 'sort_by(Datapoints,&Timestamp)[?Sum > `0`].{t:Timestamp,sum:Sum}' \
+              --output table || true
+          done
+
+          echo ""
+          echo "--- Lambda ConcurrentExecutions (max) - compare against reserved_concurrent_executions=1 in deploy/main.tf ---"
+          aws cloudwatch get-metric-statistics \
+            --namespace AWS/Lambda --metric-name ConcurrentExecutions \
+            --dimensions Name=FunctionName,Value="$FUNCTION_NAME" \
+            --start-time "$START_TIME" --end-time "$END_TIME" --period "$PERIOD" \
+            --statistics Maximum \
+            --query 'sort_by(Datapoints,&Timestamp)[?Maximum > `0`].{t:Timestamp,max:Maximum}' \
+            --output table || true
+
+          # deploy/main.tf's aws_apigatewayv2_api.mesh: name = "${var.project}-mesh-api" (default project "benzene-mesh").
+          API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='benzene-mesh-mesh-api'].ApiId" --output text | head -n1)
+          if [ -z "$API_ID" ]; then
+            echo ""
+            echo "No matching API Gateway v2 API found by name - skipping API Gateway metrics."
+            exit 0
+          fi
+          echo ""
+          echo "--- API Gateway (ApiId=$API_ID) Latency / IntegrationLatency (ms) ---"
+          for metric in Latency IntegrationLatency; do
+            echo "  $metric:"
+            aws cloudwatch get-metric-statistics \
+              --namespace AWS/ApiGateway --metric-name "$metric" \
+              --dimensions Name=ApiId,Value="$API_ID" \
+              --start-time "$START_TIME" --end-time "$END_TIME" --period "$PERIOD" \
+              --statistics Average Maximum --extended-statistics p90 p99 \
+              --query 'sort_by(Datapoints,&Timestamp)[].{t:Timestamp,avg:Average,max:Maximum,p90:ExtendedStatistics.p90,p99:ExtendedStatistics.p99}' \
+              --output table || true
+          done
+          echo ""
+          echo "--- API Gateway 5xx count (sum per period) ---"
+          aws cloudwatch get-metric-statistics \
+            --namespace AWS/ApiGateway --metric-name 5xx \
+            --dimensions Name=ApiId,Value="$API_ID" \
+            --start-time "$START_TIME" --end-time "$END_TIME" --period "$PERIOD" \
+            --statistics Sum \
+            --query 'sort_by(Datapoints,&Timestamp)[?Sum > `0`].{t:Timestamp,sum:Sum}' \
+            --output table || true
+
       # Fallback for exactly the case CloudWatch Logs can't answer: MeshArtifactMiddleware's own
       # exception is deliberately never returned to the HTTP client (no detail leakage - see its
       # remarks and MeshArtifactMiddlewareTest's "no leakage" assertion) and, in practice, may also
