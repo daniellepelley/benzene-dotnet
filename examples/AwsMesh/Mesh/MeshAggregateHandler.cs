@@ -87,4 +87,4 @@ public class MeshAggregateSummary
 /// resolution). Wrapping the seed in its own type sidesteps that collision entirely.
 /// </para>
 /// </summary>
-internal sealed record MeshExtraServicesSeed(MeshServiceRegistry? Registry);
+public sealed record MeshExtraServicesSeed(MeshServiceRegistry? Registry);
