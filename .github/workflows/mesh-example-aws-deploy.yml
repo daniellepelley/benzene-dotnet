@@ -21,6 +21,10 @@ on:
         description: 'Option B admin allowlist (work/mesh-external-service-discovery-scope-2026-08.md): JSON list of external services to seed into the mesh, e.g. [{"name":"wetsticks-admin","specUrl":"https://.../benzene/spec","healthUrl":"https://.../benzene/health"}]. Not sticky - every run applies exactly this value (blank = none), so pass it again on each run you want it to stay set.'
         required: false
         default: ""
+      mesh_allowed_emails:
+        description: 'Comma-separated Google account emails allowed to log into the mesh UI (case-insensitive exact match, no domain matching - see variables.tf''s mesh_allowed_emails), e.g. "a@gmail.com,b@gmail.com". Not sticky - blank keeps variables.tf''s own default (daniellepelley@gmail.com only), so pass the FULL list again on each run you want it to stay set - a run with one email drops any others not repeated here.'
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -198,10 +202,19 @@ jobs:
           # (the default) means "no extra services" - the -var is only added when non-blank, so a bare
           # run falls through to variables.tf's own default ([]), same as before this input existed.
           MESH_EXTRA_SERVICES_INPUT: ${{ inputs.mesh_extra_services }}
+          # Same env-indirection reasoning as MESH_EXTRA_SERVICES_INPUT above. The input is a plain
+          # comma-separated string (friendlier to type into the workflow_dispatch form than JSON) -
+          # converted here into a JSON array (valid Terraform -var syntax for a list(string)), with jq
+          # doing the quoting so an email containing a stray quote/backslash can't break out of it.
+          MESH_ALLOWED_EMAILS_INPUT: ${{ inputs.mesh_allowed_emails }}
         run: |
           args=(-input=false -auto-approve -var "region=${{ inputs.region }}")
           if [ -n "$MESH_EXTRA_SERVICES_INPUT" ]; then
             args+=(-var "mesh_extra_services=$MESH_EXTRA_SERVICES_INPUT")
+          fi
+          if [ -n "$MESH_ALLOWED_EMAILS_INPUT" ]; then
+            emails_json=$(printf '%s' "$MESH_ALLOWED_EMAILS_INPUT" | jq -R 'split(",") | map(gsub("^\\s+|\\s+$";"")) | map(select(length > 0))')
+            args+=(-var "mesh_allowed_emails=$emails_json")
           fi
           terraform apply "${args[@]}"
 

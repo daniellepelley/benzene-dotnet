@@ -475,8 +475,15 @@ example is what makes it Google specifically (`Issuer = "https://accounts.google
    fails at Google with `redirect_uri_mismatch` (see "Locked out or misconfigured?" below).
 5. **Set who's allowed in**: `mesh_allowed_emails` (a Terraform variable, default
    `["daniellepelley@gmail.com"]`) is the list of Google account emails allowed to log in -
-   case-insensitive exact match, no domain matching. Override it (`-var 'mesh_allowed_emails=["you@gmail.com","teammate@gmail.com"]'`)
-   with your own account(s) before deploying, or you'll deploy a mesh only the default account can open.
+   case-insensitive exact match, no domain matching. Override it with your own account(s) before
+   deploying, or you'll deploy a mesh only the default account can open (and every login will show
+   the generic "Access denied" page - see "Locked out or misconfigured?" below, this is the single
+   most common cause). Two ways to set it:
+   - **Via the GitHub Actions workflow** (the way `mesh_extra_services` already works): pass
+     `mesh_allowed_emails` on *Run workflow* as a comma-separated list, e.g.
+     `you@gmail.com,teammate@gmail.com`. Not sticky - blank keeps the Terraform default, and each run
+     applies exactly the list you pass, so include everyone who should stay allowed, every time you set it.
+   - **Local `terraform apply`**: `-var 'mesh_allowed_emails=["you@gmail.com","teammate@gmail.com"]'`.
 6. **Log in**: open `mesh_ui_url` - it redirects to `/mesh/auth/login`, then to Google, then back. A
    successful login sets a session cookie good for 24 hours (`MeshOidcOptions.SessionDuration`).
    Once logged in the Mesh UI renders a **Sign out** control - the page feature-detects the
