@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text.Json;
+using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 
@@ -18,18 +19,31 @@ namespace Benzene.Example.Asp.DemoAuth;
 public sealed class DemoJwtIssuer
 {
     public const string KeyId = "demo-key-1";
-
-    // #219: this MUST match the base URL this app is actually listening on - Startup.cs builds the
-    // JWKS lookup URL (and OAuth2BearerOptions.ValidIssuers) directly from this constant. If Kestrel
-    // ends up on a different port (a busy 5000, an explicit --urls, launchSettings.json, or
-    // ASPNETCORE_URLS overriding it), every /protected/* request fails with a bare 401 and no other
-    // clue why: the token's "iss" claim no longer matches ValidIssuers, and/or the JWKS fetch 404s.
-    // If GET /protected/ping 401s and curl http://localhost:5000/demo-token works, check the port
-    // your server actually bound (the console startup banner logs it) and update this constant.
-    public const string Issuer = "http://localhost:5000/";
     public const string Audience = "benzene-example-asp";
 
     private readonly RSA _rsa = RSA.Create(2048);
+
+    /// <summary>
+    /// The demo issuer's base URL, which <see cref="JwksUri"/> is derived from. Configurable
+    /// via the "DEMO_AUTH_ISSUER" config value (config.json or an environment variable), defaulting
+    /// to <c>http://localhost:5000/</c> to preserve this example's out-of-the-box behavior.
+    ///
+    /// This MUST match the base URL the app is actually served from: <c>OAuth2BearerOptions</c>
+    /// fetches JWKS from <see cref="JwksUri"/> to validate a token's signature, and a mismatch (e.g.
+    /// the app is run with `--urls http://localhost:5050` but this is left at the :5000 default)
+    /// fails that fetch. The symptom is an opaque <c>401 Unauthorized</c> on every request to
+    /// <c>/protected/*</c> with no message hinting at the real cause - if that happens, check this
+    /// value against the port the app is actually listening on.
+    /// </summary>
+    public string Issuer { get; }
+
+    /// <summary>The demo identity provider's JWKS endpoint, derived from <see cref="Issuer"/>.</summary>
+    public string JwksUri => $"{Issuer}.well-known/jwks.json";
+
+    public DemoJwtIssuer(IConfiguration configuration)
+    {
+        Issuer = configuration["DEMO_AUTH_ISSUER"] ?? "http://localhost:5000/";
+    }
 
     public string JwksJson()
     {

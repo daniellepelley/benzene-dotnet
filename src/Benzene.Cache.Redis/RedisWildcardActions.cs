@@ -26,6 +26,21 @@ internal class RedisWildcardActions : CacheInvalidateActions
 
     protected override async Task<bool> InvalidateEntryAsync(CancellationToken cancellationToken)
     {
+        // #198 defense-in-depth: CreatePrefixActions already rejects an empty/whitespace prefix
+        // before it ever reaches here, but this type is also reachable directly via
+        // CreateWildcardActions (an unescaped, caller-supplied pattern by design) and this is the
+        // last point before a real Redis KEYS scan runs. Never execute a bare/effectively-universal
+        // pattern - that would delete every key in the logical database.
+        if (IsEffectivelyUniversalPattern(_pattern))
+        {
+            Logger.LogError(
+                "Refusing to run cache invalidation for pattern {pattern}: it would match the entire keyspace",
+                _pattern);
+            throw new InvalidOperationException(
+                $"Refusing to run cache invalidation for pattern '{_pattern}': it would match the " +
+                "entire keyspace. This is a defense-in-depth guard (#198) - check what produced this pattern.");
+        }
+
         long deletedKeys = 0;
         try
         {
@@ -66,6 +81,31 @@ internal class RedisWildcardActions : CacheInvalidateActions
         // per-tenant/per-entity prefix that was never populated, or whose entries already expired) -
         // not a failure to report upstream.
         Logger.LogDebug("{pattern} matched {deletedKeys} key(s); reporting success.", _pattern, deletedKeys);
+        return true;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="pattern"/> would match every key in the keyspace: null/empty/
+    /// whitespace-only, or - after trimming - composed entirely of the glob wildcard <c>*</c>
+    /// (Redis glob syntax treats one or more consecutive <c>*</c> identically to a single one, so
+    /// <c>"*"</c>, <c>"**"</c>, and <c>" * "</c> are all equally universal).
+    /// </summary>
+    private static bool IsEffectivelyUniversalPattern(string pattern)
+    {
+        if (string.IsNullOrWhiteSpace(pattern))
+        {
+            return true;
+        }
+
+        var trimmed = pattern.Trim();
+        foreach (var c in trimmed)
+        {
+            if (c != '*')
+            {
+                return false;
+            }
+        }
+
         return true;
     }
 }

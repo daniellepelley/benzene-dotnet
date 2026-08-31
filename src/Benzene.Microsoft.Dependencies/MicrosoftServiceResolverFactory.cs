@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using Benzene.Abstractions.DI;
 using Microsoft.Extensions.DependencyInjection;
@@ -45,15 +46,52 @@ public class MicrosoftServiceResolverFactory : IServiceResolverFactory, IAsyncDi
         _ownsServiceProvider = true;
     }
 
+    /// <summary>
+    /// Disposes the provider we built ourselves (an externally-supplied provider's lifetime belongs to
+    /// whoever built it, so this is a no-op there). Disposing runs the container's disposable
+    /// singletons' cleanup (e.g. MeshAnnouncer's announce loop, HttpMeshTraceExporter's tail-batch
+    /// flush), which previously leaked until process exit on the Lambda / self-host-from-
+    /// IServiceCollection paths - there this Dispose() was a no-op and nothing else owned the provider.
+    /// Prefers the async bridge - with an UNBOUNDED wait - over the plain <see cref="IDisposable"/>
+    /// cast when the provider needs it: Microsoft.Extensions.DependencyInjection's own root provider
+    /// <c>Dispose()</c> throws <see cref="InvalidOperationException"/> for a container-owned singleton
+    /// that implements only <see cref="IAsyncDisposable"/> (task board #262, round 16 -
+    /// <c>work/bug-fix-plan-round16-2026-08.md</c> WP-A) - this is the ONLY disposal path some hosts
+    /// have at all (e.g. <c>Benzene.Aws.Lambda.Core</c>'s whole disposal chain is
+    /// <see cref="IDisposable"/>-only), so silently failing to dispose such a singleton (or throwing)
+    /// is not acceptable. Same rationale/pattern as <see cref="MicrosoftServiceResolverAdapter.Dispose"/>.
+    /// The wait deliberately suppresses the ambient <see cref="SynchronizationContext"/> (restored in
+    /// a <c>finally</c>) around the blocking call: without this, a container-owned singleton's own
+    /// <c>DisposeAsync()</c> that awaits without <c>ConfigureAwait(false)</c> (ordinary application
+    /// code) can deadlock this thread FOREVER under a single-thread-affinity context (WinForms/WPF/
+    /// Blazor-Server-shaped) - and because this disposes the WHOLE root provider, typically once at
+    /// process/host shutdown, that hang can mean the entire application never finishes shutting down
+    /// (task board #289, round 17). This is the standard sync-over-async mitigation, not the
+    /// bounded-5s pattern - it keeps the wait unbounded while removing the deadlock vector.
+    /// </summary>
     public void Dispose()
     {
-        // Only dispose a provider we built ourselves. Disposing runs the container's IDisposable
-        // singletons' cleanup (e.g. MeshAnnouncer's announce loop, HttpMeshTraceExporter's tail-batch
-        // flush), which previously leaked until process exit on the Lambda / self-host-from-
-        // IServiceCollection paths - there this Dispose() was a no-op and nothing else owned the provider.
-        if (_ownsServiceProvider)
+        if (!_ownsServiceProvider)
         {
-            (_serviceProvider as IDisposable)?.Dispose();
+            return;
+        }
+
+        if (_serviceProvider is IAsyncDisposable asyncDisposable)
+        {
+            var previousContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+            try
+            {
+                asyncDisposable.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            }
+            finally
+            {
+                SynchronizationContext.SetSynchronizationContext(previousContext);
+            }
+        }
+        else if (_serviceProvider is IDisposable disposable)
+        {
+            disposable.Dispose();
         }
     }
 

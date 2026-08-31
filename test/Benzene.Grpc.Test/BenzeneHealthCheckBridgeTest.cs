@@ -116,21 +116,77 @@ public class BenzeneHealthCheckBridgeTest
         Assert.Equal(BenzeneHealthCheckStatus.Failed, result.Data["Database-2"]);
     }
 
+    // #281: HealthCheckProcessor.RunTimedAsync downgrades a non-critical, non-persistent Failed result to
+    // Warning before deciding the aggregate - so a non-critical dependency being down degrades the probe
+    // rather than taking it out of service. The bridge must apply the identical rule instead of reading
+    // Status unconditionally, so the same check/state doesn't report "serving" over HTTP and NOT_SERVING
+    // over grpc.health.v1.
+    [Fact]
+    public async Task CheckHealthAsync_NonCriticalFailingCheck_DowngradesToDegradedNotUnhealthy()
+    {
+        var bridge = new BenzeneHealthCheckBridge(new[]
+        {
+            new FakeHealthCheck("a", BenzeneHealthCheckStatus.Ok),
+            new FakeHealthCheck("NonCriticalDependency", BenzeneHealthCheckStatus.Failed, isNonCritical: true),
+        });
+
+        var result = await bridge.CheckHealthAsync(new HealthCheckContext());
+
+        Assert.NotEqual(HealthStatus.Unhealthy, result.Status);
+        Assert.Equal(HealthStatus.Degraded, result.Status);
+        Assert.Equal(BenzeneHealthCheckStatus.Warning, result.Data!["NonCriticalDependency"]);
+    }
+
+    // A critical (default) check reporting Failed must still flip the bridge unhealthy - the downgrade is
+    // scoped to non-critical checks only.
+    [Fact]
+    public async Task CheckHealthAsync_CriticalFailingCheck_StillReportsUnhealthy()
+    {
+        var bridge = new BenzeneHealthCheckBridge(new[]
+        {
+            new FakeHealthCheck("CriticalDependency", BenzeneHealthCheckStatus.Failed),
+        });
+
+        var result = await bridge.CheckHealthAsync(new HealthCheckContext());
+
+        Assert.Equal(HealthStatus.Unhealthy, result.Status);
+    }
+
+    // A non-critical check's Failed result is downgraded UNLESS it's a persistent (deterministic, won't
+    // self-heal) failure - that still surfaces as unhealthy, mirroring HealthCheckProcessor.RunTimedAsync.
+    [Fact]
+    public async Task CheckHealthAsync_NonCriticalPersistentFailingCheck_StillReportsUnhealthy()
+    {
+        var bridge = new BenzeneHealthCheckBridge(new[]
+        {
+            new FakeHealthCheck("NonCriticalDependency", BenzeneHealthCheckStatus.Failed, isNonCritical: true, isPersistent: true),
+        });
+
+        var result = await bridge.CheckHealthAsync(new HealthCheckContext());
+
+        Assert.Equal(HealthStatus.Unhealthy, result.Status);
+    }
+
     private class FakeHealthCheck : IBenzeneHealthCheck
     {
         private readonly string _status;
+        private readonly bool _isPersistent;
 
-        public FakeHealthCheck(string type, string status)
+        public FakeHealthCheck(string type, string status, bool isNonCritical = false, bool isPersistent = false)
         {
             Type = type;
             _status = status;
+            IsNonCritical = isNonCritical;
+            _isPersistent = isPersistent;
         }
 
         public string Type { get; }
 
+        public bool IsNonCritical { get; }
+
         public Task<IBenzeneHealthCheckResult> ExecuteAsync(CancellationToken cancellationToken)
         {
-            return Task.FromResult<IBenzeneHealthCheckResult>(new BenzeneHealthCheckResult(_status, Type, new Dictionary<string, object>()));
+            return Task.FromResult<IBenzeneHealthCheckResult>(new BenzeneHealthCheckResult(_status, Type, new Dictionary<string, object>(), isPersistent: _isPersistent));
         }
     }
 }

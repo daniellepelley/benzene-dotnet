@@ -5,16 +5,24 @@ namespace Benzene.CodeGen.Client
 {
     public class CSharpTypeName : ITypeName
     {
+        // Every $ref's Reference.Id is an arbitrary caller-supplied schema id (e.g. from the
+        // documented bring-your-own-schema SuppliedSchemaCatalog feature) - not already a valid C#
+        // identifier. The class declaration for that same id is emitted via this formatter
+        // (OpenApiSchemaCSharpTypeBuilder), so every read of a Reference.Id here must go through the
+        // same formatter or the generated property/parameter type can name a class that was never
+        // generated (or isn't valid C# at all) - see #240.
+        private readonly INameFormatter _nameFormatter = new CSharpNameFormatter();
+
         public string GetName(OpenApiSchema openApiSchema)
         {
             if (openApiSchema == null)
             {
                 return "Void";
             }
-            
+
             if (openApiSchema.Reference != null && !string.IsNullOrEmpty(openApiSchema.Reference.Id))
             {
-                return openApiSchema.Reference.Id;
+                return _nameFormatter.Format(openApiSchema.Reference.Id);
             }
 
             // A bare (non-$ref) oneOf/anyOf schema - typically a top-level polymorphic
@@ -31,6 +39,7 @@ namespace Benzene.CodeGen.Client
                 {
                     var baseTypeIds = union
                         .Select(x => x.AllOf?.FirstOrDefault(branch => branch.Reference != null)?.Reference.Id)
+                        .Select(id => string.IsNullOrEmpty(id) ? id : _nameFormatter.Format(id))
                         .Distinct()
                         .ToArray();
 
@@ -98,7 +107,7 @@ namespace Benzene.CodeGen.Client
         {
             if (string.IsNullOrEmpty(openApiSchema.Type) || openApiSchema.Type == "object")
             {
-                return openApiSchema.Reference.Id;
+                return _nameFormatter.Format(openApiSchema.Reference.Id);
             }
 
             return GetName(openApiSchema);

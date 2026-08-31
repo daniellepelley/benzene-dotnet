@@ -127,8 +127,16 @@ public class IdempotencyMiddlewareTest
     {
         var store = new InMemoryIdempotencyStore();
         var calls = 0;
+        var context = new TestContext();
 
-        await Middleware(store).HandleAsync(new TestContext(), () => { calls++; return Task.CompletedTask; });
+        // A genuinely-completed message: the handler (standing in for a pipeline that runs through
+        // MessageRouter) explicitly reports success via MessageResult.
+        await Middleware(store).HandleAsync(context, () =>
+        {
+            calls++;
+            context.MessageResult = BenzeneResult.Ok();
+            return Task.CompletedTask;
+        });
 
         Assert.Equal(1, calls);
         var claim = await store.TryClaimAsync("key-1");
@@ -140,10 +148,22 @@ public class IdempotencyMiddlewareTest
     {
         var store = new InMemoryIdempotencyStore();
         var calls = 0;
-        Func<Task> next = () => { calls++; return Task.CompletedTask; };
 
-        await Middleware(store).HandleAsync(new TestContext(), next);
-        await Middleware(store).HandleAsync(new TestContext(), next);
+        var first = new TestContext();
+        await Middleware(store).HandleAsync(first, () =>
+        {
+            calls++;
+            first.MessageResult = BenzeneResult.Ok();
+            return Task.CompletedTask;
+        });
+
+        var second = new TestContext();
+        await Middleware(store).HandleAsync(second, () =>
+        {
+            calls++;
+            second.MessageResult = BenzeneResult.Ok();
+            return Task.CompletedTask;
+        });
 
         Assert.Equal(1, calls); // handler ran only for the first copy
     }
@@ -152,7 +172,12 @@ public class IdempotencyMiddlewareTest
     public async Task DuplicateOfCompleted_ReplaysSuccessfulResult()
     {
         var store = new InMemoryIdempotencyStore();
-        await Middleware(store).HandleAsync(new TestContext(), () => Task.CompletedTask);
+        var first = new TestContext();
+        await Middleware(store).HandleAsync(first, () =>
+        {
+            first.MessageResult = BenzeneResult.Ok();
+            return Task.CompletedTask;
+        });
 
         var duplicate = new TestContext();
         await Middleware(store).HandleAsync(duplicate, () => Task.CompletedTask);
@@ -218,6 +243,30 @@ public class IdempotencyMiddlewareTest
 
         // The claim was released rather than marked completed, so a redelivery reprocesses.
         Assert.True((await store.TryClaimAsync("key-1")).Claimed);
+    }
+
+    // #260: a result-bearing context (IHasMessageResult) that completes without EVER setting
+    // MessageResult (a non-standard pipeline that omits MessageRouter or short-circuits before it
+    // runs) must NOT be treated as success - that directly contradicted the "null == failure,
+    // redeliver" convention SQS/DynamoDb always had and #229 extended to SNS/S3/EventBridge. Before
+    // the fix this fell through to `true` and permanently marked the claim Completed.
+    [Fact]
+    public async Task HandlerCompletesWithoutSettingResult_TreatedAsNotSuccessful_ReleasesClaim_SoRedeliveryReprocesses()
+    {
+        var store = new InMemoryIdempotencyStore();
+        var calls = 0;
+
+        await Middleware(store).HandleAsync(new TestContext(), () =>
+        {
+            calls++;
+            // Deliberately never sets MessageResult.
+            return Task.CompletedTask;
+        });
+
+        // The claim was released rather than marked completed, so a redelivery reprocesses.
+        var reclaim = await store.TryClaimAsync("key-1");
+        Assert.True(reclaim.Claimed);
+        Assert.Equal(1, calls);
     }
 
     [Fact]

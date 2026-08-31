@@ -10,6 +10,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- MeshAnnouncer and CloudServiceDescriptorSource are internal; the test project white-box
+         tests EnsureStarted's degradation behavior directly against a stubbed descriptor source
+         (a throwing Get/TryGet is otherwise unreachable through the public builder API). -->
+    <InternalsVisibleTo Include="Benzene.Test" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Benzene.Core.MessageHandlers\Benzene.Core.MessageHandlers.csproj" />
     <ProjectReference Include="..\Benzene.Core.Messages\Benzene.Core.Messages.csproj" />
     <ProjectReference Include="..\Benzene.Core.Middleware\Benzene.Core.Middleware.csproj" />

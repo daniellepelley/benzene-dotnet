@@ -38,10 +38,17 @@ public static class MessageBuilderExtensions
     /// </remarks>
     /// <param name="source">The message builder to read the topic (S3 event name) from.</param>
     /// <param name="bucketName">The S3 bucket name to report on the record.</param>
-    /// <param name="key">
-    /// The S3 object key to report on the record, in its plain (decoded) form - not pre-encoded.
-    /// </param>
+    /// <param name="key">The real (decoded) S3 object key a handler should observe.</param>
     /// <returns>The built S3 event notification batch.</returns>
+    /// <remarks>
+    /// <paramref name="key"/> is the real key a handler should see after decoding - not the wire
+    /// form. Real S3 event notifications carry the key URL-encoded (space -&gt; <c>+</c>, other
+    /// reserved/non-ASCII bytes percent-encoded), and production handlers run it through
+    /// <see cref="S3ObjectKeyCodec.Decode(string?)"/>. So the record built here stores
+    /// <see cref="S3ObjectKeyCodec.Encode(string?)"/> of <paramref name="key"/>, the exact inverse,
+    /// meaning any key - including one containing <c>+</c>, <c>%</c>, or non-ASCII characters -
+    /// round-trips back to <paramref name="key"/> through the real production getters.
+    /// </remarks>
     public static S3Event AsS3<T>(this IMessageBuilder<T> source, string bucketName = "benzene-test-bucket", string key = "benzene-test-object")
     {
         return new S3Event

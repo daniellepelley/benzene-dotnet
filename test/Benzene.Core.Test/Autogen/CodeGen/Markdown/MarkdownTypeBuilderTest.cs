@@ -216,4 +216,96 @@ public class MarkdownTypeBuilderTest
 
         Assert.Contains("payment: PaymentMethod", lineWriter.GetLines().ToText());
     }
+
+    // #265: a property whose schema is type:object with additionalProperties but no own declared
+    // properties (the shape for a Dictionary<string, T>-typed property) fell into MapProperty's
+    // empty-object else branch, which hard-coded a bare "{}" with the property NAME dropped
+    // entirely - unreadable, unattributable output.
+    [Fact]
+    public void MapProperty_AdditionalPropertiesMap_RendersTheNamedMapShape_NotABareAnonymousBraces()
+    {
+        var rootSchema = new OpenApiSchema
+        {
+            Type = "object",
+            Properties = new Dictionary<string, OpenApiSchema>
+            {
+                {
+                    "scores", new OpenApiSchema
+                    {
+                        Type = "object",
+                        AdditionalProperties = new OpenApiSchema { Type = "integer" }
+                    }
+                }
+            }
+        };
+
+        var schemas = new Dictionary<string, OpenApiSchema> { { "Root", rootSchema } };
+        var lineWriter = new LineWriter();
+        var markdownTypeBuilder = new MarkdownTypeBuilder(new SchemaGetter(schemas));
+
+        markdownTypeBuilder.BuildType("Root", lineWriter);
+
+        var text = lineWriter.GetLines().ToText();
+
+        // Before the fix: an unnamed, unattributable "{}" line - the field's name never appeared.
+        Assert.DoesNotContain("    {}" + Environment.NewLine, text);
+        Assert.Contains("scores: {[string]: int}", text);
+    }
+
+    // Same #265 fix, for an array of such map-shaped objects (Dictionary<string, T>[]).
+    [Fact]
+    public void MapProperty_ArrayOfAdditionalPropertiesMaps_RendersTheNamedMapShape()
+    {
+        var itemSchema = new OpenApiSchema
+        {
+            Type = "object",
+            AdditionalProperties = new OpenApiSchema { Type = "string" }
+        };
+        var rootSchema = new OpenApiSchema
+        {
+            Type = "object",
+            Properties = new Dictionary<string, OpenApiSchema>
+            {
+                { "scoresPerRound", new OpenApiSchema { Type = "array", Items = itemSchema } }
+            }
+        };
+
+        var schemas = new Dictionary<string, OpenApiSchema> { { "Root", rootSchema } };
+        var lineWriter = new LineWriter();
+        var markdownTypeBuilder = new MarkdownTypeBuilder(new SchemaGetter(schemas));
+
+        markdownTypeBuilder.BuildType("Root", lineWriter);
+
+        var text = lineWriter.GetLines().ToText();
+
+        Assert.DoesNotContain("    {}[]" + Environment.NewLine, text);
+        Assert.Contains("scoresPerRound: {[string]: string}[]", text);
+    }
+
+    [Fact]
+    public void BuildType_ArrayProperty_WithNullItems_RendersVoidArrayPlaceholder_NotNRE()
+    {
+        // #213: MapProperty's array branch dereferenced Items.Reference/Items.Type unconditionally,
+        // NRE-ing on a hand-authored schema with Items == null. GetPropertyTypeName already
+        // null-checks the equivalent case (its own array branch recurses into GetPropertyTypeName(Items),
+        // and that method's very first check turns a null schema into the "Void" placeholder) -
+        // MapProperty now guards the same way and falls through to the generic fallback branch,
+        // which renders that same placeholder via GetPropertyTypeName instead of throwing.
+        var rootSchema = new OpenApiSchema
+        {
+            Type = "object",
+            Properties = new Dictionary<string, OpenApiSchema>
+            {
+                { "items", new OpenApiSchema { Type = "array", Items = null } }
+            }
+        };
+
+        var schemas = new Dictionary<string, OpenApiSchema> { { "Root", rootSchema } };
+        var lineWriter = new LineWriter();
+        var markdownTypeBuilder = new MarkdownTypeBuilder(new SchemaGetter(schemas));
+
+        markdownTypeBuilder.BuildType("Root", lineWriter);
+
+        Assert.Contains("items: Void[]", lineWriter.GetLines().ToText());
+    }
 }

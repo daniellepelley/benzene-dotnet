@@ -83,7 +83,14 @@ public class MarkdownTypeBuilder
             }
             else
             {
-                lineWriter.WriteLine("{}");
+                // #265: this branch is the normal shape for a Dictionary<string, T>-typed property
+                // (type: object with additionalProperties but no own declared properties) as well as
+                // a genuinely empty object - the property NAME was dropped entirely, rendering a bare,
+                // anonymous "{}" line a reader could not associate with any field. Always name the
+                // property, and where there IS a value type to report, render the map shape (mirroring
+                // CSharpTypeName.GetName's Dictionary<string, T> handling for the C# generator) instead
+                // of an uninformative "{}".
+                lineWriter.WriteLine($"{CodeGenHelpers.Camelcase(name)}: {GetMapOrEmptyObjectPlaceholder(openApiSchema)}");
             }
         }
         // #213: an `Items == null` array schema isn't reachable through Benzene's own SchemaBuilder,
@@ -119,7 +126,9 @@ public class MarkdownTypeBuilder
                 }
                 else
                 {
-                    lineWriter.WriteLine("{}[]");
+                    // Same #265 fix as the single-object branch above, for an array of such objects
+                    // (e.g. a Dictionary<string, T>[] or an array of genuinely empty objects).
+                    lineWriter.WriteLine($"{CodeGenHelpers.Camelcase(name)}: {GetMapOrEmptyObjectPlaceholder(innerSchema)}[]");
                 }
             }
         }
@@ -140,6 +149,17 @@ public class MarkdownTypeBuilder
             lineWriter.WriteLine($"{CodeGenHelpers.Camelcase(name)}: {GetPropertyTypeName(openApiSchema)}");
         }
     }
+    // #265: an `additionalProperties`-shaped object (no own declared properties) carries a value
+    // type worth reporting - render it as a map shape rather than an uninformative bare "{}",
+    // mirroring CSharpTypeName.GetName's Dictionary<string, T> handling for the C# generator
+    // (see OpenApiSchemaCSharpTypeBuilder.cs's comment on GetTypeName/GetName).
+    private string GetMapOrEmptyObjectPlaceholder(OpenApiSchema openApiSchema)
+    {
+        return openApiSchema.AdditionalProperties != null
+            ? $"{{[string]: {GetPropertyTypeName(openApiSchema.AdditionalProperties)}}}"
+            : "{}";
+    }
+
     private OpenApiSchema GetInnerType(OpenApiSchema openApiSchema)
     {
         return openApiSchema.Type == "array"

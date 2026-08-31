@@ -16,17 +16,22 @@ public class SnsClientMiddleware : IMiddleware<SnsSendMessageContext>, ITerminal
     private readonly ICancellationTokenAccessor? _cancellation;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="SnsClientMiddleware"/> class.
+    /// Initializes a new instance of the <see cref="SnsClientMiddleware"/> class with no
+    /// cancellation-token accessor.
     /// </summary>
     /// <param name="amazonSns">The SNS client used to publish the message.</param>
-    /// <param name="cancellation">
-    /// Supplies the ambient cancellation token to pass into the publish call (the
-    /// <c>HttpBenzeneMessageClient</c> constructor-optional accessor idiom); null observes no
-    /// cancellation. Resolved automatically from the container on the DI-registered
-    /// <c>UseSnsClient()</c> path; the explicit-client <c>UseSnsClient(amazonSns)</c> overload
-    /// resolves it from the pipeline's service resolver and passes it through.
-    /// </param>
-    public SnsClientMiddleware(IAmazonSimpleNotificationService amazonSns, ICancellationTokenAccessor? cancellation = null)
+    public SnsClientMiddleware(IAmazonSimpleNotificationService amazonSns)
+        : this(amazonSns, null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes the middleware, additionally resolving the ambient cancellation token so an
+    /// upstream cancel/timeout aborts the outbound publish instead of running it to completion.
+    /// </summary>
+    /// <param name="amazonSns">The SNS client used to publish the message.</param>
+    /// <param name="cancellation">Supplies the ambient cancellation token; null observes no cancellation.</param>
+    public SnsClientMiddleware(IAmazonSimpleNotificationService amazonSns, ICancellationTokenAccessor? cancellation)
     {
         _amazonSns = amazonSns;
         _cancellation = cancellation;

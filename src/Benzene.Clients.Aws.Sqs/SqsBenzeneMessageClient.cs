@@ -10,7 +10,6 @@ using Benzene.Clients.Common;
 using Benzene.Core.Middleware;
 using Benzene.Results;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 using Void = Benzene.Abstractions.Results.Void;
 
 namespace Benzene.Clients.Aws.Sqs;
@@ -40,11 +39,11 @@ public class SqsBenzeneMessageClient : IBenzeneMessageClient
     /// <param name="topicAttributeKey">The message attribute the topic is written to (defaults to <see cref="SqsContextConverter{T}.DefaultTopicAttribute"/>).</param>
     public SqsBenzeneMessageClient(string queueUrl, IAmazonSQS amazonSqsClient, ILogger<SqsBenzeneMessageClient> logger, IServiceResolver serviceResolver, string topicAttributeKey = SqsContextConverter<object>.DefaultTopicAttribute)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _serviceResolver = serviceResolver;
         _queueUrl = queueUrl;
-        // #192: a null logger must not make the catch block's own LogError throw and mask the real
-        // failure - fall back to a no-op logger.
-        _logger = logger ?? NullLogger<SqsBenzeneMessageClient>.Instance;
+        _logger = logger;
         _topicAttributeKey = topicAttributeKey;
 
         var benzeneServiceContainer = new NullBenzeneServiceContainer();
@@ -65,9 +64,11 @@ public class SqsBenzeneMessageClient : IBenzeneMessageClient
     /// <param name="topicAttributeKey">The message attribute the topic is written to (defaults to <see cref="SqsContextConverter{T}.DefaultTopicAttribute"/>).</param>
     public SqsBenzeneMessageClient(string queueUrl, IMiddlewarePipeline<SqsSendMessageContext> middlewarePipeline, ILogger<SqsBenzeneMessageClient> logger, IServiceResolver serviceResolver, string topicAttributeKey = SqsContextConverter<object>.DefaultTopicAttribute)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _serviceResolver = serviceResolver;
         _middlewarePipeline = middlewarePipeline;
-        _logger = logger ?? NullLogger<SqsBenzeneMessageClient>.Instance;
+        _logger = logger;
         _queueUrl = queueUrl;
         _topicAttributeKey = topicAttributeKey;
     }

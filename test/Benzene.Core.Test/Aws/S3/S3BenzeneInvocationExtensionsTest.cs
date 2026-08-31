@@ -27,11 +27,15 @@ public class S3BenzeneInvocationExtensionsTest
         var services = new ServiceCollection();
         var app = new MiddlewarePipelineBuilder<AwsEventStreamContext>(new MicrosoftBenzeneServiceContainer(services));
         app.UseS3(s3 => s3
-            .Use(null, (resolver, _, next) =>
-            {
-                resolved = resolver.GetService<IBenzeneInvocation>();
-                return next();
-            })
+                .Use(null, (resolver, _, next) =>
+                {
+                    resolved = resolver.GetService<IBenzeneInvocation>();
+                    return next();
+                }),
+            // This test is about invocation-id/platform resolution, not message routing - the inline
+            // middleware never sets a MessageResult, so escalating on that (#229's null-result fix)
+            // would be unrelated noise here.
+            configure: options => options.RaiseOnFailureStatus = false
         );
 
         var s3Event = new S3Event

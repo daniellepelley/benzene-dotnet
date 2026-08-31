@@ -47,6 +47,8 @@ internal static class AvroDatumConverter
                 return ToRecord((RecordSchema)schema, value, maxDepth, depth);
             case Schema.Type.Array:
                 return ToArray((ArraySchema)schema, value, maxDepth, depth);
+            case Schema.Type.Map:
+                return ToMap((MapSchema)schema, value, maxDepth, depth);
             case Schema.Type.String:
                 return value == null ? null : ToAvroString(value);
             case Schema.Type.Boolean:
@@ -75,7 +77,7 @@ internal static class AvroDatumConverter
             return null;
         }
 
-        var branch = NonNullBranch(union);
+        var branch = ResolveWriteBranch(union, value);
         return ToDatum(branch, value, maxDepth, depth + 1);
     }
 
@@ -114,6 +116,50 @@ internal static class AvroDatumConverter
         return items.ToArray()!;
     }
 
+    private static object ToMap(MapSchema schema, object? value, int maxDepth, int depth)
+    {
+        if (value == null)
+        {
+            return new Dictionary<string, object?>();
+        }
+
+        // Avro map keys are ALWAYS strings per spec (unlike CLR dictionaries, which are generic over
+        // the key type) - a non-string-keyed CLR target is a genuine mismatch, not something to
+        // silently coerce. Check the value's own declared key type up front so this is caught even
+        // for an empty dictionary, not just when a non-string key actually shows up below.
+        var dictionaryInterface = value.GetType().GetInterfaces()
+            .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IDictionary<,>));
+
+        if (dictionaryInterface != null && dictionaryInterface.GetGenericArguments()[0] != typeof(string))
+        {
+            throw new NotSupportedException(
+                $"Avro map fields are always string-keyed per the Avro spec, but '{value.GetType()}' is " +
+                $"keyed by '{dictionaryInterface.GetGenericArguments()[0]}'. Use a string-keyed dictionary " +
+                "instead of coercing the key type.");
+        }
+
+        if (value is not IDictionary dictionary)
+        {
+            return new Dictionary<string, object?>();
+        }
+
+        var result = new Dictionary<string, object?>();
+        foreach (DictionaryEntry entry in dictionary)
+        {
+            if (entry.Key is not string key)
+            {
+                throw new NotSupportedException(
+                    "Avro map fields are always string-keyed per the Avro spec, but encountered a map key " +
+                    $"of type '{entry.Key?.GetType().ToString() ?? "null"}'. Use a string-keyed dictionary " +
+                    "instead of coercing the key type.");
+            }
+
+            result[key] = ToDatum(schema.ValueSchema, entry.Value, maxDepth, depth + 1);
+        }
+
+        return result;
+    }
+
     private static long ToAvroLong(object value)
     {
         // ulong maps to the signed Avro long; its upper half (> long.MaxValue) doesn't fit positively,
@@ -148,6 +194,8 @@ internal static class AvroDatumConverter
                 return FromRecord((RecordSchema)schema, datum, targetType);
             case Schema.Type.Array:
                 return FromArray((ArraySchema)schema, datum, targetType);
+            case Schema.Type.Map:
+                return FromMap((MapSchema)schema, datum, targetType);
             case Schema.Type.Null:
                 return DefaultValue(targetType);
             case Schema.Type.String:
@@ -164,7 +212,7 @@ internal static class AvroDatumConverter
             return DefaultValue(targetType);
         }
 
-        var branch = NonNullBranch(union);
+        var branch = ResolveReadBranch(union, datum);
         return FromDatum(branch, datum, Nullable.GetUnderlyingType(targetType) ?? targetType);
     }
 
@@ -213,6 +261,59 @@ internal static class AvroDatumConverter
         return array;
     }
 
+    private static object FromMap(MapSchema schema, object? datum, Type targetType)
+    {
+        var (valueType, stringKeyed) = GetMapValueType(targetType);
+        if (!stringKeyed)
+        {
+            throw new NotSupportedException(
+                $"Avro map fields are always string-keyed per the Avro spec, but the target type " +
+                $"'{targetType}' is keyed by a non-string type. Use a string-keyed dictionary " +
+                "(Dictionary<string,V>, IDictionary<string,V>, or IReadOnlyDictionary<string,V>) instead.");
+        }
+
+        var dictionary = (IDictionary)Activator.CreateInstance(typeof(Dictionary<,>).MakeGenericType(typeof(string), valueType))!;
+
+        if (datum is IDictionary sourceDictionary)
+        {
+            foreach (DictionaryEntry entry in sourceDictionary)
+            {
+                // Avro map keys are always strings on the wire (GenericDatumReader's map datum is
+                // string-keyed by construction), so this cast can't legitimately fail.
+                var key = (string)entry.Key;
+                dictionary[key] = FromDatum(schema.ValueSchema, entry.Value, valueType);
+            }
+        }
+
+        return dictionary;
+    }
+
+    /// <summary>
+    /// Resolves the value type and key-string-ness of a CLR dictionary target type, for
+    /// <see cref="FromMap"/>. Supports a concrete <c>Dictionary&lt;string,V&gt;</c> or an
+    /// interface-typed <c>IDictionary&lt;string,V&gt;</c>/<c>IReadOnlyDictionary&lt;string,V&gt;</c>
+    /// property; a property typed as anything else that still declares a dictionary interface with a
+    /// non-string key is reported as non-string-keyed rather than silently defaulting.
+    /// </summary>
+    private static (Type ValueType, bool StringKeyed) GetMapValueType(Type targetType)
+    {
+        var dictionaryInterface = new[] { targetType }.Concat(targetType.GetInterfaces())
+            .FirstOrDefault(i => i.IsGenericType &&
+                (i.GetGenericTypeDefinition() == typeof(IDictionary<,>) ||
+                 i.GetGenericTypeDefinition() == typeof(IReadOnlyDictionary<,>)));
+
+        if (dictionaryInterface == null)
+        {
+            // Not a strongly-typed dictionary target (e.g. a plain `object` field) - default to a
+            // string-keyed Dictionary<string, object>.
+            return (typeof(object), true);
+        }
+
+        var keyType = dictionaryInterface.GetGenericArguments()[0];
+        var valueType = dictionaryInterface.GetGenericArguments()[1];
+        return (valueType, keyType == typeof(string));
+    }
+
     private static object? FromAvroString(string? value, Type targetType)
     {
         var type = Nullable.GetUnderlyingType(targetType) ?? targetType;
@@ -248,9 +349,119 @@ internal static class AvroDatumConverter
         return Convert.ChangeType(datum, type, Inv);
     }
 
-    private static Schema NonNullBranch(UnionSchema union)
+    /// <summary>
+    /// Picks the union branch to serialize <paramref name="value"/> (never null - the null case is
+    /// handled by the caller) against, by the value's actual CLR type. Correct for any branch count:
+    /// for the common 2-branch <c>["null", X]</c> shape there is only one non-null candidate, so this
+    /// always resolves to it (byte-identical to the old first-non-null-branch behavior); for 3+
+    /// non-null branches it picks the one matching the value's runtime shape instead of always the
+    /// first declared.
+    /// </summary>
+    private static Schema ResolveWriteBranch(UnionSchema union, object value)
     {
-        return union.Schemas.FirstOrDefault(s => s.Tag != Schema.Type.Null) ?? union.Schemas[0];
+        var candidates = union.Schemas.Where(s => s.Tag != Schema.Type.Null).ToList();
+        if (candidates.Count == 0)
+        {
+            return union.Schemas[0];
+        }
+
+        // Exact-shape match: the branch whose Avro type is the natural (narrowest) mapping for the
+        // value's actual CLR type.
+        var exact = candidates.FirstOrDefault(s => IsNaturalMatch(s, value));
+        if (exact != null)
+        {
+            return exact;
+        }
+
+        // Widening match: no exact-width branch is present (e.g. an `int` value but the union only
+        // declares "long") - pick the narrowest branch the value still fits into losslessly.
+        var widened = candidates.FirstOrDefault(s => IsWideningMatch(s, value));
+        if (widened != null)
+        {
+            return widened;
+        }
+
+        // No scalar/shape match found (e.g. two record branches for the same POCO shape, which this
+        // converter can't disambiguate without a registered CLR-type-to-schema-name map) - fall back
+        // to the first non-null branch in declaration order, same as the old (2-branch-safe) behavior.
+        return candidates[0];
+    }
+
+    private static bool IsNaturalMatch(Schema schema, object value)
+    {
+        var type = value.GetType();
+        return schema.Tag switch
+        {
+            Schema.Type.Boolean => value is bool,
+            Schema.Type.Int => type == typeof(byte) || type == typeof(sbyte) || type == typeof(short) ||
+                                type == typeof(ushort) || type == typeof(int),
+            Schema.Type.Long => type == typeof(uint) || type == typeof(long) || type == typeof(ulong),
+            Schema.Type.Float => value is float,
+            Schema.Type.Double => value is double,
+            Schema.Type.Bytes => value is byte[],
+            Schema.Type.String => type == typeof(string) || type == typeof(Guid) || type == typeof(DateTime) ||
+                                   type == typeof(DateTimeOffset) || type == typeof(decimal) || type.IsEnum,
+            Schema.Type.Map => value is IDictionary,
+            Schema.Type.Array => value is IEnumerable and not string and not byte[] and not IDictionary,
+            Schema.Type.Record => value is not IEnumerable and not IDictionary &&
+                                   type != typeof(bool) && type != typeof(byte[]) &&
+                                   type != typeof(Guid) && type != typeof(DateTime) &&
+                                   type != typeof(DateTimeOffset) && type != typeof(decimal) &&
+                                   !type.IsEnum && !type.IsPrimitive,
+            _ => false
+        };
+    }
+
+    private static bool IsWideningMatch(Schema schema, object value)
+    {
+        var type = value.GetType();
+        return schema.Tag switch
+        {
+            Schema.Type.Long => type == typeof(byte) || type == typeof(sbyte) || type == typeof(short) ||
+                                 type == typeof(ushort) || type == typeof(int),
+            Schema.Type.Double => value is float,
+            _ => false
+        };
+    }
+
+    /// <summary>
+    /// Picks the union branch to read <paramref name="datum"/> (never null - the null case is handled
+    /// by the caller) against, by the datum's actual runtime type. <see cref="GenericDatumReader{T}"/>
+    /// already resolved the wire's actual branch when it produced <paramref name="datum"/> (it read
+    /// the union's branch index off the wire itself); this recovers that information from the datum's
+    /// CLR shape instead of discarding it by always picking the first non-null branch. For the common
+    /// 2-branch <c>["null", X]</c> shape there is only one non-null candidate, so this always resolves
+    /// to it (byte-identical to the old behavior).
+    /// </summary>
+    private static Schema ResolveReadBranch(UnionSchema union, object datum)
+    {
+        var candidates = union.Schemas.Where(s => s.Tag != Schema.Type.Null).ToList();
+        if (candidates.Count == 0)
+        {
+            return union.Schemas[0];
+        }
+
+        var match = candidates.FirstOrDefault(s => MatchesDatum(s, datum));
+        return match ?? candidates[0];
+    }
+
+    private static bool MatchesDatum(Schema schema, object datum)
+    {
+        return schema.Tag switch
+        {
+            Schema.Type.Boolean => datum is bool,
+            Schema.Type.Int => datum is int,
+            Schema.Type.Long => datum is long,
+            Schema.Type.Float => datum is float,
+            Schema.Type.Double => datum is double,
+            Schema.Type.Bytes => datum is byte[],
+            Schema.Type.String => datum is string,
+            Schema.Type.Map => datum is IDictionary,
+            Schema.Type.Array => datum is IEnumerable and not IDictionary and not string and not byte[],
+            Schema.Type.Record => schema is RecordSchema recordSchema && datum is GenericRecord record &&
+                                   record.Schema.Fullname == recordSchema.Fullname,
+            _ => false
+        };
     }
 
     private static object? DefaultValue(Type type)

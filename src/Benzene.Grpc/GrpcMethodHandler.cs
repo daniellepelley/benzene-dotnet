@@ -52,10 +52,10 @@ public class GrpcMethodHandler : IGrpcMethodHandler
         var grpcContext = new GrpcContext<TRequest, IAsyncEnumerable<TResponse>>(_grpcMethodDefinition.Topic, context, request);
         using var resolver = _serviceResolverFactory.CreateScope();
 
-        await RunPipelineAsync(grpcContext, context, resolver);
+        await RunPipelineAsync(grpcContext, context, resolver, deferSuccessTrailer: true);
 
         var items = ResolveResponseStream<TRequest, TResponse>(grpcContext, resolver, context.CancellationToken);
-        await GrpcStreamAdapter.WriteAll(items, responseStream, context.CancellationToken);
+        await WriteStreamAsync(items, responseStream, grpcContext, context, resolver);
     }
 
     /// <inheritdoc />
@@ -86,10 +86,10 @@ public class GrpcMethodHandler : IGrpcMethodHandler
         var grpcContext = new GrpcContext<IAsyncEnumerable<TRequest>, IAsyncEnumerable<TResponse>>(_grpcMethodDefinition.Topic, context, requestItems);
         using var resolver = _serviceResolverFactory.CreateScope();
 
-        await RunPipelineAsync(grpcContext, context, resolver);
+        await RunPipelineAsync(grpcContext, context, resolver, deferSuccessTrailer: true);
 
         var items = ResolveResponseStream<IAsyncEnumerable<TRequest>, TResponse>(grpcContext, resolver, context.CancellationToken);
-        await GrpcStreamAdapter.WriteAll(items, responseStream, context.CancellationToken);
+        await WriteStreamAsync(items, responseStream, grpcContext, context, resolver);
     }
 
     /// <summary>
@@ -99,7 +99,19 @@ public class GrpcMethodHandler : IGrpcMethodHandler
     /// response headers. Callers are responsible for extracting/converting the response (or response stream)
     /// from <paramref name="grpcContext"/> afterwards.
     /// </summary>
-    private async Task RunPipelineAsync<TRequest, TResponse>(GrpcContext<TRequest, TResponse> grpcContext, ServerCallContext context, IServiceResolver resolver)
+    /// <param name="grpcContext">The pipeline context for this call, carrying the request and (once the pipeline runs) the handler's result.</param>
+    /// <param name="context">The underlying gRPC server call context.</param>
+    /// <param name="resolver">The per-call DI scope the pipeline runs in.</param>
+    /// <param name="deferSuccessTrailer">
+    /// <c>true</c> for the two streaming shapes: on a successful pipeline result, skip writing the
+    /// <c>benzene-status</c> trailer here and leave it to <see cref="WriteStreamAsync{TResponseItem}"/> to
+    /// write it once the response stream has actually finished draining. A pipeline FAILURE (a non-OK
+    /// status decided before any stream item is produced - e.g. request validation) still writes its
+    /// trailer and throws immediately either way, since no stream has started yet. Unary/client-streaming
+    /// callers always pass <c>false</c> (the default): the whole response is already known once the
+    /// pipeline returns, so there is nothing to defer.
+    /// </param>
+    private async Task RunPipelineAsync<TRequest, TResponse>(GrpcContext<TRequest, TResponse> grpcContext, ServerCallContext context, IServiceResolver resolver, bool deferSuccessTrailer = false)
     {
         var callAccessor = resolver.TryGetService<GrpcServerCallAccessor>();
         if (callAccessor != null)
@@ -123,9 +135,13 @@ public class GrpcMethodHandler : IGrpcMethodHandler
 
         var status = grpcContext.MessageHandlerResult?.BenzeneResult.Status;
         var isSuccessful = grpcContext.MessageHandlerResult?.BenzeneResult.IsSuccessful ?? false;
-        grpcContext.ResponseTrailers.Add("benzene-status", status ?? "Unknown");
-
         var statusCode = resolver.GetService<IGrpcStatusCodeMapper>().Map(status, isSuccessful);
+
+        if (!(deferSuccessTrailer && statusCode == StatusCode.OK))
+        {
+            grpcContext.ResponseTrailers.Add("benzene-status", status ?? "Unknown");
+        }
+
         if (statusCode != StatusCode.OK)
         {
             var errors = grpcContext.MessageHandlerResult?.BenzeneResult.Errors;
@@ -138,6 +154,60 @@ public class GrpcMethodHandler : IGrpcMethodHandler
         {
             await context.WriteResponseHeadersAsync(grpcContext.ResponseHeaders);
         }
+    }
+
+    /// <summary>
+    /// Drains a streaming response (<see cref="GrpcStreamAdapter.WriteAll{T}"/>) and only then writes the
+    /// <c>benzene-status</c> trailer - gRPC trailers are sent once, at call end, so this is safe, and it's
+    /// what lets a mid-stream handler exception (#280) still land a truthful trailer instead of the
+    /// success one <see cref="RunPipelineAsync{TRequest,TResponse}"/> would otherwise have written before
+    /// the handler's iterator ever ran. A mid-drain exception is classified the same way
+    /// <c>Benzene.Core.MessageHandlers.MessageHandler{TRequest,TResponse}</c> classifies a unary handler's
+    /// exception (<see cref="ArgumentException"/> -&gt; ValidationError, <see cref="TimeoutException"/> -&gt;
+    /// Timeout, <see cref="OperationCanceledException"/> -&gt; the same Cancelled/DeadlineExceeded
+    /// translation <see cref="RunPipelineAsync{TRequest,TResponse}"/> uses, anything else -&gt;
+    /// ServiceUnavailable), then run through the same <see cref="IGrpcStatusCodeMapper"/>/
+    /// <see cref="AddRichErrorDetails"/> path as a pipeline-level failure.
+    /// </summary>
+    private static async Task WriteStreamAsync<TResponseItem>(IAsyncEnumerable<TResponseItem> items, IServerStreamWriter<TResponseItem> responseStream, GrpcContext grpcContext, ServerCallContext context, IServiceResolver resolver)
+    {
+        try
+        {
+            await GrpcStreamAdapter.WriteAll(items, responseStream, context.CancellationToken);
+
+            var status = grpcContext.MessageHandlerResult?.BenzeneResult.Status;
+            grpcContext.ResponseTrailers.Add("benzene-status", status ?? "Unknown");
+        }
+        catch (OperationCanceledException)
+        {
+            var cancelCode = DateTime.UtcNow >= context.Deadline ? StatusCode.DeadlineExceeded : StatusCode.Cancelled;
+            throw new RpcException(new Status(cancelCode, "The call was cancelled."));
+        }
+        catch (Exception ex)
+        {
+            var (benzeneStatus, detail) = ClassifyStreamException(ex);
+            var statusCode = resolver.GetService<IGrpcStatusCodeMapper>().Map(benzeneStatus, isSuccessful: false);
+            grpcContext.ResponseTrailers.Add("benzene-status", benzeneStatus);
+            AddRichErrorDetails(grpcContext.ResponseTrailers, statusCode, detail, benzeneStatus, errors: null);
+            throw new RpcException(new Status(statusCode, detail));
+        }
+    }
+
+    /// <summary>
+    /// Classifies a mid-stream handler exception the same way
+    /// <c>Benzene.Core.MessageHandlers.MessageHandler{TRequest,TResponse}.HandleAsync</c> classifies a
+    /// unary handler's exception (see its remarks) - kept in sync deliberately, not shared, since the two
+    /// call sites work with different exception-handling shapes (a result-returning try/catch there, a
+    /// throw-through-<see cref="RpcException"/> one here).
+    /// </summary>
+    private static (string BenzeneStatus, string Detail) ClassifyStreamException(Exception ex)
+    {
+        return ex switch
+        {
+            ArgumentException => (Benzene.Results.BenzeneResultStatus.ValidationError, ex.Message),
+            TimeoutException => (Benzene.Results.BenzeneResultStatus.Timeout, ex.Message),
+            _ => (Benzene.Results.BenzeneResultStatus.ServiceUnavailable, ex.Message),
+        };
     }
 
     /// <summary>

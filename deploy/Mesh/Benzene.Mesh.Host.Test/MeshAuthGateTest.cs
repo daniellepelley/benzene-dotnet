@@ -2,6 +2,7 @@ using System.Net;
 using System.Security.Claims;
 using System.Text;
 using Benzene.Auth.Core;
+using Benzene.Http.Routing;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -868,6 +869,109 @@ public class MeshAuthGateTest
             var identity = new ClaimsIdentity("TestScheme");
             identity.AddClaim(new Claim(ClaimTypes.Email, "bob@example.com"));
             identity.AddClaim(new Claim("roles", "[\"mesh-admins\"]"));
+            context.User = new ClaimsPrincipal(identity);
+
+            Invoke(gate, context);
+
+            Assert.True(wasCalled());
+        });
+    }
+
+    /// <summary>
+    /// Maps one fixed (method, path) pair to a topic, exactly the shape a real <c>IRouteFinder</c>
+    /// would resolve a route alias to - hand-rolled rather than mocked since this test project takes
+    /// no Moq dependency.
+    /// </summary>
+    private sealed class FakeRouteFinder : IRouteFinder
+    {
+        private readonly string _method;
+        private readonly string _path;
+        private readonly string _topic;
+
+        public FakeRouteFinder(string method, string path, string topic)
+        {
+            _method = method;
+            _path = path;
+            _topic = topic;
+        }
+
+        public HttpTopicRoute? Find(string method, string path) =>
+            string.Equals(method, _method, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(path, _path, StringComparison.OrdinalIgnoreCase)
+                ? new HttpTopicRoute(_topic, new Dictionary<string, object>())
+                : null;
+    }
+
+    /// <summary>
+    /// #287: MeshDispatchGuardMiddleware.IsGuarded matches on canonical path OR topic (via the route
+    /// finder) so a route alias reaching the dispatch handler cannot slip past it - but the
+    /// dispatchRole check here used to compare only the literal DispatchPath. A caller reaching the
+    /// same benzene:mesh:dispatch topic through a different route would pass the guard's own
+    /// CSRF/identity/rate-limit checks and then bypass the role requirement entirely, even without the
+    /// required role. Not exploitable today (there is exactly one route to dispatch) - this pins the
+    /// two gates against future drift by routing dispatchRole through the same path-OR-topic predicate.
+    /// </summary>
+    [Fact]
+    public void DispatchRole_RouteAliasResolvingToTheDispatchTopic_IsAlsoGated()
+    {
+        WithEnvVars(("MESH_OIDC_CLIENT_SECRET", "shh"), () =>
+        {
+            var next = NextDelegate(out var wasCalled);
+            var config = new MeshAuthConfig { Mode = "oidc", DispatchRole = "mesh-admins" };
+            config.Oidc.Authority = "https://idp.example.com";
+            config.Oidc.ClientId = "client-id";
+            var gate = new MeshAuthGate(next, config, dispatchEnabled: true);
+
+            const string aliasPath = "/v2/mesh/dispatch";
+            // The literal dispatch topic (Benzene.Mesh.Dispatch.Extensions.DispatchTopic /
+            // MeshDispatchGuardOptions's own default), spelled out rather than referenced so this test
+            // compiles unchanged whether or not MeshAuthGate exposes its own DispatchTopic constant.
+            const string dispatchTopic = "benzene:mesh:dispatch";
+            var context = NewContext(aliasPath);
+            context.Request.Method = "POST";
+            context.RequestServices = new ServiceCollection()
+                .AddScoped<AuthenticationHolder>()
+                .AddSingleton<IRouteFinder>(new FakeRouteFinder("POST", aliasPath, dispatchTopic))
+                .BuildServiceProvider();
+
+            var identity = new ClaimsIdentity("TestScheme");
+            identity.AddClaim(new Claim(ClaimTypes.Email, "bob@example.com"));
+            identity.AddClaim(new Claim("roles", "[\"reader\"]")); // missing mesh-admins
+            context.User = new ClaimsPrincipal(identity);
+
+            Invoke(gate, context);
+
+            Assert.False(wasCalled());
+            Assert.Equal(403, context.Response.StatusCode);
+        });
+    }
+
+    /// <summary>
+    /// The mirror image of the alias test above: a route/topic that has nothing to do with dispatch
+    /// must NOT trip the dispatchRole check just because a route finder happens to be present.
+    /// </summary>
+    [Fact]
+    public void DispatchRole_UnrelatedRouteResolvingToADifferentTopic_IsNotGated()
+    {
+        WithEnvVars(("MESH_OIDC_CLIENT_SECRET", "shh"), () =>
+        {
+            var next = NextDelegate(out var wasCalled);
+            var config = new MeshAuthConfig { Mode = "oidc", DispatchRole = "mesh-admins" };
+            config.Oidc.Authority = "https://idp.example.com";
+            config.Oidc.ClientId = "client-id";
+            var gate = new MeshAuthGate(next, config, dispatchEnabled: true);
+
+            const string unrelatedPath = "/orders";
+            var context = NewContext(unrelatedPath);
+            context.Request.Method = "POST";
+            context.RequestServices = new ServiceCollection()
+                .AddScoped<AuthenticationHolder>()
+                .AddSingleton<IRouteFinder>(new FakeRouteFinder("POST", unrelatedPath, "orders:create"))
+                .BuildServiceProvider();
+
+            var identity = new ClaimsIdentity("TestScheme");
+            identity.AddClaim(new Claim(ClaimTypes.Email, "bob@example.com"));
+            identity.AddClaim(new Claim("roles", "[\"reader\"]")); // missing mesh-admins, but irrelevant here
             context.User = new ClaimsPrincipal(identity);
 
             Invoke(gate, context);

@@ -92,7 +92,10 @@ public class DynamoDbIdempotencyStore : IIdempotencyStore
                 },
                 // Win the claim only when there is no live record: either nothing is there, or what's
                 // there has already expired (DynamoDB TTL deletion lags, so check it explicitly).
-                ConditionExpression = "attribute_not_exists(#pk) OR expiresAt < :now",
+                // Inclusive (<=) to match ReadRecordAsync's own expiry check below (#272) — a record
+                // whose expiresAt equals "now" exactly must be reclaimable by both paths, not treated
+                // as still live by the write and already-gone by the read.
+                ConditionExpression = "attribute_not_exists(#pk) OR expiresAt <= :now",
                 ExpressionAttributeNames = new Dictionary<string, string> { ["#pk"] = _partitionKeyAttribute },
                 ExpressionAttributeValues = new Dictionary<string, AttributeValue>
                 {

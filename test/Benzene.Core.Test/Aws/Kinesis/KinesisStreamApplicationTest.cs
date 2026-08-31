@@ -22,6 +22,16 @@ public class KinesisStreamApplicationTest
         };
     }
 
+    private static KinesisEventRecord NewRecord(string sequenceNumber, string partitionKey)
+    {
+        return new KinesisEventRecord
+        {
+            EventSource = "aws:kinesis",
+            EventId = "shardId-000000000000:" + sequenceNumber,
+            Kinesis = new KinesisRecordData { SequenceNumber = sequenceNumber, PartitionKey = partitionKey },
+        };
+    }
+
     private static KinesisEvent CreateKinesisEvent(params string[] sequenceNumbers)
     {
         var records = new List<KinesisEventRecord>();
@@ -68,17 +78,28 @@ public class KinesisStreamApplicationTest
     [Fact]
     public async Task HandleAsync_CheckpointingAForeignRecord_DoesNotRewindTheResumePoint()
     {
-        // A handler that checkpoints record 2 (real), then a record that isn't in the batch by
-        // reference (e.g. a projected/transformed copy), must NOT have its resume point rewound to the
-        // start of the batch - IndexOf returns -1 for the foreign record, and the old code set the
-        // watermark to -1 (reprocess everything). The watermark only advances now.
+        // A handler that checkpoints records 1 and 2 (real, contiguous), then a record that isn't in
+        // the batch by reference (e.g. a projected/transformed copy), must NOT have its resume point
+        // rewound to the start of the batch - IndexOf returns -1 for the foreign record, and the old
+        // code set the watermark to -1 (reprocess everything). The watermark only advances now.
+        // #273 note: this scenario used to checkpoint ONLY record 2 (never record 1) before the
+        // foreign checkpoint - under the old max-index watermark that "worked" (it doesn't track
+        // gaps), but under the fixed contiguous-prefix watermark that scenario would correctly report
+        // record 1 as the resume point (it was genuinely never confirmed) - asserting the exact bug
+        // #273 closes, not the foreign-record guard this test exists to cover. Checkpointing both real
+        // records restores a genuine contiguous prefix so the test isolates the foreign-record
+        // behavior it's actually named for.
         var application = BuildApplication(async context =>
         {
             var index = 0;
             await foreach (var record in context.Items)
             {
                 index++;
-                if (index == 2)
+                if (index == 1)
+                {
+                    await context.Checkpointer.CheckpointAsync(record); // real record 1
+                }
+                else if (index == 2)
                 {
                     await context.Checkpointer.CheckpointAsync(record);                 // real record 2
                     await context.Checkpointer.CheckpointAsync(NewRecord("not-in-batch")); // foreign copy
@@ -198,6 +219,75 @@ public class KinesisStreamApplicationTest
 
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => application.HandleAsync(CreateKinesisEvent("1", "2"), ServiceResolverFactory()));
+    }
+
+    [Fact]
+    public async Task HandleAsync_PartitionByCheckpointing_AnEarlierPartitionsFailure_IsNotSkippedByALaterPartitionsCheckpoint()
+    {
+        // #273: batch order (shard order) is A-1, B-1, A-2, B-2. A handler using PartitionBy (the
+        // pattern this package's own class doc recommends for restoring per-key ordering) processes
+        // partition A's whole group first - A-1 (index 0), then A-2 (index 2), checkpointing each -
+        // entirely before it ever looks at partition B's B-1 (index 1). When B-1 then fails, the old
+        // single monotonic-index watermark had already advanced past index 2, so it reported the resume
+        // point as B-2 (index 3) - silently treating B-1 (never confirmed) as done. The fixed
+        // contiguous-prefix watermark must report B-1 (the first unconfirmed index), not B-2.
+        var records = new List<KinesisEventRecord>
+        {
+            NewRecord("A-1", "A"),
+            NewRecord("B-1", "B"),
+            NewRecord("A-2", "A"),
+            NewRecord("B-2", "B"),
+        };
+
+        var application = BuildApplication(async context =>
+        {
+            await foreach (var group in context.Items.PartitionBy(r => r.Kinesis.PartitionKey))
+            {
+                foreach (var record in group.Value)
+                {
+                    if (record.Kinesis.SequenceNumber == "B-1")
+                    {
+                        throw new InvalidOperationException("B-1 fails");
+                    }
+
+                    await context.Checkpointer.CheckpointAsync(record);
+                }
+            }
+        });
+
+        var @event = new KinesisEvent { Records = records };
+        var response = await application.HandleAsync(@event, ServiceResolverFactory());
+
+        var failure = Assert.Single(response.BatchItemFailures);
+        Assert.Equal("B-1", failure.ItemIdentifier);
+    }
+
+    [Fact]
+    public async Task HandleAsync_SequentialInOrderCheckpointing_BehavesByteIdenticallyToTheOldMonotonicWatermark()
+    {
+        // #273 regression guard: for a plain sequential handler that checkpoints strictly in order (no
+        // gaps, no partitioning), the contiguous-prefix watermark must produce exactly the same resume
+        // point the old max-index watermark did. This mirrors
+        // HandleAsync_ThrowsAfterCheckpointingRecordTwoOfFive_ReturnsRecordThreesSequenceNumber but
+        // states the byte-identical-behavior intent explicitly as its own permanent regression test.
+        var application = BuildApplication(async context =>
+        {
+            var processed = 0;
+            await foreach (var record in context.Items)
+            {
+                processed++;
+                if (processed == 4)
+                {
+                    throw new InvalidOperationException("boom");
+                }
+                await context.Checkpointer.CheckpointAsync(record);
+            }
+        });
+
+        var response = await application.HandleAsync(CreateKinesisEvent("1", "2", "3", "4", "5"), ServiceResolverFactory());
+
+        var failure = Assert.Single(response.BatchItemFailures);
+        Assert.Equal("4", failure.ItemIdentifier);
     }
 
     [Fact]

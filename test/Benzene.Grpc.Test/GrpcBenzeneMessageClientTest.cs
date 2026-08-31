@@ -11,6 +11,7 @@ using Benzene.Results;
 using Google.Protobuf;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
@@ -18,6 +19,20 @@ namespace Benzene.Grpc.Test;
 
 public class GrpcBenzeneMessageClientTest
 {
+    [Fact]
+    public void Constructor_PrebuiltPipelineOverload_NullLogger_ThrowsImmediately()
+    {
+        var invoker = new TestCallInvoker();
+        var registry = new GrpcClientRouteRegistry();
+        var adapter = new ProtobufJsonGrpcMessageAdapter();
+        var pipeline = new MiddlewarePipelineBuilder<GrpcSendMessageContext>(new NullBenzeneServiceContainer())
+            .UseGrpcClient(invoker, registry, adapter)
+            .Build();
+
+        Assert.Throws<ArgumentNullException>(() =>
+            new GrpcBenzeneMessageClient(pipeline, adapter, new DefaultGrpcStatusReverseMapper(), null!, new NullServiceResolver()));
+    }
+
     [Fact]
     public async Task SendMessageAsync_WhenTheCallSucceeds_ReturnsTheMappedResponse()
     {
@@ -173,26 +188,6 @@ public class GrpcBenzeneMessageClientTest
         Assert.Null(invoker.CapturedOptions.Deadline);
     }
 
-    // WP-I coverage debt: BuildClient used to default a *non-null* logger whenever the caller omitted
-    // one (`logger ?? NullLogger<...>.Instance`), which meant every test above - despite never passing
-    // a logger explicitly - never actually exercised GrpcBenzeneMessageClient's own null-logger
-    // handling. BuildClient's `logger` parameter is passed straight through now (its own default is
-    // `null`), so this test genuinely constructs with a null ILogger and pins that the catch block's
-    // own LogError call doesn't NRE and mask the real failure - the #266 fix.
-    [Fact]
-    public async Task SendMessageAsync_NullLogger_DoesNotThrow_AndStillReturnsServiceUnavailable()
-    {
-        var invoker = new TestCallInvoker { ExceptionToThrow = new InvalidOperationException("boom") };
-        var client = BuildClient(invoker, out var registry, logger: null);
-        registry.Add<EchoRequest, EchoReply>("echo-topic", "/benzene.test.TestService/Echo");
-
-        var result = await client.SendMessageAsync<EchoRequest, EchoReply>(
-            new BenzeneClientRequest<EchoRequest>("echo-topic", new EchoRequest { Name = "world" }, new Dictionary<string, string>()));
-
-        Assert.False(result.IsSuccessful);
-        Assert.Equal(BenzeneResultStatus.ServiceUnavailable, result.Status);
-    }
-
     private static GrpcBenzeneMessageClient BuildClient(TestCallInvoker invoker, out GrpcClientRouteRegistry registry, IServiceResolver? resolver = null, ILogger<GrpcBenzeneMessageClient>? logger = null)
     {
         registry = new GrpcClientRouteRegistry();
@@ -202,10 +197,6 @@ public class GrpcBenzeneMessageClientTest
             .UseGrpcClient(invoker, registry, adapter)
             .Build();
 
-        // Deliberately NOT defaulted to NullLogger<T>.Instance here (that was the WP-I finding: doing
-        // so silently masked GrpcBenzeneMessageClient's own null-logger handling in every test above).
-        // A caller who wants a non-null logger passes one explicitly (see the ambient-cancellation
-        // test); omitting it now genuinely reaches the constructor as null.
-        return new GrpcBenzeneMessageClient(pipeline, adapter, new DefaultGrpcStatusReverseMapper(), logger!, resolver ?? new NullServiceResolver());
+        return new GrpcBenzeneMessageClient(pipeline, adapter, new DefaultGrpcStatusReverseMapper(), logger ?? NullLogger<GrpcBenzeneMessageClient>.Instance, resolver ?? new NullServiceResolver());
     }
 }

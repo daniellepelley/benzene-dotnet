@@ -30,8 +30,7 @@ surface needed.
   `SourceOptions["functionName"]`. One function's `ListTags` failing (deleted between `ListFunctions`
   and here, or access-denied on that one function's ARN) drops just that function - it can't be
   tag-matched without its tags anyway - rather than losing every other function's result via the
-  shared `Task.WhenAll`. An optional `benzene:mesh-path` tag is carried into
-  `SourceOptions["meshPath"]` for services serving the descriptor at a non-default path.
+  shared `Task.WhenAll`.
 - `Extensions.AddMeshAwsLambdaDiscovery()` — registers a default-credential `AmazonLambdaClient`, the
   provider (as an additional `IMeshDiscoveryProvider`), and a `MeshDiscoveryRunner` over all providers.
 
@@ -58,8 +57,7 @@ scoped to the tagged resource group). Read + describe-invoke only; discovery nev
 
 ## Tests
 - `test/Benzene.Mesh.Test/Discovery/AwsLambdaDiscoveryProviderTest.cs` — tagged-only emission,
-  pagination-marker following, `benzene:mesh-path` carry-through, valued-tag filtering (mocked
-  `IAmazonLambda`).
+  pagination-marker following, valued-tag filtering (mocked `IAmazonLambda`).
 - `test/Benzene.Mesh.Test/Discovery/MeshDiscoveryRunnerTest.cs` — union with seed, seed-wins-on-clash,
   empty, `MeshRegistryJson` round-trip through the `mesh.json` shape, filter `Matches`.
 

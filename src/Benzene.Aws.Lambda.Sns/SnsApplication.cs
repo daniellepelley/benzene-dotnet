@@ -57,6 +57,8 @@ public class SnsApplication : SingleContextEscalatingApplicationBase<SnsApplicat
         // BoundedFanOut optionally caps how many records run at once (SnsOptions.MaxDegreeOfParallelism);
         // unset leaves the fan-out unbounded, exactly as before.
         var contexts = @event.Records.Select(record => SnsRecordContext.CreateInstance(@event, record));
-        await BoundedFanOut.WhenAllAsync(contexts, context => ProcessAsync(context, serviceResolverFactory), _options.MaxDegreeOfParallelism);
+        // No cancellation token reaches this application's HandleAsync today (IMiddlewareApplication's
+        // two-arg overload only) - default is the honest signal there is none to observe here.
+        await BoundedFanOut.WhenAllAsync(contexts, context => ProcessAsync(context, serviceResolverFactory), _options.MaxDegreeOfParallelism, default);
     }
 }

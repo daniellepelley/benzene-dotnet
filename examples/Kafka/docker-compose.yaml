@@ -1,11 +1,8 @@
 version: '3'
 services:
   zookeeper:
-    # Pinned to the last ZooKeeper-compatible Confluent Platform release (matches
-    # Benzene.Examples.Kafka.Test/docker-compose.yaml) - `:latest` now tracks a CP line that
-    # dropped ZooKeeper support entirely, which breaks this ZK-based topology (#217).
     image: confluentinc/cp-zookeeper:7.4.4
-    networks:
+    networks: 
       - broker-kafka
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181

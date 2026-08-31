@@ -15,15 +15,10 @@ namespace Benzene.Mesh.Discovery.Aws;
 /// <remarks>
 /// Uses <c>ListFunctions</c> + per-function <c>ListTags</c> only (no ResourceGroupsTagging API), so it
 /// needs no dependency beyond the already-approved <c>AWSSDK.Lambda</c>. IAM: <c>lambda:ListFunctions</c>,
-/// <c>lambda:ListTags</c>, and <c>lambda:InvokeFunction</c> (for the later interrogation). An optional
-/// <c>benzene:mesh-path</c> tag is carried into <c>SourceOptions</c> for services that serve the
-/// descriptor at a non-default path.
+/// <c>lambda:ListTags</c>, and <c>lambda:InvokeFunction</c> (for the later interrogation).
 /// </remarks>
 public class AwsLambdaDiscoveryProvider : IMeshDiscoveryProvider
 {
-    /// <summary>The tag whose value (when present) overrides the mesh descriptor path for a service.</summary>
-    public const string MeshPathTag = "benzene:mesh-path";
-
     /// <summary>
     /// Upper bound on concurrent <c>ListTags</c> calls during discovery. Keeps a large account from
     /// firing hundreds of tag reads at once and hitting the Lambda control-plane's request-rate limit,
@@ -115,10 +110,6 @@ public class AwsLambdaDiscoveryProvider : IMeshDiscoveryProvider
             }
 
             var options = new Dictionary<string, string> { ["functionName"] = function.FunctionName };
-            if (tags.TryGetValue(MeshPathTag, out var meshPath) && !string.IsNullOrWhiteSpace(meshPath))
-            {
-                options["meshPath"] = meshPath;
-            }
 
             entries.Add(new MeshServiceRegistryEntry(
                 function.FunctionName,

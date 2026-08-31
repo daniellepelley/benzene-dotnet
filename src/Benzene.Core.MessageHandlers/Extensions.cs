@@ -201,9 +201,12 @@ public static class MiddlewarePipelineExtensions
     /// <remarks>
     /// Works on any transport whose adapter wraps its topic getter in
     /// <see cref="PresetTopicMessageTopicGetter{TContext}"/> (every non-HTTP transport that supports
-    /// preset topics - SQS/SNS/EventBridge/Service Bus/Event Hub/Queue Storage/Timer/Event Grid/RabbitMQ,
-    /// and the self-hosted SQS/Service Bus/Event Hub workers). It carries the derived topic in scoped DI
-    /// state, not on the context, exactly like <c>UsePresetTopic</c>.
+    /// preset topics - SQS/SNS/S3/DynamoDB Streams/Kafka/EventBridge/Service Bus/Event Hub/Queue
+    /// Storage/Timer/Event Grid/RabbitMQ, and the self-hosted SQS/Service Bus/Event Hub workers).
+    /// Kinesis is the one AWS Lambda trigger package that does not: it fans a batch <em>in</em> to one
+    /// stream context with no per-record topic-routing concept at all (see
+    /// <c>Benzene.Aws.Lambda.Kinesis/CLAUDE.md</c>), so there is no topic getter to wrap. It carries the
+    /// derived topic in scoped DI state, not on the context, exactly like <c>UsePresetTopic</c>.
     /// </remarks>
     public static IMiddlewarePipelineBuilder<TContext> UseTopicFrom<TContext>(this IMiddlewarePipelineBuilder<TContext> app,
         Func<TContext, ITopic?> topicSelector)

@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Threading;
@@ -250,6 +251,28 @@ public class TempoTraceSourceTest
         }
     }
 
+    // A minimal ILogger that records formatted messages, for asserting on warning logs without pulling in
+    // a mocking framework's extension-method plumbing for ILogger (mirrors XRayTraceSourceTest).
+    private sealed class RecordingLogger : ILogger
+    {
+        public List<string> Messages { get; } = new();
+
+        public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
+
+        private sealed class NullScope : IDisposable
+        {
+            public static readonly NullScope Instance = new();
+            public void Dispose() { }
+        }
+    }
+
+    private static string SearchBody(params string[] traceIds)
+        => "{ \"traces\": [ " + string.Join(", ", traceIds.Select(id => "{ \"traceID\": \"" + id + "\" }")) + " ] }";
+
     [Fact]
     public async Task GetCorrelationAsync_IsolatesAPerTraceFetchFailure_AndKeepsTheRest()
     {
@@ -306,6 +329,66 @@ public class TempoTraceSourceTest
         Assert.Contains(logger.Messages, m => m.Contains("t-b", StringComparison.Ordinal));
     }
 
+    // #252: a per-trace HttpClient-level timeout throws TaskCanceledException (an OperationCanceledException
+    // subclass) completely independent of the caller's own cancellationToken - the isolation catch must not
+    // treat that the same as genuine host cancellation and let it fault the whole correlation search.
+    [Fact]
+    public async Task GetCorrelationAsync_IsolatesAPerTraceTimeout_NotTiedToTheCallersToken()
+    {
+        const string correlationId = "ticket-1";
+        var traceIds = Enumerable.Range(0, 6).Select(i => $"t-{i}").ToArray();
+        const string timingOutTraceId = "t-3";
+
+        var source = Source(path =>
+        {
+            if (path.StartsWith("/api/search"))
+            {
+                return (HttpStatusCode.OK, SearchBody(traceIds));
+            }
+
+            if (path.Contains(timingOutTraceId))
+            {
+                throw new TaskCanceledException(
+                    "simulated HttpClient.Timeout for this one trace, unrelated to the caller's token");
+            }
+
+            return (HttpStatusCode.OK, TraceBody("orders:create", "ok", "orders-api", correlationId));
+        }, out _);
+
+        // The caller's own cancellationToken is CancellationToken.None throughout - nothing the caller did
+        // requested cancellation, so t-3's per-request timeout must be isolated exactly like the adjacent
+        // HttpRequestException test, not treated as genuine host cancellation.
+        var view = await source.GetCorrelationAsync(correlationId);
+
+        Assert.NotNull(view);
+        Assert.Equal(5, view!.Traces.Count); // every trace except the one whose fetch timed out
+        Assert.DoesNotContain(view.Traces, t => t.TraceId == timingOutTraceId);
+    }
+
+    // The complement of the above: when the CALLER's own token really is cancelled, the exception must
+    // propagate rather than being isolated away - matching MessageHandler.cs's token-verified convention.
+    // The token is cancelled from WITHIN the per-trace fetch handler (not before the call starts) so this
+    // exercises the per-trace catch's `when` filter directly, rather than a search-call short-circuit.
+    [Fact]
+    public async Task GetCorrelationAsync_PropagatesGenuineCancellation_WhenTheCallersOwnTokenIsCancelled()
+    {
+        using var cts = new CancellationTokenSource();
+        var source = Source(path => path.StartsWith("/api/search")
+            ? (HttpStatusCode.OK, SearchBody("t-0"))
+            : throw SimulateGenuineHostCancellation(cts), out _);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => source.GetCorrelationAsync("ticket-1", null, cts.Token));
+    }
+
+    // Cancels the ambient token AND throws the exception the fetch would see once it observes that
+    // cancellation - i.e. a genuine host shutdown/drain, not an unrelated per-request timeout.
+    private static Exception SimulateGenuineHostCancellation(CancellationTokenSource cts)
+    {
+        cts.Cancel();
+        return new TaskCanceledException("simulated genuine host cancellation", null, cts.Token);
+    }
+
     // #188: every per-trace fetch blocks until ALL of them have arrived, then all unblock together. This
     // is only satisfiable if the correlation fetch fans the requests out concurrently (BoundedFanOut) - a
     // sequential `foreach await` would issue the second fetch only after the first completes, which never
@@ -337,7 +420,7 @@ public class TempoTraceSourceTest
                 _allArrived.TrySetResult();
             }
 
-            await _allArrived.Task; // only resolves once every expected fetch has arrived
+            await _allArrived.Task; // only resolves once every expected trace fetch has arrived
 
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{ "batches": [] }""") };
         }
@@ -346,8 +429,8 @@ public class TempoTraceSourceTest
     [Fact]
     public async Task GetCorrelationAsync_FetchesMatchedTracesConcurrently_NotSequentially()
     {
-        var search = """{ "traces": [ { "traceID": "t-a" }, { "traceID": "t-b" }, { "traceID": "t-c" } ] }""";
-        var handler = new GatedConcurrencyHandler(search, expectedConcurrentRequests: 3);
+        var traceIds = new[] { "t-0", "t-1", "t-2" };
+        var handler = new GatedConcurrencyHandler(SearchBody(traceIds), traceIds.Length);
         var options = new TempoTraceSourceOptions(TempoUrl); // SearchConcurrency default (8) >= 3
         var source = new TempoTraceSource(new HttpClient(handler), options);
 
@@ -355,6 +438,7 @@ public class TempoTraceSourceTest
         var completed = await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(5)));
 
         Assert.Same(task, completed); // did not deadlock - all 3 fetches were in flight together
+        Assert.Null(await task);      // each fetch returned an empty trace body → no events → filtered out
     }
 
     [Fact]
@@ -409,24 +493,5 @@ public class TempoTraceSourceTest
         await source.GetCorrelationAsync("ticket-1");
 
         Assert.Empty(logger.Messages);
-    }
-
-    // A minimal ILogger that records formatted messages, for asserting on warning logs without pulling in
-    // a mocking framework's extension-method plumbing for ILogger (mirrors XRayTraceSourceTest).
-    private sealed class RecordingLogger : ILogger
-    {
-        public List<string> Messages { get; } = new();
-
-        public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
-        public bool IsEnabled(LogLevel logLevel) => true;
-
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
-            Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
-
-        private sealed class NullScope : IDisposable
-        {
-            public static readonly NullScope Instance = new();
-            public void Dispose() { }
-        }
     }
 }

@@ -6,6 +6,7 @@ using Benzene.Abstractions.DI;
 using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Abstractions.Middleware;
 using Benzene.Aws.Lambda.Sns;
+using Benzene.Core.Exceptions;
 using Benzene.Core.MessageHandlers;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -140,5 +141,40 @@ public class SnsFailureHandlingTest
 
         // Reaching the end without throwing proves the escalated failure was caught too.
         await application.HandleAsync(CreateEvent(), resolverFactory.Object);
+    }
+
+    [Fact]
+    public async Task HandleAsync_CatchExceptionsTrue_InfrastructureFailure_RethrowsDespiteCatchExceptions()
+    {
+        // #228: an infrastructure/DI-wiring failure (BenzeneResolutionException) is not this
+        // message's fault and is not retryable per-message - it must fail the invocation even when
+        // CatchExceptions opts into swallowing ordinary handler exceptions, mirroring SqsApplication's
+        // carve-out. Before the fix this completed silently (zero retry, zero signal, forever).
+        var mockPipeline = new Mock<IMiddlewarePipeline<SnsRecordContext>>();
+        mockPipeline.Setup(x => x.HandleAsync(It.IsAny<SnsRecordContext>(), It.IsAny<IServiceResolver>()))
+            .ThrowsAsync(new BenzeneResolutionException("Unable to resolve type IExampleService"));
+
+        var (_, resolverFactory) = CreateResolver();
+        var application = new SnsApplication(mockPipeline.Object, new SnsOptions { CatchExceptions = true });
+
+        await Assert.ThrowsAsync<BenzeneResolutionException>(() => application.HandleAsync(CreateEvent(), resolverFactory.Object));
+    }
+
+    [Fact]
+    public async Task HandleAsync_DefaultOptions_HandlerNeverSetsMessageResult_ThrowsSnsMessageProcessingException()
+    {
+        // #229: a null/unset MessageResult (pipeline completed without any middleware setting an
+        // outcome) must be treated as a failure, not a silent success - "err toward redelivery,
+        // never toward loss", matching SQS/DynamoDb and RaiseOnFailureStatus's safe-by-default intent.
+        var mockPipeline = new Mock<IMiddlewarePipeline<SnsRecordContext>>();
+        mockPipeline.Setup(x => x.HandleAsync(It.IsAny<SnsRecordContext>(), It.IsAny<IServiceResolver>()))
+            .Returns(Task.CompletedTask);
+
+        var (_, resolverFactory) = CreateResolver();
+        var application = new SnsApplication(mockPipeline.Object);
+
+        var exception = await Assert.ThrowsAsync<SnsMessageProcessingException>(
+            () => application.HandleAsync(CreateEvent("msg-3"), resolverFactory.Object));
+        Assert.Equal("msg-3", exception.MessageId);
     }
 }

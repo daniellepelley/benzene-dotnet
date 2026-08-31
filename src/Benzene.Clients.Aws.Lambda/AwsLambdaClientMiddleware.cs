@@ -17,17 +17,22 @@ public class AwsLambdaClientMiddleware : IMiddleware<LambdaSendMessageContext>, 
     private readonly ICancellationTokenAccessor? _cancellation;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="AwsLambdaClientMiddleware"/> class.
+    /// Initializes a new instance of the <see cref="AwsLambdaClientMiddleware"/> class with no
+    /// cancellation-token accessor.
     /// </summary>
     /// <param name="amazonLambda">The Lambda client used to invoke the function.</param>
-    /// <param name="cancellation">
-    /// Supplies the ambient cancellation token to pass into the invoke call (the
-    /// <c>HttpBenzeneMessageClient</c> constructor-optional accessor idiom); null observes no
-    /// cancellation. Resolved automatically from the container on the DI-registered
-    /// <c>UseAwsLambdaClient()</c> path; the explicit-client <c>UseAwsLambdaClient(amazonLambda)</c>
-    /// overload resolves it from the pipeline's service resolver and passes it through.
-    /// </param>
-    public AwsLambdaClientMiddleware(IAmazonLambda amazonLambda, ICancellationTokenAccessor? cancellation = null)
+    public AwsLambdaClientMiddleware(IAmazonLambda amazonLambda)
+        : this(amazonLambda, null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes the middleware, additionally resolving the ambient cancellation token so an
+    /// upstream cancel/timeout aborts the outbound invoke instead of running it to completion.
+    /// </summary>
+    /// <param name="amazonLambda">The Lambda client used to invoke the function.</param>
+    /// <param name="cancellation">Supplies the ambient cancellation token; null observes no cancellation.</param>
+    public AwsLambdaClientMiddleware(IAmazonLambda amazonLambda, ICancellationTokenAccessor? cancellation)
     {
         _amazonLambda = amazonLambda;
         _cancellation = cancellation;

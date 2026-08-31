@@ -135,7 +135,7 @@ public class SqsConsumerApplication : IMiddlewareApplication<ReceiveMessageRespo
                 }
 
                 return null;
-            }, _options.MaxDegreeOfParallelism);
+            }, _options.MaxDegreeOfParallelism, cancellationToken);
 
         var failedMessages = results
             .Where(message => message != null)

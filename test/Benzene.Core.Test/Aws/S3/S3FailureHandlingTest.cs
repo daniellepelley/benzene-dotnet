@@ -7,6 +7,7 @@ using Benzene.Abstractions.DI;
 using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Abstractions.Middleware;
 using Benzene.Aws.Lambda.S3;
+using Benzene.Core.Exceptions;
 using Benzene.Core.MessageHandlers;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -108,5 +109,36 @@ public class S3FailureHandlingTest
         // Safe-by-default: a returned failure result is escalated so AWS retries it, not silently accepted.
         await Assert.ThrowsAsync<S3MessageProcessingException>(
             () => application.HandleAsync(CreateEvent(), CreateResolverFactory().Object));
+    }
+
+    [Fact]
+    public async Task HandleAsync_CatchExceptionsTrue_InfrastructureFailure_RethrowsDespiteCatchExceptions()
+    {
+        // #228: an infrastructure/DI-wiring failure (BenzeneResolutionException) fails the whole
+        // invocation even when CatchExceptions opts into swallowing ordinary handler exceptions - S3
+        // has no partial-failure channel, so swallowing this means 100%-loss-reported-as-success.
+        var mockPipeline = new Mock<IMiddlewarePipeline<S3RecordContext>>();
+        mockPipeline.Setup(x => x.HandleAsync(It.IsAny<S3RecordContext>(), It.IsAny<IServiceResolver>()))
+            .ThrowsAsync(new BenzeneResolutionException("Unable to resolve type IExampleService"));
+
+        var application = new S3Application(mockPipeline.Object, new S3Options { CatchExceptions = true });
+
+        await Assert.ThrowsAsync<BenzeneResolutionException>(() => application.HandleAsync(CreateEvent(), CreateResolverFactory().Object));
+    }
+
+    [Fact]
+    public async Task HandleAsync_DefaultOptions_HandlerNeverSetsMessageResult_ThrowsS3MessageProcessingException()
+    {
+        // #229: a null/unset MessageResult is treated as a failure, not a silent success, aligning
+        // with SQS/DynamoDb's "err toward redelivery, never toward loss" convention.
+        var mockPipeline = new Mock<IMiddlewarePipeline<S3RecordContext>>();
+        mockPipeline.Setup(x => x.HandleAsync(It.IsAny<S3RecordContext>(), It.IsAny<IServiceResolver>()))
+            .Returns(Task.CompletedTask);
+
+        var application = new S3Application(mockPipeline.Object);
+
+        var exception = await Assert.ThrowsAsync<S3MessageProcessingException>(
+            () => application.HandleAsync(CreateEvent("object-3"), CreateResolverFactory().Object));
+        Assert.Equal("object-3", exception.ObjectKey);
     }
 }

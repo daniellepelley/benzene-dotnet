@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Threading;
 using Benzene.Abstractions.DI;
 using Benzene.Core.Exceptions;
 using Microsoft.Extensions.DependencyInjection;
@@ -94,8 +95,48 @@ public sealed class MicrosoftServiceResolverAdapter : IServiceResolver
         return _serviceProvider.GetServices<T>();
     }
 
+    /// <summary>
+    /// Disposes the wrapped scope. Bridges to <see cref="IAsyncDisposable.DisposeAsync"/> - with an
+    /// UNBOUNDED wait - when the scope needs it, rather than calling <see cref="IDisposable.Dispose"/>
+    /// directly: Microsoft.Extensions.DependencyInjection's own scope <c>Dispose()</c> throws
+    /// <see cref="InvalidOperationException"/> the moment it has to tear down a resolved instance that
+    /// implements only <see cref="IAsyncDisposable"/> (task board #266, round 16 -
+    /// <c>work/bug-fix-plan-round16-2026-08.md</c> WP-A) - an entirely ordinary shape for a
+    /// user-registered async-native client/connection. This is the systemic fix: every transport built
+    /// on <c>Benzene.Core.Middleware</c> tears its per-message scope down through exactly this method
+    /// (<c>MiddlewareApplication.HandleAsync</c>'s <c>using var serviceResolver = ...</c>), so without
+    /// this bridge, resolving such a service crashed AND leaked (its own <c>DisposeAsync</c> never ran)
+    /// on every single message. The wait is deliberately unbounded, unlike the bounded-5s pattern used
+    /// for best-effort telemetry flushes elsewhere (<c>MeshAnnouncer</c>) - abandoning a user's own
+    /// scope disposal mid-way would silently leak their resources by design, and Autofac's own
+    /// <see cref="Autofac.ILifetimeScope.Dispose"/> already blocks unboundedly for the identical shape,
+    /// so this restores parity rather than introducing new blocking behavior. The wait deliberately
+    /// suppresses the ambient <see cref="SynchronizationContext"/> (restored in a <c>finally</c>)
+    /// around the blocking call: without this, a scope's own <c>DisposeAsync()</c> that awaits
+    /// without <c>ConfigureAwait(false)</c> (ordinary application code) can deadlock this thread
+    /// FOREVER under a single-thread-affinity context (WinForms/WPF/Blazor-Server-shaped) - the
+    /// posted continuation could only ever run on the very thread now blocked waiting for it (task
+    /// board #289, round 17). This is the standard sync-over-async mitigation, not the bounded-5s
+    /// pattern - it keeps the wait unbounded (matching Autofac) while removing the deadlock vector.
+    /// </summary>
     public void Dispose()
     {
-        _scope?.Dispose();
+        if (_scope is IAsyncDisposable asyncDisposableScope)
+        {
+            var previousContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+            try
+            {
+                asyncDisposableScope.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            }
+            finally
+            {
+                SynchronizationContext.SetSynchronizationContext(previousContext);
+            }
+        }
+        else
+        {
+            _scope?.Dispose();
+        }
     }
 }

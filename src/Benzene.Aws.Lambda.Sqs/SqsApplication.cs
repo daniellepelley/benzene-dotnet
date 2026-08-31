@@ -113,7 +113,10 @@ public class SqsApplication : IMiddlewareApplication<SQSEvent, SQSBatchResponse>
                 }
 
                 return null;
-            }, _options.MaxDegreeOfParallelism);
+            },
+            // No cancellation token reaches this application's HandleAsync today (IMiddlewareApplication's
+            // two-arg overload only) - default is the honest signal there is none to observe here.
+            _options.MaxDegreeOfParallelism, default);
 
         var batchItemFailures = results
             .Where(failure => failure != null)

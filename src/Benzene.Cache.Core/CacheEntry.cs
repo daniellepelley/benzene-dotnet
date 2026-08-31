@@ -44,6 +44,20 @@ public abstract class CacheEntry<T> : CacheWriteActions<T>, ICacheEntry<T>
     /// string <c>"null"</c>, never a <c>null</c> stored value, so presence and "the stored value
     /// deserializes to null" are never confused with each other.
     /// </summary>
+    /// <remarks>
+    /// Presence is decided by <c>cacheValue != null</c>, not <c>!string.IsNullOrEmpty(cacheValue)</c>
+    /// (#201): the former conflated "key absent" with "the serializer emitted an empty string" for
+    /// any <see cref="ISerializer"/> that encodes a null/default value as <c>""</c> rather than the
+    /// stock <c>System.Text.Json</c> serializer's 4-character <c>"null"</c> - silently reintroducing
+    /// the cache-penetration hazard #140 was fixed to close, for that class of serializer. This
+    /// requires every <see cref="GetEntryValueAsync"/> implementation to genuinely distinguish a
+    /// store-level miss (returns <c>null</c>) from an empty stored value (returns <c>""</c>) -
+    /// including on its own error path, where "could not determine presence" must also be
+    /// <c>null</c>, never <c>""</c> (which this fix would otherwise misreport as a hit of an empty
+    /// value). <see cref="Benzene.Cache.Redis.RedisCacheService"/>'s implementation does this: Redis
+    /// itself returns a null bulk reply for a missing key, and its error-handling path returns
+    /// <c>null</c> too.
+    /// </remarks>
     private async Task<(bool Found, T? Value)> TryReadEntryAsync(CancellationToken cancellationToken)
     {
         try

@@ -98,7 +98,14 @@ public class XRayTraceSource : IMeshTraceSource
 
         // The window is chunked (MaxTraceSummariesWindow) and each chunk paged to exhaustion - a
         // correlation search must not miss matches, so there's no hard cap here (unlike recent-flows).
-        var summaries = await FetchTraceSummariesAsync(start, end, filter, hardCap: null, "GetCorrelationAsync", cancellationToken);
+        // De-duplicated by Id immediately after the fetch (#274): the window is chunked
+        // (MaxTraceSummariesWindow) and adjacent chunks touch at a shared instant whose inclusivity
+        // isn't verified either way, and GetTraceSummaries pagination can legitimately re-surface a
+        // trace under eventual consistency - either way, a duplicated id must not produce two
+        // identical TraceViews for one physical trace.
+        var summaries = (await FetchTraceSummariesAsync(start, end, filter, hardCap: null, "GetCorrelationAsync", cancellationToken))
+            .DistinctBy(s => s.Id)
+            .ToList();
         var traceIds = summaries.Select(s => s.Id).Where(id => !string.IsNullOrEmpty(id)).ToList();
 
         if (traceIds.Count == 0)
@@ -163,8 +170,13 @@ public class XRayTraceSource : IMeshTraceSource
         // could silently surface stale traces as "recent" under high volume; this samples over a much wider,
         // order-agnostic set before the client-side newest-first Take(limit) below. A hit on the cap is
         // logged (not silent) since it means the sample may not cover the full requested window.
-        var summaries = await FetchTraceSummariesAsync(
-            start, end, filter: null, hardCap: limit * RecentFlowsHardCapMultiplier, "GetRecentFlowsAsync", cancellationToken);
+        // De-duplicated by Id immediately after the fetch (#274) - see GetCorrelationAsync's comment;
+        // without this a duplicated summary would occupy two of the top-N slots below, silently
+        // displacing a genuinely different trace from the recent-flows list.
+        var summaries = (await FetchTraceSummariesAsync(
+            start, end, filter: null, hardCap: limit * RecentFlowsHardCapMultiplier, "GetRecentFlowsAsync", cancellationToken))
+            .DistinctBy(s => s.Id)
+            .ToList();
 
         // Select the newest N by the trace-id epoch (second-granularity, but enough to pick the right ~20),
         // then enrich those rows below. Ordering within a second is refined by the enriched millisecond
@@ -239,9 +251,21 @@ public class XRayTraceSource : IMeshTraceSource
                     result[trace.Id] = XRaySegmentMapper.Map(trace.Id, segments.Select(s => s.Document));
                 }
             }
+            catch (Exception ex) when (ex is OperationCanceledException && cancellationToken.IsCancellationRequested)
+            {
+                // The complement of the fetch-isolation catch below: when the caller's own cancellationToken
+                // is actually cancelled, that's a genuine host cancellation (not a per-batch backend failure
+                // or an unrelated per-request timeout) and must propagate rather than silently degrading this
+                // batch's rows to the summary plane - see MessageHandler.cs's
+                // ex.CancellationToken.IsCancellationRequested checks and the Jaeger/Tempo trace-source fix
+                // for the same timeout-vs-cancellation distinction.
+                throw;
+            }
             catch
             {
-                // Fetch isolation: a failed batch leaves its ≤5 rows on the summary plane, never the whole list.
+                // Fetch isolation: a failed batch - including an HttpClient-level per-request timeout
+                // unrelated to the caller's own token - leaves its ≤5 rows on the summary plane, never the
+                // whole list.
             }
 
             return result;

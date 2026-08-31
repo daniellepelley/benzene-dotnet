@@ -15,7 +15,8 @@ namespace Benzene.Azure.Function.EventHub.Function;
 /// </para>
 /// <para>
 /// <b>Ordering tradeoff.</b> Event Hub records within a partition are ordered, and the default
-/// (both flags off) fan-out runs them concurrently but lets any exception fail the whole invocation
+/// (safe-by-default: <see cref="RaiseOnFailureStatus"/> on, <see cref="CatchExceptions"/> off)
+/// fan-out runs them concurrently but lets any exception fail the whole invocation
 /// so the trigger re-delivers - and re-runs - the entire batch, siblings included. Turning
 /// <see cref="CatchExceptions"/> on trades that all-or-nothing re-delivery for sibling isolation: a
 /// poison event is logged and skipped so its already-succeeded (and not-yet-run) siblings are not

@@ -15,6 +15,11 @@ public class InMemoryEventStore : IEventStore
 {
     // Mirrors DynamoDbEventStore's MaxEventsPerAppend so app code written against either store sees
     // the same limit; the in-memory store has no transaction-size constraint of its own to enforce.
+    // For the SAME reason, it also mirrors DynamoDbEventStore's reduced effective cap when appending
+    // to an EXISTING stream (expectedVersion > 0): the DynamoDB store reserves one of its 100
+    // transact-write items for the version ConditionCheck in that case, so app code written against
+    // either store must see the same 99-events-on-an-existing-stream ceiling here too, even though
+    // this store has no physical condition-check item of its own (#271 contract parity).
     private const int MaxEventsPerAppend = 100;
 
     private readonly Dictionary<string, List<StoredEvent>> _streams = new();
@@ -38,11 +43,13 @@ public class InMemoryEventStore : IEventStore
             throw new ArgumentOutOfRangeException(nameof(expectedVersion), expectedVersion, "Expected version cannot be negative.");
         }
 
-        if (events.Count > MaxEventsPerAppend)
+        var effectiveMaxEventsPerAppend = expectedVersion > 0 ? MaxEventsPerAppend - 1 : MaxEventsPerAppend;
+        if (events.Count > effectiveMaxEventsPerAppend)
         {
-            throw new ArgumentException(
-                $"Cannot append {events.Count} events in a single call; the maximum is {MaxEventsPerAppend}. Split the append.",
-                nameof(events));
+            var message = expectedVersion > 0
+                ? $"Cannot append {events.Count} events in a single call at expectedVersion {expectedVersion}; appending to an existing stream mirrors DynamoDbEventStore's reserved condition-check transact item, so the effective limit is {effectiveMaxEventsPerAppend} events. Split the append."
+                : $"Cannot append {events.Count} events in a single call; the maximum is {MaxEventsPerAppend}. Split the append.";
+            throw new ArgumentException(message, nameof(events));
         }
 
         lock (_gate)

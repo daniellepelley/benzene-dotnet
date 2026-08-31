@@ -35,7 +35,8 @@ public static class Extensions
     public static IMiddlewarePipelineBuilder<SnsSendMessageContext> UseSnsClient(
         this IMiddlewarePipelineBuilder<SnsSendMessageContext> app)
     {
-        app.Register(x => x.AddScoped<SnsClientMiddleware>());
+        app.Register(x => x.AddScoped(resolver => new SnsClientMiddleware(
+            resolver.GetService<IAmazonSimpleNotificationService>(), resolver.TryGetService<ICancellationTokenAccessor>())));
         return app.Use<SnsSendMessageContext, SnsClientMiddleware>();
     }
 

@@ -18,7 +18,8 @@ namespace Benzene.Mesh.Wire;
 /// byte[] (marshals base64) → "string"</item>
 /// <item>JsonElement/JsonNode/JsonDocument/object (shape unknowable statically) → {} (unconstrained)</item>
 /// <item>Nullable&lt;T&gt; → T's schema with "null" added to its type</item>
-/// <item>arrays/IEnumerable&lt;T&gt; → "array" with "items"; string-keyed IDictionary&lt;string,T&gt; →
+/// <item>arrays/IEnumerable&lt;T&gt; → "array" with "items"; IDictionary&lt;TKey,TValue&gt; (any key
+/// type - System.Text.Json always serializes a dictionary as an object with string-converted keys) →
 /// "object" with "additionalProperties"</item>
 /// <item>other classes/structs → "object" with "properties" from public readable properties,
 /// honoring <see cref="JsonPropertyNameAttribute"/>/<see cref="JsonIgnoreAttribute"/> and camelCase
@@ -179,13 +180,20 @@ public static class MeshSchemaGenerator
         return schema;
     }
 
+    /// <summary>
+    /// Matches <c>IDictionary&lt;TKey,TValue&gt;</c>/<c>IReadOnlyDictionary&lt;TKey,TValue&gt;</c> for
+    /// ANY key type, not just <c>string</c>: System.Text.Json serializes any dictionary (int/enum/
+    /// Guid-keyed included) as a JSON object with string-converted keys, never an array of
+    /// {key,value} pairs - so the key type is irrelevant to the wire shape this schema describes.
+    /// Checked before <see cref="TryGetEnumerableElementType"/> so a dictionary never falls through to
+    /// the array fallback the pre-fix code used for a non-string-keyed one.
+    /// </summary>
     private static bool TryGetDictionaryValueType(Type type, out Type valueType)
     {
         var dictionary = new[] { type }.Concat(type.GetInterfaces())
             .FirstOrDefault(x => x.IsGenericType &&
                                  (x.GetGenericTypeDefinition() == typeof(IDictionary<,>) ||
-                                  x.GetGenericTypeDefinition() == typeof(IReadOnlyDictionary<,>)) &&
-                                 x.GetGenericArguments()[0] == typeof(string));
+                                  x.GetGenericTypeDefinition() == typeof(IReadOnlyDictionary<,>)));
         valueType = dictionary?.GetGenericArguments()[1] ?? typeof(object);
         return dictionary != null;
     }

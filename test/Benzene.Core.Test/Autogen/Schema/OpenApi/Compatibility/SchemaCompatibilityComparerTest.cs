@@ -262,6 +262,82 @@ public class SchemaCompatibilityComparerTest
     }
 
     [Fact]
+    public void OneOfDiscriminator_InlineMembersReordered_MatchByMappingKeyNotIndex()
+    {
+        // #239: both variants are inline (no $ref) - there is no ref-target name to key on, so the
+        // only remaining identity available is the discriminator mapping. Before the fix, the
+        // mapping-fallback comparison in VariantKey was dead code (it compared a mapping target
+        // against a refId that is guaranteed null in that branch), so this fell through to purely
+        // positional matching: reordering the two members alone (mapping reordered right along with
+        // them, as it would be if a person hand-edited the array) produced 6 spurious property changes
+        // and HasBreakingChanges == True for a byte-identical, no-op reorder.
+        var baselineMapping = new OpenApiDiscriminator
+        {
+            PropertyName = "petType",
+            Mapping = new Dictionary<string, string> { ["dog"] = "Dog", ["cat"] = "Cat" }
+        };
+        var currentMapping = new OpenApiDiscriminator
+        {
+            PropertyName = "petType",
+            Mapping = new Dictionary<string, string> { ["cat"] = "Cat", ["dog"] = "Dog" }
+        };
+
+        var baseline = DocOf(Req(Topic, Obj(("id", true)),
+            new OpenApiSchema { OneOf = new List<OpenApiSchema> { InlineDog(), InlineCat() }, Discriminator = baselineMapping }));
+        var current = DocOf(Req(Topic, Obj(("id", true)),
+            new OpenApiSchema { OneOf = new List<OpenApiSchema> { InlineCat(), InlineDog() }, Discriminator = currentMapping }));
+
+        var report = new SchemaCompatibilityComparer().Compare(baseline, current);
+
+        Assert.Empty(report.Changes);
+        Assert.False(report.HasBreakingChanges);
+    }
+
+    [Fact]
+    public void OneOfDiscriminator_InlineMemberPropertyRemoved_IsFlaggedOnTheRightVariant()
+    {
+        // Same shape as above, but a real change: the "dog" variant genuinely loses a property. The
+        // fix must still find and attribute it correctly, not just suppress everything indiscriminately.
+        var mapping = new OpenApiDiscriminator
+        {
+            PropertyName = "petType",
+            Mapping = new Dictionary<string, string> { ["dog"] = "Dog", ["cat"] = "Cat" }
+        };
+
+        var dogWithoutBark = new OpenApiSchema { Type = "object", Properties = new Dictionary<string, OpenApiSchema>() };
+
+        var baseline = DocOf(Req(Topic, Obj(("id", true)),
+            new OpenApiSchema { OneOf = new List<OpenApiSchema> { InlineDog(), InlineCat() }, Discriminator = mapping }));
+        var current = DocOf(Req(Topic, Obj(("id", true)),
+            new OpenApiSchema { OneOf = new List<OpenApiSchema> { dogWithoutBark, InlineCat() }, Discriminator = mapping }));
+
+        var report = new SchemaCompatibilityComparer().Compare(baseline, current);
+
+        // Exactly one variant is reported as changed (the "dog" one, since "cat" is byte-identical) -
+        // before the fix, the fallback's failure to key by mapping meant every inline member's identity
+        // degenerated to raw position, so a genuine single-variant change couldn't be distinguished
+        // from any other bug in the matching (a false negative on the reorder test above would have
+        // masked this too; asserting both cases together pins down the fix).
+        Assert.Equal(2, report.Changes.Count);
+        Assert.Equal(SchemaChangeKind.UnionVariantChanged, report.Changes[0].Kind);
+        Assert.Equal(SchemaChangeKind.PropertyRemoved, report.Changes[1].Kind);
+        Assert.EndsWith("bark", report.Changes[1].Path);
+        Assert.StartsWith(report.Changes[0].Path, report.Changes[1].Path);
+    }
+
+    private static OpenApiSchema InlineDog() => new()
+    {
+        Type = "object",
+        Properties = new Dictionary<string, OpenApiSchema> { ["bark"] = new() { Type = "boolean" } }
+    };
+
+    private static OpenApiSchema InlineCat() => new()
+    {
+        Type = "object",
+        Properties = new Dictionary<string, OpenApiSchema> { ["meow"] = new() { Type = "boolean" } }
+    };
+
+    [Fact]
     public void OneOfVariantMatchedPairDiffers_IsUnionVariantChanged_WithNestedChange()
     {
         var baselineComponents = PetComponents();

@@ -173,11 +173,10 @@ public class BenzeneServiceBusWorker : IBenzeneWorker
             return;
         }
 
+        ServiceBusSettlementDecision decision;
         try
         {
-            var decision = await _application.HandleAsync(settler.Message, _serviceResolverFactory, settler.CancellationToken);
-
-            await SettleAsync(settler, decision);
+            decision = await _application.HandleAsync(settler.Message, _serviceResolverFactory, settler.CancellationToken);
         }
         catch (Exception ex)
         {
@@ -211,6 +210,30 @@ public class BenzeneServiceBusWorker : IBenzeneWorker
             }
 
             throw;
+        }
+
+        // Deliberately OUTSIDE the handler's own try/catch above (#277): the handler already
+        // completed successfully at this point, so a settlement failure here (e.g. the lock was
+        // lost by the time settlement runs, or a transient broker error on the complete/abandon/
+        // dead-letter/defer call itself) is a distinct failure mode - it must not be logged with
+        // the handler-failure template above, and it must not trigger an abandon on a message that
+        // was already correctly and fully processed. Log it distinctly and let the lock's own
+        // natural expiry drive redelivery, mirroring the Cosmos/EventHub siblings' "don't force an
+        // extra side effect on top of an already-decided-successful outcome" checkpoint handling.
+        try
+        {
+            await SettleAsync(settler, decision);
+        }
+        catch (Exception ex)
+        {
+            using (var loggingScope = _serviceResolverFactory.CreateScope())
+            {
+                loggingScope.GetService<ILogger<BenzeneServiceBusWorker>>()
+                    .LogError(ex,
+                        "Settling Service Bus message {messageId} failed after it was already successfully " +
+                        "processed; the message lock will expire naturally and Service Bus will redeliver it",
+                        settler.Message.MessageId);
+            }
         }
     }
 

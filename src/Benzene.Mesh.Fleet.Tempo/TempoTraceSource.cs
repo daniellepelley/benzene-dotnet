@@ -31,15 +31,7 @@ public class TempoTraceSource : IMeshTraceSource
     private readonly ILogger? _logger;
 
     /// <summary>Creates the source over an <see cref="HttpClient"/> and Tempo endpoint/window options.</summary>
-    public TempoTraceSource(HttpClient httpClient, TempoTraceSourceOptions options) : this(httpClient, options, null)
-    {
-    }
-
-    /// <summary>Creates the source over an <see cref="HttpClient"/>, Tempo endpoint/window options, and an
-    /// optional logger (used to warn when a correlation search hits its result limit — see
-    /// <see cref="TempoTraceSourceOptions.CorrelationSearchLimit"/> — and when an individual per-trace fetch
-    /// fails during correlation hydration).</summary>
-    public TempoTraceSource(HttpClient httpClient, TempoTraceSourceOptions options, ILogger? logger)
+    public TempoTraceSource(HttpClient httpClient, TempoTraceSourceOptions options, ILogger? logger = null)
     {
         _httpClient = httpClient;
         _options = options;
@@ -97,8 +89,16 @@ public class TempoTraceSource : IMeshTraceSource
                 var events = await FetchTraceEventsAsync(match.TraceId, cancellationToken);
                 return events.Count > 0 ? new TraceView { TraceId = match.TraceId, Events = events } : null;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
+                // Token-verified, not type-based: an HttpClient-level per-request Timeout throws
+                // TaskCanceledException (an OperationCanceledException subclass) regardless of whether the
+                // caller's own token was ever cancelled, so isolating on exception type alone would let
+                // one slow backend fault the whole correlation search. This isolates everything EXCEPT an
+                // OperationCanceledException while the caller's own cancellationToken is actually
+                // cancelled - that's genuine host cancellation and must propagate instead (see
+                // MessageHandler.cs's ex.CancellationToken.IsCancellationRequested checks for the same
+                // timeout-vs-cancellation distinction).
                 _logger?.LogWarning(ex,
                     "TempoTraceSource.GetCorrelationAsync failed to fetch trace {TraceId} while hydrating correlation id {CorrelationId}; dropping this trace and keeping the rest.",
                     match.TraceId, correlationId);
@@ -107,7 +107,6 @@ public class TempoTraceSource : IMeshTraceSource
         }, _options.SearchConcurrency);
 
         var traces = fetched.Where(t => t is not null).Select(t => t!).ToList();
-
         if (traces.Count == 0)
         {
             return null;

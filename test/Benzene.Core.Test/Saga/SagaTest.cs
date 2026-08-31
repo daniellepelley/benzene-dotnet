@@ -213,6 +213,31 @@ public class SagaTest
         Assert.Same(result.Failures[0].Exception, result.FailureException);
     }
 
+    // #209: the same concurrent-failure surfacing, but one step fails via a thrown exception and the
+    // other via an ordinary failure result - Failures must carry both regardless of which shape each
+    // step's failure took.
+    [Fact]
+    public async Task RunAsync_TwoStepsFailConcurrentlyInSameStage_OneByExceptionOneByResult_SurfacesBothInFailures()
+    {
+        var saga = new SagaBuilder()
+            .Stage(stage => stage
+                .Step<string>(step => step.Do(_ => Task.FromResult(BenzeneResult.ServiceUnavailable<string>())))
+                .Step<string>(step => step.Do(_ => throw new InvalidOperationException("boom"))))
+            .Build();
+
+        var result = await saga.RunAsync();
+
+        Assert.Equal(SagaOutcome.RolledBack, result.Outcome);
+        Assert.Equal(2, result.Failures.Count);
+        Assert.All(result.Failures, f => Assert.Equal(SagaStepState.Failed, f.State));
+        Assert.Contains(result.Failures, f => f.Exception is InvalidOperationException);
+        Assert.Contains(result.Failures, f => f.Exception == null && f.Result is { IsSuccessful: false });
+
+        // Failure/FailureException remain a backward-compatible view over the first entry.
+        Assert.Same(result.Failures[0].Result, result.Failure);
+        Assert.Same(result.Failures[0].Exception, result.FailureException);
+    }
+
     /// <summary>
     /// A single-step-failure run must still populate <see cref="SagaResult.Failures"/> with exactly
     /// that one outcome, mirroring <see cref="SagaResult.Failure"/> - not just the multi-failure case.

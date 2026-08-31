@@ -1,5 +1,5 @@
-using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Middleware;
+using Benzene.Core;
 using Polly;
 
 namespace Benzene.Resilience.Polly;
@@ -21,8 +21,7 @@ public static class Extensions
     public static IMiddlewarePipelineBuilder<TContext> UseResiliencePipeline<TContext>(
         this IMiddlewarePipelineBuilder<TContext> app, ResiliencePipeline pipeline)
     {
-        return app.Use(resolver => new PollyResilienceMiddleware<TContext>(
-            pipeline, cancellation: resolver.TryGetService<ICancellationTokenAccessor>()));
+        return app.Use(resolver => new PollyResilienceMiddleware<TContext>(pipeline, accessor: resolver.GetService<CancellationTokenAccessor>()));
     }
 
     /// <summary>
@@ -40,8 +39,7 @@ public static class Extensions
     public static IMiddlewarePipelineBuilder<TContext> UseResiliencePipeline<TContext>(
         this IMiddlewarePipelineBuilder<TContext> app, ResiliencePipeline pipeline, Func<TContext, bool> isFailure)
     {
-        return app.Use(resolver => new PollyResilienceMiddleware<TContext>(
-            pipeline, isFailure, resolver.TryGetService<ICancellationTokenAccessor>()));
+        return app.Use(resolver => new PollyResilienceMiddleware<TContext>(pipeline, isFailure, resolver.GetService<CancellationTokenAccessor>()));
     }
 
     /// <summary>

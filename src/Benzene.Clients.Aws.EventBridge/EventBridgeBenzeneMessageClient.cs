@@ -8,7 +8,6 @@ using Benzene.Abstractions.Results;
 using Benzene.Core.Middleware;
 using Benzene.Results;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 using Void = Benzene.Abstractions.Results.Void;
 
 namespace Benzene.Clients.Aws.EventBridge;
@@ -33,12 +32,12 @@ public class EventBridgeBenzeneMessageClient : IBenzeneMessageClient
     public EventBridgeBenzeneMessageClient(string source, IAmazonEventBridge amazonEventBridge,
         ILogger<EventBridgeBenzeneMessageClient> logger, IServiceResolver serviceResolver, string? eventBusName = null)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _source = source;
         _eventBusName = eventBusName;
         _serviceResolver = serviceResolver;
-        // #192: a null logger (e.g. a caller wiring this up outside DI) must not make the catch
-        // block's own LogError throw and mask the real failure - fall back to a no-op logger.
-        _logger = logger ?? NullLogger<EventBridgeBenzeneMessageClient>.Instance;
+        _logger = logger;
 
         var benzeneServiceContainer = new NullBenzeneServiceContainer();
         var middlewarePipelineBuilder = new MiddlewarePipelineBuilder<EventBridgeSendMessageContext>(benzeneServiceContainer);
@@ -50,10 +49,12 @@ public class EventBridgeBenzeneMessageClient : IBenzeneMessageClient
     public EventBridgeBenzeneMessageClient(string source, IMiddlewarePipeline<EventBridgeSendMessageContext> middlewarePipeline,
         ILogger<EventBridgeBenzeneMessageClient> logger, IServiceResolver serviceResolver, string? eventBusName = null)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _source = source;
         _eventBusName = eventBusName;
         _middlewarePipeline = middlewarePipeline;
-        _logger = logger ?? NullLogger<EventBridgeBenzeneMessageClient>.Instance;
+        _logger = logger;
         _serviceResolver = serviceResolver;
     }
 

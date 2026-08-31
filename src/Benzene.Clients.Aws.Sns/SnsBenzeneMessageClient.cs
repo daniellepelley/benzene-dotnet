@@ -10,7 +10,6 @@ using Benzene.Clients.Common;
 using Benzene.Core.Middleware;
 using Benzene.Results;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 using Void = Benzene.Abstractions.Results.Void;
 
 namespace Benzene.Clients.Aws.Sns;
@@ -38,11 +37,11 @@ public class SnsBenzeneMessageClient : IBenzeneMessageClient
     /// <param name="serviceResolver">The service resolver used to run the pipeline.</param>
     public SnsBenzeneMessageClient(string topicArn, IAmazonSimpleNotificationService amazonSnsClient, ILogger<SnsBenzeneMessageClient> logger, IServiceResolver serviceResolver)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _topicArn = topicArn;
         _serviceResolver = serviceResolver;
-        // #192: a null logger must not make the catch block's own LogError throw and mask the real
-        // failure - fall back to a no-op logger.
-        _logger = logger ?? NullLogger<SnsBenzeneMessageClient>.Instance;
+        _logger = logger;
 
         var benzeneServiceContainer = new NullBenzeneServiceContainer();
         var middlewarePipelineBuilder = new MiddlewarePipelineBuilder<SnsSendMessageContext>(benzeneServiceContainer);
@@ -61,7 +60,9 @@ public class SnsBenzeneMessageClient : IBenzeneMessageClient
     /// <param name="serviceResolver">The service resolver used to run the pipeline.</param>
     public SnsBenzeneMessageClient(string topicArn, IMiddlewarePipeline<SnsSendMessageContext> middlewarePipeline, ILogger<SnsBenzeneMessageClient> logger, IServiceResolver serviceResolver)
     {
-        _logger = logger ?? NullLogger<SnsBenzeneMessageClient>.Instance;
+        ArgumentNullException.ThrowIfNull(logger);
+
+        _logger = logger;
         _topicArn = topicArn;
         _middlewarePipeline = middlewarePipeline;
         _serviceResolver = serviceResolver;

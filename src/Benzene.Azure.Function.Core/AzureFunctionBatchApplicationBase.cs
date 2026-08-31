@@ -177,7 +177,8 @@ public abstract class AzureFunctionBatchApplicationBase<TContext, TState>
         return BoundedFanOut.WhenAllAsync(
             entries,
             entry => ProcessItemAsync(entry.Context, entry.State, serviceResolverFactory, cancellationToken),
-            _maxDegreeOfParallelism);
+            _maxDegreeOfParallelism,
+            cancellationToken);
     }
 
     private async Task ProcessItemAsync(TContext context, TState state, IServiceResolverFactory serviceResolverFactory, CancellationToken cancellationToken)
@@ -207,6 +208,8 @@ public abstract class AzureFunctionBatchApplicationBase<TContext, TState>
         }
         catch (Exception ex) when (_catchExceptions)
         {
+            var isInfrastructure = BenzeneFailure.IsInfrastructure(ex);
+
             using (var loggingScope = serviceResolverFactory.CreateScope())
             {
                 var logger = GetLogger(loggingScope);
@@ -229,9 +232,35 @@ public abstract class AzureFunctionBatchApplicationBase<TContext, TState>
                         GetLogId(context));
                 }
 
-                logger.LogError(ex, BenzeneFailure.IsInfrastructure(ex)
+                logger.LogError(ex, isInfrastructure
                     ? BenzeneFailure.InfrastructureLogPrefix + " " + FailureLogMessageTemplate + " — this service is mis-wired; the message is not at fault"
                     : FailureLogMessageTemplate, GetLogId(context));
+            }
+
+            // #257: an infrastructure/DI-wiring failure is not this item's fault and will fail
+            // identically for every item - swallowing it here would mean the whole invocation reports
+            // success while every item fails the same way, forever (the exact #228 defect this mirrors
+            // for AWS SNS/S3/EventBridge's SingleContextEscalatingApplicationBase.ProcessAsync). It
+            // escapes CatchExceptions entirely and fails the invocation loudly. For ServiceBus's
+            // AckMode = Explicit, OnExceptionCaughtAsync above has already abandoned the not-yet-settled
+            // message, so this composes cleanly: the message is still abandoned AND the invocation now
+            // fails.
+            if (isInfrastructure)
+            {
+                throw;
+            }
+
+            // #258: a genuine ambient cancellation (the Functions host asking this invocation to stop)
+            // must not be treated as an ordinary per-item failure - #230 already makes a still-*queued*
+            // item observe the same cancellation and abort the whole invocation regardless of
+            // CatchExceptions; without this, an already-*running* item hit by the identical cancellation
+            // was instead logged and swallowed here, giving two items affected by the same host event
+            // opposite severity purely by scheduling luck. Token-verified (matching MessageHandler.cs's
+            // pattern), not a bare type-based exclusion, so an application-produced
+            // OperationCanceledException unrelated to host shutdown is not over-escalated.
+            if (ex is OperationCanceledException && cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
         }
         catch (Exception) when (ShouldCleanUpBeforeRethrow(context, state))

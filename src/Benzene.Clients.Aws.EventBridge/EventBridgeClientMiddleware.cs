@@ -18,17 +18,19 @@ public class EventBridgeClientMiddleware : IMiddleware<EventBridgeSendMessageCon
     private readonly ICancellationTokenAccessor? _cancellation;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="EventBridgeClientMiddleware"/> class.
+    /// Initializes a new instance of the <see cref="EventBridgeClientMiddleware"/> class with no
+    /// cancellation-token accessor.
     /// </summary>
-    /// <param name="amazonEventBridge">The EventBridge client used to put events.</param>
-    /// <param name="cancellation">
-    /// Supplies the ambient cancellation token to pass into the put-events call (the
-    /// <c>HttpBenzeneMessageClient</c> constructor-optional accessor idiom); null observes no
-    /// cancellation. Resolved automatically from the container on the DI-registered
-    /// <c>UseEventBridgeClient()</c> path; the explicit-client <c>UseEventBridgeClient(amazonEventBridge)</c>
-    /// overload resolves it from the pipeline's service resolver and passes it through.
-    /// </param>
-    public EventBridgeClientMiddleware(IAmazonEventBridge amazonEventBridge, ICancellationTokenAccessor? cancellation = null)
+    public EventBridgeClientMiddleware(IAmazonEventBridge amazonEventBridge)
+        : this(amazonEventBridge, null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes the middleware, additionally resolving the ambient cancellation token so an
+    /// upstream cancel/timeout aborts the outbound publish instead of running it to completion.
+    /// </summary>
+    public EventBridgeClientMiddleware(IAmazonEventBridge amazonEventBridge, ICancellationTokenAccessor? cancellation)
     {
         _amazonEventBridge = amazonEventBridge;
         _cancellation = cancellation;

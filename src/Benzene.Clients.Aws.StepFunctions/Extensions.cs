@@ -28,7 +28,8 @@ public static class Extensions
     public static IBenzeneServiceContainer AddStepFunctionsClient(this IBenzeneServiceContainer services, string stateMachineArn, bool healthCheck = true)
     {
         services.AddScoped<IStepFunctionsClientFactory>(resolver => new StepFunctionsClientFactory(
-            stateMachineArn, resolver.GetService<IAmazonStepFunctions>(), resolver.GetService<ILogger<StepFunctionsClient>>()));
+            stateMachineArn, resolver.GetService<IAmazonStepFunctions>(), resolver.GetService<ILogger<StepFunctionsClient>>(),
+            resolver.TryGetService<ICancellationTokenAccessor>()));
         services.AddScoped(resolver => resolver.GetService<IStepFunctionsClientFactory>().Create());
 
         if (healthCheck)

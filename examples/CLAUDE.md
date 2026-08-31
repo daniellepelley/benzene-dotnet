@@ -113,11 +113,12 @@ handler/logic in `Benzene.Examples.App` and wiring it from the hosts, rather tha
   function** consuming events published to a per-service "inbox" topic (Benzene routes by the
   `"topic"` message attribute, not by Pub/Sub topic, mirroring `AwsMesh`'s one-queue-per-service
   shape). The mesh is an HTTP function too: it polls each service's profile from a static registry
-  (`MeshRegistry.FromEnvironment`, since Google Cloud has no mesh discovery provider yet), persists the
-  catalog to **GCS** (`Benzene.Mesh.GoogleCloud.Storage`), and serves the Mesh UI; **Cloud Scheduler**
-  drives aggregation via `POST /mesh/refresh` (Cloud Functions has no timer trigger). Own `.sln`
-  (`Benzene.Examples.GoogleCloudMesh.sln`, built by the `mesh-examples-build` CI job — see below),
-  `README.md`, and Terraform `deploy/`. Does **not** use the shared `App` domain.
+  (`MeshRegistry.FromEnvironment` reads per-service `MESH_*_URL` vars, since Google Cloud has no mesh
+  discovery provider yet), persists the catalog to **GCS** (`Benzene.Mesh.GoogleCloud.Storage`), and
+  serves the Mesh UI; **Cloud Scheduler** drives aggregation via `POST /mesh/refresh` (Cloud Functions
+  has no timer trigger). Own `.sln` (`Benzene.Examples.GoogleCloudMesh.sln`, built by the
+  `mesh-examples-build` CI job — see below), `README.md`, and Terraform `deploy/`. Does **not** use
+  the shared `App` domain.
 
 ## How these build (important)
 - Examples build via **`Benzene.Examples.sln`** at the repo root — **not** the main `Benzene.sln`. Several

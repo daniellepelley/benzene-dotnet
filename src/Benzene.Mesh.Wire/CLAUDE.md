@@ -109,7 +109,9 @@ HealthChecks.Core (heartbeat health shape), Results.
 - `test/Benzene.Mesh.Test/Wire/MeshSchemaGeneratorTest.cs` - direct unit coverage of every
   `MeshSchemaGenerator.Derive` branch: each primitive/date/byte-array mapping, the unconstrained
   `{}` cases (object/JsonElement/enum), `Nullable<T>`'s added `"null"` type, dictionary/enumerable
-  mapping, `JsonPropertyName`/`JsonIgnore` (`Always` and `WhenWritingDefault`) handling, the
+  mapping (any dictionary key type - int/enum/Guid-keyed included - maps to `additionalProperties`,
+  matching System.Text.Json's actual any-key-as-string-object wire behavior, not just `string`-keyed),
+  `JsonPropertyName`/`JsonIgnore` (`Always` and `WhenWritingDefault`) handling, the
   nullable-annotated-property → optional "required" rule, lexicographic property ordering, and
   cycle-cutting on a self-referencing type. None of this had a test before (the conformance suite
   only exercises it indirectly through the canonical conformance handlers' payload shapes).

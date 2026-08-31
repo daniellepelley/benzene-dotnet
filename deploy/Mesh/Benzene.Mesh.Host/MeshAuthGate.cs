@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using Benzene.Auth.Basic;
 using Benzene.Auth.Core;
+using Benzene.Http.Routing;
 using Benzene.Mesh.Artifacts;
 using Benzene.Mesh.Dispatch;
 using Microsoft.AspNetCore.Authentication;
@@ -66,6 +67,15 @@ public class MeshAuthGate
     /// <see cref="MeshAuthConfig.DispatchRole"/> is enforced against exactly this path - see <see cref="InvokeAsync"/>.
     /// </summary>
     public static readonly string DispatchPath = new MeshDispatchGuardOptions().Path;
+
+    /// <summary>
+    /// #287: the dispatch topic, read off the same <see cref="MeshDispatchGuardOptions"/> default as
+    /// <see cref="DispatchPath"/> rather than a second hand-kept literal. Used as the topic-based
+    /// fallback for the <c>dispatchRole</c> check in <see cref="InvokeAsync"/>, mirroring
+    /// <see cref="MeshDispatchGuardMiddleware{TContext}"/>'s own <c>IsGuarded</c> - see
+    /// <see cref="MeshPathCanonicalizer.IsPathOrTopicMatch"/>.
+    /// </summary>
+    public static readonly string? DispatchTopic = new MeshDispatchGuardOptions().Topic;
 
     /// <summary>
     /// WP-1(c) (#4): <c>POST /mesh/auth/logout</c> - oidc mode only, see <see cref="HandleLogoutAsync"/>.
@@ -369,10 +379,25 @@ public class MeshAuthGate
         // sees the AuthenticationHolder this gate populates on HttpContext.RequestServices - a
         // RequireRole there would see no principal at all and refuse every dispatch, role or no role.
         // This gate already runs once per request against the one HttpContext, so the check belongs
-        // here, matched to the fixed, well-known dispatch path (see DispatchPath) exactly as
-        // IngestionPath is above - one gate for the whole host, per the class remarks.
+        // here, matched to the well-known dispatch path/topic (see DispatchPath/DispatchTopic) exactly
+        // as IngestionPath is above - one gate for the whole host, per the class remarks.
+        //
+        // #287: matched through the SAME path-OR-topic predicate MeshDispatchGuardMiddleware.IsGuarded
+        // uses (MeshPathCanonicalizer.IsPathOrTopicMatch), not a literal-path-only comparison - a route
+        // alias that reached the dispatch topic under a different literal path would otherwise bypass
+        // this role requirement while still passing the guard's own CSRF/identity/rate-limit checks.
+        // IRouteFinder is resolved null-tolerantly (context.RequestServices does not carry one from
+        // this host's own ASP.NET Core container today - see the class remarks on why the Benzene
+        // pipeline's registrations don't cross that boundary - so this currently falls back to the
+        // path-only comparison exactly as before); if that ever changes, this gate picks up the same
+        // topic fallback IsGuarded already has, with nothing to update here.
         if (!string.IsNullOrEmpty(_config.DispatchRole) &&
-            canonicalPath == CanonicalDispatchPath &&
+            MeshPathCanonicalizer.IsPathOrTopicMatch(
+                context.Request.Method,
+                context.Request.Path,
+                CanonicalDispatchPath,
+                DispatchTopic,
+                context.RequestServices.GetService<IRouteFinder>()) &&
             !HasAnyRole(principal, new[] { _config.DispatchRole }))
         {
             await WriteForbiddenAsync(context,

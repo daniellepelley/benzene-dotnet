@@ -376,6 +376,77 @@ public class XRayTraceSourceTest
     }
 
     [Fact]
+    public async Task GetCorrelationAsync_DuplicateTraceIdAcrossWindowChunks_IsOnlyReportedOnce()
+    {
+        // #274: a wide correlation window is chunked (MaxTraceSummariesWindow); if the same trace id
+        // comes back from two different chunk calls (e.g. touching chunk boundaries, or backend
+        // pagination re-surfacing a trace under eventual consistency), the correlation view must not
+        // show the same physical trace twice.
+        const string correlationId = "ticket-dup";
+        const string traceId = "1-cccccccc-3333";
+
+        var mock = new Mock<IAmazonXRay>();
+        mock.Setup(x => x.GetTraceSummariesAsync(It.IsAny<GetTraceSummariesRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new GetTraceSummariesResponse
+            {
+                // Same trace id reported for every chunk call - simulates a boundary/pagination dup.
+                TraceSummaries = new List<TraceSummary> { new TraceSummary { Id = traceId } }
+            });
+        mock.Setup(x => x.BatchGetTracesAsync(It.IsAny<BatchGetTracesRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((BatchGetTracesRequest req, CancellationToken _) => new BatchGetTracesResponse
+            {
+                Traces = req.TraceIds.Select(id => new Trace
+                {
+                    Id = id,
+                    Segments = new List<Segment>
+                    {
+                        new Segment { Document = Segment("seg-a", "orders-api", "orders:create", correlationId, 1500000000.0) }
+                    }
+                }).ToList()
+            });
+
+        var source = new XRayTraceSource(mock.Object);
+
+        // Default CorrelationLookback (24h) chunks into >= 4 sub-queries over the 6h bound - each one
+        // returning the same trace id here, simulating the duplication this finding targets.
+        var view = await source.GetCorrelationAsync(correlationId);
+
+        Assert.NotNull(view);
+        Assert.Single(view!.Traces); // FAILS today: one TraceView per chunk call, all for the same trace
+    }
+
+    [Fact]
+    public async Task GetRecentFlowsAsync_DuplicateSummaryId_OccupiesOnlyOneTopNSlot()
+    {
+        // #274's sibling: GetRecentFlowsAsync's top-N selection has the same missing-dedup gap - a
+        // duplicated summary id must not occupy two of the top-N slots (displacing a genuinely
+        // different trace).
+        var duplicated = "1-5c000000-aaaaaaaaaaaaaaaaaaaaaaaa";
+        var distinct = "1-5b000000-bbbbbbbbbbbbbbbbbbbbbbbb";
+
+        var mock = new Mock<IAmazonXRay>();
+        mock.Setup(x => x.GetTraceSummariesAsync(It.IsAny<GetTraceSummariesRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new GetTraceSummariesResponse
+            {
+                TraceSummaries = new List<Amazon.XRay.Model.TraceSummary>
+                {
+                    new Amazon.XRay.Model.TraceSummary { Id = duplicated, Duration = 0.1 },
+                    new Amazon.XRay.Model.TraceSummary { Id = duplicated, Duration = 0.1 }, // same id again
+                    new Amazon.XRay.Model.TraceSummary { Id = distinct, Duration = 0.1 }
+                }
+            });
+        var source = new XRayTraceSource(mock.Object,
+            new XRayTraceSourceOptions { RecentFlowsServiceEnrichmentMax = 0 });
+
+        // limit=2: with the duplicate counted twice, the genuinely-distinct trace gets displaced from
+        // the top-N entirely.
+        var flows = await source.GetRecentFlowsAsync(2);
+
+        Assert.Equal(2, flows.Select(f => f.TraceId).Distinct().Count());
+        Assert.Contains(flows, f => f.TraceId == distinct);
+    }
+
+    [Fact]
     public async Task GetCorrelationAsync_NoMatches_ReturnsNull()
     {
         var mock = new Mock<IAmazonXRay>();
@@ -573,6 +644,33 @@ public class XRayTraceSourceTest
         Assert.Equal(0, flows[0].Events);
         Assert.Equal(older, flows[1].TraceId);
         mock.Verify(x => x.BatchGetTracesAsync(It.IsAny<BatchGetTracesRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // #252 (XRay sibling): EnrichRecentFlowsAsync's FetchBatchAsync had a bare `catch { }` that swallowed a
+    // genuine caller cancellation the same way it swallows a backend failure - silently degrading the row
+    // to the summary plane instead of propagating. When the caller's own token IS cancelled, this must
+    // propagate, matching the Jaeger/Tempo trace-source fix for the same timeout-vs-cancellation confusion.
+    [Fact]
+    public async Task GetRecentFlowsAsync_PropagatesGenuineCancellation_InsteadOfDegradingToSummaryPlane()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var mock = new Mock<IAmazonXRay>();
+        mock.Setup(x => x.GetTraceSummariesAsync(It.IsAny<GetTraceSummariesRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new GetTraceSummariesResponse
+            {
+                TraceSummaries = new List<Amazon.XRay.Model.TraceSummary>
+                {
+                    new Amazon.XRay.Model.TraceSummary { Id = "1-5c000000-aaaaaaaaaaaaaaaaaaaaaaaa" }
+                }
+            });
+        mock.Setup(x => x.BatchGetTracesAsync(It.IsAny<BatchGetTracesRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException("simulated genuine host cancellation", cts.Token));
+
+        var source = new XRayTraceSource(mock.Object);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => source.GetRecentFlowsAsync(20, null, cts.Token));
     }
 
     [Fact]

@@ -9,7 +9,6 @@ using Benzene.Clients.Common;
 using Benzene.Core.Middleware;
 using Benzene.Results;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 using Void = Benzene.Abstractions.Results.Void;
 
 namespace Benzene.Clients.Azure.EventHub;
@@ -38,10 +37,10 @@ public class EventHubBenzeneMessageClient : IBenzeneMessageClient
     /// <param name="topicPropertyKey">The event property the topic is written to (defaults to <see cref="EventHubContextConverter{T}.DefaultTopicProperty"/>).</param>
     public EventHubBenzeneMessageClient(EventHubProducerClient producerClient, ILogger<EventHubBenzeneMessageClient> logger, IServiceResolver serviceResolver, string topicPropertyKey = EventHubContextConverter<object>.DefaultTopicProperty)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _serviceResolver = serviceResolver;
-        // #192: a null logger must not make the catch block's own LogError throw and mask the real
-        // failure - fall back to a no-op logger.
-        _logger = logger ?? NullLogger<EventHubBenzeneMessageClient>.Instance;
+        _logger = logger;
         _topicPropertyKey = topicPropertyKey;
 
         var benzeneServiceContainer = new NullBenzeneServiceContainer();
@@ -61,9 +60,11 @@ public class EventHubBenzeneMessageClient : IBenzeneMessageClient
     /// <param name="topicPropertyKey">The event property the topic is written to (defaults to <see cref="EventHubContextConverter{T}.DefaultTopicProperty"/>).</param>
     public EventHubBenzeneMessageClient(IMiddlewarePipeline<EventHubSendMessageContext> middlewarePipeline, ILogger<EventHubBenzeneMessageClient> logger, IServiceResolver serviceResolver, string topicPropertyKey = EventHubContextConverter<object>.DefaultTopicProperty)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _serviceResolver = serviceResolver;
         _middlewarePipeline = middlewarePipeline;
-        _logger = logger ?? NullLogger<EventHubBenzeneMessageClient>.Instance;
+        _logger = logger;
         _topicPropertyKey = topicPropertyKey;
     }
 

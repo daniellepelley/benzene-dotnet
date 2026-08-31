@@ -104,7 +104,7 @@ public class OpenApiDocumentBuilder :
 
     private KeyValuePair<OperationType, OpenApiOperation> CreateOpenApiOperation(IHttpEndpointDefinition httpEndpointDefinition, IMessageHandlerDefinition[] messageHandlerDefinitions)
     {
-        var operationType = MapOperationType(httpEndpointDefinition.Method);
+        var operationType = MapOperationType(httpEndpointDefinition.Method, httpEndpointDefinition);
 
         var messageHandlerDefinition = messageHandlerDefinitions.First(h => h.Topic.Id == httpEndpointDefinition.Topic);
 
@@ -198,26 +198,37 @@ public class OpenApiDocumentBuilder :
     }
 
 
-    private static OperationType MapOperationType(string method)
+    // The 8 verbs OpenAPI itself has an operation-object slot for
+    // (https://spec.openapis.org/oas/v3.0.3#path-item-object) - CONNECT has no OpenAPI representation,
+    // so it is deliberately not here; that is a real "this HTTP method can't be documented", not an
+    // oversight to widen.
+    private static readonly Dictionary<string, OperationType> OperationTypesByMethod = new(StringComparer.OrdinalIgnoreCase)
+    {
+        { "GET", OperationType.Get },
+        { "PUT", OperationType.Put },
+        { "POST", OperationType.Post },
+        { "DELETE", OperationType.Delete },
+        { "OPTIONS", OperationType.Options },
+        { "HEAD", OperationType.Head },
+        { "PATCH", OperationType.Patch },
+        { "TRACE", OperationType.Trace },
+    };
+
+    private static OperationType MapOperationType(string method, IHttpEndpointDefinition httpEndpointDefinition)
     {
         if (string.IsNullOrEmpty(method))
         {
             return OperationType.Post;
         }
 
-        var mappings = new Dictionary<string, OperationType>
+        if (OperationTypesByMethod.TryGetValue(method, out var operationType))
         {
-            { "GET", OperationType.Get },
-            { "PUT", OperationType.Put },
-            { "POST", OperationType.Post },
-            { "DELETE", OperationType.Delete },
-            { "OPTIONS", OperationType.Options },
-            { "HEAD", OperationType.Head },
-            { "PATCH", OperationType.Patch },
-            { "TRACE", OperationType.Trace },
-        };
+            return operationType;
+        }
 
-        return mappings[method.ToUpperInvariant()];
+        throw new InvalidOperationException(
+            $"'{method}' is not a valid HTTP method for an OpenAPI operation (topic '{httpEndpointDefinition.Topic}', " +
+            $"path '{httpEndpointDefinition.Path}'). Supported methods: GET, PUT, POST, DELETE, OPTIONS, HEAD, PATCH, TRACE.");
     }
 
     // public OpenApiSchema AddSchema(Type type)

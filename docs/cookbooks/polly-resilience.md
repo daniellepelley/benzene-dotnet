@@ -1,9 +1,12 @@
-# Polly Resilience Pipelines (circuit breaker, timeout, hedging, fallback)
+# Polly Resilience Pipelines (circuit breaker, timeout, retry, rate limiter)
 
 Run a Benzene middleware pipeline (or an outbound port call) through your own
 [Polly](https://www.pollydocs.org/) `ResiliencePipeline`, so you get circuit breaker / timeout /
-hedging / fallback / rate limiting without Benzene wrapping or hiding Polly behind its own
-abstraction.
+retry / rate limiting without Benzene wrapping or hiding Polly behind its own abstraction.
+
+> **Hedging and Fallback are not supported.** See
+> [Why concurrent-attempt strategies aren't supported](#why-concurrent-attempt-strategies-arent-supported)
+> below.
 
 ## Problem Statement
 
@@ -12,13 +15,13 @@ abstraction.
 deliberately does **not** ship a circuit breaker, timeout, or bulkhead, and does not depend on Polly,
 so it stays the zero-dependency option for callers who only want retry.
 
-Everything else — circuit breaker, timeout, hedging, fallback, rate limiting — comes from the sibling
-**`Benzene.Resilience.Polly`** package. It takes a `Polly.Core` dependency in exchange for the whole
-toolkit, and it *exposes* Polly rather than wrapping it: you build a `ResiliencePipeline` with exactly
-the strategies you want and hand it to `.UseResiliencePipeline(...)`. Benzene gives Polly a clean
-place to plug into the pipeline; it does not re-abstract the strategy surface (retry strategies,
-circuit-breaker state, hedging, rate limiting) that's the reason to reach for Polly in the first
-place.
+Richer sequential-attempt patterns — circuit breaker, timeout, retry, rate limiting — come from the
+sibling **`Benzene.Resilience.Polly`** package. It takes a `Polly.Core` dependency in exchange for
+that toolkit, and it *exposes* Polly rather than wrapping it: you build a `ResiliencePipeline` with
+exactly the strategies you want and hand it to `.UseResiliencePipeline(...)`. Benzene gives Polly a
+clean place to plug into the pipeline; it does not re-abstract the strategy surface (retry strategies,
+circuit-breaker state, rate limiting) that's the reason to reach for Polly in the first place.
+**Concurrent-attempt strategies — Hedging and Fallback — are out of scope**; see below.
 
 > Prefer to own the ~15 lines yourself instead of taking the dependency? The
 > [DIY alternative](#appendix-diy-without-the-package) at the end shows the hand-rolled middleware —
@@ -30,7 +33,8 @@ place.
 - A Benzene middleware pipeline (any transport) built with `IMiddlewarePipelineBuilder<TContext>`.
 - Familiarity with building a Polly `ResiliencePipeline` via `ResiliencePipelineBuilder` — this
   cookbook doesn't re-teach Polly itself; see the [Polly docs](https://www.pollydocs.org/) for the
-  full strategy catalogue (retry, circuit breaker, timeout, hedging, rate limiter, fallback).
+  full strategy catalogue. This package supports the **sequential-attempt** strategies (retry,
+  circuit breaker, timeout, rate limiter) — not Hedging or Fallback, see below.
 
 ## Installation
 
@@ -139,15 +143,45 @@ services.UsingBenzene(x => x.AddOutboundRouting(routing => routing
         .UseResiliencePipeline(circuitBreakerPipeline))));
 ```
 
-## Cancellation caveat
+## Cancellation
 
 Benzene's middleware pipeline does not thread a `CancellationToken` through
 `IMiddleware<TContext>.HandleAsync(TContext context, Func<Task> next)` — no middleware anywhere in
-Benzene carries one. The middleware passes the token Polly threads through `ExecuteAsync`, so Polly's
-own timeout strategy still works (it races the delegate against its own internal token), but where the
-transport has no deadline this is effectively `CancellationToken.None` — a Polly-cancelled execution
-can't cooperatively cancel the Benzene pipeline underneath it beyond however `next()` itself responds
-to an `OperationCanceledException` propagating back up.
+Benzene carries one. So `PollyResilienceMiddleware` cannot hand Polly's per-attempt token to `next`
+directly. Instead — exactly the pattern
+[`Benzene.Resilience`'s `TimeoutMiddleware<TContext>`](../resilience.md) already uses — it exposes
+that token to whatever `next()` wraps via the ambient `ICancellationTokenAccessor`: for the duration
+of each Polly attempt it links the attempt's token with whatever ambient token was already set (so an
+outer `UseTimeout`, or any host-seeded token, is never lost), sets the accessor to the linked token
+before calling `next()`, and restores the prior ambient token once the attempt finishes. So Polly's
+Timeout and RateLimiter strategies — anything that cancels an attempt — actually reach downstream
+code, as long as that code reads the token from the accessor:
+
+```csharp
+public class MyOutboundHandler
+{
+    private readonly ICancellationTokenAccessor _accessor;
+
+    public MyOutboundHandler(ICancellationTokenAccessor accessor) => _accessor = accessor;
+
+    public Task CallDownstreamAsync() =>
+        _httpClient.GetAsync("https://example.com", _accessor.CancellationToken);
+}
+```
+
+When constructing the middleware via `.UseResiliencePipeline(...)`, the accessor is resolved from the
+same DI scope as the rest of the pipeline, so this is automatic — nothing beyond reading
+`ICancellationTokenAccessor` in your own code is required.
+
+**The caveat — same as `TimeoutMiddleware`.** This can only cancel work that *observes* the ambient
+token. `next()` (and whatever it calls) has no way to be forcibly interrupted — like every
+`CancellationToken`-based mechanism in .NET, cancellation is cooperative. A `next()` that never reads
+`ICancellationTokenAccessor` (or otherwise ignores the token it's handed) simply keeps running past
+the configured deadline; since it never throws `OperationCanceledException`, Polly's own strategy never
+sees the signal it needs to raise `TimeoutRejectedException` either — the pipeline just waits for
+`next()` to finish and returns normally, functionally identical to running without this middleware at
+all. There is no true "abandon and move on": Polly cannot forcibly abort a still-running `Task` any
+more than `TimeoutMiddleware` can.
 
 **Widening `ShouldHandle` can silently drop cancellation-safety.** Polly's own *default*
 `ShouldHandle` (used when a strategy's options leave it unset) already excludes
@@ -185,24 +219,65 @@ var pipeline = new ResiliencePipelineBuilder()
 ## Testing
 
 `ResiliencePipeline` is a real object you can construct directly in a test — no need to spin up your
-whole host to exercise the middleware:
+whole host to exercise the middleware. Pass a `CancellationTokenAccessor` explicitly and have `next`
+read its token, exactly as real downstream code would (see [Cancellation](#cancellation) above) —
+that is what actually lets Polly's timeout reach `next`:
 
 ```csharp
+using Benzene.Core;
 using Benzene.Resilience.Polly;
 using Polly;
 using Polly.Timeout;
 
+var accessor = new CancellationTokenAccessor();
 var pipeline = new ResiliencePipelineBuilder()
     .AddTimeout(TimeSpan.FromMilliseconds(50))
     .Build();
-var middleware = new PollyResilienceMiddleware<object>(pipeline);
+var middleware = new PollyResilienceMiddleware<object>(pipeline, accessor: accessor);
 
 await Assert.ThrowsAsync<TimeoutRejectedException>(() =>
-    middleware.HandleAsync(new object(), () => Task.Delay(TimeSpan.FromSeconds(1))));
+    middleware.HandleAsync(new object(), () => Task.Delay(TimeSpan.FromSeconds(1), accessor.CancellationToken)));
 ```
 
 See `test/Benzene.Core.Test/Resilience/PollyResilienceMiddlewareTest.cs` for the full set (retry,
-exception propagation, and the outcome-aware failure-result path).
+exception propagation, the outcome-aware failure-result path, and the cancellation behavior above —
+including the caveat case where `next` ignores the token).
+
+## Why concurrent-attempt strategies aren't supported
+
+`PollyResilienceMiddleware<TContext>` only supports **sequential-attempt** Polly strategies — Retry,
+Timeout, CircuitBreaker, RateLimiter — where Polly invokes the per-attempt callback strictly one
+attempt at a time. It does **not** support Hedging or Fallback, or any custom strategy that runs more
+than one attempt concurrently for a single execution. Two independent reasons, one shallow and one
+fundamental:
+
+1. **The convenience API can't even build one.** Polly.Core 8.5.0 defines `AddHedging`/`AddFallback`
+   only on the *generic* `ResiliencePipelineBuilder<TResult>`
+   (`HedgingStrategyOptions<TResult>`/`FallbackStrategyOptions<TResult>`), but every
+   `.UseResiliencePipeline(...)` overload in this package hands out the *non-generic*
+   `ResiliencePipelineBuilder`. This isn't an oversight to fix — Benzene results flow through the
+   mutable pipeline `TContext`, not a `TResult` returned from `next()`, so the generic
+   result-typed strategies have no natural mapping onto this middleware's shape in the first place.
+2. **Even a hand-rolled concurrent attempt corrupts shared state.** The shallow restriction above is
+   not a safety net: Polly's own public, non-generic `ResiliencePipelineBuilderExtensions.AddStrategy(...)`
+   extensibility point is available on exactly the builder `.UseResiliencePipeline(Action<ResiliencePipelineBuilder>)`
+   already hands out, and it lets you register **any** custom `ResilienceStrategy` — including a
+   hand-rolled "run N attempts concurrently, take the first" hedge, a completely standard Polly
+   pattern. `PollyResilienceMiddleware<TContext>.HandleAsync`'s per-attempt callback closes over one
+   shared `next` continuation (the entire downstream pipeline), one shared `TContext` instance, and
+   one shared ambient `CancellationTokenAccessor`. A concurrent-attempt strategy would run `next()` —
+   and therefore the real handler dispatch and its side effects — more than once for one logical
+   message, and tear the shared ambient token and `TContext` writes between attempts (last write
+   wins, silently).
+
+Rather than allow that corruption, the middleware detects re-entrancy: if a second attempt starts
+while one is already in flight for the same `HandleAsync` call, it throws `NotSupportedException`
+naming the problem, and `next()` never runs more than once. If you need hedging-style behavior,
+implement it at a different layer — e.g. issue concurrent calls yourself around (not through) this
+middleware, each with its own context/token. Supporting concurrent attempts natively would need a
+redesign (per-attempt context/token isolation, with defined merge semantics for a mutable message
+context) that is deliberately out of scope for this middleware; see `work/outstanding-bugs.md` for
+the open maintainer question.
 
 ## Troubleshooting
 

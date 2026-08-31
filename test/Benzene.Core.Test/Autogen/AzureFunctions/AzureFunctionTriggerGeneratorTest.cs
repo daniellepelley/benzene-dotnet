@@ -156,6 +156,50 @@ namespace App { public class OrderDoc { } }
         Assert.Contains("\"c\"", diagnostic.GetMessage());
     }
 
+    // #259 (BENZ0010): DatabaseName/ContainerName are Cosmos DB's own binding-destination fields -
+    // exactly analogous to EventHubName/Topic/QueueName/Path on the sibling transports #39 already
+    // validated (BENZ0003-BENZ0007) - and were never validated, unlike every one of those. Before the
+    // fix this compiled clean (zero diagnostics) and emitted `databaseName: "", containerName: ""`
+    // literally - a change-feed trigger bound to nothing, failing only at Azure host startup.
+    [Fact]
+    public void CosmosDb_MissingDatabaseNameAndContainerName_ReportsBENZ0010AndEmitsNothing()
+    {
+        var (output, diagnostics) = GenerateResult(@"[assembly: Benzene.Azure.Function.CosmosDb.BenzeneCosmosDbTrigger(Name = ""c"", DocumentType = typeof(App.OrderDoc))]");
+
+        Assert.DoesNotContain("CosmosDBTrigger", output);
+
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal("BENZ0010", diagnostic.Id);
+        Assert.Equal(DiagnosticSeverity.Error, diagnostic.Severity);
+        Assert.Contains("\"c\"", diagnostic.GetMessage());
+    }
+
+    // Missing only ONE of the two must still trip the check - not just "both missing".
+    [Theory]
+    [InlineData(@"[assembly: Benzene.Azure.Function.CosmosDb.BenzeneCosmosDbTrigger(Name = ""c"", DocumentType = typeof(App.OrderDoc), ContainerName = ""orders"")]")]
+    [InlineData(@"[assembly: Benzene.Azure.Function.CosmosDb.BenzeneCosmosDbTrigger(Name = ""c"", DocumentType = typeof(App.OrderDoc), DatabaseName = ""shop"")]")]
+    public void CosmosDb_MissingOnlyOneOfDatabaseNameOrContainerName_ReportsBENZ0010(string declaration)
+    {
+        var (output, diagnostics) = GenerateResult(declaration);
+
+        Assert.DoesNotContain("CosmosDBTrigger", output);
+
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal("BENZ0010", diagnostic.Id);
+    }
+
+    // DocumentType missing takes precedence in reporting only in the sense that both checks run
+    // independently - when DocumentType alone is missing (DatabaseName/ContainerName both set), only
+    // BENZ0002 fires, not BENZ0010 too, since the DocumentType check returns first.
+    [Fact]
+    public void CosmosDb_MissingOnlyDocumentType_ReportsOnlyBENZ0002()
+    {
+        var (_, diagnostics) = GenerateResult(@"[assembly: Benzene.Azure.Function.CosmosDb.BenzeneCosmosDbTrigger(Name = ""c"", DatabaseName = ""shop"", ContainerName = ""orders"")]");
+
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal("BENZ0002", diagnostic.Id);
+    }
+
     [Fact]
     public void Timer_EmitsScheduleRunOnStartupAndNoArgDispatch()
     {
@@ -344,40 +388,42 @@ namespace App { public class OrderDoc { } }
     // Round 14-15 #233: TopicName set with SubscriptionName omitted (no QueueName either) passed both
     // BENZ0003 (queue and topic both empty - false, topic is set) and BENZ0009 (queue set - false, no
     // queue) and previously silently generated [ServiceBusTrigger("audit", "")], syntactically valid
-    // but broken at deployment. Blocking, like BENZ0003/BENZ0002: nothing is emitted.
+    // but broken at deployment. Blocking, like BENZ0003/BENZ0002: nothing is emitted. Renumbered on
+    // merge from BENZ0010 to BENZ0011 - round 16/17's independent CosmosDb fix (#259) claimed BENZ0010
+    // on main first.
     [Fact]
-    public void ServiceBus_TopicWithoutSubscription_ReportsBENZ0010()
+    public void ServiceBus_TopicWithoutSubscription_ReportsBENZ0011()
     {
         var (output, diagnostics) = GenerateResult(
             @"[assembly: Benzene.Azure.Function.ServiceBus.BenzeneServiceBusTrigger(Name = ""sb"", TopicName = ""audit"")]");
 
         Assert.DoesNotContain("ServiceBusTrigger", output);
         var diagnostic = Assert.Single(diagnostics);
-        Assert.Equal("BENZ0010", diagnostic.Id);
+        Assert.Equal("BENZ0011", diagnostic.Id);
         Assert.Equal(DiagnosticSeverity.Error, diagnostic.Severity);
     }
 
     // The symmetric case: SubscriptionName set with TopicName omitted (no QueueName either). Before
     // this fix, this tripped BENZ0003 ("sets neither QueueName nor TopicName") - technically blocking,
     // but a misleading message that never mentions the SubscriptionName the caller actually set. Now
-    // reports the more specific BENZ0010 instead.
+    // reports the more specific BENZ0011 instead.
     [Fact]
-    public void ServiceBus_SubscriptionWithoutTopic_ReportsBENZ0010()
+    public void ServiceBus_SubscriptionWithoutTopic_ReportsBENZ0011()
     {
         var (output, diagnostics) = GenerateResult(
             @"[assembly: Benzene.Azure.Function.ServiceBus.BenzeneServiceBusTrigger(Name = ""sb"", SubscriptionName = ""svc"")]");
 
         Assert.DoesNotContain("ServiceBusTrigger", output);
         var diagnostic = Assert.Single(diagnostics);
-        Assert.Equal("BENZ0010", diagnostic.Id);
+        Assert.Equal("BENZ0011", diagnostic.Id);
         Assert.Equal(DiagnosticSeverity.Error, diagnostic.Severity);
     }
 
     // A queue set alongside an asymmetric topic/subscription pair must still take the existing
-    // BENZ0009 (ambiguous queue+topic) path, not the new BENZ0010 check - the queue always wins and
+    // BENZ0009 (ambiguous queue+topic) path, not the new BENZ0011 check - the queue always wins and
     // the topic/subscription pair is discarded wholesale, so its internal (a)symmetry is moot.
     [Fact]
-    public void ServiceBus_QueueSetWithTopicButNoSubscription_ReportsBENZ0009NotBENZ0010()
+    public void ServiceBus_QueueSetWithTopicButNoSubscription_ReportsBENZ0009NotBENZ0011()
     {
         var (output, diagnostics) = GenerateResult(
             @"[assembly: Benzene.Azure.Function.ServiceBus.BenzeneServiceBusTrigger(Name = ""sb"", QueueName = ""orders"", TopicName = ""audit"")]");

@@ -55,14 +55,35 @@ public static class DependencyInjectionExtensions
     /// <returns>The Azure Function app builder, for method chaining.</returns>
     /// <remarks>
     /// Named <c>UseTimerTrigger</c> (not <c>UseTimer</c>) to avoid colliding with
-    /// <c>Benzene.Diagnostics</c>'s timing middleware extension of that name.
+    /// <c>Benzene.Diagnostics</c>'s timing middleware extension of that name. Uses the default
+    /// <see cref="TimerOptions"/> (safe-by-default: <see cref="TimerOptions.RaiseOnFailureStatus"/> on,
+    /// <see cref="TimerOptions.CatchExceptions"/> off) - use the
+    /// <see cref="UseTimerTrigger(IAzureFunctionAppBuilder, Action{IMiddlewarePipelineBuilder{TimerContext}}, Action{TimerOptions})"/>
+    /// overload to configure it.
     /// </remarks>
     public static IAzureFunctionAppBuilder UseTimerTrigger(this IAzureFunctionAppBuilder app, Action<IMiddlewarePipelineBuilder<TimerContext>> action)
+        => app.UseTimerTrigger(action, (Action<TimerOptions>?)null);
+
+    /// <summary>
+    /// Adds a timer entry point application to the Azure Function app, configuring its inner
+    /// middleware pipeline and its exception/failure-status behavior via <see cref="TimerOptions"/>.
+    /// </summary>
+    /// <param name="app">The Azure Function app builder to add timer handling to.</param>
+    /// <param name="action">The action that configures the timer middleware pipeline.</param>
+    /// <param name="configure">
+    /// Configures the <see cref="TimerOptions"/> - exception isolation and failure-result escalation.
+    /// Defaults (<see cref="TimerOptions.RaiseOnFailureStatus"/> on, <see cref="TimerOptions.CatchExceptions"/>
+    /// off) apply if omitted or left unset.
+    /// </param>
+    /// <returns>The Azure Function app builder, for method chaining.</returns>
+    public static IAzureFunctionAppBuilder UseTimerTrigger(this IAzureFunctionAppBuilder app, Action<IMiddlewarePipelineBuilder<TimerContext>> action, Action<TimerOptions>? configure)
     {
         app.Register(x => x.AddAzureTimer());
         var pipeline = app.Create<TimerContext>();
         action(pipeline);
-        app.Add(serviceResolverFactory => new TimerApplication(pipeline.Build(), serviceResolverFactory));
+        var options = new TimerOptions();
+        configure?.Invoke(options);
+        app.Add(serviceResolverFactory => new TimerApplication(pipeline.Build(), serviceResolverFactory, options));
         return app;
     }
 
@@ -78,6 +99,24 @@ public static class DependencyInjectionExtensions
         if (app is IAzureFunctionAppBuilder azureApp)
         {
             azureApp.UseTimerTrigger(action);
+        }
+        return app;
+    }
+
+    /// <summary>
+    /// Applies timer-trigger configuration - including <see cref="TimerOptions"/> - to a
+    /// platform-neutral <see cref="IBenzeneApplicationBuilder"/>. No-op on any platform other than
+    /// Azure Functions.
+    /// </summary>
+    /// <param name="app">The application builder passed to <c>BenzeneStartUp.Configure</c>.</param>
+    /// <param name="action">The action that configures the timer middleware pipeline.</param>
+    /// <param name="configure">Configures the <see cref="TimerOptions"/> for the entry point.</param>
+    /// <returns><paramref name="app"/>, for method chaining.</returns>
+    public static IBenzeneApplicationBuilder UseTimerTrigger(this IBenzeneApplicationBuilder app, Action<IMiddlewarePipelineBuilder<TimerContext>> action, Action<TimerOptions> configure)
+    {
+        if (app is IAzureFunctionAppBuilder azureApp)
+        {
+            azureApp.UseTimerTrigger(action, configure);
         }
         return app;
     }

@@ -348,6 +348,20 @@ namespace Benzene.Azure.Function.SourceGenerators
 
                 var database = AttributeReading.NamedString(a, "DatabaseName", "");
                 var container = AttributeReading.NamedString(a, "ContainerName", "");
+
+                // #259 (BENZ0010): DatabaseName/ContainerName are Cosmos DB's own binding-destination
+                // fields - exactly analogous to EventHubName/Topic/QueueName/Path on the sibling
+                // transports (BENZ0003-BENZ0007) - and were never validated, unlike every one of those.
+                // Checked alongside (not instead of) the DocumentType/BENZ0002 check above.
+                if (database.Length == 0 || container.Length == 0)
+                {
+                    builder.Add(TriggerInfo.ForDiagnostic(
+                        AttributeReading.Literal(name),
+                        location,
+                        new PendingDiagnosticInfo(DiagnosticDescriptors.CosmosDbTriggerMissingDestination, AttributeReading.Literal(name))));
+                    continue;
+                }
+
                 var connection = AttributeReading.NamedString(a, "Connection", "CosmosDbConnection");
                 var lease = AttributeReading.NamedString(a, "LeaseContainerName", "leases");
                 var createLease = AttributeReading.NamedBool(a, "CreateLeaseContainerIfNotExists", false);

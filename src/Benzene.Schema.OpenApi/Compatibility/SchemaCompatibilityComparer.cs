@@ -214,8 +214,9 @@ public class SchemaCompatibilityComparer
     /// Walks a <c>oneOf</c>/<c>anyOf</c> member list pairwise between baseline and current. Matching
     /// priority: (1) <c>$ref</c> target name, when the member has one — a <c>$ref</c> already uniquely
     /// and stably identifies the target component, regardless of whether a discriminator mapping happens
-    /// to cover it; (2) discriminator mapping value, for inline (non-<c>$ref</c>) members only, where
-    /// there is no <c>$ref</c> name to key on; (3) position. Unmatched baseline members are <see cref="SchemaChangeKind.UnionVariantRemoved"/>,
+    /// to cover it; (2) for an inline (non-<c>$ref</c>) member, the discriminator-mapping key it pairs
+    /// with positionally (see <see cref="UnclaimedMappingKeys"/>), where there is no <c>$ref</c> name to
+    /// key on; (3) position. Unmatched baseline members are <see cref="SchemaChangeKind.UnionVariantRemoved"/>,
     /// unmatched current members are <see cref="SchemaChangeKind.UnionVariantAdded"/>, and a matched pair
     /// that differs recurses and is reported as/within <see cref="SchemaChangeKind.UnionVariantChanged"/>.
     /// </summary>
@@ -359,8 +360,8 @@ public class SchemaCompatibilityComparer
 
     /// <summary>
     /// Indexes a <c>oneOf</c>/<c>anyOf</c> member list by its matching key: its <c>$ref</c> target name
-    /// when it has one, else the discriminator mapping value that points at this member when
-    /// <paramref name="owner"/> declares a discriminator, else its position.
+    /// when it has one, else the discriminator mapping key it represents (see
+    /// <see cref="UnclaimedMappingKeys"/>), else its position.
     /// </summary>
     private static Dictionary<string, OpenApiSchema> IndexVariants(OpenApiSchema owner, IList<OpenApiSchema>? members)
     {
@@ -371,43 +372,70 @@ public class SchemaCompatibilityComparer
         }
 
         var mapping = owner.Discriminator?.Mapping;
+        var unclaimedMappingKeys = UnclaimedMappingKeys(mapping, members);
 
+        var inlinePosition = 0;
         for (var i = 0; i < members.Count; i++)
         {
             var member = members[i];
-            var key = VariantKey(mapping, member, i);
+            var key = VariantKey(member, i, inlinePosition, unclaimedMappingKeys);
+            if (string.IsNullOrEmpty(member.Reference?.Id))
+            {
+                inlinePosition++;
+            }
+
             result[key] = member;
         }
 
         return result;
     }
 
-    private static string VariantKey(IDictionary<string, string>? mapping, OpenApiSchema member, int index)
+    /// <summary>
+    /// The discriminator mapping entries that don't already name one of this union's <c>$ref</c>
+    /// members - i.e. the entries that, if they identify anything in this union at all, must be
+    /// identifying one of its <em>inline</em> members - in the mapping's own declaration order.
+    /// </summary>
+    private static List<string> UnclaimedMappingKeys(IDictionary<string, string>? mapping, IList<OpenApiSchema> members)
+    {
+        if (mapping is not { Count: > 0 })
+        {
+            return new List<string>();
+        }
+
+        var refIds = new HashSet<string>(members
+            .Select(m => m.Reference?.Id)
+            .Where(id => !string.IsNullOrEmpty(id))!);
+
+        return mapping
+            .Where(entry => !refIds.Contains(RefTargetName(entry.Value)))
+            .Select(entry => entry.Key)
+            .ToList();
+    }
+
+    /// <summary>
+    /// A member's matching key: its <c>$ref</c> target name when it has one - a <c>$ref</c> already
+    /// uniquely and stably identifies the target component, so it takes priority over discriminator-
+    /// mapping coverage regardless of whether a mapping entry happens to name it (keying on mapping
+    /// coverage instead let an additive mapping edit - a new entry covering a previously-unmapped
+    /// <c>$ref</c> - look like the variant was replaced: <c>disc:X</c> on one side, <c>ref:X</c> on the
+    /// other, for the very same schema). Otherwise this is an inline member with no name of its own to
+    /// key on, so it is identified positionally: the <paramref name="inlinePosition"/>-th inline member
+    /// pairs with the <paramref name="inlinePosition"/>-th unclaimed discriminator-mapping entry, giving
+    /// it a stable <c>disc:</c> identity that survives the whole union being reordered (member array and
+    /// mapping moving together), rather than the raw array position alone.
+    /// </summary>
+    private static string VariantKey(OpenApiSchema member, int index, int inlinePosition, IReadOnlyList<string> unclaimedMappingKeys)
     {
         var refId = member.Reference?.Id;
 
-        // A $ref already uniquely and stably identifies the target component, so it takes priority over
-        // discriminator-mapping coverage: whether a mapping entry happens to name this $ref is metadata
-        // about the variant, not part of its identity. Keying on mapping coverage instead let an
-        // additive mapping edit (a new entry covering a previously-unmapped $ref) look like the variant
-        // was replaced — disc:X on one side, ref:X on the other, for the very same schema.
         if (!string.IsNullOrEmpty(refId))
         {
             return $"ref:{refId}";
         }
 
-        // No $ref to key on - this is an inline member. Fall back to the discriminator mapping when it
-        // identifies this exact member (mapping values are $ref-shaped, so this only ever matches an
-        // inline member a mapping entry names directly).
-        if (mapping is { Count: > 0 })
+        if (inlinePosition < unclaimedMappingKeys.Count)
         {
-            foreach (var entry in mapping)
-            {
-                if (RefTargetName(entry.Value) == refId)
-                {
-                    return $"disc:{entry.Key}";
-                }
-            }
+            return $"disc:{unclaimedMappingKeys[inlinePosition]}";
         }
 
         return $"idx:{index}";

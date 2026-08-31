@@ -28,6 +28,12 @@ public class CacheEntryTest
         public TimeSpan? LastExpireIn;
 
         public FakeCacheEntry(Dictionary<string, string> store, string key = "the-key", ILogger? logger = null)
+            : this(store, key, logger, serializer: null)
+        {
+        }
+
+        public FakeCacheEntry(Dictionary<string, string> store, string key, ILogger? logger, Benzene.Abstractions.Serialization.ISerializer? serializer)
+            : base(serializer)
         {
             _store = store;
             _key = key;
@@ -479,6 +485,99 @@ public class CacheEntryTest
 
         Assert.True(result.IsSuccessful);
         Assert.Contains(logger.Warnings, w => w.Contains("invalidate", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task WriteThroughAsync_GetCacheValueDelegateThrows_StillReturnsTheSuccessfulDatabaseResult()
+    {
+        // #199: getCacheValue/getCacheAction are caller-supplied delegates that run AFTER the
+        // database write has already committed - a throw here used to propagate in place of the
+        // result, indistinguishable at the call site from the database write itself having failed
+        // (exactly the failure mode #139 was fixed to prevent, just reachable through this adjacent
+        // path). It must instead degrade to "write succeeded, cache sync failed", per #139's contract.
+        var store = new Dictionary<string, string>();
+        var entry = new FakeCacheEntry<string>(store);
+
+        var result = await entry.WriteThroughAsync(
+            () => Task.FromResult(BenzeneResult.Ok("new-value")),
+            (Func<IBenzeneResult<string>, string?>)(_ => throw new InvalidOperationException("boom")));
+
+        Assert.True(result.IsSuccessful);
+        Assert.Equal("new-value", result.Payload);
+        Assert.False(store.ContainsKey("the-key")); // the throwing delegate meant nothing was ever cached
+    }
+
+    [Fact]
+    public async Task WriteThroughAsync_GetCacheActionDelegateThrows_StillReturnsTheSuccessfulDatabaseResult()
+    {
+        // #199, the other caller-supplied delegate on the same overload.
+        var store = new Dictionary<string, string>();
+        var entry = new FakeCacheEntry<string>(store);
+
+        var result = await entry.WriteThroughAsync(
+            () => Task.FromResult(BenzeneResult.Ok(42)),
+            result => $"computed-{result.Payload}",
+            (Func<IBenzeneResult<int>, CacheUpdateAction>)(_ => throw new InvalidOperationException("boom")));
+
+        Assert.True(result.IsSuccessful);
+        Assert.Equal(42, result.Payload);
+        Assert.False(store.ContainsKey("the-key"));
+    }
+
+    [Fact]
+    public async Task WriteThroughAsync_GetCacheValueDelegateThrowsOperationCanceled_Propagates()
+    {
+        // The one exception that must NOT be swallowed by the #199 fix - a caller-driven cancellation
+        // propagates like any other ambient cancellation, the same convention #141 established.
+        var store = new Dictionary<string, string>();
+        var entry = new FakeCacheEntry<string>(store);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => entry.WriteThroughAsync(
+            () => Task.FromResult(BenzeneResult.Ok("new-value")),
+            (Func<IBenzeneResult<string>, string?>)(_ => throw new OperationCanceledException())));
+    }
+
+    /// <summary>
+    /// A minimal <see cref="Benzene.Abstractions.Serialization.ISerializer"/> that encodes a null
+    /// reference (or a value-type default) as the empty string rather than the stock
+    /// <c>System.Text.Json</c> serializer's 4-character <c>"null"</c> - the exact seam #201 describes:
+    /// the docs invite a custom <see cref="Benzene.Abstractions.Serialization.ISerializer"/> (#145)
+    /// without warning that presence detection used to assume this never happens.
+    /// </summary>
+    private sealed class EmptyStringForNullSerializer : Benzene.Abstractions.Serialization.ISerializer
+    {
+        public string Serialize(Type type, object payload) => payload?.ToString() ?? "";
+
+        public string Serialize<T>(T payload) => payload?.ToString() ?? "";
+
+        public object? Deserialize(Type type, string payload) => string.IsNullOrEmpty(payload) ? null : payload;
+
+        public T? Deserialize<T>(string payload) => string.IsNullOrEmpty(payload) ? default : (T)(object)payload;
+    }
+
+    [Fact]
+    public async Task LazyLoadAsync_CustomSerializerEncodesNullAsEmptyString_ExplicitlyCachedNull_IsStillAHitWithoutCallingDb()
+    {
+        // #201: presence detection used to be `!string.IsNullOrEmpty(cacheValue)`, which conflates
+        // "key absent" with "the serializer emitted an empty string" - silently reintroducing #140's
+        // cache-penetration hazard for any ISerializer that encodes null/default as "" instead of the
+        // stock serializer's "null". The fix (`cacheValue != null`) must treat this negative-cache
+        // entry as a real hit again.
+        var store = new Dictionary<string, string>();
+        var entry = new FakeCacheEntry<string>(store, "the-key", logger: null, serializer: new EmptyStringForNullSerializer());
+        await entry.SetValueAsync(null!);
+        Assert.Equal("", store["the-key"]); // sanity: this serializer really does store "", not "null"
+        var databaseFuncCalled = false;
+
+        var result = await entry.LazyLoadAsync(() =>
+        {
+            databaseFuncCalled = true;
+            return Task.FromResult(BenzeneResult.Ok("from-database"));
+        });
+
+        Assert.False(databaseFuncCalled);
+        Assert.True(result.IsSuccessful);
+        Assert.Null(result.Payload);
     }
 
     [Fact]

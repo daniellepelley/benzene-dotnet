@@ -183,7 +183,9 @@ public class SnsMessagePipelineTest
             return next();
         });
 
-        var aws = new SnsApplication(pipeline.Build());
+        // This test is about the raw pipeline seeing the record, not message routing - it never sets
+        // a MessageResult, so escalating on that (#229's null-result fix) would be unrelated noise here.
+        var aws = new SnsApplication(pipeline.Build(), new SnsOptions { RaiseOnFailureStatus = false });
 
         var request = new SNSEvent
         {
@@ -213,11 +215,15 @@ public class SnsMessagePipelineTest
         var app = new MiddlewarePipelineBuilder<AwsEventStreamContext>(new MicrosoftBenzeneServiceContainer(services));
 
         app.UseSns(message => message
-            .Use(null, (context, next) =>
-            {
-                snsRecordContext = context;
-                return next();
-            })
+                .Use(null, (context, next) =>
+                {
+                    snsRecordContext = context;
+                    return next();
+                }),
+            // This test is about the stream wiring handing the record through, not message routing - the
+            // inline middleware never sets a MessageResult, so escalating on that (#229's null-result fix)
+            // would be unrelated noise here.
+            configure: options => options.RaiseOnFailureStatus = false
         );
 
         var request = new SNSEvent

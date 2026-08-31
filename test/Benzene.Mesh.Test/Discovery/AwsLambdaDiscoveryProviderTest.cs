@@ -86,25 +86,6 @@ public class AwsLambdaDiscoveryProviderTest
     }
 
     [Fact]
-    public async Task Discover_CarriesMeshPathHintTag()
-    {
-        var functions = new Dictionary<string, (FunctionConfiguration, Dictionary<string, string>)>
-        {
-            ["orders"] = (Fn("orders"), new Dictionary<string, string>
-            {
-                ["benzene"] = "true",
-                ["benzene:mesh-path"] = "/custom/mesh"
-            }),
-        };
-        var mock = LambdaWith(functions, (null, null, new[] { "orders" }));
-
-        var provider = new AwsLambdaDiscoveryProvider(mock.Object);
-        var entry = Assert.Single(await provider.DiscoverAsync(new MeshDiscoveryFilter()));
-
-        Assert.Equal("/custom/mesh", entry.SourceOptions!["meshPath"]);
-    }
-
-    [Fact]
     public async Task Discover_ValuedTagFilter_ExcludesNonMatching()
     {
         var functions = new Dictionary<string, (FunctionConfiguration, Dictionary<string, string>)>

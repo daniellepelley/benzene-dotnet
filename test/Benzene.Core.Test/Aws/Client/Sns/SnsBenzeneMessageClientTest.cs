@@ -9,6 +9,7 @@ using Benzene.Clients;
 using Benzene.Clients.Aws.Sns;
 using Benzene.Core.Middleware;
 using Benzene.Results;
+using Benzene.Test.Logging.Helpers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -17,6 +18,43 @@ namespace Benzene.Test.Aws.Client.Sns;
 
 public class SnsBenzeneMessageClientTest
 {
+    [Fact]
+    public void Constructor_NullLogger_ThrowsImmediately()
+    {
+        var mockSnsClient = new Mock<IAmazonSimpleNotificationService>();
+
+        Assert.Throws<ArgumentNullException>(() =>
+            new SnsBenzeneMessageClient("some-topic-arn", mockSnsClient.Object, null!, new NullServiceResolver()));
+    }
+
+    [Fact]
+    public void Constructor_PrebuiltPipelineOverload_NullLogger_ThrowsImmediately()
+    {
+        var pipeline = new MiddlewarePipelineBuilder<SnsSendMessageContext>(new NullBenzeneServiceContainer()).Build();
+
+        Assert.Throws<ArgumentNullException>(() =>
+            new SnsBenzeneMessageClient("some-topic-arn", pipeline, null!, new NullServiceResolver()));
+    }
+
+    [Fact]
+    public async Task SendMessageAsync_ThrowingClient_LogsThroughTheErrorPathWithoutThrowing()
+    {
+        var mockSnsClient = new Mock<IAmazonSimpleNotificationService>();
+        mockSnsClient
+            .Setup(x => x.PublishAsync(It.IsAny<PublishRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new Exception("boom"));
+
+        var collector = new FakeLogCollector();
+        var logger = new FakeLogger<SnsBenzeneMessageClient>(collector);
+
+        var client = new SnsBenzeneMessageClient("some-topic-arn", mockSnsClient.Object, logger, new NullServiceResolver());
+
+        var result = await client.SendMessageAsync<string, string>("some-topic", "some-message");
+
+        Assert.Equal(BenzeneResultStatus.ServiceUnavailable, result.Status);
+        Assert.Contains(collector.Entries, e => e.Exception?.Message == "boom");
+    }
+
     [Fact]
     public async Task SendMessageAsync_OkResponse_ReturnsAccepted()
     {
@@ -56,24 +94,6 @@ public class SnsBenzeneMessageClientTest
             .ThrowsAsync(new Exception("boom"));
 
         var client = new SnsBenzeneMessageClient("some-topic-arn", mockSnsClient.Object, NullLogger<SnsBenzeneMessageClient>.Instance, new NullServiceResolver());
-
-        var result = await client.SendMessageAsync<string, string>("some-topic", "some-message");
-
-        Assert.Equal(BenzeneResultStatus.ServiceUnavailable, result.Status);
-    }
-
-    [Fact]
-    public async Task SendMessageAsync_ThrowingClient_ConstructedWithANullLogger_DoesNotThrow()
-    {
-        // #192: the catch block's own LogError call must not itself throw a NullReferenceException
-        // when the client was constructed with a null logger - the constructor now falls back to
-        // NullLogger<SnsBenzeneMessageClient>.Instance instead of storing the null reference verbatim.
-        var mockSnsClient = new Mock<IAmazonSimpleNotificationService>();
-        mockSnsClient
-            .Setup(x => x.PublishAsync(It.IsAny<PublishRequest>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new Exception("boom"));
-
-        var client = new SnsBenzeneMessageClient("some-topic-arn", mockSnsClient.Object, null!, new NullServiceResolver());
 
         var result = await client.SendMessageAsync<string, string>("some-topic", "some-message");
 

@@ -161,6 +161,25 @@ namespace Benzene.Azure.Function.SourceGenerators
             isEnabledByDefault: true);
 
         /// <summary>
+        /// A <c>[assembly: BenzeneCosmosDbTrigger(...)]</c> declaration is missing the required
+        /// <c>DatabaseName</c> and/or <c>ContainerName</c> - Cosmos DB's own binding-destination
+        /// fields, exactly analogous to <c>EventHubName</c>/<c>Topic</c>/<c>QueueName</c>/<c>Path</c> on
+        /// the sibling transports <c>BENZ0003</c>-<c>BENZ0007</c> already validate. Checked alongside -
+        /// not instead of - the <c>DocumentType</c>/<see cref="CosmosDbTriggerMissingDocumentType"/>
+        /// check.
+        /// </summary>
+        public static readonly DiagnosticDescriptor CosmosDbTriggerMissingDestination = new(
+            id: "BENZ0010",
+            title: "CosmosDb trigger missing DatabaseName/ContainerName",
+            messageFormat:
+                "[assembly: BenzeneCosmosDbTrigger(Name = {0}, ...)] does not set DatabaseName and/or " +
+                "ContainerName. The Cosmos DB change-feed trigger can't be bound without both - set " +
+                "DatabaseName and ContainerName.",
+            category: Category,
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
+
+        /// <summary>
         /// A <c>[assembly: BenzeneServiceBusTrigger(...)]</c> declaration is binding to a topic (no
         /// <c>QueueName</c> set - see <see cref="ServiceBusAmbiguousQueueAndTopic"/> for the
         /// queue-also-set case, which wins and makes this moot) but sets only one of
@@ -171,7 +190,7 @@ namespace Benzene.Azure.Function.SourceGenerators
         /// deployment (round 14-15 #233).
         /// </summary>
         public static readonly DiagnosticDescriptor ServiceBusTopicSubscriptionMismatch = new(
-            id: "BENZ0010",
+            id: "BENZ0011",
             title: "ServiceBus trigger sets topic without subscription (or vice versa)",
             messageFormat:
                 "[assembly: BenzeneServiceBusTrigger(Name = {0}, ...)] sets TopicName without " +

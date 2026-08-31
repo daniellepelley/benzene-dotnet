@@ -104,6 +104,29 @@ public class EventServiceDocumentDeserializerTest
         }
     }
 
+    // #243: GetEvents/GetRequests read the array with a null-forgiving `!` and no null-coalescing,
+    // unlike the adjacent GetTransports/GetTags, which both null-coalesce to empty. A document
+    // missing "events"/"requests" entirely - an externally-sourced or older-shape baseline, not
+    // anything Benzene itself ever emits - crashed with ArgumentNullException instead of
+    // deserializing to an empty array like every other missing optional collection here does.
+    [Fact]
+    public void Deserialize_DocumentMissingEventsAndRequests_DeserializesToEmptyArrays_NotArgumentNullException()
+    {
+        const string json = """
+        {
+          "info": { "title": "svc", "version": "1.0" },
+          "components": { "schemas": {} }
+        }
+        """;
+
+        var doc = new EventServiceDocumentDeserializer().Deserialize(json);
+
+        Assert.NotNull(doc.Events);
+        Assert.Empty(doc.Events);
+        Assert.NotNull(doc.Requests);
+        Assert.Empty(doc.Requests);
+    }
+
     [Fact]
     public void SchemaCompatibility_EnsureBackwardCompatible_StringOverload_SharedSchemaNameAcrossTwoDeserializeCalls_Throws()
     {

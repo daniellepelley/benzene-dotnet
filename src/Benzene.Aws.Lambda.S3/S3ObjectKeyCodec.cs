@@ -35,14 +35,14 @@ public static class S3ObjectKeyCodec
     }
 
     /// <summary>
-    /// URL-encodes an S3 object key using the same scheme S3 itself applies (space becomes <c>+</c>,
-    /// other reserved/non-ASCII bytes are percent-encoded) - the exact inverse of <see cref="Decode"/>.
-    /// Returns <c>null</c> unchanged.
+    /// URL-encodes an object key the way S3 encodes it on an event notification record, so the
+    /// result round-trips through <see cref="Decode(string?)"/> back to the original key.
     /// </summary>
-    /// <param name="rawKey">The plain (decoded) key to encode as it would appear on the wire.</param>
-    /// <returns>The URL-encoded key, or <c>null</c> if <paramref name="rawKey"/> was <c>null</c>.</returns>
-    public static string? Encode(string? rawKey)
+    /// <param name="key">The real (decoded) object key.</param>
+    /// <returns>The URL-encoded key as it would appear on the event notification record, or
+    /// <c>null</c> if <paramref name="key"/> was <c>null</c>.</returns>
+    public static string? Encode(string? key)
     {
-        return rawKey == null ? null : WebUtility.UrlEncode(rawKey);
+        return key == null ? null : WebUtility.UrlEncode(key);
     }
 }

@@ -29,14 +29,7 @@ public class JaegerTraceSource : IMeshTraceSource
     private readonly ILogger? _logger;
 
     /// <summary>Creates the source over an <see cref="HttpClient"/> and Jaeger endpoint/window options.</summary>
-    public JaegerTraceSource(HttpClient httpClient, JaegerTraceSourceOptions options) : this(httpClient, options, null)
-    {
-    }
-
-    /// <summary>Creates the source over an <see cref="HttpClient"/>, Jaeger endpoint/window options, and an
-    /// optional logger (used to warn when an individual per-service search fails during the fan-out — see
-    /// <see cref="SearchAcrossServicesAsync"/>).</summary>
-    public JaegerTraceSource(HttpClient httpClient, JaegerTraceSourceOptions options, ILogger? logger)
+    public JaegerTraceSource(HttpClient httpClient, JaegerTraceSourceOptions options, ILogger? logger = null)
     {
         _httpClient = httpClient;
         _options = options;
@@ -105,7 +98,9 @@ public class JaegerTraceSource : IMeshTraceSource
     /// full traces, and dedupe by trace id (a cross-service trace is returned by each of its services).
     /// Runs the per-service GETs concurrently, capped at <see cref="JaegerTraceSourceOptions.SearchConcurrency"/>
     /// (<see cref="BoundedFanOut"/>) - sequentially awaiting one GET per service would otherwise pay every
-    /// service's round-trip in series for one fleet load.</summary>
+    /// service's round-trip in series for one fleet load. Each per-service GET is isolated: one service's
+    /// failure is caught, logged, and skipped rather than discarding every other service's already-fetched
+    /// results via <see cref="Task.WhenAll(System.Threading.Tasks.Task[])"/> fault semantics.</summary>
     private async Task<List<JaegerMappedTrace>> SearchAcrossServicesAsync(
         (DateTimeOffset Start, DateTimeOffset End) window, string? tags, CancellationToken cancellationToken)
     {
@@ -125,26 +120,36 @@ public class JaegerTraceSource : IMeshTraceSource
         // this call site's policy, not BoundedFanOut's - it stays a plain fail-fast primitive.
         var perService = await BoundedFanOut.WhenAllAsync(services, async service =>
         {
-            var url = $"{_options.JaegerUrl}/api/traces?service={Uri.EscapeDataString(service)}"
-                      + $"&start={startMicros}&end={endMicros}&limit={_options.SearchLimitPerService}";
-            if (tags is not null)
-            {
-                url += $"&tags={Uri.EscapeDataString(tags)}";
-            }
-
             try
             {
+                var url = $"{_options.JaegerUrl}/api/traces?service={Uri.EscapeDataString(service)}"
+                          + $"&start={startMicros}&end={endMicros}&limit={_options.SearchLimitPerService}";
+                if (tags is not null)
+                {
+                    url += $"&tags={Uri.EscapeDataString(tags)}";
+                }
+
                 var body = await GetStringOrNullAsync(url, cancellationToken);
                 return body is null ? new List<JaegerMappedTrace>() : JaegerTraceMapper.MapTraces(body);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
+                // Per-service isolation: one service's connection failure - or an HttpClient-level
+                // per-request Timeout, which throws TaskCanceledException (an OperationCanceledException
+                // subclass) regardless of whether the caller's own token was ever cancelled - shouldn't
+                // discard every other service's completed results (Task.WhenAll's fault semantics would
+                // otherwise fault the whole fan-out). The filter is token-verified, not type-based: it
+                // isolates any OperationCanceledException UNLESS the caller's own cancellationToken is
+                // actually cancelled, in which case that's a genuine host cancellation and must propagate
+                // instead (see MessageHandler.cs's ex.CancellationToken.IsCancellationRequested checks for
+                // the same timeout-vs-cancellation distinction). Logged, then degrades to that service
+                // contributing no traces this call.
                 _logger?.LogWarning(ex,
-                    "JaegerTraceSource's search against service {Service} failed; dropping this service's traces and keeping the rest.",
+                    "JaegerTraceSource search failed for service {Service}; skipping it and keeping the other services' results.",
                     service);
                 return new List<JaegerMappedTrace>();
             }
-        }, _options.SearchConcurrency);
+        }, _options.SearchConcurrency, cancellationToken);
 
         var byTraceId = new Dictionary<string, JaegerMappedTrace>();
         foreach (var trace in perService.SelectMany(traces => traces))

@@ -60,8 +60,11 @@ namespace Benzene.CodeGen.ApiGateway
             {
                 var duplicate = duplicates[0];
                 var topics = string.Join(", ", duplicate.Select(x => x.request.Topic));
+                // Report the first entry's original-cased Method (not the folded grouping key) so
+                // the message still reads naturally for the common identical-casing case.
+                var originalMethod = duplicate.First().http.Method;
                 throw new BenzeneException(
-                    $"Route '{duplicate.First().http.Method} - {duplicate.Key.Path}' has been assigned to more than one topic ({topics}), this is not permitted");
+                    $"Route '{originalMethod} - {duplicate.Key.Path}' has been assigned to more than one topic ({topics}), this is not permitted");
             }
 
             var paths = mappings
@@ -135,7 +138,7 @@ namespace Benzene.CodeGen.ApiGateway
             stringBuilder.AppendLine(@"              method.response.header.X-Content-Type-Options: ""'nosniff'""");
             stringBuilder.AppendLine(@"              method.response.header.Referrer-Policy: ""'no-referrer'""");
             stringBuilder.AppendLine(@$"              method.response.header.Access-Control-Allow-Methods: ""'{verbsText},OPTIONS'""");
-            stringBuilder.AppendLine(@$"              method.response.header.Access-Control-Allow-Headers: ""'{_options.AllowedHeaders}'""");
+            stringBuilder.AppendLine(@$"              method.response.header.Access-Control-Allow-Headers: ""'{YamlValueEscaping.EscapeForDoubleQuoted(_options.AllowedHeaders)}'""");
             stringBuilder.AppendLine(@"            responseTemplates:");
             stringBuilder.AppendLine(@"              application/json: |");
             CorsHeaders(stringBuilder);
@@ -230,7 +233,7 @@ namespace Benzene.CodeGen.ApiGateway
             stringBuilder.AppendLine(@"            statusCode: ""200""");
             stringBuilder.AppendLine(@"            responseParameters:");
             stringBuilder.AppendLine(@$"              method.response.header.Access-Control-Allow-Methods: ""'{verb},OPTIONS'""");
-            stringBuilder.AppendLine(@$"              method.response.header.Access-Control-Allow-Headers: ""'{_options.AllowedHeaders}'""");
+            stringBuilder.AppendLine(@$"              method.response.header.Access-Control-Allow-Headers: ""'{YamlValueEscaping.EscapeForDoubleQuoted(_options.AllowedHeaders)}'""");
             stringBuilder.AppendLine(@"              method.response.header.Cache-Control: ""'no-store, no-cache'""");
             stringBuilder.AppendLine(@"              method.response.header.Content-Security-Policy: ""'default-src \\'none\\';'""");
             stringBuilder.AppendLine(@"              method.response.header.Referrer-Policy: ""'no-referrer'""");

@@ -9,7 +9,6 @@ using Benzene.Clients.Common;
 using Benzene.Core.Middleware;
 using Benzene.Results;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 using Void = Benzene.Abstractions.Results.Void;
 
 namespace Benzene.Clients.Azure.EventGrid;
@@ -38,11 +37,11 @@ public class EventGridBenzeneMessageClient : IBenzeneMessageClient
     /// <param name="serviceResolver">The service resolver used to run the pipeline.</param>
     public EventGridBenzeneMessageClient(string source, EventGridPublisherClient publisherClient, ILogger<EventGridBenzeneMessageClient> logger, IServiceResolver serviceResolver)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _serviceResolver = serviceResolver;
         _source = source;
-        // #192: a null logger must not make the catch block's own LogError throw and mask the real
-        // failure - fall back to a no-op logger.
-        _logger = logger ?? NullLogger<EventGridBenzeneMessageClient>.Instance;
+        _logger = logger;
 
         var benzeneServiceContainer = new NullBenzeneServiceContainer();
         var middlewarePipelineBuilder = new MiddlewarePipelineBuilder<EventGridSendMessageContext>(benzeneServiceContainer);
@@ -61,10 +60,12 @@ public class EventGridBenzeneMessageClient : IBenzeneMessageClient
     /// <param name="serviceResolver">The service resolver used to run the pipeline.</param>
     public EventGridBenzeneMessageClient(string source, IMiddlewarePipeline<EventGridSendMessageContext> middlewarePipeline, ILogger<EventGridBenzeneMessageClient> logger, IServiceResolver serviceResolver)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _serviceResolver = serviceResolver;
         _source = source;
         _middlewarePipeline = middlewarePipeline;
-        _logger = logger ?? NullLogger<EventGridBenzeneMessageClient>.Instance;
+        _logger = logger;
     }
 
     /// <summary>

@@ -17,17 +17,22 @@ public class SqsClientMiddleware : IMiddleware<SqsSendMessageContext>, ITerminal
     private readonly ICancellationTokenAccessor? _cancellation;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="SqsClientMiddleware"/> class.
+    /// Initializes a new instance of the <see cref="SqsClientMiddleware"/> class with no
+    /// cancellation-token accessor.
     /// </summary>
     /// <param name="amazonSqs">The SQS client used to send the message.</param>
-    /// <param name="cancellation">
-    /// Supplies the ambient cancellation token to pass into the send call (the
-    /// <c>HttpBenzeneMessageClient</c> constructor-optional accessor idiom); null observes no
-    /// cancellation. Resolved automatically from the container on the DI-registered
-    /// <c>UseSqsClient()</c> path; the explicit-client <c>UseSqsClient(amazonSqs)</c> overload
-    /// resolves it from the pipeline's service resolver and passes it through.
-    /// </param>
-    public SqsClientMiddleware(IAmazonSQS amazonSqs, ICancellationTokenAccessor? cancellation = null)
+    public SqsClientMiddleware(IAmazonSQS amazonSqs)
+        : this(amazonSqs, null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes the middleware, additionally resolving the ambient cancellation token so an
+    /// upstream cancel/timeout aborts the outbound send instead of running it to completion.
+    /// </summary>
+    /// <param name="amazonSqs">The SQS client used to send the message.</param>
+    /// <param name="cancellation">Supplies the ambient cancellation token; null observes no cancellation.</param>
+    public SqsClientMiddleware(IAmazonSQS amazonSqs, ICancellationTokenAccessor? cancellation)
     {
         _amazonSqs = amazonSqs;
         _cancellation = cancellation;

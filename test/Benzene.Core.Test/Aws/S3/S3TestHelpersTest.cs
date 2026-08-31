@@ -22,11 +22,15 @@ public class S3TestHelpersTest
         var app = new MiddlewarePipelineBuilder<AwsEventStreamContext>(new MicrosoftBenzeneServiceContainer(services));
 
         app.UseS3(message => message
-            .Use(null, (context, next) =>
-            {
-                capturedContext = context;
-                return next();
-            })
+                .Use(null, (context, next) =>
+                {
+                    capturedContext = context;
+                    return next();
+                }),
+            // This test is about the test-helper-built event reaching the pipeline, not message
+            // routing - the inline middleware never sets a MessageResult, so escalating on that
+            // (#229's null-result fix) would be unrelated noise here.
+            configure: options => options.RaiseOnFailureStatus = false
         );
 
         var s3Event = MessageBuilder.Create("ObjectCreated:Put", Defaults.MessageAsObject).AsS3(bucketName: "my-bucket", key: "my-key");
@@ -39,14 +43,11 @@ public class S3TestHelpersTest
         Assert.Equal("my-key", capturedContext.S3EventNotificationRecord.S3.Object.Key);
     }
 
-    // #191: a key containing a reserved character (here the exact repro from the finding, plus a
-    // '%' case) must come back out of the real getter unchanged - AsS3 has to URL-encode it going
-    // in, mirroring what a real S3 event notification does, so S3ObjectKeyCodec.Decode (which
-    // S3MessageBodyGetter runs on every read since #158) doesn't corrupt it.
     [Theory]
     [InlineData("invoice+2024-08-27.pdf")]
-    [InlineData("100% done.txt")]
-    public async Task AsS3_KeyWithReservedCharacters_RoundTripsThroughTheRealGetter(string rawKey)
+    [InlineData("reports/100%-done.csv")]
+    [InlineData("résumé/naïve-café.pdf")]
+    public async Task AsS3_ReservedOrUnicodeCharactersInKey_RoundTripThroughTheRealProductionGetters(string realKey)
     {
         S3RecordContext capturedContext = null;
         var services = ServiceResolverMother.CreateServiceCollection();
@@ -57,18 +58,30 @@ public class S3TestHelpersTest
             {
                 capturedContext = context;
                 return next();
-            })
+            }),
+            // This test is about key round-tripping through the wire/getters, not message routing -
+            // the inline middleware never sets a MessageResult, so escalating on that (#229's
+            // null-result fix) would be unrelated noise here, same as the sibling test above.
+            configure: options => options.RaiseOnFailureStatus = false
         );
 
-        var s3Event = MessageBuilder.Create("ObjectCreated:Put", Defaults.MessageAsObject).AsS3(key: rawKey);
+        var s3Event = MessageBuilder.Create("ObjectCreated:Put", Defaults.MessageAsObject).AsS3(bucketName: "my-bucket", key: realKey);
 
         await app.Build().HandleAsync(AwsEventStreamContextBuilder.Build(s3Event), new MicrosoftServiceResolverAdapter(services.BuildServiceProvider()));
 
-        // The record now carries the wire-encoded form, not the plain key.
-        Assert.NotEqual(rawKey, capturedContext.S3EventNotificationRecord.S3.Object.Key);
+        Assert.NotNull(capturedContext);
 
+        // The record itself carries the wire-encoded form (matching a real S3 event notification) -
+        // decoding it must recover the exact original key, with no corruption from '+', '%', or
+        // non-ASCII characters.
+        var decodedFromRecord = S3ObjectKeyCodec.Decode(capturedContext.S3EventNotificationRecord.S3.Object.Key);
+        Assert.Equal(realKey, decodedFromRecord);
+
+        // And the real production getters used by handlers must observe the same round-trip.
         var body = new S3MessageBodyGetter().GetBody(capturedContext);
+        Assert.Contains($"\"key\":\"{realKey}\"", body);
 
-        Assert.Contains($"\"key\":\"{rawKey}\"", body);
+        var headers = new S3MessageHeadersGetter().GetHeaders(capturedContext);
+        Assert.Equal(realKey, headers["key"]);
     }
 }

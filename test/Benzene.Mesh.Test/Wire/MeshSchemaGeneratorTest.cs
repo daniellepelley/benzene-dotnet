@@ -75,6 +75,36 @@ public class MeshSchemaGeneratorTest
     }
 
     [Fact]
+    public void Derive_StringKeyedDictionary_SchemaIsByteIdentical_NoDescriptorHashChurnFromTheFix()
+    {
+        // #235 pins the string-keyed path unchanged - extending TryGetDictionaryValueType to other key
+        // types must not alter the schema an already-correct contract derives (no descriptor-hash
+        // churn). The known-good shape, asserted verbatim rather than field-by-field.
+        var schema = MeshSchemaGenerator.Derive(typeof(Dictionary<string, int>));
+
+        Assert.Equal(
+            "{\"type\":\"object\",\"additionalProperties\":{\"type\":\"integer\"}}",
+            schema.ToJsonString());
+    }
+
+    [Theory]
+    [InlineData(typeof(Dictionary<int, string>))]
+    [InlineData(typeof(Dictionary<DayOfWeekForSchema, string>))]
+    [InlineData(typeof(Dictionary<System.Guid, string>))]
+    public void Derive_NonStringKeyedDictionary_StillMapsToObjectWithAdditionalProperties_NotAnArray(System.Type type)
+    {
+        // #235: System.Text.Json serializes ANY dictionary (int/enum/Guid-keyed included) as a JSON
+        // object with string-converted keys, never an array of {key,value} pairs. Before the fix, a
+        // non-string key type fell through to the enumerable fallback and produced the wrong "array"
+        // shape the wire never actually emits.
+        var schema = MeshSchemaGenerator.Derive(type);
+
+        Assert.Equal("object", schema["type"]!.GetValue<string>());
+        Assert.Equal("string", schema["additionalProperties"]!["type"]!.GetValue<string>());
+        Assert.Null(schema["items"]); // must not also carry the array-shape's sibling key
+    }
+
+    [Fact]
     public void Derive_Array_MapsToArrayWithItems()
     {
         var schema = MeshSchemaGenerator.Derive(typeof(int[]));

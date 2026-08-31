@@ -1183,6 +1183,53 @@ codegen correctness (P10, P11)".
   `ReflectionHttpEndpointFinder`'s own duplicate-route check; `BuildOptions`'s CORS verb list is also
   `.Distinct()`ed as defense-in-depth for direct callers. See WP-H.
 
+### Tracked findings rounds 12–14, WP-M — CodeGen.ApiGateway/Markdown escaping + guards (done)
+Ruling in [`bug-fix-plan-rounds12-14-2026-08.md`](archive/bug-fix-plan-rounds12-14-2026-08.md) §"WP-M". Direct
+continuation of #86/#87 above — same bug class, reached through different inputs.
+- **[RESOLVED] #211 — `ApiGatewayBuilderV1`'s duplicate-route guard (`BuildCodeFiles`) grouped on the
+  raw `Method`, unlike the `ReflectionHttpEndpointFinder` guard it mirrors (which explicitly
+  case-folds `Method`, with a comment about this exact risk).** Two topics mapped to `"GET"` and
+  `"get"` for the same path passed the guard silently and then both emitted a `get:` block under the
+  same path (`BuildVerb` always lower-cases the emitted verb) — the identical duplicate-key YAML
+  shape #87 fixed, reached via verb casing instead of identical casing. The grouping key now folds
+  `Method` with `ToLowerInvariant()`, exactly like `ReflectionHttpEndpointFinder`; the thrown
+  message still reports the first entry's original-cased `Method` so the common identical-casing
+  case reads unchanged. See WP-M.
+- **[RESOLVED] #212 — `ApiGatewayBuilderV1` interpolated user-controlled strings (topic names, the
+  path-derived `tags:` entry, the configured CORS allow-headers value) straight into the generated
+  YAML with no escaping.** A `"` in a topic name broke the double-quoted `summary:` scalar it landed
+  in; a `: ` surviving `CreateTag`'s title-casing into the unquoted `tags:` sequence item made that
+  item parse as a nested mapping instead of a scalar — both produced YAML a real parser rejects, the
+  same root cause as #87 reached through different adversarial content instead of a structural
+  duplicate. Fixed by routing every such interpolation through a small escaping helper
+  (`YamlValueEscaping`, `src/Benzene.CodeGen.ApiGateway/YamlValueEscaping.cs`) instead of raw string
+  interpolation: `QuoteSingle` always wraps a value in a single-quoted YAML scalar (doubling internal
+  `'`s — the only escape a single-quoted scalar has, and sufficient for arbitrary content), used for
+  the `tags:` sequence item (both `BuildOptions` and `BuildVerb`, previously emitted bare/unquoted);
+  `EscapeForDoubleQuoted` escapes `\` and `"` for embedding inside a double-quoted scalar the call
+  site already wraps in literal `"..."`, used for `summary:`'s topic and the two
+  `Access-Control-Allow-Headers` header lines' `AllowedHeaders` value (preserving their existing
+  double-quoted/AWS-required-single-quote-literal shape rather than changing it). Verified by
+  actually loading the generated YAML with a real parser (`YamlDotNet`, added as a pinned dev
+  dependency to `test/Benzene.Core.Test` — it was already present transitively via
+  `ByteBard.AsyncAPI.NET.Readers` at the same version, so this adds nothing new to the dependency
+  graph) rather than eyeballing the output. **Flag for reuse:** `YamlValueEscaping` is a small,
+  self-contained, dependency-free static helper (no code shared with `ApiGatewayBuilderV1` beyond
+  being in the same package) — round 15's WP-F fixes the same bug class in the Terraform/HCL
+  generator (#244); if that generator's escaping need is YAML rather than HCL-specific, lifting
+  `QuoteSingle`'s single-quoted-scalar approach (or the file itself, generalized and moved to
+  `Benzene.CodeGen.Core`) may be worth it, though no code is shared as of this fix. See WP-M.
+- **[RESOLVED] #213 — `MarkdownTypeBuilder.MapProperty` dereferenced an array schema's `Items`
+  (`Items.Reference`/`Items.Type`) with no null check, throwing `NullReferenceException` for a
+  hand-authored schema with `Items == null`, unlike the sibling `GetPropertyTypeName` (reached via
+  the same method's final fallback branch), which already null-checks the equivalent case and
+  renders a `"Void"` placeholder.** Added the same null check to `MapProperty`'s array branch
+  (`openApiSchema.Items != null`, alongside the existing `Reference`/`Type` checks); a null `Items`
+  now falls through to the method's generic fallback, which calls `GetPropertyTypeName` and renders
+  the same `Void[]` placeholder the sibling method's guard already produces for a null schema, rather
+  than throwing. Not reachable through Benzene's own `SchemaBuilder`-produced schemas, but the method
+  is public and callable with any hand-authored schema. See WP-M.
+
 ### Tracked findings round 7–10, WP-J — Schema comparer discriminator matching + coverage (done)
 Decision, rationale, and rejected alternatives are ruled in
 [`bug-fix-designs-round7-10-2026-08.md`](archive/bug-fix-designs-round7-10-2026-08.md) §"WP-J — Schema comparer
@@ -2483,6 +2530,15 @@ top-of-file summary blockquote).
   scheme specifically) to record this explicitly as a `[DECISION]` in place, rather than leaving it
   silently misleading. Left for a future round to decide whether/how to carry the scheme onto the wire.
 
+> **Merge note (2026-08-31).** The two sections immediately below (rounds 12–13's WP-2 Fleet
+> trace-source fetch isolation, then rounds 12–17's broader per-package findings) were developed on
+> independent branches that both continued this file past the point above and have now been merged
+> together, in the order each branch wrote them. Where both branches independently fixed the same
+> underlying defect (e.g. `TempoTraceSource`/`JaegerTraceSource` per-fetch isolation, `#188`/`#189`),
+> the merged source combines both fixes rather than picking one — see the corresponding package
+> `CLAUDE.md`/test files for what actually shipped. This note exists so a reader doesn't mistake the
+> concatenation below for two rounds that happened to find the identical bug twice by coincidence.
+
 ### Tracked findings rounds 12–13, WP-2 — Fleet trace-source fetch isolation (done)
 Decisions, rationale, and rejected alternatives are ruled in
 [`bug-fix-rulings-round12-13-2026-08.md`](bug-fix-rulings-round12-13-2026-08.md) §"WP-2 — Fleet
@@ -2932,6 +2988,1876 @@ below for why the fix footprint ended up wider than the ruling's own four-file c
   reachable through reflection, but the method is public). Fixed: a small `EscapeTableCell` helper
   (`value.Replace("|", "\\|")`) applied to both the field-name and validation-rules cells. Test:
   `BuildValidation_PropertyNameContainingPipe_RendersAsACorrectTableRow`.
+- **[RESOLVED] #226 — `CasterFuncBuilder.CreateCasterFunc` memoized a compiled caster delegate only
+  *after* `Expression.Lambda(...).Compile()` returned, so a self-referential or mutually-recursive
+  versioned DTO shape (`Node.Child: Node`, or two types referencing each other) re-entered
+  `CreateCasterFunc` for the same `(TFrom,TTo)` pair before anything was memoized — the guard never
+  tripped, recursion was unbounded, and the process died with an uncatchable, unloggable
+  `StackOverflowException` (verified exit code 134) reachable through the documented, "fail eagerly at
+  registration" `Upcast<TFrom,TTo>()`/`CasterFactory` API on ordinary tree/graph-shaped payloads
+  (parent/child categories, org charts, comment threads).** Took the plan's primary ruling — **support
+  recursion properly via a lazy indirection cell**, not the cycle-detection-exception fallback: before
+  building the mapping expression for `(fromType, toType)`, `CreateCasterFunc` now installs a
+  `RecursionCell<TFrom,TTo>` in `_funcs` — a mutable holder plus a stable `Func<TFrom,TTo>` forwarding
+  delegate (`cell.Invoke`) bound to it. A recursive lookup for the same pair during expression building
+  (via `MapDelegate` from `CreateClassExpression`/`CreateEnumerableExpression`/`CreateListExpression`)
+  resolves to that forwarder and the generated expression embeds it as a constant, calling through the
+  cell rather than recursing into the builder again. Once `Expression.Lambda(...).Compile()` returns,
+  the cell's `Func` is filled with the real compiled delegate and the memoized `_funcs` entry is
+  replaced with the direct delegate for the non-recursive fast path — any expression already built
+  against the forwarder keeps working (it now resolves through to the real delegate). This is safe
+  because `Compile()` only builds the delegate, it never invokes the lambda body, and casters are built
+  eagerly at `Upcast`/registration time, so every cell reachable from an outer `CreateCasterFunc` call
+  is filled in before any caster is ever actually run. A build/compile failure removes the dangling
+  entry (`catch`/`_funcs.Remove(key)`) rather than leaving an unfillable forwarder behind. Null
+  termination was already correct and needed no change: `CreateClassExpression`'s existing null-guard
+  short-circuits to `default`/`null` without invoking the (possibly-recursive) delegate at all.
+  New test `test/Benzene.Core.Test/Core/Versioning/CasterRecursionTest.cs` covers: a self-referential
+  type builds and casts correctly (null child, and a 3-level-deep tree with value assertions at every
+  level); a mutually-recursive `A`↔`B` pair builds and casts correctly from either side as the root
+  type (exercising both orderings of which pair installs the indirection cell first). The crash itself
+  (pre-fix) was verified by building an equivalent probe as a separate console app referencing
+  `Benzene.Core.Versioning` and running it in a child `dotnet` process: pre-fix it aborted with exit
+  code 134 (uncaught `StackOverflowException`, "Stack overflow." dumped by the CLR, unwinding through
+  `MapDelegate`→`CreateClassExpression`→`CreatePropertyExpressions`→`BuildClassMappingExpression`→
+  `CreateCasterFunc` repeatedly); post-fix the same probe returns exit code 0. That probe was a scratch
+  file, not committed — the permanent in-proc regression coverage above is what ships.
+
+## Resolved in round 15, WP-B (AWS trigger family gaps)
+
+Findings from the round-15 review pass (task board #227–#229, `work/archive/bug-fix-plan-round15-2026-08.md`
+WP-B; rationale and rejected alternatives in `work/archive/bug-fix-designs-round15-2026-08.md` §2). All three
+fixed in `src/Benzene.Aws.Lambda.S3`, `src/Benzene.Aws.Lambda.DynamoDb`,
+`src/Benzene.Aws.Lambda.Kafka`, `src/Benzene.Aws.Lambda.Core`, and
+`src/Benzene.Core.MessageHandlers/Extensions.cs`.
+
+- **[RESOLVED] #227 — `.UsePresetTopic()`/`.UseTopicFrom()` crashed forever (a
+  `BenzeneResolutionException` on every single message) on S3, DynamoDB Streams, and Kafka pipelines,
+  because those packages' `AddS3`/`AddDynamoDb`/`AddKafka` DI extensions never registered
+  `PresetTopicHolder` or wrapped their topic getter in `PresetTopicMessageTopicGetter<TContext>`, unlike
+  Sns/Sqs/EventBridge.** Fixed by registering `PresetTopicHolder` and wrapping
+  `S3MessageTopicGetter`/`DynamoDbMessageTopicGetter`/`KafkaMessageTopicGetter` in
+  `PresetTopicMessageTopicGetter<TContext>`, copying the shape from
+  `Benzene.Aws.Lambda.Sns/DependencyInjectionExtensions.cs`. `UseTopicFrom`'s doc comment
+  (`Benzene.Core.MessageHandlers/Extensions.cs`) now lists all three among the supported transports.
+  **Scope correction from the plan: Kinesis (the plan's fourth named transport) is not fixed and will
+  not be** — investigation found it structurally different from the other three, not merely missing the
+  same wiring. `Benzene.Aws.Lambda.Kinesis` has no `IMessageTopicGetter<TContext>`, no `MessageRouter`,
+  and no `.UseMessageHandlers()` call site at all: it fans a batch *in* to one
+  `StreamContext<KinesisEventRecord>` (its own `CLAUDE.md`: "unlike the SQS/SNS/S3 adapters there are no
+  topic/body/header getters to register"), so there is no topic getter to wrap and no
+  `PresetTopicMiddleware<TContext>` for a preset to feed. Forcing in an unused topic-getter registration
+  would be dead code implying a routing capability the package cannot exercise. `UseTopicFrom`'s doc
+  comment and the capability matrix's "Message routing" row both now say so explicitly, so this isn't
+  silently re-litigated as a missed spot in a future pass. New tests:
+  `S3MessagePipelineTest.Send_UnknownEventName_WithPresetTopic_RoutesToPresetTopic`,
+  `DynamoDbMessagePipelineTest.Send_UnknownTopic_WithPresetTopic_RoutesToPresetTopic`,
+  `KafkaMessagePipelineTest.Send_UnknownTopic_WithPresetTopic_RoutesToPresetTopic` — each builds an event
+  whose native topic/event-name matches no handler and asserts `.UsePresetTopic()` still routes it
+  successfully (red before the DI fix: `BenzeneResolutionException` resolving `PresetTopicHolder`).
+- **[RESOLVED] #228 — SNS/S3/EventBridge's shared `SingleContextEscalatingApplicationBase.ProcessAsync`
+  swallowed infrastructure/DI-wiring failures (e.g. `BenzeneResolutionException`) under
+  `CatchExceptions=true`, reporting the invocation healthy while every message failed the same way,
+  forever.** Fixed by adding an unconditional rethrow carve-out for `BenzeneFailure.IsInfrastructure(ex)`
+  inside the `catch (Exception ex) when (_catchExceptions)` block, mirroring `SqsApplication.cs`'s
+  existing carve-out and its stated reasoning (an infra failure isn't the message's fault, isn't
+  retryable per-message, and these transports have no partial-failure channel to report it on one record
+  at a time). The existing log line is kept and extended with "Infrastructure failure — rethrowing
+  despite CatchExceptions" wording so operators see why the invocation failed instead of being logged
+  and swallowed. New tests (one per concrete application, since all three share the base class):
+  `SnsFailureHandlingTest`/`S3FailureHandlingTest`/`EventBridgeFailureHandlingTest`
+  `.HandleAsync_CatchExceptionsTrue_InfrastructureFailure_RethrowsDespiteCatchExceptions` — a pipeline
+  mock throwing `BenzeneResolutionException` with `CatchExceptions=true` now rethrows instead of
+  completing silently (red before the fix).
+- **[RESOLVED] #229 (minor) — SNS/S3/EventBridge treated a null/unset `MessageResult` (the pipeline
+  completed without any middleware setting an outcome) as an accepted message, while SQS/DynamoDb
+  explicitly treat the same case as a failure ("err toward redelivery, never toward loss").** Fixed by
+  changing `SingleContextEscalatingApplicationBase.ProcessAsync`'s escalation check from
+  `context.MessageResult?.IsSuccessful == false` to `!= true`, aligning the shared base class on
+  SQS/DynamoDb's convention; only an explicit success is now exempt from escalation. The null-result
+  semantics are now documented on the base class's `raiseOnFailureStatus` constructor-parameter doc
+  comment. Impact is deliberately narrow: normal wiring's `MessageRouter` always sets a non-null result,
+  so only a non-standard pipeline that omits it (or short-circuits before it runs) changes behavior — and
+  it changes toward failure-visibility, matching `RaiseOnFailureStatus`'s safe-by-default intent. Kafka's
+  own null-skip choice (separately documented and justified in `Benzene.Aws.Lambda.Kafka/CLAUDE.md`) was
+  deliberately left untouched, per the plan's ruling. New tests: `SnsFailureHandlingTest`/
+  `S3FailureHandlingTest`/`EventBridgeFailureHandlingTest`
+  `.HandleAsync_DefaultOptions_HandlerNeverSetsMessageResult_Throws*MessageProcessingException` — a
+  pipeline mock that never sets `MessageResult` now escalates (throws, with default
+  `RaiseOnFailureStatus=true`) instead of completing silently (red before the fix).
+
+### Round 15, WP-C — Azure cancellation + Timer escalation (#230–#232, done)
+- **[RESOLVED] #230 — `BoundedFanOut.WhenAllAsync`'s concurrency-limiting semaphore took no
+  `CancellationToken`, so an item still queued behind `MaxDegreeOfParallelism` never observed
+  cancellation and simply waited for a free slot** (verified: cap of 1, 3 items, item 0 sleeps 300ms,
+  cancel at 50ms — all three ran to completion, ~300ms+, zero `OperationCanceledException`). Fixed:
+  both `WhenAllAsync` overloads (`src/Benzene.Core.Middleware/BoundedFanOut.cs`) now take an optional
+  `CancellationToken cancellationToken = default`, threaded into `semaphore.WaitAsync(cancellationToken)`;
+  a queued item cancelled while waiting throws `OperationCanceledException` out of `WhenAllAsync`, which
+  every Azure batch trigger already treats as a failed invocation → redelivery (the correct
+  drain-abort behavior). `Task.WhenAll` already awaits every started task to completion before
+  returning/throwing, so an already-running item is never abandoned un-awaited — confirmed by a
+  dedicated regression test, no extra aggregation logic needed. Audited **every** call site repo-wide
+  (`grep BoundedFanOut.WhenAllAsync` across `src/`): `AzureFunctionBatchApplicationBase.HandleBatchAsync`,
+  `MiddlewareMultiApplication<TEvent,TContext,TResult>`/`<TEvent,TContext>` (×2), `SqsConsumerApplication`,
+  and `JaegerTraceSource.SearchAcrossServicesAsync` had a real ambient token in scope and now pass it;
+  `KafkaApplication`, `SqsApplication` (Lambda), `S3Application`, `SnsApplication`,
+  `ParallelOutboundMiddleware`, and `ScatterGatherExtensions.ScatterGatherAsync` have no
+  `CancellationToken` reaching their `HandleAsync`/public signature today, so each now passes `default`
+  explicitly with a one-line comment recording why — no unaudited caller left. New tests:
+  `BoundedFanOutTest.WhenAllAsync_Bounded_ItemQueuedBehindTheSemaphore_ObservesCancellation`,
+  `..._Void_Bounded_ItemQueuedBehindTheSemaphore_ObservesCancellation`,
+  `..._Bounded_OnCancellation_AlreadyStartedItemStillRunsToCompletion`
+  (`test/Benzene.Core.Test/Core/Middleware/BoundedFanOutTest.cs`).
+- **[RESOLVED] #231 — `TimerApplication` never escalated a message-handler's returned failure result,
+  unlike every sibling Azure Function batch trigger** (verified: a tick whose handler returned
+  `BenzeneResult.UnexpectedError()` completed without throwing — no retry, no failed-invocation
+  telemetry). Fixed: new `TimerOptions` (`src/Benzene.Azure.Function.Timer/TimerOptions.cs`) with
+  `RaiseOnFailureStatus` defaulting `true` and `CatchExceptions` defaulting `false`, matching every
+  sibling package's safe-by-default contract; accepted as an optional third ctor parameter on
+  `TimerApplication` (existing two-arg ctor call sites keep compiling unchanged). The escalation/catch
+  logic itself moved into a new `TimerTickApplication` (mirroring the `EventGridApplication`/
+  `EventGridBatchApplication` split) that `TimerApplication` now wraps: after the pipeline completes, if
+  `RaiseOnFailureStatus` and `context.MessageResult?.IsSuccessful == false`, it throws
+  `TimerMessageProcessingException`
+  (`src/Benzene.Azure.Function.Timer/TimerMessageProcessingException.cs`, carrying the tick's
+  `ScheduledFor` — `TimerTriggerInfo.ScheduleStatus?.Next` — mirroring the sibling `*MessageProcessingException`
+  shape); `CatchExceptions` contains that throw (or the pipeline's own exception) with a logged error,
+  same as every batch trigger. **Deliberate deviation from WP-B's `!= true` convention**: the
+  message-routed batch triggers run every item through `MessageRouter`, which unconditionally records
+  a result, so an unset result there only ever means the router never ran; Timer has no such
+  guarantee — its primary, documented **direct** consumption mode (`UseTick(...)`) never touches
+  `MessageResult` at all, so `!= true` would have escalated *every* plain tick by default (a real
+  regression against the existing `TimerPipelineTest`/`AzureFunctionCancellationTest` coverage, caught
+  by running them before committing). Using `== false` instead escalates only a message handler that
+  actually ran (via `UsePresetTopic(...).UseMessageHandlers()`) and explicitly reported failure — which
+  is exactly the review's probe — while leaving the direct-tick mode behaviour-preserving. Exposed
+  through `UseTimerTrigger(action, Action<TimerOptions> configure)` overloads on both
+  `IAzureFunctionAppBuilder` and `IBenzeneApplicationBuilder`. Package `CLAUDE.md`'s "Failure handling"
+  section rewritten to document the new default and flags. New tests:
+  `test/Benzene.Core.Test/Azure/TimerFailureHandlingTest.cs` (defaults, exception cascade,
+  failure-result escalation, `RaiseOnFailureStatus=false` opt-out, `CatchExceptions=true` containment
+  of both an exception and an escalated failure result).
+- **[RESOLVED] #232 (minor) — three stale "(both flags off)" doc comments left over from the
+  `RaiseOnFailureStatus` safe-by-default flip, describing a default that no longer matched reality.**
+  Reworded to the sibling packages' "safe-by-default: `RaiseOnFailureStatus` on, `CatchExceptions` off"
+  phrasing in `src/Benzene.Azure.Function.EventGrid/EventGridApplication.cs:29`,
+  `src/Benzene.Azure.Function.EventHub/Function/DependencyInjectionExtensions.cs:84`, and
+  `src/Benzene.Azure.Function.EventHub/Function/EventHubOptions.cs:18` (keeping the latter's
+  ordering-tradeoff remark otherwise intact). Doc-only, no test.
+### Round 15 — WP-D: mesh exporter flush, collector null-tolerance, schema generator, dead tag (2026-08-29)
+- **[RESOLVED] #233 — `HttpMeshTraceExporter.PumpAsync` (`src/Benzene.Mesh.Wire/IMeshTraceExporter.cs`)
+  recreated its wait-timeout deadline from a fresh relative `CancelAfter(_flushInterval)` every loop
+  iteration, so any channel activity before the timeout fired reset the effective countdown — a
+  steady, moderate trickle below `batchSize` never reached a time-based flush at all, only process
+  shutdown did (verified: one event/sec for 20s against the default `batchSize=64, flushInterval=5s`
+  produced zero POSTs during the whole run).** Fixed by tracking an absolute next-flush deadline
+  (`Environment.TickCount64 + flushIntervalMs`), computed once and reset only after an actual flush
+  (batch-full or deadline flush); each wait is bounded by however much of the deadline remains, so
+  activity can no longer push it back, and an elapsed deadline flushes the buffer even if it's below
+  `batchSize`. The shutdown tail-flush is unchanged. New `HttpMeshTraceExporterTest` (3 tests): a
+  steady trickle below `batchSize` still produces a POST well before `DisposeAsync` (red before the
+  fix — zero POSTs within the wait window; green after), the batch-full path still flushes early
+  without waiting for a long deadline, and `DisposeAsync` still tail-flushes a short, unflushed
+  remainder on shutdown.
+- **[RESOLVED] #234 — `MeshCollectorStore.Register`/`AddEvents`/`AddIssues`
+  (`src/Benzene.Mesh.Collector/MeshCollectorStore.cs`) threw `NullReferenceException` on an
+  explicit-null wire list (`descriptor.Topics`/`Produces`, `MeshTraceBatch.Events`,
+  `MeshIssueBatch.Issues`), violating the mesh spec's "no missing feed ever fails ingestion" collector
+  contract — the same defect class already fixed once for a null `Status`/`TopicVersion` field,
+  recurring one level up for whole collections.** Fixed: `Register` now coalesces
+  `descriptor.Topics`/`descriptor.Produces` to an empty list on the descriptor itself (not just a
+  local variable), so every later read of the stored descriptor is safe too; `AddEvents` coalesces its
+  `events` parameter; `AddIssues` coalesces `batch.Issues` and, one level down, each issue's
+  `ExemplarTraceIds` — the one further unguarded wire-list iteration the sweep turned up. New tests in
+  `MeshCollectorStoreTest`: `Register_NullTopicsAndProduces_IsAcceptedAsAnEmptyDeclaredGraph`,
+  `AddEvents_NullEventsList_IsAcceptedAsANoOpBatch`,
+  `AddIssues_NullIssuesList_IsAcceptedAsALivenessOnlyBatch_AndMarksTheFeedWired` — all deserialize the
+  review's exact null-list payloads via `MeshJson.Options` (red before the fix — NRE on each; green
+  after). This brings the collector into conformance with the spec's existing text; no fixture edit
+  (spec change) was needed or made, per the repo's own rule against changing a fixture to match an
+  implementation.
+- **[RESOLVED] #235 — `MeshSchemaGenerator.TryGetDictionaryValueType`
+  (`src/Benzene.Mesh.Wire/MeshSchemaGenerator.cs`) only recognized string-keyed
+  `IDictionary`/`IReadOnlyDictionary`; any other key type (int/enum/Guid-keyed, etc.) fell through to
+  the enumerable fallback, deriving a wrong "array of {key,value}" schema shape — but
+  System.Text.Json actually serializes any dictionary as a JSON object with string-converted keys
+  regardless of key type, so the descriptor misdescribed the real wire format for any handler contract
+  using a non-string-keyed dictionary.** Fixed by dropping the `x.GetGenericArguments()[0] ==
+  typeof(string)` key-type restriction from the interface match (checked before the enumerable
+  fallback, unchanged ordering) — a dictionary of any key type now emits `{"type":"object",
+  "additionalProperties":<value schema>}`, matching the real wire shape. The string-keyed path's own
+  output is unchanged: `Derive_StringKeyedDictionary_SchemaIsByteIdentical_NoDescriptorHashChurnFromTheFix`
+  pins its exact JSON verbatim, byte-identical to before (no descriptor-hash churn for an
+  already-correct contract). New `Derive_NonStringKeyedDictionary_StillMapsToObjectWithAdditionalProperties_NotAnArray`
+  theory covers `Dictionary<int,string>`, an enum-keyed dictionary, and `Dictionary<Guid,string>` (red
+  before the fix — each derived the array-of-{key,value} shape; green after).
+- **[RESOLVED] #236 (minor) — `AwsLambdaDiscoveryProvider`'s `benzene:mesh-path` tag was read into
+  `SourceOptions["meshPath"]` (with test coverage asserting exactly that), but the only consumer of
+  `AwsLambdaInvoke` mesh sources, `LambdaMeshServiceSource`, never read a `meshPath` option at all — a
+  known incomplete item from the original self-discovery design doc
+  (`work/archive/mesh-self-discovery-design-2026-07.md` §6 item 1: "aligning `LambdaMeshServiceSource`
+  to ask for `mesh`" was never finished; `LambdaMeshServiceSource` still sends the fixed
+  `benzene:spec`/`benzene:healthcheck` topics through the `BenzeneMessage` envelope, which has no path
+  concept). Ruling: remove the dead tag rather than wire it — there is nothing meaningful for
+  `meshPath` to do against the envelope-only interrogation this adapter actually performs.** Removed
+  the `MeshPathTag` constant, the `options["meshPath"]` write, and the doc remarks
+  (`AwsLambdaDiscoveryProvider.cs`'s class remark, `Benzene.Mesh.Discovery.Aws/CLAUDE.md`'s Key-types
+  and Tests sections) that described it; deleted
+  `AwsLambdaDiscoveryProviderTest.Discover_CarriesMeshPathHintTag`, the test asserting the tag's
+  carry-through. This closes the paper trail the design doc's §6 item 1 left open.
+### Round 15, WP-E — Polly cancellation + Xml serializer contract (#237, #238, done)
+Design/rationale in [`bug-fix-designs-round15-2026-08.md`](archive/bug-fix-designs-round15-2026-08.md)
+§5. Plan in [`bug-fix-plan-round15-2026-08.md`](archive/bug-fix-plan-round15-2026-08.md) WP-E.
+- **[RESOLVED] #237** — `PollyResilienceMiddleware<TContext>.HandleAsync` discarded the
+  `CancellationToken` Polly passes its `ExecuteAsync` callback, silently defeating every
+  cancellation-driven Polly strategy (Timeout, Hedging, RateLimiter); the published cookbook
+  (`docs/cookbooks/polly-resilience.md`) additionally claimed the token was passed through, which was
+  false against the actual source (verified: its own "Testing" sample threw no exception). **Ruling
+  applied: fixed it for real, not a doc retreat.** The middleware now exposes Polly's per-attempt token
+  to the downstream pipeline via the ambient `CancellationTokenAccessor` — exactly the pattern the
+  sibling `Benzene.Resilience.TimeoutMiddleware<TContext>` already uses: for the duration of each Polly
+  attempt it links the attempt's token with whatever ambient token was already set
+  (`CancellationTokenSource.CreateLinkedTokenSource`, so an outer `UseTimeout` or any host-seeded token
+  is never lost), sets the accessor to the linked token before invoking `next()`, and restores the
+  prior token in a `finally` once the attempt finishes. `PollyResilienceMiddleware<TContext>` gained an
+  optional `CancellationTokenAccessor? accessor` constructor parameter (a private one is created when
+  omitted, so direct construction without DI still works); the four `.UseResiliencePipeline(...)`
+  overloads now resolve it from the same DI scope as the rest of the pipeline (mirroring
+  `.UseTimeout`'s `resolver.GetService<CancellationTokenAccessor>()`), so real usage shares one
+  instance with everything else in the scope. This resolves the open design question flagged in
+  `work/archive/polly-resilience-plan-2026-08.md` (ship unresolved, "resolve via
+  `ICancellationTokenAccessor`, the pattern `TimeoutMiddleware` already uses correctly"). The cookbook's
+  "Testing" sample, cancellation section, and the package `CLAUDE.md` are corrected to describe the
+  real mechanism and — matching `TimeoutMiddleware`'s own documented caveat — state plainly that this
+  can only cancel work that *observes* the ambient token: a `next()` that ignores it still runs to
+  completion, and Polly (like .NET cancellation generally) cannot forcibly abort a running `Task`, so
+  no `TimeoutRejectedException` is raised either in that case. Tests (`PollyResilienceMiddlewareTest.cs`):
+  a Polly timeout strategy actually throws `TimeoutRejectedException` when `next` observes the ambient
+  accessor's token (the corrected cookbook sample, run verbatim); the accessor is restored after each
+  attempt; an outer ambient token's cancellation survives being linked with Polly's own per-attempt
+  token; a `next` that ignores the token runs to completion with no exception even past the deadline
+  (the documented caveat, both with and without an explicitly-supplied accessor).
+- **[RESOLVED] #238** — `Benzene.Xml.XmlSerializer.Deserialize` broke its own documented null-round-trip
+  contract: `Serialize(type, null)` deliberately returns `""` (matching Avro/MessagePack's null-tolerant
+  pattern per its own doc comment), but `Deserialize(type, "")` threw `InvalidOperationException` and
+  `Deserialize(type, null)` NRE'd outright (unguarded dereference checking for a leading BOM character).
+  Fixed by guarding `Deserialize(Type, string)` with `string.IsNullOrEmpty(payload)` → return `null`
+  before any parsing, mirroring `Serialize`'s own null guard and matching Avro/MessagePack's
+  `string.IsNullOrEmpty(payload) ? null : ...` pattern exactly. The generic `Deserialize<T>(string)`
+  overload delegates to the guarded untyped overload, so both are covered by one guard. Malformed
+  non-empty XML still throws (unchanged; the guard only short-circuits null/empty). Tests
+  (`XmlSerializerTest.cs`): `Serialize(null)` → `Deserialize` round-trips to `null`; `Deserialize` of
+  `null` and of `""` (both overloads) return `null` without throwing; a genuinely malformed non-empty
+  payload still throws `InvalidOperationException`.
+> **Tracked findings, 2026-08-29 (round 15, WP-F) — all six fixed; build/test verification pending
+> centralized re-verification.** The round-15 review pass's CodeGen/Schema sweep (task board
+> #239–#244) produced six evidence-backed findings across the discriminator-matching comparers, the
+> C# client generator, the OpenAPI document builder, the JSON-example schema inferrer, the
+> event-service deserializer, and the (explicitly experimental, non-packable) Terraform generator.
+> All six landed in one work package, each with red-before/green-after tests. Design rulings remain
+> in **[`bug-fix-designs-round15-2026-08.md`](archive/bug-fix-designs-round15-2026-08.md)** §6 (once
+> archived); consult it before touching any of this code again.
+> **Verification note:** this round landed alongside ~15 other work-package sessions all building the
+> full solution concurrently on one shared, resource-constrained host (load averages 100–270 on 4
+> cores, confirmed OOM kills) — every WP hit the same wall. Rather than 16 agents fighting the same
+> contended host in parallel, the round coordinator is running one centralized
+> `dotnet build`/`dotnet test` pass after all 16 work packages merge and the host quiets down. Before
+> that centralized pass: every project this WP touched (`Benzene.Schema.OpenApi`,
+> `Benzene.Schema.Compatibility`, `Benzene.CodeGen.Client`, `Benzene.CodeGen.Terraform`) was observed
+> compiling cleanly (0 errors) during a partial build that reached ~90% of the ~150-project solution
+> before being abandoned for time; the full-solution build and the `test/Benzene.Core.Test` run were
+> not completed end-to-end under this WP's own session.
+- **[RESOLVED] #239 — `SchemaCompatibilityComparer.VariantKey` and its twin
+  `JsonSchemaComparer.VariantKey` had dead discriminator-mapping-fallback code: reached only when the
+  member has no `$ref` (so `refId` is guaranteed `null` there), it then compared
+  `RefTargetName(entry.Value) == refId` — i.e. against `null` — which a mapping value string can never
+  equal, so it could never match.** Every inline (non-`$ref`) discriminated-union member fell through
+  to purely positional matching regardless of any discriminator mapping — a `oneOf` of two inline
+  discriminator-mapped members, purely reordered with byte-identical content, was reported as spurious
+  property changes and `HasBreakingChanges == True`, which would fail the `EnsureBackwardCompatible` CI
+  gate on a pure no-op reorder. Fixed in both twins identically: `IndexVariants` now precomputes the
+  discriminator-mapping entries that don't already name one of the union's `$ref` members
+  (`UnclaimedMappingKeys`/its JSON-walker twin) — the entries that, if they identify anything at all,
+  must be identifying one of the *inline* members — in the mapping's own declaration order, and pairs
+  the *n*-th such inline member with the *n*-th unclaimed entry, giving it a stable `disc:` identity
+  that survives the whole union being reordered (member array and mapping moving together). `$ref`-named
+  matching (round 11, #152/#53) is untouched — a `$ref` member still keys on its own target name
+  unconditionally, before the mapping fallback is ever consulted. New tests in both
+  `SchemaCompatibilityComparerTest` and `JsonSchemaComparerTest`: two inline discriminator-mapped
+  members reordered (mapping reordered along with them) now produce zero changes, and a genuine
+  property removal on one inline member is still caught and attributed to exactly that variant.
+- **[RESOLVED] #240 — `CSharpTypeName.GetName`/`GetArrayType` returned a `$ref`'s raw, unsanitized
+  `Reference.Id` as a C# type name, while the referenced type's own class declaration
+  (`OpenApiSchemaCSharpTypeBuilder`) correctly ran the same id through `CSharpNameFormatter.Format`.**
+  Reachable via the documented bring-your-own-schema `SuppliedSchemaCatalog` feature, whose schema ids
+  are arbitrary caller strings: a catalogue id `orderItem` generated a correctly Pascal-cased class
+  `OrderItem` but a property of the never-generated raw type `orderItem` (CS0246); a hyphenated id
+  (`order-item`) produced a hard C# syntax error. Fixed: `CSharpTypeName` now owns a
+  `CSharpNameFormatter` instance and routes every `Reference.Id` read (the direct `$ref` case, the
+  `oneOf`/`anyOf` shared-`allOf`-base case, and the array-of-`$ref` case in `GetArrayType`) through it,
+  so a property/parameter type name and the class it names can never diverge again.
+  `MessageClientSdkBuilder.AddMethod`'s method-signature path needed no separate fix — it already calls
+  through `_typeName.GetName`, so it picked the fix up transitively. New tests:
+  `CSharpTypeNameTest` unit-asserts the formatted-name match (and the hyphenated case's validity)
+  directly, and a new `CodegenOutputCompilesTest.GeneratedClient_WithArbitraryCatalogueSchemaId_Compiles`
+  theory drives the real builder pipeline for both `orderItem` and `order-item` catalogue ids and
+  compiles the generated output with Roslyn.
+- **[RESOLVED] #241 — `OpenApiDocumentBuilder.MapOperationType` indexed a fixed 8-verb dictionary
+  directly with `HttpEndpointAttribute.Method` (an unvalidated free-form string), so a real but
+  unsupported verb (`CONNECT`) or a plain typo (`Gett`) crashed the whole spec build with an opaque
+  `KeyNotFoundException` naming neither the bad verb nor which handler/topic/path it came from.**
+  Ruling: kept the 8-verb table (it is exactly OpenAPI's supported operation-object set — `CONNECT` has
+  no OpenAPI representation, so widening it would be wrong), replaced the raw dictionary index with a
+  case-insensitive `TryGetValue`, and on a miss throw a descriptive `InvalidOperationException` naming
+  the invalid method *and* the topic and path of the endpoint being mapped (threaded in from
+  `CreateOpenApiOperation`, which already has that context). New tests in
+  `OpenApiDocumentBuilderTest`: `Gett` and `CONNECT` both throw with the verb, topic, and path all
+  present in the message; `get`/`GET`/`Get` all map successfully to the same operation.
+- **[RESOLVED] #242 — `JsonOpenApiSchemaBuilder.CreateArraySchema` called `jToken.First()`
+  unconditionally when inferring a schema from an example JSON payload (the documented
+  `AddJsonEvent(topic, typeName, json)` extension), so an ordinary empty example array anywhere in the
+  payload (`{"id":"abc","tags":[]}`) crashed with `InvalidOperationException: Sequence contains no
+  elements`.** Fixed: guarded the empty-`JArray` case before calling `.First()`, emitting an array
+  schema with an untyped items placeholder (`new OpenApiSchema()` — no `type` keyword, matching
+  anything) rather than guessing a type with nothing in the example to infer it from; a non-empty array
+  still infers its item schema from the first element exactly as before. New test:
+  `CreateSchema("OrderCreated", "{\"id\":\"abc\",\"tags\":[]}")` (the exact review probe) now returns a
+  schema instead of throwing.
+- **[RESOLVED] #243 (minor) — `EventServiceDocumentDeserializer.GetEvents`/`GetRequests` read the
+  `"events"`/`"requests"` array with a null-forgiving `!` and no null-coalescing, unlike the adjacent
+  `GetTransports`/`GetTags`, which both null-coalesce to empty** — a document missing either key
+  (reachable via an externally-sourced or older-shape baseline passed to
+  `SchemaCompatibility.EnsureBackwardCompatible`; Benzene's own emitted documents always include both
+  arrays) crashed with `ArgumentNullException` instead of deserializing to an empty array like every
+  other missing optional collection here does. Fixed by null-coalescing both to
+  `Array.Empty<T>()`, matching the sibling getters exactly. New test:
+  `EventServiceDocumentDeserializerTest.Deserialize_DocumentMissingEventsAndRequests_...` deserializes
+  a minimal document with neither key to empty `Events`/`Requests` arrays.
+- **[RESOLVED] #244 (minor, experimental/non-packable package) — `Benzene.CodeGen.Terraform`'s HCL
+  generation (`TerraformEventBridgeRuleBuilder.QuoteList` and other interpolated fields across the
+  package) didn't escape `"`/`\` before embedding caller-supplied values (topic names, Lambda names,
+  entry points, domains) into generated `.tf` string literals** — the same unescaped-interpolation bug
+  class round 14 found in `CodeGen.ApiGateway`/Markdown, now confirmed in a third generator; a value
+  containing `"` produced invalid HCL (an early-terminated string literal). Fixed: added one
+  `NameFormatter.EscapeHclString` helper (backslash first, then double quote; null/empty-tolerant to
+  match the interpolation it replaces) and routed every interpolated string-literal value across
+  `TerraformEventBridgeRuleBuilder`, `TerraformLambdaBuilder`, and
+  `TerraformLambdaEventBusPermissionsBuilder` through it — `QuoteList`, the rule/target/lambda/role tag
+  and name attributes, and the SNS subscription `filter_policy` topic list. Resource *labels* (the
+  second quoted string in `resource "type" "label"`, already derived through `NameFormatter.UnderScoreCase`)
+  were deliberately left alone — that's a separate identifier-validity concern, not the string-literal-
+  escaping bug this fixes. New tests assert a topic containing `"` and one containing `\` each produce
+  correctly-escaped output through `QuoteList`.
+## Rounds 12–14 fixes (2026-08-29)
+
+- **[RESOLVED] #47 — `MeshAnnouncer.EnsureStarted` permanently disabled the announcer (and could fail
+  the triggering invocation) if descriptor derivation threw, rather than only if it returned null.**
+  This was the oldest open item on the board; the null-descriptor half had already been fixed since
+  #47 was originally filed — `EnsureStarted` correctly reset `_started` to 0 and let the next
+  invocation retry when `_descriptorSource.TryGet()`/`.Get(resolver)` returned null. The residual gap
+  this closes: if that call **threw** instead — e.g. the invocation's registry (lazy path) genuinely
+  isn't ready yet — the exception propagated straight out of `EnsureStarted`, failing whatever
+  invocation happened to trigger the lazy start, and left `_started` stuck at 1 forever with the
+  announce loop never starting on any later invocation either. Both halves of the class's own
+  documented contract (spec §6 — every failure here is swallowed and retried on the next invocation,
+  and nothing here ever fails an invocation) were violated. Fixed: wrapped the descriptor-derivation
+  call in `MeshAnnouncer.cs` in try/catch; on any exception, reset `_started` to 0 and return without
+  throwing — identical reset to the existing null-descriptor path, so a later invocation (with a
+  ready registry) retries and starts the announce loop normally. New test
+  `MeshAnnouncerTest.EnsureStarted_WhenDescriptorDerivationThrows_SwallowsAndRetriesOnNextInvocation`
+  (`test/Benzene.Core.Test/CloudService/MeshAnnouncerTest.cs`) white-box tests `MeshAnnouncer` directly
+  against a resolver stub whose `TryGetService<IMessageHandlerDefinitionLookUp>()` throws once then
+  succeeds (added `InternalsVisibleTo` from `Benzene.CloudService` to the test assembly, since a
+  throwing lazy-path derivation is otherwise unreachable through the public `UseBenzeneCloudService`
+  builder API); it confirmed red against the prior source (first call threw to the caller and the
+  second call was a permanent no-op — the collector never saw a register POST) and green after the fix
+  (first call returns quietly, second call's announce loop registers, observed via a stub
+  `HttpMessageHandler` receiving the `benzene:mesh:register` envelope). Full CloudService suite
+  (`Benzene.Test`, `FullyQualifiedName~CloudService`): 34/34 passed; full `Benzene.sln` build (incl.
+  every test project): 0 errors.
+### Tracked findings round 12, WP-H — Mesh.Dispatch: cancellation, audit trail, limiter charging (#185–#187, done)
+Ruled in [`bug-fix-designs-round12-2026-08.md`](archive/bug-fix-designs-round12-2026-08.md) §1 (see
+`work/archive/bug-fix-plan-rounds12-14-2026-08.md` for the WP-H task text). Files:
+`src/Benzene.Mesh.Dispatch/MeshDispatchMessageHandler.cs`,
+`src/Benzene.Mesh.Dispatch/MeshDispatchRateLimiter.cs` (no code change needed there — see #187).
+
+- **[RESOLVED] #185 — `MeshDispatchMessageHandler.HandleAsync` hardcoded `CancellationToken.None` into
+  the dispatch call**, so `UseTimeout(...)` wrapping `UseMeshDispatch()` gave zero real protection: the
+  real, side-effecting dispatch ran to completion regardless of the configured deadline. Fixed by
+  resolving the ambient token via an optional `ICancellationTokenAccessor` constructor parameter,
+  read at the point of use — the exact idiom `HttpBenzeneMessageClient` already uses
+  (`_cancellation?.CancellationToken ?? CancellationToken.None`). No new DI registration was needed:
+  `Benzene.Core.MessageHandlers`'s DI extensions already register a scoped `ICancellationTokenAccessor`,
+  and `MeshDispatchMessageHandler` is itself registered scoped, so the container resolves it
+  automatically. New test `MeshDispatchMessageHandlerTest.ResolvesCancellationTokenFromTheAccessor_AndPassesItToTheDispatcher`
+  asserts the exact token flows through to the dispatcher (not `CancellationToken.None`); the review's
+  own probe — `UseTimeout(...)` wrapping the handler with a slow mock dispatcher —
+  is `UseTimeout_AroundTheDispatchHandler_ActuallyBoundsTheRealDispatchCall`: pre-fix, the dispatch runs
+  the mock's full simulated delay regardless of a 50ms deadline; post-fix, it observes cancellation
+  well short of that (the assertion bound is deliberately generous — a fraction of the mock's
+  simulated work — so it is a mechanism check, not a scheduler-precision check).
+- **[RESOLVED] #186 — a thrown dispatch exception (target unreachable, DNS failure, malformed URL)
+  left zero audit trail**, unlike every other exit path in the handler, which calls `Audit(...)` first.
+  Ruling: audit-then-fail-as-result, never a silent raw throw. Fixed by wrapping the
+  `dispatcher.DispatchAsync(...)` call in try/catch; on exception, `Audit(...)` now takes an optional
+  `Exception?` parameter (added to the existing private method, same log-call shape every other exit
+  path uses — outcome/service/topic/caller-identity, now also carrying the exception when there is
+  one) recording outcome `"dispatch-failed"`, then the handler returns
+  `BenzeneResult.ServiceUnavailable<RawStringMessage>(ex.Message)` — the same status this codebase's
+  other outbound-call boundaries (`HttpBenzeneMessageClient`, `GrpcBenzeneMessageClient`) already use
+  for a transport-level send failure, not a new status. New test
+  `MeshDispatchMessageHandlerTest.DispatcherThrows_AuditsTheFailure_AndReturnsServiceUnavailable_InsteadOfThrowing`:
+  pre-fix, a throwing mock dispatcher's exception propagated raw out of `HandleAsync` with zero logger
+  invocations; post-fix, exactly one `LogInformation` call carrying the failure and a
+  `service-unavailable` result returned instead.
+- **[RESOLVED] #187 (minor) — `MeshDispatchRateLimiter` charged/created a per-target window for
+  arbitrary/unregistered service names before the registry validated the service exists**, leaking a
+  permanent dictionary entry per distinct garbage name (500 nonexistent names = 500 permanent entries),
+  never pruned from within `Benzene.Mesh.Dispatch` itself. Ruling: validate before charging. Fixed by
+  reordering `HandleAsync` so the registry existence check (`_registry.Services.FirstOrDefault(...)`)
+  now runs *before* `_limiter.TryAcquire(...)` — no change needed inside
+  `MeshDispatchRateLimiter` itself, since the fix is entirely about when the handler calls it. An
+  unregistered service name is now rejected (`not-found`) without the limiter ever creating an entry
+  for it, and a legitimately rate-limited *registered* target is unaffected (the limiter still runs,
+  just one step later). New test
+  `MeshDispatchMessageHandlerTest.UnregisteredServiceNames_AreRejected_WithoutEverChargingTheRateLimiterWindow`:
+  drives 500 distinct nonexistent service names through the handler (each asserted `not-found`, never
+  `rate-limited`), then reflects into the limiter's private `_windows` dictionary and asserts a count
+  of 0 — pre-fix this was 500.
+
+Full `test/Benzene.Mesh.Test` run after the fix: 560 passed, 0 failed. (One test,
+`JaegerTraceSourceTest.GetRecentFlowsAsync_QueriesServicesConcurrently_NotSequentially`, failed on a
+single run under an exceptionally loaded shared build host — a pre-existing, WP-H-unrelated
+concurrency-timing assertion — and passed cleanly on immediate re-run with no code changes; not a
+regression from this work package.)
+### Tracked findings round 12–14, WP-I — Mesh Fleet: Tempo correlation fetch + Jaeger fan-out isolation (done)
+Decisions, rationale, and the shared-file overlap check against round-15 WP-C are ruled in
+`work/archive/bug-fix-plan-rounds12-14-2026-08.md` §"WP-I" and `work/archive/bug-fix-designs-round12-2026-08.md` §2.
+- **[RESOLVED] #188 — `TempoTraceSource.GetCorrelationAsync` fetched up to 100 matched traces fully
+  sequentially with zero per-trace fetch isolation, unlike `Benzene.Mesh.Fleet.Aws.XRay`'s correct
+  pattern; one trace's transient HTTP failure mid-loop discarded the entire correlation search,
+  including every trace already fetched successfully.** Per-trace fetches now run through
+  `Benzene.Core.Middleware.BoundedFanOut`, each wrapped in its own try/catch (a failing fetch is logged
+  via the new optional `ILogger?` constructor parameter and skipped; `OperationCanceledException` still
+  propagates), so a mid-loop failure degrades to "the healthy traces," never the whole search. Bounded
+  by a new `TempoTraceSourceOptions.SearchConcurrency` (default 8, matching Jaeger's
+  `SearchConcurrency` default) rather than one-at-a-time. See WP-I.
+- **[RESOLVED] #189 (minor) — Jaeger's per-service search fan-out (over the shared
+  `Benzene.Core.Middleware.BoundedFanOut`) capped concurrency but had no per-item failure isolation; one
+  faulted per-service task discarded every other service's completed results via `Task.WhenAll`'s fault
+  semantics.** Fixed at the `JaegerTraceSource.SearchAcrossServicesAsync` call site (not in
+  `BoundedFanOut.cs` itself — see the shared-file note below): each per-service body now catches its own
+  exception, logs it (new optional `ILogger?` constructor parameter) with the failed service name, and
+  contributes an empty result for that service instead of faulting the fan-out, so the healthy services'
+  results still return. See WP-I.
+- **[RESOLVED] #190 (minor) — Tempo's correlation search limit was hardcoded to 100 with no override
+  and no warning when hit, unlike Jaeger's `SearchLimitPerService` or X-Ray's #77-fixed logged-warning
+  pattern.** Lifted into `TempoTraceSourceOptions.SearchLimit` (default 100, preserving prior behavior);
+  `GetCorrelationAsync` now logs a warning via the same optional `ILogger?` when the search returns a
+  full page at the configured limit (the result may not cover every matching trace), rather than
+  truncating silently. See WP-I.
+- **Shared-file note (BoundedFanOut):** `src/Benzene.Core.Middleware/BoundedFanOut.cs` is confirmed
+  shared (Jaeger, MapReduce's `ScatterGatherExtensions`, `Benzene.Clients`' `OutboundParallelExtensions`/
+  `ParallelOutboundMiddleware`, several Azure/AWS Lambda batch applications all reference it) — **this
+  WP did not modify `BoundedFanOut.cs` at all.** Both #188's and #189's per-item isolation are
+  implemented entirely at the call site (the body lambda passed into `BoundedFanOut.WhenAllAsync`
+  catches its own exception and returns a sentinel/empty result instead of letting it fault the
+  `Task.WhenAll`), so there is **no file-level overlap and no expected merge conflict** with round-15
+  WP-C's `CancellationToken`-parameter addition to `BoundedFanOut.cs` — that file is untouched by this
+  commit. (Tempo's fetch loop newly takes a dependency on `BoundedFanOut` via a new
+  `Benzene.Core.Middleware` project reference in `Benzene.Mesh.Fleet.Tempo.csproj`, but does not touch
+  its source.)
+### Tracked findings round 12–14, WP-K — Saga: rollback on state-store failure + multi-failure surfacing (done)
+Ruling and rationale are recorded in
+[`bug-fix-plan-rounds12-14-2026-08.md`](archive/bug-fix-plan-rounds12-14-2026-08.md) §"WP-K — Saga: rollback
+on state-store failure + multi-failure surfacing (#208, #209)" and
+[`bug-fix-designs-round14-2026-08.md`](archive/bug-fix-designs-round14-2026-08.md) §2.
+- **[RESOLVED] #208 — a saga-state-store failure aborted the run with zero rollback attempt, silently
+  breaking `Saga`'s own documented "all-or-nothing" guarantee.** A state-store exception thrown right
+  after a real, effect-producing stage completed (`ISagaStateStore.RecordStageCompletedAsync`, and the
+  final `RecordFinishedAsync` call on an all-succeeded run) propagated raw out of `RunAsync`, so the
+  registered `Compensate` for the completed stage(s) never ran. Fixed: `Saga.RunOnceAsync` now catches
+  a store exception at both of those call sites, compensates every completed stage exactly as a step
+  failure would (new `RollBackCompletedStagesAsync`/`HandleStateStoreFailureAsync` helpers), and
+  returns `SagaOutcome.RolledBack` (or `PartiallyRolledBack` if a compensation itself also fails,
+  populating the existing `CompensationFailures` list) with the store's exception attached via a new
+  `SagaResult.StateStoreException` property — never a raw throw. The result is still (best-effort)
+  persisted via one more `RecordFinishedAsync` call, swallowing a second store failure there so it
+  cannot mask the already-computed rollback outcome. **Documented edge case (deliberate):** a failure
+  from `ISagaStateStore.RecordStartedAsync` - before any stage has run - is left to propagate raw,
+  since there is nothing yet to compensate; this is called out explicitly in the `Saga` class remarks
+  and in the `RunOnceAsync` call site. A store failure on `RecordFinishedAsync` *after* a step-failure
+  rollback has already run is likewise left as a swallowed best-effort persist (rollback already
+  happened; nothing further to compensate), so a second store hiccup there can't discard the
+  already-correct, already-computed result. New tests in `SagaRetryAndStateStoreTest`:
+  `StateStore_ThrowsRightAfterARealStageCompletes_TriggersCompensation_InsteadOfRawThrow`,
+  `StateStore_CompensationItselfFails_ReturnsPartiallyRolledBack`,
+  `StateStore_ThrowsOnFinalFinish_AfterEveryStageSucceeded_TriggersFullRollback`, and (for the
+  documented edge case) `StateStore_ThrowsOnRecordStarted_BeforeAnyStageRuns_PropagatesRaw`.
+- **[RESOLVED] #209 — when two steps in the same stage failed concurrently, `SagaResult` surfaced only
+  one of them via `Failure`/`FailureException`; the other had no representation anywhere on the public
+  result.** Fixed: added `SagaResult.Failures` (`IReadOnlyList<SagaStepOutcome>`), populated with
+  *every* failed step's outcome in the failing stage - the data was already there in
+  `RollBackAsync`'s per-stage outcome list, just filtered down to `FirstOrDefault` before. `Failure`
+  and `FailureException` are now convenience views over `Failures[0]`, kept for backward
+  compatibility and documented as such, mirroring how `CompensationFailures` is already the full list
+  on this same class. New test in `SagaTest`:
+  `RunAsync_TwoStepsFailConcurrentlyInSameStage_SurfacesBothInFailures` (asserts `Failures.Count == 2`,
+  both step identities/exceptions present, and that `Failure`/`FailureException` still match the first
+  entry). Round-1's #15 concurrency fix (`SagaStep<T>`/`Stage` outcome now run-scoped, not stored on
+  the shared instance) was re-run unchanged and remains green -
+  `RunAsync_ManyConcurrentRunsOnOneBuiltSaga_NeverCrossContaminate` (300 concurrent runs, 0
+  cross-contaminated) - this WP's `RunOnceAsync` changes added only local/parameter state, no new
+  shared mutable state.
+### Tracked findings rounds 12–14, WP-L — Autofac closed-generic routing (done)
+Ruled in [`bug-fix-plan-rounds12-14-2026-08.md`](archive/bug-fix-plan-rounds12-14-2026-08.md) WP-L, from the
+round-14 finding in [`bug-fix-designs-round14-2026-08.md`](archive/bug-fix-designs-round14-2026-08.md) §3. Read
+the round-9 #82–#85 `[RESOLVED]` entries above (WP-Q) before touching this file again — these are the
+same six methods those fixes touched, and their regression tests (32-way concurrent resolution,
+`TryAdd*` idempotency, `CreateServiceResolverFactory()` repeat-call safety) must stay green.
+
+- **[RESOLVED] #210 — `AutofacBenzeneServiceContainer` threw on a CLOSED generic `Type` where the
+  Microsoft DI adapter succeeds, because the generic-routing check in six methods
+  (`AddScoped(Type)`, `AddScoped(Type, Type)`, `AddTransient(Type)`, `AddTransient(Type, Type)`,
+  `AddSingleton(Type)`, `AddSingleton(Type, Type)`) tested `Type.IsGenericType` — true for both an open
+  generic definition (`typeof(Handler<>)`) and a closed generic (`typeof(Handler<Widget>)`) — instead of
+  `Type.IsGenericTypeDefinition`, true only for the open definition. A closed generic `Type` failed the
+  check into Autofac's `RegisterGeneric`, which requires an open generic type definition and throws
+  `ArgumentException: The type ... is not an open generic type definition` on a closed one — so a
+  discovered handler class that happened to be a closed generic (e.g. `Handler<SomeConcreteMessage>`
+  rather than an open `Handler<>`) worked under `MicrosoftBenzeneServiceContainer` (which has no generic
+  branching at all - it forwards every `Type` straight to `IServiceCollection`, which handles open and
+  closed generics uniformly) and threw under Autofac.** Fixed: all six checks now test
+  `IsGenericTypeDefinition`, routing a closed generic `Type` through the ordinary `RegisterType`/`As`
+  path exactly like the Microsoft adapter, while an open generic definition still takes
+  `RegisterGeneric`. New `AutofacClosedGenericRoutingTest` (alongside the existing
+  `AutofacDIParityTest`/`AutofacDITest`): a red run against the pre-fix `IsGenericType` check reproduced
+  the exact `ArgumentException` on all six methods (verified by reverting the fix locally and re-running
+  the new test file — 6 failed, 3 passed); post-fix all 9 tests pass, including a Microsoft-adapter
+  control test (`MicrosoftAdapter_AddScoped_ClosedGenericType_Succeeds`) resolving the identical closed
+  generic type side-by-side, and an open-generic regression test
+  (`AutofacAdapter_AddScoped_OpenGenericType_StillResolvesPerClosedRequest`) confirming the
+  generic-definition path is untouched. Full re-run of `test/Benzene.Core.Test` (1413 tests, including
+  every #82–#85 regression test and all pre-existing open-generic registrations exercised transitively
+  by `AddMessageHandlers`): 1411 passed, 0 failed, 2 skipped. No capability-matrix change: the matrix
+  carries no DI-container-adapter row describing generic-registration behavior, so there is no stale
+  capability statement to correct — parity with the Microsoft adapter is exactly what the adapter is
+  meant to provide and was never claimed otherwise.
+### Tracked findings rounds 12-14, WP-N — S3 TestHelpers key encoding + ServiceBus client logger guard (#191, #192, done)
+Ruling and rationale are in [`bug-fix-plan-rounds12-14-2026-08.md`](archive/bug-fix-plan-rounds12-14-2026-08.md) WP-N and
+[`bug-fix-designs-round12-2026-08.md`](archive/bug-fix-designs-round12-2026-08.md) §3.
+- **[RESOLVED] #191 — `Benzene.Aws.Lambda.S3.TestHelpers`'s `AsS3` builder produced a fake object key
+  that was never URL-encoded, so the real `S3ObjectKeyCodec.Decode` step (added by #158's fix) silently
+  corrupted any test-constructed key containing `+`, `%`, or other S3-reserved characters** — verified:
+  `"invoice+2024-08-27.pdf"` through `AsS3` and the real production getters came back as
+  `"invoice 2024-08-27.pdf"`. Fixed by adding `S3ObjectKeyCodec.Encode` — the exact inverse of
+  `Decode` (`WebUtility.UrlEncode` alongside `Decode`'s `WebUtility.UrlDecode`) — and using it in
+  `MessageBuilderExtensions.AsS3` to encode the caller's real (decoded) key before storing it on the
+  fake record, so the codec pair round-trips by construction: `Decode(Encode(key)) == key` for any
+  key, including one containing `+`, `%`, or non-ASCII characters. Regression tests in
+  `S3TestHelpersTest.AsS3_ReservedOrUnicodeCharactersInKey_RoundTripThroughTheRealProductionGetters`
+  (a `[Theory]` covering the review's exact `+` probe plus a `%`-containing key and a unicode key),
+  asserting the round-trip through both the raw record's `Decode` and the real
+  `S3MessageBodyGetter`/`S3MessageHeadersGetter`.
+- **[RESOLVED] #192 (minor) — `ServiceBusBenzeneMessageClient`'s failure-handling catch block itself
+  threw if constructed with a null logger (its own `LogError` call null-guards), and every other
+  `*BenzeneMessageClient` in the codebase shared the same constructor shape.** Fixed by adding
+  `ArgumentNullException.ThrowIfNull(logger)` as the first statement in every constructor that takes a
+  required (non-optional, non-nullable) `ILogger`/`ILogger<T>` across the client family, so a null
+  logger fails fast at construction instead of inside the catch block at the worst possible moment.
+  `HttpBenzeneMessageClient` was deliberately left unchanged — its `ILogger? logger = null` parameter
+  is optional by design and every use is already null-conditional (`_logger?.LogError(...)`).
+  Classes touched (both constructor overloads on each, where two exist):
+  `Benzene.Clients.Azure.ServiceBus.ServiceBusBenzeneMessageClient`,
+  `Benzene.Clients.Aws.EventBridge.EventBridgeBenzeneMessageClient`,
+  `Benzene.Clients.Aws.Lambda.AwsLambdaBenzeneMessageClient` (single constructor),
+  `Benzene.Clients.Aws.Sns.SnsBenzeneMessageClient`, `Benzene.Clients.Aws.Sqs.SqsBenzeneMessageClient`,
+  `Benzene.Clients.Azure.EventGrid.EventGridBenzeneMessageClient`,
+  `Benzene.Clients.Azure.EventHub.EventHubBenzeneMessageClient`,
+  `Benzene.Clients.Azure.QueueStorage.QueueStorageBenzeneMessageClient`,
+  `Benzene.Grpc.Client.GrpcBenzeneMessageClient`, `Benzene.Kafka.Core.Kafka.KafkaBenzeneMessageClient`,
+  `Benzene.RabbitMq.RabbitMqSendMessage.RabbitMqBenzeneMessageClient`. Regression tests: a
+  `Constructor_NullLogger_ThrowsImmediately`/`Constructor_PrebuiltPipelineOverload_NullLogger_ThrowsImmediately`
+  fact per class (new test files for ServiceBus/EventGrid/EventHub/QueueStorage/EventBridge; added to
+  the existing Kafka/RabbitMq/Sns/Sqs/AwsLambda/Grpc client test files), plus a normal-construction,
+  failing-send test using `FakeLogger`/`FakeLogCollector` (or the existing `RecordingLogger` for gRPC)
+  confirming the catch block still logs the real exception and returns a failure result without
+  throwing.
+### Tracked findings round 12–14, WP-O — Mesh UI vendoring doc + upstream items (#204–#207)
+Round 14's client-side review of `src/Benzene.Mesh.Ui` (`work/archive/bug-fix-designs-round14-2026-08.md`
+§1) found that `mesh-ui.html`/`mesh-spec-ui.html` are not hand-written vanilla JS as
+`src/Benzene.Mesh.Ui/CLAUDE.md` extensively described — they are a minified React + Redux Toolkit
+build vendored verbatim from the external `benzene-ui` repo, kept honest by
+`.github/workflows/mesh-ui-drift-check.yml` ("never hand-edit"). The doc's mismatch with reality was
+itself the headline finding (#204); three further findings (#205–#207) are real client-side behavior
+gaps inside that vendored bundle.
+- **[RESOLVED] #204 — `src/Benzene.Mesh.Ui/CLAUDE.md` documented features/conventions absent from
+  the real shipped bundle, and never mentioned the vendoring relationship at all.** An agent trusting
+  the doc verbatim could plausibly hand-edit the generated `.html` files directly — exactly what the
+  drift check exists to prevent. Fixed by rewriting the doc: a prominent vendoring notice now leads
+  the file (never hand-edit; changes go upstream in `benzene-ui` then get re-vendored; the drift-check
+  workflow enforces it), the large dated changelog of hand-written-vanilla-JS implementation history
+  was removed rather than patched (it no longer describes the real bundle and there is no reliable way
+  to tell which parts, if any, still applied), and the accurate server-side/deployment material — the
+  `MeshUiPage`/`MeshUiMiddleware`/`MeshUiExtensions`/`MeshSpecUiPage`/`MeshSpecUiMiddleware` C# API
+  surface, the opt-in-parameter rules, and the static-file-host deployment guidance, all verified
+  against current source — was kept and, where the doc had fallen behind the actual method signature
+  (the undocumented `environment` parameter), corrected. No code changed; the vendored `.html` files
+  were not touched.
+- **[UPSTREAM] #205 — the Refresh control has no confirmation step, despite the package's own doc
+  calling it "real money per click" (fans out to every service in the mesh on every press).** The
+  sibling Test Console Send action requires an explicit checkbox before submitting; Refresh does not.
+  This is inside the vendored `benzene-ui` bundle, so it cannot be fixed by editing the `.html` files
+  in this repo — needs a fix in `benzene-ui` (add an equivalent confirmation gate to Refresh) followed
+  by a re-vendor of `mesh-ui.html` here. Documented in `src/Benzene.Mesh.Ui/CLAUDE.md`'s new "Known
+  upstream items" section. Out of scope for this repo's fix rounds.
+- **[UPSTREAM] #206 (minor) — the Sign-out control has no pending/disabled state**, unlike Refresh
+  and Send, so a rapid double-click can fire two concurrent logout requests. Same disposition as
+  #205: needs a `benzene-ui` fix (disable/pending-state Sign-out while its request is in flight) plus
+  a re-vendor. Documented in `src/Benzene.Mesh.Ui/CLAUDE.md`. Out of scope for this repo's fix rounds.
+- **[UPSTREAM] #207 (minor) — Sign-out's `fetch()` doesn't pass `credentials: "same-origin"`
+  explicitly**, unlike the other two write-action helpers (Refresh, Send). Not an active bug (the
+  browser default is same-origin) but an inconsistency worth normalizing upstream for consistency and
+  to avoid the omission reading as an oversight. Same disposition as #205/#206: needs a `benzene-ui`
+  fix plus a re-vendor. Documented in `src/Benzene.Mesh.Ui/CLAUDE.md`. Out of scope for this repo's
+  fix rounds.
+### Tracked findings rounds 12/14, WP-P — Examples sweep (task board #193–#196, #214–#223, done)
+Ruled in [`bug-fix-plan-rounds12-14-2026-08.md`](archive/bug-fix-plan-rounds12-14-2026-08.md) WP-P,
+covering round-12 §4 and round-14 §4 (both archived). All fourteen tasks are independent,
+example-local fixes. Verified per-project rather than via one whole-`Benzene.Examples.sln` build
+(the review host was under extreme, unrelated contention from concurrent sessions for the whole
+session — load average 100–165 — making a several-hundred-project solution build impractically
+slow, up to 38 minutes wall-clock for a single example's full dependency chain even though CPU time
+consumed was seconds): `examples/Cqrs/Benzene.Example.Cqrs.csproj` (a newly-added `Benzene.Examples.sln`
+member, pulling in the also-newly-added `src/Benzene.Outbox`) built clean (0 warnings, 0 errors);
+`examples/K8sTransports/App/Benzene.Examples.K8sTransports.App.csproj` (the other newly-added member,
+pulling in `Domain`) built clean (0 errors, 17 pre-existing warnings unrelated to this WP, all in
+`Benzene.Kafka.Core`/`Benzene.Aws.Sqs`); `examples/Asp/Benzene.Example.Asp.csproj` built clean and its
+6 integration tests passed; `examples/GoogleCloudMesh/Benzene.Examples.GoogleCloudMesh.sln` built
+clean. The Cloudflare worker's `npm install` + `npx wrangler deploy --dry-run` both pass with no
+deprecated-config warning.
+
+- **[RESOLVED] #214 — `examples/GoogleCloudMesh/Mesh/Startup.cs:48` called
+  `MeshServiceRegistry.FromEnvironment()`, which doesn't exist** (a genuine build error,
+  contradicting the README's "the whole solution builds" claim). Fixed: corrected to
+  `MeshRegistry.FromEnvironment()` — the example's own static registry-builder class
+  (`Mesh/MeshRegistry.cs`). `dotnet build examples/GoogleCloudMesh/Benzene.Examples.GoogleCloudMesh.sln`
+  now succeeds (0 errors).
+- **[RESOLVED] #193 + #215 — `examples/Cqrs`, `examples/K8sTransports`, and `examples/Outbox` were not
+  members of `Benzene.Examples.sln`**, so the documented build gate silently skipped all three. Added
+  all three (and their sub-projects — `K8sTransports` has `App`+`Domain`) as solution items, nested
+  under matching solution folders; `Cqrs`'s `ProjectReference` to `src/Benzene.Outbox` turned out to be
+  missing from the solution entirely too (a `src/` gap, not an `examples/` one), so it was added
+  alongside, nested under the existing `src` solution folder to match convention. `Cqrs` and
+  `K8sTransports/App` were each confirmed building clean as standalone projects (see this section's
+  intro); `Outbox`'s own `ProjectReference`s all point at `src/` projects already present in the
+  solution before this change (no further gaps like `Cqrs`'s), so it needs no additional fix — its
+  standalone build was still in flight, under the same host contention, when this entry was written.
+- **[RESOLVED] #216 — `examples/GoogleCloudMesh` was entirely undocumented in `examples/CLAUDE.md`**,
+  unlike every sibling mesh example. Added a `GoogleCloudMesh/` bullet to the Layout section (topology,
+  the two-functions-per-service Gen2 split, static discovery, GCS-backed catalog, its own `.sln` and
+  the fact that it is *not* a member of the root `Benzene.Examples.sln`), and noted the same in the
+  "How these build" per-folder-solution list.
+- **[RESOLVED] #194 — the Cloudflare worker's `@cloudflare/containers@^0.0.15` was the one npm-deprecated
+  version in the package's whole history** ("bundling is wrong, please use 0.0.16" per its own npm
+  deprecation notice), and `npx wrangler deploy --dry-run` failed local bundling with "Could not
+  resolve `@cloudflare/containers`" (the 0.0.15 tarball ships no `dist/`). Bumped to `^0.3.7` (current
+  latest at review time, no deprecation notice, same `Container`/`getContainer`/`defaultPort` API the
+  Worker and the docs' worked example already use). `npm install` now succeeds (0 vulnerabilities) and
+  `wrangler deploy --dry-run` gets past local bundling ("Total Upload: ...") with no
+  `@cloudflare/containers` resolution error; the dry-run then stops at "The Docker CLI is needed to
+  build the configured image ... but could not be launched" — an environment limitation (no Docker
+  daemon in this sandbox, same limitation round-14 already noted for the Kafka finding), not a defect
+  in the fix, since it's past the exact failure point (local bundling) the review asked to confirm.
+- **[RESOLVED] #195 — `worker/wrangler.toml`'s `[containers.configuration]` / `instance_type` block is
+  a deprecated config shape current wrangler flags**, and diverges from `docs/getting-started-cloudflare.md`'s
+  own worked example, which has no such block. Removed the block so the example matches its own
+  documented source of truth; `wrangler deploy --dry-run` no longer emits the deprecated-shape warning.
+- **[RESOLVED] #196 — `examples/K8sTransports/Domain/PlaceOrderMessageHandler.cs:23-25`'s doc comment
+  pointed readers at `App/HttpStartup.cs`/`App/WorkerStartup.cs` for "how one process hosts all
+  three"** — neither file exists (only `App/Startup.cs`, where that explanation actually lives).
+  Corrected the reference.
+- **[RESOLVED] #217 — `examples/Kafka/docker-compose.yaml` pinned `confluentinc/cp-kafka:latest` (and
+  `cp-zookeeper:latest`) in a ZooKeeper topology**, and `latest` currently tracks a Confluent Platform
+  line that dropped ZooKeeper support. Pinned both images to `7.4.4`, the exact tag the example's own
+  test-harness compose file (`Benzene.Examples.Kafka.Test/docker-compose.yaml`) already uses as its
+  last-ZK-compatible precedent.
+- **[RESOLVED] #218 + #222 — `examples/Asp/Benzene.Example.Asp/Startup.cs:52` hardcoded an Application
+  Insights instrumentation key in source, and `config.json` shipped a dummy DB connection string with a
+  plaintext placeholder password that nothing reads** (confirmed by grep across the whole repo before
+  removal — only `Program.cs`'s non-optional `AddJsonFile("config.json")` load references the file
+  itself; no code anywhere reads `DB_CONNECTION_STRING`). Fixed: the AI key is now read from
+  configuration (`APPINSIGHTS_INSTRUMENTATIONKEY`, defaulting to empty — telemetry simply sends nowhere
+  until a real key is configured), with a comment explaining where to put a real one; `config.json`'s
+  dummy connection string was deleted outright (left as `{}` so `Program.cs`'s non-optional
+  `AddJsonFile` call still finds a file).
+- **[RESOLVED] #219 — the demo JWT issuer's `Issuer`/`JwksUri` (`examples/Asp`) were hardcoded to
+  `http://localhost:5000/` with no hint on failure if the app runs on a different port** (verified: an
+  opaque 401 on every `/protected/*` request). `DemoJwtIssuer.Issuer` is now an instance property read
+  from configuration (`DEMO_AUTH_ISSUER`, defaulting to `http://localhost:5000/` to preserve current
+  behavior), with `JwksUri` derived from it; `Startup.cs` resolves the singleton instance via DI instead
+  of the old `static const`. Added a doc comment on `DemoJwtIssuer.Issuer` (and a pointer from
+  `Startup.cs`) spelling out the opaque-401 symptom and its cause.
+- **[RESOLVED] #220 — `examples/App/Benzene.Examples.App.Data` was an orphaned project** (stale
+  pre-split namespace `Benzene.Examples.Aws.Data`, EF Core/Npgsql 7.0.3, out of support since 2024).
+  Verified zero references repo-wide before deleting: every `using Benzene.Examples.App.Data;` in the
+  tree resolves to the *namespace* of the same name declared inside the live `Benzene.Examples.App`
+  project's own `Data/` folder — a same-named but unrelated namespace — and grepping for the orphaned
+  project's actual namespace (`Benzene.Examples.Aws.Data`) or its `.csproj` path found only the
+  project's own files and its `Benzene.Examples.sln` entry, no `ProjectReference` anywhere. Deleted the
+  project directory, removed its solution entry, and removed the stale mention from `examples/CLAUDE.md`.
+- **[RESOLVED] #221 — a CS8632 nullable-annotation warning in
+  `GoogleCloudMesh/Shared/MeshServiceWiring.cs`** (a `?` on a parameter type in a project with
+  `<Nullable>disable</Nullable>`, copied from the nullable-enabled `AzureFunctionsMesh` sibling whose
+  `MeshServiceWiring.cs` uses the identical `Action<...>? configureBenzene = null` shape correctly).
+  Added `#nullable enable` at the top of the file (scoped to this one file rather than flipping the
+  whole project) — the warning is gone and no new nullable warnings were introduced.
+- **[RESOLVED] #223 — `examples/Asp/Benzene.Example.Asp/Startup.cs` emitted ASP0001 ("The call to
+  UseAuthorization should appear between app.UseRouting() and app.UseEndpoints(..)")**, copied
+  verbatim into every adopter's project since this file is used as a template. Root cause: the
+  `app.Map("/protected", ...)`/`app.Map("/slow", ...)` branches each called their own `protectedApp`/
+  `slowApp`-scoped `UseRouting()` + an empty `UseEndpoints(endpoints => { })` — dead weight, since
+  neither branch ever maps an ASP.NET Core endpoint (both gate access and dispatch entirely through
+  Benzene's own `UseBenzene(...)`/`UseOAuth2Bearer`/`RequireScope`, mirroring the main pipeline's
+  `UseBenzene(...)` a few lines up, which has no such wrapper of its own) — but their mere presence
+  was enough to make the analyzer misjudge the real, correctly-ordered top-level
+  `UseRouting()`/`UseAuthorization()`/`UseEndpoints(MapControllers)` triplet as out of order (confirmed
+  empirically: relocating just the `UseAuthorization()` call, leaving the extra pairs in place, did
+  not clear the warning — it kept firing wherever `UseAuthorization()` was moved to, until the two dead
+  pairs were removed). Fixed by deleting both branches' redundant `UseRouting()`/`UseEndpoints()` calls
+  and leaving `UseAuthorization()` in its original, natural position right after the top-level
+  `UseRouting()`. No behavior change: `WeatherForecastController` (the only thing ever dispatched
+  through the real `UseEndpoints`) is unauthenticated either way, and the `/protected`/`/slow` branches
+  never touched ASP.NET Core's own authorization/endpoint-routing machinery to begin with. Verified:
+  the ASP0001 warning is gone from a clean rebuild of `Benzene.Example.Asp.csproj` (0 errors, only the
+  pre-existing, unrelated `NU1510` package-pruning warning remains).
+
+## Round 15 + rounds 12–14: two integration bugs found only by the post-merge baseline (2026-08-30)
+
+Both of the above rounds' 16 work packages built and tested clean in isolated worktrees; the two
+issues below only existed at the intersection of two independently-correct work packages, and so
+were invisible until everything landed on `main` together. Caught by the first full, uncontended
+`dotnet build` + `dotnet test` run against fully-merged `main` — not by any individual work package's
+own (correct, at the time) verification. Recorded here as a reminder that a fix round isn't done at
+the last merge commit; it's done after a real centralized baseline run.
+
+- **[RESOLVED] `S3TestHelpersTest.AsS3_ReservedOrUnicodeCharactersInKey_RoundTripThroughTheRealProductionGetters`
+  (3 theory cases) failed post-merge.** Root cause: WP-N's test (`#191`) was written against a pipeline
+  with no terminal result-setting middleware, before WP-B's `#229` fix existed; `#229` changed
+  SNS/S3/EventBridge to escalate (throw) on an unset `MessageResult` instead of silently treating it as
+  accepted. Individually each change was correct; merged together, WP-N's test now hit WP-B's new
+  escalation path and failed. Fixed by adding `configure: options => options.RaiseOnFailureStatus =
+  false` to the test's `app.UseS3(...)` call, matching the sibling test immediately above it
+  (`AsS3_BuildsAnEventThatRoutesThroughTheS3Pipeline`), which already opts out of that escalation for
+  the same reason (the test is about key round-tripping, not message routing, so the inline middleware
+  deliberately never sets a `MessageResult`). `test/Benzene.Core.Test/Aws/S3/S3TestHelpersTest.cs`.
+- **[RESOLVED] `RateLimitingPipelineTest`'s two `#200`-era tests failed post-merge.**
+  `InternallyOwnedRateLimiterHolder<TContext>` (WP-J's new class backing `#200`'s per-pipeline-not-
+  per-container guard) implemented only `IAsyncDisposable`. The Microsoft DI adapter's synchronous
+  container disposal (`ServiceProviderEngineScope.Dispose()`) throws `InvalidOperationException` when
+  it needs to dispose a resolved singleton that implements only `IAsyncDisposable` — the same defect
+  class as the already-fixed `#85` (`AutofacServiceResolverFactory` missing `IAsyncDisposable`), but in
+  the opposite direction. Fixed by also implementing `IDisposable` on the holder, bridging to its
+  existing `DisposeAsync()` the same way `MeshAnnouncer.Dispose()` already does
+  (`DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(5))`, best-effort on `AggregateException`).
+  Separately, `SiblingPipelines_OffOneSharedContainer_EachGetTheirOwnIndependentInternallyOwnedLimiter`
+  (also new in WP-J) never added a terminal middleware to its second pipeline, so a successful
+  (non-rejected) rate-limit acquire never wrote a result via `IMessageHandlerResultSetter` — the
+  rate-limiting middleware itself only writes a result on rejection — leaving an NRE on the
+  success-path assertion; fixed by adding a terminal `.Use((resolver, context, next) => ...)` that
+  records `BenzeneResult.Ok()`. `src/Benzene.RateLimiting/Extensions.cs`,
+  `test/Benzene.Core.Test/Plugins/RateLimiting/RateLimitingPipelineTest.cs`.
+
+Full baseline re-verified after both fixes: `Benzene.Core.Test` 3296 passed / 2 skipped / 0 failed,
+`Benzene.Mesh.Test` 575 passed, `Benzene.Mesh.Host.Test` 150 passed, `Benzene.Examples.sln` build 0
+errors. Pushed to `main` (`28473b0`).
+
+## Round 16 fixes (2026-08-30)
+
+- **[RESOLVED] #252 — `JaegerTraceSource`/`TempoTraceSource`'s per-service/per-trace isolation catch
+  didn't survive an `HttpClient`-level timeout that wasn't the caller's own token; `XRayTraceSource`'s
+  complementary bare catch swallowed genuine caller cancellation.**
+  `src/Benzene.Mesh.Fleet.Jaeger/JaegerTraceSource.cs`, `src/Benzene.Mesh.Fleet.Tempo/TempoTraceSource.cs`
+  isolated a per-service/per-trace fetch with `catch (Exception ex) when (ex is not
+  OperationCanceledException)` — distinguishing "backend failed" from "host cancelled" purely by
+  exception *type*. `HttpClient.Timeout` on one slow backend throws `TaskCanceledException` (an
+  `OperationCanceledException` subclass) even when the caller's own token was never cancelled, so that
+  exception escaped the isolation catch, faulted the whole `BoundedFanOut.WhenAllAsync` fan-out, and
+  discarded every other service's already-fetched results — the #189 regression class reintroduced for
+  one exception family. Separately, `src/Benzene.Mesh.Fleet.Aws.XRay/XRayTraceSource.cs`'s
+  `EnrichRecentFlowsAsync`/`FetchBatchAsync` had a bare `catch { }` with the inverse problem — it
+  swallowed genuine caller cancellation too, silently degrading a cancelled recent-flows enrichment to
+  the summary plane instead of propagating.
+
+  Fixed by replacing the type-based filters in Jaeger/Tempo with the token-verified form `catch
+  (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)`
+  — isolating everything EXCEPT an `OperationCanceledException` while the caller's own token is actually
+  cancelled, matching `MessageHandler.cs`'s existing `ex.CancellationToken.IsCancellationRequested`
+  precedent for the same timeout-vs-cancellation distinction. `XRayTraceSource.FetchBatchAsync` gained
+  the complementary rethrow (`catch (Exception ex) when (ex is OperationCanceledException &&
+  cancellationToken.IsCancellationRequested) { throw; }`, ahead of the existing bare `catch` that keeps
+  degrading everything else).
+
+  Verified with permanent regression tests in `test/Benzene.Mesh.Test/JaegerTraceSourceTest.cs` and
+  `TempoTraceSourceTest.cs`: `GetCorrelationAsync_IsolatesAPerServiceTimeout_NotTiedToTheCallersToken`
+  / `..._IsolatesAPerTraceTimeout_NotTiedToTheCallersToken` (a `TaskCanceledException` simulating an
+  `HttpClient.Timeout` on one service/trace with the caller's own token uncancelled → before the fix
+  the exception propagated and the healthy service's/trace's result was lost too; after, it survives,
+  mirroring the adjacent `HttpRequestException` isolation test) and the complementary
+  `GetCorrelationAsync_PropagatesGenuineCancellation_WhenTheCallersOwnTokenIsCancelled` (the ambient
+  token is actually cancelled from within the failing service's/trace's handler → `OperationCanceledException`
+  correctly propagates, both before and after the fix — confirming the fix doesn't newly break genuine
+  cancellation). `test/Benzene.Mesh.Test/XRayTraceSourceTest.cs` gained
+  `GetRecentFlowsAsync_PropagatesGenuineCancellation_InsteadOfDegradingToSummaryPlane` (a mocked
+  `BatchGetTracesAsync` throwing `OperationCanceledException` while the caller's token is cancelled →
+  before the fix no exception surfaced and the row silently degraded; after, it propagates). Full
+  `Benzene.Mesh.Test` run: 582 passed / 0 failed.
+## Round 16, WP-C: Azure trigger family — infra escalation, ambient cancellation, CosmosDb generator validation (2026-08-30)
+
+- **[RESOLVED] #257 (high) — `AzureFunctionBatchApplicationBase.ProcessItemAsync` and
+  `TimerTickApplication.HandleAsync` silently swallowed an infrastructure/DI-wiring failure under
+  `CatchExceptions = true`.** The exact `#228` defect (fixed for AWS SNS/S3/EventBridge's
+  `SingleContextEscalatingApplicationBase.ProcessAsync`), unfixed for every Azure Functions batch
+  trigger sharing the base class (ServiceBus, EventHub, Kafka, QueueStorage, EventGrid) and
+  independently for the Timer trigger: a `BenzeneResolutionException` (or anything with one in its
+  `InnerException` chain — `BenzeneFailure.IsInfrastructure`) was logged with a differentiated message
+  but never rethrown, so a mis-wired deploy silently dropped messages (the host checkpoints on a
+  "successful" invocation) or, for ServiceBus `AckMode = Explicit`, looped abandon/redeliver forever
+  while the service reported healthy. Fixed by mirroring
+  `SingleContextEscalatingApplicationBase.ProcessAsync` exactly in both files: compute
+  `isInfrastructure` once, keep the existing differentiated log line, then `if (isInfrastructure)
+  throw;`. Composes cleanly with ServiceBus Explicit-ack's `OnExceptionCaughtAsync` abandon hook, which
+  still runs first — the message is abandoned AND the invocation now fails loudly.
+  `src/Benzene.Azure.Function.Core/AzureFunctionBatchApplicationBase.cs`,
+  `src/Benzene.Azure.Function.Timer/TimerApplication.cs`.
+- **[RESOLVED] #258 (minor) — the same catch also silently absorbed a genuine ambient-cancellation
+  `OperationCanceledException`, inconsistent with #230's own still-queued-item behavior.** An
+  already-*running* batch item (past `BoundedFanOut`'s semaphore) that observed the same ambient
+  cancellation the Functions host signaled for the invocation was caught by the unqualified `catch
+  (Exception ex) when (_catchExceptions)` and logged/swallowed like an ordinary business exception —
+  while a sibling item still *queued* at that exact moment correctly aborted the whole invocation per
+  `#230`, regardless of `CatchExceptions`. Two items hit by the identical host-cancellation event got
+  opposite severity purely by scheduling luck. Fixed in `AzureFunctionBatchApplicationBase
+  .ProcessItemAsync` only (Timer never reaches this scenario — a single tick never calls
+  `BoundedFanOut`): after the infrastructure check, also rethrow when `ex is OperationCanceledException
+  && cancellationToken.IsCancellationRequested` — the token-verified form (checked against this call's
+  own ambient token, matching `MessageHandler.cs`'s existing pattern), not a bare type-based exclusion,
+  so an application-produced OCE unrelated to host shutdown is not over-escalated. Regression tests:
+  `EventGridFailureHandlingTest.HandleAsync_CatchExceptionsTrue_AmbientCancellation_EscapesContainmentAndRethrows`
+  plus the negative `HandleAsync_CatchExceptionsTrue_UnrelatedCancellation_StaysContained`.
+- **[RESOLVED] #259 — the Azure Functions source generator never validated `BenzeneCosmosDbTrigger`'s
+  `DatabaseName`/`ContainerName`, unlike every sibling transport's destination field.** `#39`
+  (round "WP-C") gave every other non-HTTP transport reader a required-field check for the one
+  attribute value without which the binding is meaningless (`BENZ0003`-`BENZ0007`), but Cosmos DB's own
+  binding-destination fields were read with an empty-string default and never checked — a declaration
+  with `DocumentType` set but no `DatabaseName`/`ContainerName` compiled clean and emitted
+  `CosmosDBTrigger(databaseName: "", containerName: "", ...)`, failing only at Azure host
+  startup/deployment. Fixed by adding a new diagnostic, `CosmosDbTriggerMissingDestination`
+  (`BENZ0010`, the next free id — verified against `DiagnosticDescriptors.cs`, which topped out at
+  `BENZ0009`), reported when `database.Length == 0 || container.Length == 0`, following
+  `ServiceBusTriggerMissingDestination`'s exact shape (report + emit nothing) — checked alongside, not
+  instead of, the existing `DocumentType`/`BENZ0002` check (which still runs first and returns early,
+  so a `DocumentType`-only omission still reports only `BENZ0002`).
+  `src/Benzene.Azure.Function.SourceGenerators/DiagnosticDescriptors.cs`,
+  `src/Benzene.Azure.Function.SourceGenerators/Transports/MessagingTransports.cs`.
+
+Red-green recipes reproduced verbatim from `work/review-round16-azure-2026-08.md` and kept as permanent
+regression tests: `test/Benzene.Core.Test/Azure/TimerFailureHandlingTest.cs`,
+`test/Benzene.Core.Test/Azure/EventGridFailureHandlingTest.cs`,
+`test/Benzene.Core.Test/Autogen/AzureFunctions/AzureFunctionTriggerGeneratorTest.cs`. Verified:
+`dotnet test test/Benzene.Core.Test -c Release --filter
+"FullyQualifiedName~Azure|FullyQualifiedName~AzureFunctionTriggerGenerator"` — 281 passed, 0 failed
+(including the pre-existing `#230`/`#231` regression tests, unaffected).
+## Round 16 WP-E: mesh collector/query (2026-08-30)
+
+- **[RESOLVED] #250 — the five `mesh:query:*` handlers never resolved `ICancellationTokenAccessor`,
+  so `UseTimeout(...)` around the query envelope was inert.** `FleetQueryMessageHandler`,
+  `ServiceQueryMessageHandler`, `TopicQueryMessageHandler`, `TraceQueryMessageHandler`, and
+  `CorrelationQueryMessageHandler` (`src/Benzene.Mesh.Collector/Handlers.cs`) took only an
+  `IMeshFleetReadModel` and always called it with the default (never-cancelled) token, even though
+  `IMeshFleetReadModel` and every downstream trace source (X-Ray/Jaeger/Tempo, including the
+  #230-fixed `BoundedFanOut`) were built to honor one. Fixed by giving all five the same optional
+  `ICancellationTokenAccessor? cancellation = null` constructor parameter `MeshDispatchMessageHandler`
+  already has (#185), resolved at the point of use (`_cancellation?.CancellationToken ??
+  CancellationToken.None`) and threaded into the read-model call. Purely additive (an optional
+  trailing constructor parameter); no DI registration change needed — the existing message-handler
+  resolution already supplies an unregistered optional collaborator as `null`, exactly as it does for
+  `MeshDispatchMessageHandler` today. `test/Benzene.Mesh.Test/MeshCollectorQueryCancellationTest.cs`
+  (inverted from the round-16 review's committed red evidence test to its green form, covering
+  Fleet + Trace; the other three handlers are mechanical clones of the same one-line fix).
+- **[RESOLVED] #251 — `MeshCollectorStore` had no catalog slot for more than one live
+  `(service, serviceVersion)`, so a side-by-side canary/blue-green deployment was reported as
+  contract drift.** Spec §2.4 requires the catalog key to be the pair `(service, serviceVersion)`:
+  two different versions reporting different `descriptorHash`es is the expected side-by-side
+  deployment state, not drift. `MeshCollectorStore._services` (`ServiceState`) held exactly one
+  `Descriptor`, wholesale-replaced on every `Register` call regardless of version — so a canary's
+  second version silently evicted the first's topics/produces/hash from the catalog, and every still-
+  healthy instance of the evicted version was then compared against the survivor's descriptor and
+  flagged as a false hash mismatch. Fixed: `ServiceState` now keys every live descriptor by
+  `ServiceVersion ?? ""` (`Descriptors`, a `Dictionary<string, MeshServiceDescriptor>`); `Register`
+  retracts only the specific version's OWN previously declared provider/consumer edges before
+  re-adding its new ones (`RetractEdges`) — a re-registration of the SAME `(service, version)` pair
+  still replaces wholesale (unchanged behavior), but a DIFFERENT version registering never touches a
+  still-live sibling version's edges. `InstanceView.HashMatches` is now computed
+  (`MeshCollectorStore.HashMatches`) against EVERY currently registered version's hash for the
+  service, not just the single "current" row, so an instance matches whichever live version it's
+  actually running, and only a hash matching none of the service's live descriptors reads as drift
+  (including the case where the SAME version re-registers with a genuinely different hash — a real
+  contract drift without a version bump — which still correctly flags, because the old hash is no
+  longer present anywhere in the live set). **[RESOLVED] view-shape choice:**
+  `MeshCollectorStore.Service(name)`/`Fleet().Services` still return exactly ONE row per service
+  NAME — the most-recently-registered version's scalar Runtime/Binding/Placement/Topics/
+  ServiceVersion/Descriptor fields — preserving today's shape for every existing caller/test keying
+  by name alone (in particular `Reregistration_ReplacesServiceVersion_WithTheLatestDescriptors`,
+  which asserts exactly one `Fleet().Services` row named "orders" after two versions register). Both
+  live versions' full descriptors remain available underneath that one row for the topic catalog
+  (`mesh:query:topic`, queried by topic id, naturally reports both versions' declared edges without
+  needing a second service-level row) and for per-instance hash comparison. A dedicated per-version
+  breakdown on `ServiceView` itself (e.g. a `Versions` list) was NOT added this round — not required
+  by any of the three behaviors spec §2.4 actually mandates, and speculative until a caller needs to
+  render "which versions are live" as its own list; a natural follow-up if the mesh UI wants it.
+  `src/Benzene.Mesh.Collector/MeshCollectorStore.cs`.
+  `test/Benzene.Mesh.Test/MeshCollectorSideBySideVersionTest.cs` (inverted from the round-16 review's
+  committed red evidence test: both catalog entries now stay live, each instance hash-matches its own
+  version, and a new drift-positive case proves a genuine same-version hash change still flags).
+  Every pre-existing `MeshCollectorStoreTest`/conformance fixture case stayed green unmodified.
+- **[RESOLVED] #253 — `MeshCollectorStore.AddEvents`/`AddIssues` threw `NullReferenceException` on a
+  null ELEMENT inside a non-null list, partially corrupting a batch's ingestion.** #234 (round 15)
+  fixed a null WHOLE list (`"events": null`); `MeshTraceEvent`/`MeshIssue` are reference types, so a
+  wire payload can also legally deserialize `"events": [null, {...}, {...}]` — a non-null list
+  containing a null element — which the loop dereferenced unconditionally, throwing mid-batch:
+  everything before the null had already mutated state, everything after was silently dropped, and
+  the caller never got its `Ack`. Fixed by skipping a null element in both loops, matching the file's
+  existing null-tolerance conventions (the null-`Status`-field guard immediately above `AddEvents`'
+  loop is the model). `AddEvents`'s returned `Accepted` count now reflects only elements actually
+  processed (a skipped null is not counted), matching `AddIssues`' pre-existing convention of only
+  counting entries it actually stored, not the raw batch length.
+  `src/Benzene.Mesh.Collector/MeshCollectorStore.cs`.
+  `test/Benzene.Mesh.Test/MeshCollectorStoreTest.cs`
+  (`AddEvents_NullElementInEventsList_DoesNotThrow_AndAppliesTheOtherEvents`,
+  `AddIssues_NullElementInIssuesList_DoesNotThrow_AndAppliesTheOtherIssues`).
+- **[RESOLVED] #256 — `CompositeMeshFleetReadModel.TraceAsync`/`CorrelationAsync`'s bare
+  `catch { return null; }` swallowed a genuine caller cancellation and misreported it as an
+  authoritative "not found".** The bare catch exists for fetch isolation (a failing trace-source
+  backend degrades a single lookup to "not found" rather than throwing out of the composite), which
+  is correct for a real backend failure — but it also caught an `OperationCanceledException` raised
+  because the CALLER'S OWN `cancellationToken` (e.g. a `mesh:query:trace`/`correlation` request
+  wrapped in `UseTimeout(...)`, or a disconnected HTTP client) was cancelled, silently reporting
+  "not found" instead of propagating the cancellation — a caller/UI couldn't distinguish a cancelled
+  request from an authoritative "that trace doesn't exist". Fixed by narrowing the catch filter:
+  rethrow when `ex is OperationCanceledException && cancellationToken.IsCancellationRequested` (the
+  method's OWN token, token-verified, matching `MessageHandler.cs`'s existing pattern rather than a
+  bare exception-type exclusion), keep swallowing everything else exactly as before.
+  `src/Benzene.Mesh.Collector/CompositeMeshFleetReadModel.cs`.
+  `test/Benzene.Mesh.Test/CompositeMeshFleetReadModelTest.cs`
+  (`TraceAsync_PropagatesRealCancellation_InsteadOfReportingNotFound`,
+  `CorrelationAsync_PropagatesRealCancellation_InsteadOfReportingNotFound`, plus the negative
+  `TraceAsync_PlainException_StillDegradesToNull_WhenTheCallersTokenIsNotCancelled`). Out of scope
+  this round (unchanged, noted for a future pass): `RecentFlowsAsync`/`TopicsFromUsageAsync`'s own
+  bare catches share the same class of gap, as does `XRayTraceSource.FetchBatchAsync`'s bare
+  `catch { }` — neither was in WP-E's task list (#252/XRay is WP-F's scope).
+
+Full `dotnet test test/Benzene.Mesh.Test -c Release`: 584 passed / 0 failed (the whole project, not a
+filtered subset, per the WP's own instruction given #251's behavioral surface).
+`dotnet test test/Benzene.Conformance.Test -c Release --filter FullyQualifiedName~Mesh`: 84 passed / 0
+failed.
+- **[RESOLVED] (2026-08-30) #263 — `OpenApiSchemaCSharpTypeBuilder` interpolated
+  `Discriminator.PropertyName` and every `mapping.Key` unescaped into generated
+  `[JsonPolymorphic]`/`[JsonDerivedType]` C# string literals** — the fourth instance of the
+  unescaped-interpolation-into-structured-output bug class this round-family (YAML #212, Markdown
+  #86, HCL #244). A discriminator value containing a `"` (e.g. `12" wheel`, a realistic
+  size/dimension-flavoured mapping value reachable via `SuppliedSchemaCatalog` or any hand-built
+  `EventServiceDocument`, not only reflection-derived schemas) produced 7 cascading Roslyn errors
+  while the CLI's `build` command reported success. Fixed by adding a small local
+  `EscapeCSharpString` helper (backslash, double-quote, `\n`/`\r`/`\t`/`\0`, and every other control
+  character via `\uXXXX`) mirroring the shape of `YamlValueEscaping`/`NameFormatter.EscapeHclString`
+  elsewhere in this codebase — deliberately NOT a new `Microsoft.CodeAnalysis.CSharp` (Roslyn)
+  dependency in `Benzene.CodeGen.Client`, which doesn't otherwise need it (Roslyn is only a
+  transitive dependency of the test project). Applied to `PropertyName` and every `mapping.Key`.
+  Test: `GeneratedClient_WithAdversarialDiscriminatorMappingKeyContainingAQuote_Compiles` (new
+  theory case in `CodegenOutputCompilesTest.cs`, using the same Roslyn-compile oracle as the
+  existing #66/#67/#240 regression tests). `src/Benzene.CodeGen.Client/OpenApiSchemaCSharpTypeBuilder.cs`.
+- **[RESOLVED] (2026-08-30) #264 — `JsonOpenApiSchemaBuilder.Create`'s switch had no case for
+  `JTokenType.Float` or `JTokenType.Null`**, throwing `Exception("No map for Float"/"No map for
+  Null")` and aborting the whole document on an ordinary JSON decimal number (e.g. a price,
+  percentage, or rating) or an ordinary JSON `null` (extremely common for an optional field in a
+  captured real-world example) — reachable from the public documented API
+  `EventServiceDocumentBuilder.AddJsonEvent`. Same crash-on-legitimate-input shape as
+  #241/#242/#243. Fixed by adding `JTokenType.Float => CreateNumberSchema()` (mirroring
+  `CreateIntegerSchema`, `Type = "number"`, `Format = "double"`) and a `JTokenType.Null` branch
+  (`CreateNullPlaceholderSchema`) returning the exact untyped/`Nullable = true` placeholder
+  convention `CreateArraySchema` already established for "nothing in the example to infer from"
+  after the #242 fix — no `type` keyword, so it matches anything, rather than inventing a new
+  placeholder shape. Tests: `CreateSchema_FloatExampleValue_DoesNotThrow_AndEmitsANumberSchema`,
+  `CreateSchema_NullExampleValue_DoesNotThrow_AndEmitsAnUntypedNullablePlaceholder`
+  (`JsonOpenApiSchemaBuilderTest.cs`). `src/Benzene.Schema.OpenApi/JsonOpenApiSchemaBuilder.cs`.
+- **[RESOLVED] (2026-08-30) #265 (minor) — `MarkdownTypeBuilder.MapProperty`'s empty-object `else`
+  branch (and the matching array-of-object branch) wrote a bare, unlabelled `"{}"`/`"{}[]"` with the
+  property NAME dropped entirely** — the normal shape for a `Dictionary<string, T>`-typed property
+  (`type: object` with `additionalProperties` but no own declared `properties`) rendered as an
+  anonymous line a reader couldn't attribute to any field. Fixed both `else` branches to always emit
+  `{CodeGenHelpers.Camelcase(name)}: ` before the placeholder, and — where `AdditionalProperties !=
+  null` — render the map shape via a new `GetMapOrEmptyObjectPlaceholder` helper
+  (`{[string]: <valueType>}`, resolving `<valueType>` through the same `GetPropertyTypeName`
+  recursion this file already uses elsewhere, e.g. `scores: {[string]: int}`), mirroring
+  `CSharpTypeName.GetName`'s `Dictionary<string, T>` handling for the C# generator (see its comment
+  at `OpenApiSchemaCSharpTypeBuilder.cs:176-183`). A genuinely empty object (no `additionalProperties`
+  either) still renders as `{name}: {}` — now at least attributable to its field. Tests:
+  `MapProperty_AdditionalPropertiesMap_RendersTheNamedMapShape_NotABareAnonymousBraces`,
+  `MapProperty_ArrayOfAdditionalPropertiesMaps_RendersTheNamedMapShape`
+  (`MarkdownTypeBuilderTest.cs`). `src/Benzene.CodeGen.Markdown/MarkdownTypeBuilder.cs`.
+
+Verified: `dotnet test test/Benzene.Core.Test -c Release --filter
+"FullyQualifiedName~Autogen|FullyQualifiedName~Schema"` — 543 passed, 2 skipped (pre-existing,
+unrelated source-generator tests), 0 failed. All three fixes are additive (a new switch arm, a new
+escaping helper applied at two call sites, a new-else-branch line shape) — every existing
+#241/#242/#243, #212/#244, #86/#213, #66/#67/#240 regression test in this filter's scope stayed
+green unmodified.
+## Resolved in round 16, WP-A (Core disposal architecture) (2026-08-30)
+
+Findings from the round-16 review pass (task board #266, #262; `work/bug-fix-plan-round16-2026-08.md`
+WP-A; evidence in `work/review-round16-core-2026-08.md` §1 and
+`work/review-round16-infrastructure-2026-08.md`'s Redis finding). Fixed in
+`src/Benzene.Microsoft.Dependencies/MicrosoftServiceResolverAdapter.cs`,
+`src/Benzene.Microsoft.Dependencies/MicrosoftServiceResolverFactory.cs`,
+`src/Benzene.Cache.Redis/RedisCacheService.cs`.
+
+- **[RESOLVED] #266 — `MicrosoftServiceResolverAdapter.Dispose()` disposed the wrapped MS DI scope
+  synchronously; Microsoft.Extensions.DependencyInjection's own `ServiceProviderEngineScope.Dispose()`
+  throws `InvalidOperationException` the moment it has to tear down a container-owned instance
+  (scoped, transient, or singleton) that implements only `IAsyncDisposable` — an entirely ordinary
+  shape for an async-native client/connection.** Every transport built on `Benzene.Core.Middleware`
+  tears its per-message scope down through exactly this path
+  (`MiddlewareApplication.HandleAsync`'s `using var serviceResolver = ...`), so any application
+  registering such a service crashed on every single message that resolved it — and the resource's
+  own `DisposeAsync` never ran (crash **and** leak). The Autofac adapter never had this defect: Autofac's
+  own `ILifetimeScope.Dispose()` already bridges an `IAsyncDisposable`-only component correctly. Fixed
+  generically (not per-type) in `MicrosoftServiceResolverAdapter.Dispose()` and, for the root
+  provider/container, `MicrosoftServiceResolverFactory.Dispose()`: both now bridge to the wrapped
+  scope/provider's own `DisposeAsync()` — with an **unbounded** wait, not the bounded-5s pattern used
+  for best-effort telemetry flushes (`MeshAnnouncer`) — whenever it implements `IAsyncDisposable`,
+  falling back to the plain synchronous `Dispose()` only when it doesn't. The wait is deliberately
+  unbounded because it's awaiting the caller's *own* disposal code, not a network flush — abandoning it
+  early would silently leak resources by design, and this now matches Autofac's own unbounded blocking
+  semantics for the identical shape rather than introducing new behavior. Side effect (intentional,
+  not a regression): a container-owned instance implementing **both** `IDisposable` and
+  `IAsyncDisposable` now observes its `DisposeAsync`, not its `Dispose`, when torn down via
+  `MicrosoftServiceResolverFactory.Dispose()`/`MicrosoftServiceResolverAdapter.Dispose()` — matching
+  the preference `MicrosoftServiceResolverFactory.DisposeAsync()` already had — because the adapter has
+  no way to know in advance, without attempting disposal, whether *any* other container-owned instance
+  needs the async path; `MicrosoftDITest.Dispose_ProviderBuiltByFactory_DisposesSingletons` updated
+  accordingly (asserts `DisposedAsync`, not `Disposed`). New tests:
+  `MicrosoftDITest.Issue266_ScopedAsyncOnlyDisposable_ScopeDisposal_DoesNotThrow_AndActuallyDisposesAsync`,
+  `MicrosoftDITest.Issue266_SingletonAsyncOnlyDisposable_FactoryDisposal_DoesNotThrow_AndActuallyDisposesAsync`
+  (both red before the fix: `InvalidOperationException`), plus the permanent parity test
+  `AsyncOnlyDisposableParityTest` (new file) asserting both the Autofac and Microsoft DI adapters
+  dispose an `IAsyncDisposable`-only container-owned service — singleton and scoped — identically,
+  without throwing, and actually run its `DisposeAsync`.
+- **[RESOLVED] #262 — `RedisCacheService` is `IAsyncDisposable`-only, so it tripped the identical
+  #266 defect whenever container-owned, including through `MicrosoftServiceResolverFactory.Dispose()`'s
+  `(_serviceProvider as IDisposable)?.Dispose()` — the *only* disposal path `Benzene.Aws.Lambda.Core`
+  has at all (its whole disposal chain, `IAwsLambdaEntryPoint`/`AwsLambdaHost<TStartUp>`, is
+  `IDisposable`-only, with no `DisposeAsync` anywhere in that chain for a caller to prefer instead).**
+  Fixed independently of #266 per the plan's explicit ruling (the #266 adapter fix alone would mask
+  this one, since it covers Benzene-managed containers — but `RedisCacheService`'s own `CLAUDE.md` tells
+  consumers to register it in *their own* container, which may not be Benzene's adapter at all): added
+  `IDisposable` to `RedisCacheService`, bridging synchronously to its existing `DisposeAsync()` with the
+  established **bounded** 5-second wait (`DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(5))`,
+  swallowing the resulting `AggregateException`) — the same pattern as `MeshAnnouncer.Dispose()` and
+  round 15's `InternallyOwnedRateLimiterHolder<TContext>.Dispose()`. Bounded (unlike #266's adapter-level
+  fix) because the work being awaited here is `RedisCacheService`'s own disposal, a prompt local
+  operation (disposing an already-connected `IConnectionMultiplexer`, or abandoning a connect that never
+  completed) — not arbitrary user code. New test file
+  `test/Benzene.Core.Test/Cache/Redis/RedisCacheServiceContainerDisposalTest.cs`
+  (`ScopedRedisCacheService_PerMessageScopeDisposal_DoesNotThrow`,
+  `SingletonRedisCacheService_SyncFactoryDisposal_DoesNotThrow`), both red before the fix
+  (`InvalidOperationException` via `MicrosoftServiceResolverAdapter`/`MicrosoftServiceResolverFactory`)
+  and green after — reproducing both the `AddScoped` per-message-scope path (mirroring
+  `AwsLambdaEntryPoint.FunctionHandlerAsync`'s per-invocation scope) and the `AddSingleton`
+  container/factory-disposal path (mirroring `AwsLambdaHost<TStartUp>.Dispose()`'s only disposal route).
+
+Scoped verification: `dotnet test test/Benzene.Core.Test -c Release --filter
+"FullyQualifiedName~Cache.Redis|FullyQualifiedName~Microsoft|FullyQualifiedName~AsyncOnlyDisposableParityTest|FullyQualifiedName~Autofac"`
+— 90 passed, 0 failed. Full `Benzene.Test.Cache` namespace also re-run standalone — 67 passed, 0
+failed. The centralized post-merge baseline (all round-16 work packages) is the coordinator's
+responsibility per the round's execution protocol.
+
+**[OPEN] — should `IServiceResolver` grow an async disposal contract?** #266's fix bridges the
+existing purely-synchronous `IServiceResolver : IDisposable` contract to `DisposeAsync()` underneath,
+inside each adapter, rather than adding `IAsyncDisposable` to `IServiceResolver` itself and switching
+`MiddlewareApplication`'s per-message `using var serviceResolver = ...` to `await using`. That would be
+a public-contract change rippling through every DI adapter (Microsoft, Autofac, any third-party
+implementation) and every call site that constructs/disposes an `IServiceResolver` — explicitly ruled
+out of scope for round 16 (`work/bug-fix-plan-round16-2026-08.md` WP-A ruling 3) because the sync
+bridge already resolves the user-visible defect without it. Worth a maintainer decision before 1.0:
+would a genuinely async per-message disposal path (no blocking wait at all, even bounded) be worth the
+breaking-change cost across every adapter and hosting integration, or does the sync-bridge-with-
+unbounded-wait resolve this permanently? If the abstraction never grows one, document that
+`IServiceResolver.Dispose()` blocking on a user's `DisposeAsync()` is a deliberate, permanent design
+choice (not a stopgap) so it isn't re-litigated as an oversight in a future round.
+## Round 16, WP-G: Mesh.Dispatch (2026-08-30)
+
+- **[RESOLVED] #254 — `MeshDispatchRateLimiter.Prune()` could delete a concurrently-installed
+  current-minute window, silently losing an increment.** `Prune()` enumerates `_windows` and, for each
+  entry whose captured `Window.Start` is stale, removed it via the unconditional two-argument
+  `_windows.TryRemove(pair.Key, out _)` — a remove-by-key with no check that the dictionary still held
+  the same value it decided was stale. `MeshDispatchGuardMiddleware.HandleAsync` calls `Prune()`
+  immediately before every `TryAcquire`, so at a minute boundary a genuinely concurrent request for the
+  same key (the same identity or target dispatching again right after the rollover) could install a
+  fresh `Window(currentMinute, Count=1)` between Prune()'s enumeration reading the stale value and its
+  `TryRemove` call executing; the unconditional remove then deleted that fresh window, letting more
+  requests through per minute than `MaxPerMinutePerIdentity`/`MaxPerMinutePerTarget` configure. Fixed
+  by switching to the conditional `TryRemove(KeyValuePair<TKey,TValue>)` overload (.NET 5+), passing
+  the exact pair the enumeration produced, so a stale decision can never delete a concurrently-replaced
+  value. `src/Benzene.Mesh.Dispatch/MeshDispatchRateLimiter.cs`. Test:
+  `Prune_RaceAtTheMinuteBoundary_NeverDeletesAConcurrentlyInstalledFreshWindow`
+  (`MeshDispatchRateLimiterTest` in `MeshDispatchTest.cs`) — reproduces the race deterministically (not
+  probabilistically) via a custom `IEqualityComparer<string>` installed on a reflection-swapped
+  `_windows` dictionary, which fires a real concurrent `TryAcquire` pair at the exact point the real,
+  compiled `Prune()`'s `TryRemove` call looks up the key's bucket (after it has decided to remove the
+  entry but before the removal executes) — exercising the actual fixed code path, not a hand
+  re-implementation of it. Verified red against the pre-fix source (entry wrongly deleted, a
+  `limit: 1` follow-up request wrongly succeeded) before applying the fix.
+- **[RESOLVED] #255 — `MeshDispatchMessageHandler.HandleAsync`'s `NotImplemented` exit path (registered
+  service, rate limit passed, but no `IMeshServiceDispatcher` matches the entry's `Source`) never
+  called `Audit(...)`.** Every other termination path — gate-blocked, bad-request, not-found,
+  rate-limited, dispatch-failed (#186), and the `dispatched` success path — leaves an audit record;
+  this one, the routine "forgot to wire the matching `AddMeshXxxDispatcher()`" post-deploy
+  misconfiguration (not a hostile input), silently vanished from the trail. Fixed by adding an
+  `Audit("no-dispatcher", ...)` call on that branch before returning the `NotImplemented` result, same
+  fields as every sibling exit path. `src/Benzene.Mesh.Dispatch/MeshDispatchMessageHandler.cs`. Test:
+  `NoDispatcherRegisteredForSource_StillLeavesAnAuditRecord` (alongside the existing
+  `NoDispatcherForSource_ReturnsNotImplemented`, which only checked the returned status).
+
+Verified: `dotnet test test/Benzene.Mesh.Test -c Release --filter "FullyQualifiedName~MeshDispatch"` —
+30 passed, 0 failed (includes the pre-existing #185/#186/#187 regression tests, unaffected).
+## Round 16, WP-B — Benzene.Resilience.Polly (2026-08-30)
+
+- **[RESOLVED] #267 — `PollyResilienceMiddleware<TContext>`'s docs overclaimed Hedging/Fallback
+  support that doesn't compile, and the underlying design had no isolation between concurrent Polly
+  attempts.** Two independent halves, one root: (a) the package's `.csproj` `<Description>`, XML
+  `<remarks>`, `CLAUDE.md`, and `docs/cookbooks/polly-resilience.md` all listed Hedging and Fallback
+  as supported strategies, but Polly.Core 8.5.0's `AddHedging`/`AddFallback` exist only on the
+  *generic* `ResiliencePipelineBuilder<TResult>`, while every `.UseResiliencePipeline(...)` overload
+  only hands out the non-generic builder — the advertised code shapes don't compile (`CS1929`/`CS0305`,
+  verified in `work/review-round16-core-2026-08.md` §2). (b) The deeper bug:
+  `PollyResilienceMiddleware<TContext>.HandleAsync` shared one mutable `CancellationTokenAccessor`,
+  one `context`, and one `next` closure across every Polly attempt with zero isolation — reachable
+  today via Polly's own public non-generic `AddStrategy(...)` extensibility point (a hand-rolled
+  concurrent-attempt "hedge"), which ran `next()` (the entire downstream pipeline) twice for one
+  message, tore the ambient token between attempts, and last-write-won the shared context. Proven
+  3/3 by the xUnit repro in `work/review-round16-performance-2026-08.md` Finding 1 (all three
+  assertions passed against the unmodified middleware, proving the corruption).
+  - **Docs fix**: removed every Hedging/Fallback claim from the `.csproj` `Description`, the type's
+    XML `<remarks>`, `CLAUDE.md`, and the cookbook (retitled "Polly Resilience Pipelines (circuit
+    breaker, timeout, retry, rate limiter)"), replacing them with the accurate supported-strategy
+    list (Retry, Timeout, CircuitBreaker, RateLimiter — the sequential-attempt strategies expressible
+    on the non-generic builder) plus a new cookbook section,
+    [Why concurrent-attempt strategies aren't supported](cookbooks/polly-resilience.md#why-concurrent-attempt-strategies-arent-supported),
+    explaining both halves of the root cause. `docs/capability-matrix.md`'s Resilience row updated to
+    match.
+  - **Runtime fix**: added a per-`HandleAsync`-call re-entrancy guard (`Interlocked.Increment` on a
+    one-element `int[]` counter allocated once per call, closed over via the existing state tuple) in
+    the attempt callback — if a second attempt starts while one is still in flight, it throws
+    `NotSupportedException` naming the problem ("a concurrent-attempt resilience strategy ... is not
+    supported by PollyResilienceMiddleware<TContext> ... run attempts sequentially, or hedge at a
+    different layer") before ever calling `next()` a second time, instead of silently corrupting the
+    shared context/token. Zero added cost/behavioral change for every sequential-attempt strategy
+    (Retry/Timeout/CircuitBreaker/RateLimiter never drive the counter above 1). Did **not** attempt
+    per-attempt context/token isolation (option (b) from the performance review) — that is a bigger
+    architecture change with no defined merge semantics for a mutable message context across
+    concurrent attempts, deliberately deferred; see the `[OPEN]` entry below.
+  - **Tests**: `test/Benzene.Core.Test/Resilience/PollyResilienceMiddlewareConcurrentAttemptGuardTest.cs`
+    (new) — the `ConcurrentDuplicateStrategy` custom Polly strategy from the performance review's
+    repro, rewritten to assert the corrected fail-fast behavior: the middleware throws
+    `NotSupportedException` on the concurrent second attempt, `next()` runs at most once (no
+    concurrent-execution, no shared-accessor tearing, no last-write-wins on the context observed).
+    Every existing `test/Benzene.Core.Test/Resilience/PollyResilienceMiddlewareTest.cs` case (Retry/
+    Timeout paths, the #237 and #63 regression tests) verified unchanged and green —
+    `dotnet test test/Benzene.Core.Test -c Release --filter "FullyQualifiedName~PollyResilienceMiddleware"`:
+    14 passed (11 existing + 3 new), 0 failed.
+## Round 16, WP-D: AWS idempotency convention + outbound client cancellation (2026-08-30)
+
+- **[RESOLVED] `#260` `IdempotencyMiddleware.WasSuccessful`'s "null `MessageResult` == success" fall-through
+  directly contradicted the "null == failure, redeliver" convention SQS/DynamoDb always had and `#229`
+  extended to SNS/S3/EventBridge.** When a result-bearing (`IHasMessageResult`) pipeline completed
+  without ever setting `MessageResult` (a non-standard pipeline that omits `MessageRouter` or
+  short-circuits before it runs), the middleware treated that as success and permanently marked the
+  idempotency claim `Completed` - even while the transport's own `#229` escalation was, in the very
+  same call, throwing to demand redelivery. The redelivery SNS/S3/EventBridge/SQS/DynamoDb was just
+  told to perform then hit the already-`Completed` claim and short-circuited as a duplicate success,
+  without the real handler ever running again. Fixed by distinguishing the two null cases precisely:
+  `context is IHasMessageResult hasResult` now returns `hasResult.MessageResult?.IsSuccessful ?? false`
+  (a result-bearing transport with no result set is NOT proven successful - same release-the-claim path
+  the middleware already takes for an explicit `IsSuccessful == false`), while a context type with no
+  result concept at all keeps the old no-throw-as-success behaviour unchanged.
+  `src/Benzene.Idempotency/IdempotencyMiddleware.cs`. Regression tests:
+  `test/Benzene.Core.Test/Idempotency/IdempotencyMiddlewareTest.cs`
+  (`HandlerCompletesWithoutSettingResult_TreatedAsNotSuccessful_ReleasesClaim_SoRedeliveryReprocesses`,
+  plus the three genuinely-completed-message tests updated to explicitly set `MessageResult = Ok()` so
+  they keep testing real success rather than the old null-fallback loophole) and
+  `test/Benzene.Core.Test/Idempotency/IdempotencyMiddlewareSnsInteractionTest.cs` (the full
+  `SnsApplication` + real `IdempotencyMiddleware<SnsRecordContext>` interaction: first attempt throws
+  `SnsMessageProcessingException` and releases the claim; the redelivery actually re-runs the handler).
+- **[RESOLVED] `#261` every outbound AWS SDK client middleware/client (SQS, SNS, EventBridge, Lambda,
+  Step Functions, the three batch clients, and the standalone `Benzene.Aws.Sqs` `SqsMessageClient`)
+  called its `*Async` SDK method with no `CancellationToken`, despite every one of those methods
+  actually supporting one - so `UseTimeout(...)` (or any other consumer of the ambient
+  `ICancellationTokenAccessor`, e.g. graceful-drain cancellation) around an outbound AWS send was a
+  silent no-op; a stalled call ran until the AWS SDK's own default retry/socket timeout, not the
+  configured deadline.** Fixed by giving every client the same optional
+  `ICancellationTokenAccessor`-resolving constructor overload `HttpClientMiddleware` already has
+  (`_cancellation?.CancellationToken ?? CancellationToken.None` at the point of use), threaded into the
+  existing SDK overload at every call site - purely additive, no wire or interface change. Where a
+  client is constructed via a DI extension (`UseSqsClient()`, `UseSnsClient()`,
+  `UseEventBridgeClient()`, `UseAwsLambdaClient()`, `AddStepFunctionsClient()`, `AddLambdaHealthCheck()`),
+  the accessor is resolved with `TryGetService` so pipelines without the registration keep working.
+  Also fixed the now-false claim in `Benzene.Clients.Aws.Lambda/CLAUDE.md` (and matching stale comments
+  in `AwsLambdaHealthCheck.cs`) that the Lambda invoke path "can't" forward the token into its own SDK
+  call - `IAmazonLambda.InvokeAsync` (and every other AWS SDK method touched here) has always had a
+  `CancellationToken` overload; `AwsLambdaHealthCheck`'s Active-mode ping now threads the accessor too.
+  Files: `src/Benzene.Clients.Aws.Sqs/{SqsClientMiddleware.cs,SqsBatchMessageClient.cs,Extensions.cs}`,
+  `src/Benzene.Clients.Aws.Sns/{SnsClientMiddleware.cs,SnsBatchMessageClient.cs,Extensions.cs}`,
+  `src/Benzene.Clients.Aws.EventBridge/{EventBridgeClientMiddleware.cs,EventBridgeBatchMessageClient.cs,Extensions.cs}`,
+  `src/Benzene.Clients.Aws.Lambda/{AwsLambdaClientMiddleware.cs,AwsLambdaClient.cs,
+  AwsLambdaBenzeneMessageClient.cs,AwsLambdaHealthCheck.cs,Extensions.cs,CLAUDE.md}`,
+  `src/Benzene.Clients.Aws.StepFunctions/{StepFunctionsClient.cs,StepFunctionsClientFactory.cs,Extensions.cs}`,
+  `src/Benzene.Aws.Sqs/Client/SqsMessageClient.cs`. Regression tests: one per client family in the new
+  `test/Benzene.Core.Test/Clients/Aws/OutboundClientCancellationTest.cs` (`TimeoutMiddleware` at a 50ms
+  deadline around a mocked SDK call that runs 5s unless it observes a cancelled token - before the fix
+  the call ran the full 5s regardless of the deadline; after, it aborts within a generous 2s ceiling).
+  Note: `StepFunctionsClient` wraps its own SDK calls in a catch-all that converts any exception
+  (including a genuine cancellation) into a `BenzeneResultStatus.ServiceUnavailable` result rather than
+  rethrowing, so its observable fix is "the call actually completes near the deadline" rather than a
+  propagated `TimeoutException` - documented inline on that test.
+
+## Round 17, WP-A: repairing round 16's own #267/#266 fixes (2026-08-30)
+
+Findings from the round-17 review pass (task board #288, #289; `work/bug-fix-plan-round17-2026-08.md`
+WP-A; evidence in `work/review-round17-performance-2026-08.md` Findings 1-2). Both are regressions
+*in* round 16's own fixes for #267 and #266 above - this WP repairs those fixes, it does not revert
+them. Fixed in `src/Benzene.Resilience.Polly/PollyResilienceMiddleware.cs`,
+`src/Benzene.Microsoft.Dependencies/MicrosoftServiceResolverAdapter.cs`,
+`src/Benzene.Microsoft.Dependencies/MicrosoftServiceResolverFactory.cs`.
+
+- **[RESOLVED] #288 — the round-16 #267 re-entrancy guard's `Interlocked.Increment` ran *before* the
+  `try`/`finally` that decrements it, so a guard-rejected (genuinely concurrent) attempt threw
+  `NotSupportedException` **without ever pairing its own increment with a decrement** - permanently
+  poisoning the per-`HandleAsync`-call counter above zero. Any later, purely sequential attempt in the
+  same call (e.g. an outer `Retry` retrying after the rejected race) then incremented the already-
+  poisoned counter and was wrongly rejected by the same guard, even though nothing overlapped with it
+  at all - the exact composition the round-16 fix's own cookbook section anticipates someone reaching
+  for.** Fixed minimally, per the plan's ruling: `Interlocked.Decrement` now runs immediately before
+  the guard throws, so the rejected attempt undoes its own count while the in-flight attempt's count
+  is left untouched - every increment is paired with exactly one decrement, whichever branch runs.
+  No restructuring beyond that. Test: `test/Benzene.Core.Test/Resilience/PollyGuardCounterLeakTest.cs`
+  (new) - `HandleAsync_SequentialRetryAfterEarlierConcurrentRace_RunsAndDoesNotThrowNotSupported`,
+  reusing the review's `ConcurrentOnFirstRoundStrategy` (a `Retry` pipeline wrapping a strategy that
+  races two concurrent sub-attempts on round 1, then forwards a single sequential attempt on round 2+,
+  matching every stock Polly strategy's shape) - red before the fix (round 2's `next()` never ran,
+  rejected by the poisoned counter), green after. All 14 pre-existing
+  `PollyResilienceMiddlewareTest`/`PollyResilienceMiddlewareConcurrentAttemptGuardTest` cases (the
+  #267 regression suite) verified unchanged and green alongside it.
+- **[RESOLVED] #289 — the round-16 #266 disposal bridge's deliberately-unbounded
+  `DisposeAsync().AsTask().GetAwaiter().GetResult()` (both `MicrosoftServiceResolverAdapter.Dispose()`
+  and `MicrosoftServiceResolverFactory.Dispose()`) could deadlock the calling thread FOREVER - not
+  just for a long time - whenever the disposed scope/provider's own `DisposeAsync()` awaits without
+  `ConfigureAwait(false)` (ordinary application code, not a Benzene defect) under an ambient
+  single-thread-affinity `SynchronizationContext` (the same shape as WinForms'/WPF's message-loop
+  context or Blazor Server's per-circuit renderer context): the posted continuation could only ever
+  run on the very thread now blocked waiting for it - the textbook sync-over-async deadlock. For
+  `MicrosoftServiceResolverFactory.Dispose()`, which tears down the whole root DI container typically
+  once at process/host shutdown, that hang can mean the entire application never finishes shutting
+  down.** Per the plan's explicit ruling, this is **not** fixed by switching to the bounded-5s pattern
+  used elsewhere (`RedisCacheService`, `MeshAnnouncer`) - that would reopen #266's own "never abandon
+  a user's cleanup mid-way" reasoning. Instead, both `Dispose()` methods now suppress the ambient
+  `SynchronizationContext` around the blocking call (the standard sync-over-async mitigation),
+  restoring the original context in a `finally`:
+  ```csharp
+  var previous = SynchronizationContext.Current;
+  SynchronizationContext.SetSynchronizationContext(null);
+  try { asyncDisposable.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
+  finally { SynchronizationContext.SetSynchronizationContext(previous); }
+  ```
+  This keeps the wait unbounded (matching Autofac's own semantics for the identical shape, as #266
+  intended) while removing the specific deadlock vector - a slow-but-eventually-completing disposal
+  still blocks the caller for exactly as long as it takes, same as before. Test:
+  `test/Benzene.Core.Test/Core/Core/DI/MicrosoftServiceResolverAdapterSyncContextDeadlockTest.cs`
+  (new) - a controllable `SingleThreadAffinitySynchronizationContext` (`Post` enqueues, nothing ever
+  dequeues) paired with a fake `IAsyncDisposable` scope/singleton whose `DisposeAsync()` awaits
+  without `ConfigureAwait(false)`, run on a dedicated background thread with a bounded `Join` so the
+  test itself can't hang CI. Both `Dispose_ScopeDisposeAsyncCapturesAmbientSyncContext_...` (adapter)
+  and `FactoryDispose_ProviderDisposeAsyncCapturesAmbientSyncContext_...` (factory, through a real
+  `IServiceCollection`-built container) were red before the fix (did not return within 10s) and green
+  after, with the async disposal confirmed to have actually run in both cases. `AsyncOnlyDisposableParityTest`
+  and the round-16 #266/#262 disposal regression suite verified unchanged and green alongside it.
+
+Scoped verification: `dotnet test test/Benzene.Core.Test -c Release --filter
+"FullyQualifiedName~PollyResilienceMiddleware|FullyQualifiedName~Microsoft|FullyQualifiedName~Cache.Redis|FullyQualifiedName~Autofac"`
+— 106 passed, 0 failed.
+## Round 17, WP-B — Mesh collector: drift detector, RecentFlows cancellation, descriptor eviction (2026-08-30)
+
+- **[RESOLVED] #283 — `RecordObservedActivityAndDrift` still read only the single "headline"
+  version's descriptor (`Descriptors[CurrentVersionKey]`), so a topic declared only by an
+  older-but-still-live version was wrongly flagged as undeclared drift the moment a second version
+  registered - the same false-positive class #251 fixed for `HashMatches`, reintroduced 90 lines
+  lower in the same file, in the same commit.** A canary/blue-green rollout of a service (v1
+  declaring `topic-a`, v2 declaring `topic-b`, both live) had every message v1 legitimately handled
+  on `topic-a` misfiled as a synthetic `contract-drift` issue the instant v2 registered, even though
+  v1's own descriptor was still correctly registered and live. Fixed by making the traffic-observed
+  drift signal reason about live versions the same way `HashMatches` already does: a topic now
+  counts as declared when it appears in the `Topics`/`Produces` list of ANY currently live version
+  of the service, not just the most-recently-registered one. New helpers
+  `IsDeclared(ServiceState, string)` and `ContainsTopicInAnyLiveVersion(ServiceState, (string, string),
+  bool)` replace the old single-descriptor `IsDeclared(MeshServiceDescriptor?, string)`/`ContainsTopic`
+  call sites in `RecordObservedActivityAndDrift`, both iterating `state.Descriptors.Values` exactly
+  as `HashMatches` does. Accepted, documented trade-off (not a silent false positive): `MeshTraceEvent`
+  carries no per-event `ServiceVersion`, so a genuine single-version drift on an edge that another
+  live version also happens to declare goes undetected until that other version retires - see the
+  `[OPEN]` entry below for the wire-shape question this would need to close cleanly.
+  `src/Benzene.Mesh.Collector/MeshCollectorStore.cs`. Tests (`test/Benzene.Mesh.Test/MeshCollectorStoreTest.cs`):
+  `OlderLiveVersion_HandlingItsOwnDeclaredTopic_IsNotFlaggedAsDrift_OnceANewerVersionRegisters` (the
+  false-positive repro, inverted to green) and
+  `TopicNoLiveVersionDeclares_IsStillFlaggedAsDrift_EvenWithMultipleLiveVersions` (the positive case:
+  a real drift on an edge no live version declares is still caught). Every pre-existing
+  `MeshCollectorStoreTest`/`MeshCollectorSideBySideVersionTest` case (in particular #251's own
+  regression tests) stayed green unmodified.
+- **[RESOLVED] #284 — `CompositeMeshFleetReadModel.RecentFlowsAsync` (and `TopicsFromUsageAsync`)
+  never got #256's cancellation-vs-failure catch filter: a bare `catch` swallowed a genuine caller
+  cancellation on `mesh:query:fleet` - the exact call #250 wired a real ambient token into - and
+  reported a normal, silently-degraded empty `FleetView` instead of propagating
+  `OperationCanceledException`.** #256 narrowed the fetch-isolation catch on `TraceAsync`/
+  `CorrelationAsync` to exclude the method's own cancelled token, but `RecentFlowsAsync` and the
+  usage-source fetch loop inside `TopicsFromUsageAsync` kept their original bare catches, undoing
+  #252's careful work of letting a genuine cancellation escape the trace-source backends' own
+  per-item fetch isolation. `TimeoutMiddleware` only converts a *thrown* `OperationCanceledException`
+  into `BenzeneResultStatus.Timeout`; with the bare catch, a caller wrapping `mesh:query:fleet` in
+  `UseTimeout(...)` against a trace-backed composite plane got a 200 OK with empty
+  `Traces`/`Services` on every deadline, not a timeout result. Fixed by applying #256's exact filter,
+  `catch (Exception ex) when (!(ex is OperationCanceledException && cancellationToken.IsCancellationRequested))`,
+  to both methods; a genuinely failing (non-cancellation) source still degrades to empty
+  flows/topics exactly as before.
+  `src/Benzene.Mesh.Collector/CompositeMeshFleetReadModel.cs`. Tests
+  (`test/Benzene.Mesh.Test/CompositeMeshFleetReadModelTest.cs`):
+  `FleetAsync_RecentFlowsSource_PropagatesRealCancellation_InsteadOfReportingEmptyFlows`,
+  `FleetAsync_UsageSource_PropagatesRealCancellation_InsteadOfReportingEmptyTopics`, plus the negative
+  cases `FleetAsync_FailingTraceSource_StillDegradesToEmptyFlows_WhenTheCallersTokenIsNotCancelled` and
+  `FleetAsync_FailingUsageSource_StillDegradesToEmptyTopics_WhenTheCallersTokenIsNotCancelled`. The
+  existing #256 `TraceAsync`/`CorrelationAsync` regression tests stayed green unmodified.
+- **[RESOLVED] #290 — `MeshCollectorStore`'s per-version `Descriptors` dictionary (new in #251) had
+  no eviction policy at all: a service that legitimately re-registers under a new `ServiceVersion` on
+  every deploy (ordinary CI/CD practice) accumulated one permanent entry per historical deploy for
+  the entire life of the collector process, degrading `HashMatches` from an O(1) comparison to an
+  unboundedly-growing O(v) scan per query.** Proven at 5,000 synthetic deploys retaining 5,000
+  entries. Fixed by adding a max-versions-per-service cap, `maxVersionsPerService` (default 8,
+  a new optional constructor parameter alongside the existing `maxTraceEvents`/`maxIssues` bounds -
+  side-by-side deployments realistically hold 2-3 live versions; 8 gives generous headroom).
+  `ServiceState` now also tracks a monotonic `DescriptorRegisteredAt` stamp per version key, set on
+  every registration, making "least-recently-registered" well-defined. When a brand-new version
+  registration would push a service's `Descriptors` over the cap, `EvictOneVersion` evicts the
+  least-recently-registered version that has no live instance currently reporting its
+  `DescriptorHash` (checked against `state.Instances`, via the new `HasLiveInstance` helper); if
+  every retained version has a live instance, the cap still wins and the least-recently-registered
+  version is evicted regardless (an in-memory diagnostic store, not a health signal - nothing is
+  logged or counted on eviction). The version just being registered is never itself a candidate (it
+  isn't in `Descriptors` yet, and is about to become `CurrentVersionKey`), so the current version is
+  never evicted. The evicted version's edges are retracted via the same `RetractEdges` call a
+  same-key re-registration already uses, so nothing is left dangling in the topic catalog.
+  `src/Benzene.Mesh.Collector/MeshCollectorStore.cs`. Tests
+  (`test/Benzene.Mesh.Test/MeshCollectorStoreTest.cs`):
+  `Register_ManyDistinctVersions_DescriptorsAreCappedAtTheConfiguredMax` (5,000-deploy growth test,
+  inverted: retained count is now 8, not 5,000),
+  `Register_OverCap_EvictsTheLeastRecentlyRegisteredVersionWithNoLiveInstance_NotACurrentOrLiveOne`
+  (a version with a live instance survives eviction over a dead sibling, and the evicted version's
+  topic edges are gone from the catalog), and `Register_OverCap_NeverEvictsTheCurrentVersion`. Cap
+  policy vs. a heartbeat-TTL-based alternative is recorded as an `[OPEN]` maintainer question below.
+
+  Full `dotnet test test/Benzene.Mesh.Test -c Release`: 600 passed / 0 failed (two transient timing
+  failures on the first run - `TempoTraceSourceTest.GetCorrelationAsync_FetchesMatchedTracesConcurrently_NotSequentially`
+  and `MeshCollectorQueryCancellationTest.UseTimeout_AroundATraceQuery_ActuallyBoundsTheRealReadModelCall`,
+  both timing-sensitive and unrelated to any file this WP touched - both passed cleanly re-run in
+  isolation, confirming CPU contention from other work packages building concurrently on the shared
+  host, not a regression).
+## Round 17, WP-C: mesh-host HTTP dispatch cancellation (2026-08-30)
+
+- **[RESOLVED] `#285` `BenzeneMessageHttpMiddleware<TContext>.DispatchAsync` called the 2-argument
+  `MiddlewareApplication.HandleAsync(request, factory)` overload, which hardcodes
+  `CancellationToken.None` into the fresh inner DI scope it creates for the dispatched envelope - so
+  the real HTTP request's cancellation, already seeded onto the OUTER per-request scope's
+  `ICancellationTokenAccessor` by the "SeedCancellationToken" pipeline middleware
+  (`BenzeneExtensions.BuildHttpPipeline`), never reached the handler's scope at all. This made round
+  16's `#250` (the `mesh:query:*` handlers resolving `ICancellationTokenAccessor` "at the point of
+  use") and round 12's `#185` (the same idiom for `MeshDispatchMessageHandler`) genuinely correct and
+  unit-tested in the library, but **inert in the shipped Mesh Host**: `deploy/Mesh/Benzene.Mesh.Host`
+  mounts both `mesh:query:*` and `mesh:dispatch` through this exact `UseBenzeneMessage` HTTP-envelope
+  transport, as does every `AwsMesh`/`AzureMesh`/`GoogleCloudMesh` example built the same way. A
+  disconnected browser tab or a load-balancer idle timeout on a `mesh:query:fleet`/`mesh:dispatch`
+  call never actually cancelled the downstream read-model/dispatch call on any of these hosts,
+  regardless of `UseTimeout(...)`/cancellation composition inside `Benzene.Mesh.Collector`/
+  `Benzene.Mesh.Dispatch` being correct in isolation. Round 16's own `#250` regression test
+  (`MeshCollectorQueryCancellationTest`) could not have caught this: it hand-shares one
+  `CancellationTokenAccessor` instance directly between the handler and `TimeoutMiddleware`'s
+  constructors, which proves the resolve-and-thread pattern works when the accessor instance is
+  shared, but cannot detect that this transport creates its own, separately-seeded inner scope -
+  it never exercises `IServiceResolverFactory.CreateScope()`/`BenzeneMessageHttpMiddleware` at all.
+  **Fix:** `DispatchAsync` now resolves `ICancellationTokenAccessor` from the OUTER (per-request)
+  scope via `TryGetService` (null-tolerant - a pipeline with no accessor registered, or a transport
+  that never seeds one, dispatches exactly as before) and calls the **existing** 3-argument
+  `MiddlewareApplication.HandleAsync(request, factory, cancellationToken)` overload - already
+  present alongside the 2-argument one, and already seeding the inner scope correctly via
+  `IServiceResolver.SeedCancellationToken` - instead of the 2-argument overload. No change to the
+  2-argument overload's signature or behaviour (other legitimate callers depend on its
+  `CancellationToken.None` default), and no change to `IHttpContext` or any other interface - a
+  narrowly-scoped fix entirely inside `DispatchAsync`'s resolution logic, matching the ruling in
+  `work/bug-fix-plan-round17-2026-08.md` WP-C. **This is what makes `#250`'s and `#185`'s
+  cancellation-propagation fixes actually effective in the shipped Mesh Host** - both fixes were
+  correct all along; the transport beneath them was silently discarding the signal they depended on.
+  File: `src/Benzene.Http/BenzeneMessage/BenzeneMessageHttpMiddleware.cs`. Regression tests (new):
+  `test/Benzene.Mesh.Test/MeshHttpDispatchCancellationTest.cs` -
+  `DispatchAsync_ThroughRealScopeCreation_SeedsTheInnerScopeWithTheOuterRequestsCancellationToken`
+  goes through REAL DI scope creation end to end (a real `MicrosoftBenzeneServiceContainer`, a real
+  `IServiceResolverFactory`, an outer scope seeded exactly as the real HTTP pipeline seeds it, and the
+  actual `BenzeneMessageHttpMiddleware.HandleAsync`/`DispatchAsync`) rather than a hand-shared
+  accessor instance - closing the exact gap the round-16 test missed - and asserts the INNER scope's
+  `FleetQueryMessageHandler` observes the outer request's cancelled token; a paired
+  `DispatchAsync_WithNoCancellationSeeded_StillDispatchesNormally` test pins that an unsignalled
+  outer scope (the common case) dispatches byte-identically to before. All pre-existing
+  `Benzene.Core.Test/Http/BenzeneMessageHttpMiddlewareTest.cs`,
+  `Benzene.Mesh.Test/MeshQueriesRoutingTest.cs`, `MeshCollectorQueryCancellationTest.cs`, and
+  `MeshDispatchTest.cs` cases verified unchanged and green.
+## Round 17, WP-D: Azure workers - Cosmos skip-mode checkpoint guard, Service Bus settlement isolation (2026-08-30)
+
+- **[RESOLVED] `#276` `BenzeneCosmosChangeFeedWorker`'s skip-mode "checkpoint the failed batch anyway"
+  call had no try/catch at all - the residual half of `#108` that the shipped fix never actually
+  reached.** `#108` (round 10) moved the success-path auto-checkpoint call outside the handler's own
+  try/catch into its own guarded try/catch, but the skip-mode branch (`CatchHandlerExceptions = true`:
+  "the handler failed, so checkpoint the batch anyway to permanently pass it over") still called
+  `await checkpointAsync();` completely unguarded. A lease-container failure there (a 429 throttle, a
+  transient network blip) escaped `OnChangesAsync` entirely unhandled and unlogged as a checkpoint
+  failure - the only prior log line named the handler as having failed, which is misleading once the
+  handler's outcome is irrelevant and the real, unlogged failure is the lease-container write. Fixed by
+  wrapping the skip-mode `checkpointAsync()` call in its own try/catch, mirroring the success path: a
+  distinct "Checkpointing the skipped change feed batch ... failed: the lease container write failed"
+  message names the lease container (not the handler) and is swallowed rather than rethrown - the batch
+  stays un-checkpointed and is redelivered/retried on the next partition scan, the same at-least-once
+  outcome `#108`'s ruling already established. `src/Benzene.Azure.CosmosDb/BenzeneCosmosChangeFeedWorker.cs`.
+  Regression test: `test/Benzene.Core.Test/Azure/CosmosDbWorker/BenzeneCosmosChangeFeedWorkerTest.cs`'s
+  `FailedBatch_CatchHandlerExceptions_SkipModeCheckpointAlsoThrows_LogsDistinctLeaseContainerFailure_AndDoesNotThrow`
+  - handler throws AND the skip-mode checkpoint call throws; asserts the worker does not throw, the
+  handler-failure log still fires once, and the new checkpoint-failure log fires once with lease-
+  container/skip-mode wording distinct from both the handler-failure log and the pre-existing
+  success-path auto-checkpoint-failure log. This test *replaces* the previously-misleadingly-named
+  `SuccessfulBatch_CheckpointThrows_SkipMode_ChecksPointsOnlyOnce_LogsAsCheckpointFailure_AndDoesNotThrow`,
+  whose pipeline mock never actually threw and so never reached the skip-mode branch at all.
+- **[RESOLVED] `#277` `BenzeneServiceBusWorker`'s `AckMode = Explicit` path ran the handler call and
+  `SettleAsync` inside one shared try/catch, so a settlement failure *after* a successful handler run
+  was caught by the handler's own catch block, logged with the handler-failure template, and the
+  already-successfully-processed message was wrongly abandoned - the same misattribution class `#108`/
+  `#116` fixed for Cosmos/EventHub, never applied to this third sibling.** Fixed by moving
+  `SettleAsync(settler, decision)` outside the handler's try/catch into its own, deliberately-placed
+  try/catch: a settlement failure (e.g. `CompleteMessageAsync` throwing because the lock was lost by
+  the time settlement runs) is now logged with a distinct "Settling Service Bus message {messageId}
+  failed after it was already successfully processed" message, and does **not** call
+  `AbandonMessageAsync()` - the lock is left to expire naturally so Service Bus redelivers the message,
+  mirroring Cosmos/EventHub's "don't force an extra side effect on top of an already-decided-successful
+  outcome" checkpoint handling. The settle-after-a-*failed*-handler path (i.e. the handler itself threw)
+  is unchanged - it still logs the handler failure, attempts `AbandonMessageAsync()` in its own nested
+  try/catch, and rethrows. `src/Benzene.Azure.ServiceBus/BenzeneServiceBusWorker.cs`. Regression test:
+  `test/Benzene.Core.Test/Azure/ServiceBusWorker/BenzeneServiceBusWorkerSettlementCancellationTest.cs`'s
+  `HandlerSucceeds_SettlementThrows_LogsDistinctSettlementFailure_DoesNotAbandon_AndDoesNotThrow` -
+  handler succeeds, `CompleteMessageAsync` throws a lock-lost-shaped exception; asserts the worker does
+  not throw, `AbandonMessageAsync` is never called, no handler-failure-template log fires, and the new
+  distinct settlement-failure log fires once with the settlement exception attached. The existing
+  `#117` regression tests (settlement under an already-cancelled `args.CancellationToken`) and the
+  handler-throws/abandon-also-throws test all pass unchanged.
+## Round 17, WP-E: AWS/GCP transports — Kinesis, XRay, Pub/Sub (2026-08-30)
+
+- **[RESOLVED] `#273` `KinesisStreamCheckpointer`'s single monotonic max-index watermark silently
+  marked an earlier, still-failed record as "done" once a later-index record from a different
+  `StreamOperators.PartitionBy` group had been checkpointed — a real, demonstrable case of the exact
+  pattern this package's own class doc recommends causing silent data loss.** A handler that
+  partitions a batch by key (the documented way to restore per-key ordering on this transport) and
+  checkpoints as it finishes each record can checkpoint a later partition's group entirely before it
+  ever looks at an earlier record from a different, still-unprocessed group. If that earlier record
+  then fails, the old max-index watermark had already advanced past its position, so
+  `FirstUncheckpointedSequenceNumber` reported the record *after* it as the resume point — the failed
+  record was reported to AWS as already handled and would never be retried. Fixed by replacing the
+  single monotonic index with a **contiguous-prefix watermark**: a `bool[]` sized to the batch tracks
+  which original positions have been confirmed, and the resume point is the first *unconfirmed*
+  position (the longest confirmed prefix's end), not the highest confirmed individual position. The
+  reference-equality/foreign-record guard is unchanged (`IndexOf` returning -1 for a projected/foreign
+  record still can't advance or rewind anything), and a confirmed index can never become unconfirmed
+  (there's no "unconfirm" operation), preserving the old code's "only ever advance" guarantee at the
+  level of each individual record. **Accepted tradeoff, not eliminated:** under `PartitionBy`, a
+  record confirmed ahead of an earlier gap (the partition that finished first) is now redelivered
+  even though it already succeeded once — safe over-retry (at-least-once), explicitly blessed by the
+  design doc's §4 caveats, and a world apart from the silent-skip data loss this fix closes. For a
+  plain sequential handler that checkpoints strictly in order (no gaps), the fix produces
+  byte-identical resume points to the old code — verified with a dedicated regression test, not just
+  asserted. `src/Benzene.Aws.Lambda.Kinesis/KinesisStreamCheckpointer.cs`. Regression tests (both new,
+  `test/Benzene.Core.Test/Aws/Kinesis/KinesisStreamApplicationTest.cs`):
+  `HandleAsync_PartitionByCheckpointing_AnEarlierPartitionsFailure_IsNotSkippedByALaterPartitionsCheckpoint`
+  (red before the fix: reported `"B-2"`; green: reports `"B-1"`, the record that actually failed) and
+  `HandleAsync_SequentialInOrderCheckpointing_BehavesByteIdenticallyToTheOldMonotonicWatermark` (a
+  plain in-order sequential handler resumes from the same record the old max-index watermark would
+  have named). Every pre-existing `KinesisStreamApplicationTest` case stays green unmodified — all of
+  them checkpoint strictly in order, so none was asserting the bug.
+- **[RESOLVED] `#274` `XRayTraceSource.GetCorrelationAsync`/`GetRecentFlowsAsync` had no
+  de-duplication of trace-summary ids returned across `FetchTraceSummariesAsync`'s window-chunk
+  boundaries, so a duplicated id produced two identical `TraceView`s in a correlation search (or
+  displaced a genuinely different trace from the top-N in recent-flows).** The correlation window is
+  chunked into `MaxTraceSummariesWindow`-sized (6h) sub-queries whose edges touch at a shared instant
+  the code's own tests prove — whether X-Ray's `GetTraceSummaries` treats that instant as closed on
+  both sides is unverified, and separately, backend pagination under eventual consistency can
+  legitimately re-surface a trace id across two calls regardless. Neither path was deduplicated before
+  `BatchGetTraces` looked the ids up, so a duplicate id was looked up twice and appended as two
+  `TraceView` entries for one physical trace. Fixed by applying `.DistinctBy(s => s.Id)` immediately
+  after `FetchTraceSummariesAsync` returns, in both methods (first-occurrence-wins) —
+  unconditionally safe regardless of which way the boundary-inclusivity question ever resolves, and
+  removes the dependency on an assumption the code already flagged as unverified for the window's
+  *width*. `src/Benzene.Mesh.Fleet.Aws.XRay/XRayTraceSource.cs`. Regression tests (both new,
+  `test/Benzene.Mesh.Test/XRayTraceSourceTest.cs`):
+  `GetCorrelationAsync_DuplicateTraceIdAcrossWindowChunks_IsOnlyReportedOnce` (red before the fix: two
+  identical `TraceView`s; green: `Assert.Single`) and
+  `GetRecentFlowsAsync_DuplicateSummaryId_OccupiesOnlyOneTopNSlot` (a duplicated summary id no longer
+  occupies two of the top-N slots, so a genuinely distinct trace is no longer silently displaced).
+  Every pre-existing `XRayTraceSourceTest` case stays green unmodified.
+- **[RESOLVED] `#275` `PubSubMiddlewareApplication` still used the pre-`#229` "null `MessageResult` ==
+  success" convention every AWS single-context transport moved away from — a Pub/Sub message whose
+  pipeline completed without ever setting a result was silently, permanently acked.** The check at
+  (what was) line 71 read `context.MessageResult?.IsSuccessful == false`; when `MessageResult` is
+  `null` (the pipeline completed without any middleware setting an outcome — an unroutable topic, or a
+  short-circuit before `MessageRouter` runs), `null == false` is `false`, so `RaiseOnFailureStatus`
+  never escalated. `PubSubOptions.RaiseOnFailureStatus`'s own doc comment already promised
+  "safe-by-default: a returned failure is escalated and redelivered", but the implementation only
+  escalated an *explicit* failure, not an unset one — the same null-reads-as-success bug class round
+  16 fixed in `IdempotencyMiddleware.WasSuccessful` (`#260`) and this round's own AWS pass fixed
+  nowhere else needed fixing (SNS/S3/EventBridge/SQS/DynamoDB already use the corrected convention).
+  **This is a strictly worse instance than any of those siblings**: Google Cloud Functions delivers
+  exactly one Pub/Sub message per invocation with no partial-failure/batch-item-failure channel at
+  all — where an AWS single-context transport's null-result bug still had other records in the same
+  batch to fall back on (round 16's characterization), completing without throwing here means the
+  Cloud Functions Framework returns 2xx, Pub/Sub acks, and the message is gone forever: no log line,
+  no retry, no batch-level safety net of any kind. Fixed by changing the check to
+  `context.MessageResult?.IsSuccessful != true`, matching
+  `SingleContextEscalatingApplicationBase`/`#229`/`#260`'s convention exactly — a null result now
+  escalates the same way an explicit failure does; only an explicit success is accepted. Also
+  reworded `PubSubOptions.RaiseOnFailureStatus`'s doc comment to state the null-escalates behavior
+  explicitly rather than leaving it implicit in "a returned failure".
+  `src/Benzene.GoogleCloud.Functions.PubSub/PubSubMiddlewareApplication.cs`,
+  `src/Benzene.GoogleCloud.Functions.PubSub/PubSubOptions.cs`. Regression test (new,
+  `test/Benzene.Core.Test/Google/PubSubFailureHandlingTest.cs`):
+  `HandleAsync_RaiseOnFailureStatusTrue_PipelineNeverSetsAResult_ThrowsPubSubMessageProcessingException`
+  (red before the fix: no exception thrown, message silently accepted; green:
+  `PubSubMessageProcessingException` thrown with the message's id). Every pre-existing
+  `PubSubFailureHandlingTest` case (explicit failure, explicit success, both-true containment, the
+  NRE-masking regression) stays green unmodified.
+## Round 17, WP-F: Avro map + multi-branch union support (2026-08-30)
+
+- **[RESOLVED] `#278` `AvroDatumConverter` had no `Schema.Type.Map` switch arm at all — any Avro
+  `map` field crashed on serialize (complex values) or deserialize (primitive values).** Reachable
+  through the package's own advertised "explicit/registered schema" use case
+  (`AvroOptions.RegisterSchema<T>`), not exotic misuse: a `map` field fell through to the primitive
+  `default` branch on both `ToDatum` and `FromDatum`, so a map's values never got recursively
+  converted to/from the datum shape `GenericDatumWriter`/`GenericDatumReader` expect. The simplest
+  case (`Dictionary<string,string>`) round-tripped through `Serialize` but threw
+  `InvalidCastException` on `Deserialize` (`Convert.ChangeType` can't target a `Dictionary<,>`); a map
+  of arrays-of-records threw `AvroException` on `Serialize` itself (`GenericDatumWriter` handed a raw
+  `List<InnerRecord>` instead of a converted `object[]`). Fixed by adding `Schema.Type.Map` arms
+  mirroring the existing `Array` handling: `ToMap` recursively converts each value against the map's
+  value schema into a plain `Dictionary<string, object?>`; `FromMap` builds a
+  `Dictionary<string, TValue>` sized from the target property's declared value type (supports
+  `Dictionary<string,V>`, `IDictionary<string,V>`, `IReadOnlyDictionary<string,V>`), converting each
+  value recursively. Avro map keys are always strings per spec — a non-string-keyed CLR dictionary
+  target (checked via the value's/target type's own `IDictionary<TKey,TValue>` generic argument, not
+  just per-entry, so it's caught even for an empty map) throws `NotSupportedException` naming the
+  constraint, rather than silently coercing the key. `src/Benzene.Avro/AvroDatumConverter.cs`.
+  Regression tests: `test/Benzene.Core.Test/Plugins/Avro/AvroMapTest.cs`
+  (`RoundTrips_PrimitiveValuedMap`, `RoundTrips_RecordWithinArrayWithinMap`,
+  `Serialize_NonStringKeyedDictionaryTarget_ThrowsNotSupportedException`,
+  `Deserialize_NonStringKeyedDictionaryTarget_ThrowsNotSupportedException`) — all four confirmed red
+  against the pre-fix code, green after.
+- **[RESOLVED] `#279` `AvroDatumConverter.NonNullBranch` always picked the FIRST non-null branch of
+  every union, on both serialize and deserialize — correct only for the common 2-branch
+  `["null", X]` "optional field" shape, and silently type/value-corrupting for a union with 3+
+  non-null branches.** A hand-authored `["null","string","long","boolean"]` union (reachable via
+  `RegisterSchema<T>`, the "polymorphic value field" shape) always serialized through the `string`
+  branch regardless of the value's actual type: a `bool` value round-tripped back as the *string*
+  `"True"`, a `long` as the string `"42"` — not merely mis-formatted, the CLR type of the result
+  changed, and for some type/value combinations (e.g. `Convert.ToBoolean(42L)`) the original value was
+  lost outright rather than just its type. Fixed by resolving the branch by actual runtime type in
+  both directions instead of always taking the first non-null branch: `ResolveWriteBranch` (serialize)
+  matches the CLR value's actual type against each candidate branch's Avro tag (exact-width match
+  first — e.g. `bool`→Boolean, `long`→Long — then a numeric-widening fallback — e.g. `int` against a
+  union offering only `long` — then, for anything still unmatched such as multiple record branches of
+  similar shape, the first declared branch, same as the old always-first behaviour); `ResolveReadBranch`
+  (deserialize) matches the *datum's* actual runtime type — `GenericDatumReader` already resolved the
+  wire's real branch by the time the datum reaches this converter (`bool`/`long`/`string`/
+  `GenericRecord`/etc.), so this recovers that information from the datum's CLR shape instead of
+  discarding it. Both branch-resolution helpers see exactly one non-null candidate for the common
+  2-branch shape, so that path is unconditionally unchanged (byte-identical, not just tested-to-look
+  unchanged). `src/Benzene.Avro/AvroDatumConverter.cs`. Regression tests:
+  `test/Benzene.Core.Test/Plugins/Avro/AvroMultiBranchUnionTest.cs`
+  (`RoundTrips_BooleanValue_ThroughAThreePlusBranchUnion`,
+  `RoundTrips_LongValue_ThroughAThreePlusBranchUnion`,
+  `RoundTrips_StringValue_ThroughAThreePlusBranchUnion` — all three confirmed red against the pre-fix
+  code, green after; plus the required 2-branch-nullable-union regression pinning the unchanged
+  behaviour: `TwoBranchNullableUnion_ReferenceTypeValuePresent_StillRoundTrips`,
+  `TwoBranchNullableUnion_ReferenceTypeValueNull_StillRoundTrips`,
+  `TwoBranchNullableUnion_ValueTypePresent_StillRoundTrips`,
+  `TwoBranchNullableUnion_ValueTypeNull_StillRoundTrips`). All pre-existing `Benzene.Avro` tests
+  (`AvroSerializerTest`, `AvroSchemaMismatchTest`, `AvroDepthGuardTest`, `AvroSchemaResolverTest`,
+  `AvroRequestResponseRoundTripTest`, `AvroMediaFormatTest`, including the #56/#57 regression tests)
+  verified unchanged and green.
+## Round 17, WP-G: gRPC streaming + health-bridge parity (2026-08-30)
+
+- **[RESOLVED] `#280` A server-streaming/duplex handler exception thrown mid-stream bypassed every
+  layer of Benzene's error classification and left a stale `benzene-status: ok` trailer on the
+  failed call.** `GrpcMethodHandler.ServerStreamingAsync`/`DuplexStreamingAsync` ran
+  `RunPipelineAsync` (which had already written the success `benzene-status` trailer and returned
+  OK, since nothing had thrown yet) and only then handed the still-unconsumed
+  `IAsyncEnumerable<TResponse>` to `GrpcStreamAdapter.WriteAll`, which had no try/catch of its own -
+  so a handler that threw partway through producing items propagated unclassified, past
+  `DefaultGrpcStatusCodeMapper`/`AddRichErrorDetails`, straight out to grpc-dotnet's own generic
+  `RpcException(Unknown, "Exception was thrown by handler.")`, with the earlier-written
+  `benzene-status: ok` trailer still attached - actively contradicting the outcome. Fixed for the
+  two streaming shapes only (unary/client-streaming untouched): `RunPipelineAsync` now takes a
+  `deferSuccessTrailer` flag - on a successful pipeline result it skips writing the `benzene-status`
+  trailer immediately, leaving that to a new `GrpcMethodHandler.WriteStreamAsync`, which drains the
+  stream and only then writes the trailer (gRPC trailers are sent once, at call end, so this is
+  safe). A mid-drain exception is classified the same way
+  `Benzene.Core.MessageHandlers.MessageHandler.HandleAsync` classifies a unary handler's exception
+  (`ArgumentException` → ValidationError, `TimeoutException` → Timeout, a genuine
+  `OperationCanceledException` → the same Cancelled/DeadlineExceeded translation
+  `RunPipelineAsync` already used, anything else → ServiceUnavailable), then run through
+  `DefaultGrpcStatusCodeMapper` + `AddRichErrorDetails` + a truthful failure `benzene-status`
+  trailer before the classified `RpcException` is thrown. A pipeline-level failure decided before
+  any stream item is produced (e.g. request validation) is unaffected - it still writes its trailer
+  and throws immediately, exactly as before. Files: `src/Benzene.Grpc/GrpcMethodHandler.cs`.
+  Regression tests (red confirmed against the pre-fix code, now green):
+  `test/Benzene.Grpc.Test/GrpcMethodHandlerStreamingTest.cs`
+  (`ServerStreamingAsync_WhenHandlerThrowsMidStream_ClassifiesTheExceptionAndWritesAFailureTrailer`,
+  `DuplexStreamingAsync_WhenHandlerThrowsMidStream_ClassifiesTheExceptionAndWritesAFailureTrailer`),
+  using two new throwing test handlers
+  (`test/Benzene.Grpc.Test/Handlers/{SubscribeThrowingMidStreamMessageHandler,ChatThrowingMidStreamMessageHandler}.cs`).
+  All pre-existing `GrpcMethodHandlerStreamingTest`/`GrpcStreamingHostingTest` happy-path and
+  no-handler/cancellation tests stay green unchanged.
+- **[RESOLVED] `#281` `BenzeneHealthCheckBridge` ignored `IHealthCheck.IsNonCritical`, while
+  `HealthCheckProcessor` honours it - the same check/state reported "serving" over HTTP and
+  `NOT_SERVING` over grpc.health.v1.** `HealthCheckProcessor.RunTimedAsync` downgrades a
+  `Failed` result to `Warning` when the check is non-critical and the failure isn't persistent
+  (`result.Status == Failed && healthCheck.IsNonCritical && !result.IsPersistent`), so a
+  non-critical dependency being down degrades the instance rather than taking it out of service.
+  `BenzeneHealthCheckBridge.CheckHealthAsync` - a second, independent aggregation path over the same
+  `IHealthCheck` contract, deliberately without a `Benzene.HealthChecks` project reference - read
+  `result.Status` unconditionally, so a non-critical/non-persistent failing check (including the
+  always-non-critical `DependencyHealthCheck` category) flipped the gRPC health bridge to
+  `Unhealthy` even though the HTTP/message-handler path correctly reported it as merely degraded.
+  Fixed by duplicating `RunTimedAsync`'s exact downgrade rule locally in the bridge (the same
+  "no direct reference, so mirror the logic" precedent this class already follows for
+  `DuplicateTypeSuffixer`/`HealthCheckNamer`), applied per-check before the aggregate Unhealthy/
+  Degraded/Healthy decision - and the downgraded status is also what's reported in the bridge's
+  per-check `data` dictionary, matching what `HealthCheckProcessor` itself would report for the
+  identical check/state. Files: `src/Benzene.Grpc.AspNet/BenzeneHealthCheckBridge.cs`. Regression
+  tests (red confirmed against the pre-fix code, now green):
+  `test/Benzene.Grpc.Test/BenzeneHealthCheckBridgeTest.cs`
+  (`CheckHealthAsync_NonCriticalFailingCheck_DowngradesToDegradedNotUnhealthy`,
+  `CheckHealthAsync_CriticalFailingCheck_StillReportsUnhealthy`,
+  `CheckHealthAsync_NonCriticalPersistentFailingCheck_StillReportsUnhealthy`). All pre-existing
+  `BenzeneHealthCheckBridgeTest` cases (no-checks, all-pass, any-fails, warns, `IncludeTypes`
+  wiring-time validation, duplicate-`Type` suffixing) stay green unchanged.
+- **Doc-only (no task number): `HealthCheckProcessor`'s deliberate "no ambient `CancellationToken`"
+  behaviour was documented only in a private `//` comment**, undiscoverable from
+  `IHealthCheckProcessor`'s public XML doc, the class doc, or `docs/health-checks.md`. Added a
+  `<remarks>` block on `IHealthCheckProcessor.PerformHealthChecksAsync`
+  (`src/Benzene.HealthChecks.Core/IHealthCheckProcessor.cs`) and a one-line note in
+  `docs/health-checks.md`'s `TimeOutHealthCheck`/`ExceptionHandlingHealthCheck` section, both
+  stating: `PerformHealthChecksAsync` takes no ambient `CancellationToken` - the only cancellation
+  signal reaching a check is its own timeout (`TimeOutHealthCheck`, the check's `Timeout` override
+  or the processor's default), so a slow custom check won't observe a caller disconnect or a host
+  shutdown/drain signal early and always runs to its own timeout, even during a graceful drain.
+## Round 17, WP-H: DynamoDB stores — transact accounting + expiry boundary (2026-08-30)
+
+- **[RESOLVED] #271 — `DynamoDbEventStore.MaxEventsPerAppend` (100) counted only `events.Count`, but
+  any `expectedVersion > 0` append prepends the `#121` `ConditionCheck` item — a 100-event append onto
+  an EXISTING stream sent 101 transact items, one over AWS's hard 100-item `TransactWriteItems` limit,
+  surfacing as AWS's own raw validation error instead of the library's friendly pre-flight guard.** The
+  existing limit test only ever exercised 101 events at `expectedVersion: 0` (no `ConditionCheck` item
+  in that case, so it never caught the off-by-one). Fixed by computing an effective per-call cap —
+  `MaxEventsPerAppend - 1` (99) whenever `expectedVersion > 0`, the plain 100 only for a brand-new
+  stream (`expectedVersion == 0`, which carries no `ConditionCheck` item) — and throwing the existing
+  friendly `ArgumentException` (now explaining the reserved condition-check slot) pre-flight, before any
+  SDK call is made, when the caller's batch exceeds it. Did **not** attempt to fold the version
+  assertion into the first `Put`'s own condition (DynamoDB conditions can only reference the item being
+  written, ruled infeasible by the review) — this is a correctly-computed cap, not a workaround.
+  **Contract parity**: `InMemoryEventStore` enforced only the plain 100-event cap regardless of
+  `expectedVersion`; it now enforces the identical 99-on-an-existing-stream effective contract (with a
+  comment explaining the limit mirrors `DynamoDbEventStore`'s real transact-item constraint even though
+  this store has no physical condition-check item of its own), so app code written against either store
+  observes the same ceiling. `src/Benzene.EventSourcing.DynamoDb/DynamoDbEventStore.cs`,
+  `src/Benzene.EventSourcing/InMemoryEventStore.cs`. Regression tests (red confirmed against the
+  pre-fix code, then green):
+  `test/Benzene.Core.Test/EventSourcing/DynamoDb/DynamoDbEventStoreTest.cs`
+  (`Append_100EventsAtAnExpectedVersionGreaterThanZero_ThrowsAFriendlyErrorPreFlight`,
+  `Append_99EventsAtAnExpectedVersionGreaterThanZero_ProducesExactly100TransactItems_AndSucceeds`,
+  `Append_ExactlyTheTransactionLimit_AtExpectedVersionZero_Succeeds`) and
+  `test/Benzene.Core.Test/EventSourcing/InMemoryEventStoreTest.cs`
+  (`Append_100EventsAtAnExpectedVersionGreaterThanZero_Throws`,
+  `Append_99EventsAtAnExpectedVersionGreaterThanZero_Succeeds`,
+  `Append_Exactly100Events_AtExpectedVersionZero_Succeeds`).
+- **[RESOLVED] #272 — `DynamoDbIdempotencyStore.TryClaimAsync`'s conditional `PutItem` used a strict
+  `expiresAt < :now` write condition while `ReadRecordAsync`'s expiry check was inclusive
+  (`epoch <= now`), so a record exactly at its expiry boundary (the same whole-second `expiresAt`
+  value both sides compare against `now`) was treated as still-live by the write and already-expired
+  by the read in the very same call — contradicting the class's own documented "reclaimable the
+  instant it lapses" contract. Under a genuinely advancing wall clock this self-heals on the next
+  retry tick, but under the store's own documented fixed-clock testing seam every one of the bounded
+  `MaxClaimAttempts` retries repeated the identical disagreement, ending in a spurious
+  `IdempotencyClaimContentionException` for a key the store's own read path already considered
+  reclaimable.** Fixed by making the write condition inclusive to match: `attribute_not_exists(#pk) OR
+  expiresAt <= :now`. `ReadRecordAsync` was already correct and is unchanged.
+  `src/Benzene.Idempotency.DynamoDb/DynamoDbIdempotencyStore.cs`. Regression test (red confirmed
+  against the pre-fix code, then green):
+  `test/Benzene.Core.Test/Idempotency/DynamoDb/DynamoDbIdempotencyStoreTest.cs`
+  (`TryClaim_WhenExistingRecordExpiresAtExactlyNow_WinsTheReclaim_NotContention` — simulates DynamoDB
+  evaluating the store's own emitted `ConditionExpression` text against an existing record whose
+  `expiresAt` equals the fixed `now`, so the test exercises the actual comparison operator the store
+  builds rather than a hard-coded assumption about it).
+
+Both findings and their captured repro shapes are from `work/review-round17-aws-deep-2026-08.md` and
+`work/review-round17-reliability-2026-08.md`. Verified:
+`dotnet test test/Benzene.Core.Test -c Release --filter
+"FullyQualifiedName~DynamoDbEventStoreTest|FullyQualifiedName~InMemoryEventStoreTest|FullyQualifiedName~DynamoDbIdempotencyStoreTest"`
+— red run (pre-fix code) failed exactly the 3 new tests above (55 passed, 3 failed, 58 total); green
+run (post-fix) 58 passed, 0 failed.
+## Round 17, WP-I: SelfHost composite-worker fault racing (2026-08-30)
+
+- **[RESOLVED] (2026-08-30) #291 — `CompositeBenzeneWorker.StartAsync` silently and permanently
+  swallowed a sibling worker's startup (or later, mid-lifetime) fault whenever the composite also
+  contained a worker whose `StartAsync` runs its full lifetime inline (exactly `SqsConsumer`'s own
+  documented shape).** `StartAsync` awaited `Task.WhenAll` over every worker's start task with no
+  failure-racing; `Task.WhenAll` only completes once EVERY constituent task has completed, so a
+  long-running worker (never completing until cancelled) meant the rollback `catch` never ran, the
+  fault was never rethrown, `BenzeneHostedServiceAdapter.ObserveFault`'s `LogCritical` +
+  `StopApplication` path never fired, and the host ran forever with one transport silently dead.
+  Compounding it, the rollback predicate itself only stopped a worker whose task
+  `IsCompletedSuccessfully` - too narrow even for the cases that did reach the catch, since it would
+  skip stopping a sibling that was merely still running/pending rather than one that had cleanly
+  finished starting.
+  - **Fix**: race the failure instead of waiting for everyone. A first-fault `TaskCompletionSource` is
+    fed by a fault continuation attached to every worker's start task (which also observes that
+    task's exception, preventing an unobserved-task-exception warning independent of whether it wins
+    the race); `StartAsync` then `await Task.WhenAny(Task.WhenAll(startTasks), firstFault.Task)`. When
+    `Task.WhenAll` wins (the no-fault happy path, or every task having already settled including any
+    fault), behavior is byte-identical to before. When `firstFault` wins, rollback runs immediately
+    and the original fault is rethrown without waiting on the still-pending `Task.WhenAll`. The
+    rollback predicate is corrected in the same change: stop any worker whose task is NOT
+    (faulted OR cancelled) - i.e. still running/pending as well as already succeeded - rather than
+    only `IsCompletedSuccessfully`.
+  - **Files**: `src/Benzene.SelfHost/CompositeBenzeneWorker.cs`.
+  - **Tests**: `test/Benzene.Core.Test/Hosting/CompositeBenzeneWorkerTest.cs` — two new regression
+    tests: `StartAsync_LongRunningSiblingFailsToStart_FaultsPromptlyAndStopsTheLongRunningSibling`
+    (an `SqsConsumer`-shaped `LongRunningWorker` alongside an `ImmediatelyFailingWorker`: today's code
+    hangs past a 5s timeout; after the fix, `StartAsync` faults promptly with the original exception
+    and the long-running sibling's `StopAsync` is observed to have run) and
+    `StartAsync_SiblingFaultsAfterStartingSuccessfully_FaultsPromptlyAndRollsBackTheSibling` (a
+    mid-lifetime fault via a `TaskCompletionSource`-backed worker, after both siblings are already
+    "running" - proves the race isn't limited to startup-time faults). Both existing
+    `CompositeBenzeneWorkerTest` cases (`StartAsync_WhenAWorkerFails_RollsBackTheStartedWorkers`,
+    `StartAsync_WhenAllSucceed_DoesNotStopAnyWorker`) stay green unchanged, confirming the no-fault
+    and already-fully-settled paths are unaffected. Confirmed red (2 new tests failing, 2 existing
+    passing) against the pre-fix code, then green (4/4) after:
+    `dotnet test test/Benzene.Core.Test -c Release --filter "FullyQualifiedName~CompositeBenzeneWorker"`.
+## Round 17, WP-K: auth hardening (2026-08-30)
+
+- **[RESOLVED] #286 (minor) — `MeshOidcOptions.Validate()`'s distinct-byte-count entropy floor did not
+  catch a short block repeated to fill the key.** The `#177` floor (fewer than 8 distinct byte values
+  across the whole `SigningKey` is rejected) counts distinct VALUES anywhere in the key, so
+  `"ABCDEFGH"` repeated 4x to reach the 32-byte minimum has exactly 8 distinct byte values and cleared
+  the check, while actually being only 8 bytes (64 bits) of real keyspace repeating with period 8 - far
+  weaker than the doc comment's claim that "a real generated secret ... clears this by a wide margin."
+  This key signs both the CSRF state token and the session cookie (a deterministic function of
+  `{Email, Exp}`), so a weak key here is a full session-forgery vector. Fixed by adding a second,
+  independent check alongside the existing distinct-byte floor: reject a key that is an exact tiling of
+  a proper substring whose period is under HALF the key's total length. A key built from exactly two
+  tiles of its own half (e.g. a 16-byte block repeated twice to fill 32 bytes) is deliberately still
+  accepted - two-tile repetition of a long-enough block is indistinguishable from a real secret by a
+  cheap structural check, and this shape was already asserted acceptable by this file's own
+  pre-existing test (`SigningKeyWithEnoughDistinctBytes_IsAccepted`'s `"0123456789abcdef"` x 2 case).
+  Also updated the doc comments (class remarks, `Validate()`'s inline comments, and the
+  `MinimumDistinctSigningKeyBytes` remarks) to describe both criteria honestly rather than
+  over-promising on the distinct-byte floor alone. Files:
+  `src/Benzene.Mesh.Auth.Oidc/MeshOidcOptions.cs` (new `HasLowPeriodRepeatingBlock`, called from
+  `Validate()`). Regression tests:
+  `test/Benzene.Mesh.Auth.Oidc.Test/MeshOidcOptionsValidateTest.cs`
+  (`EightByteRepeatingPatternPaddedTo32Bytes_Throws`, `EightByteRepeatingPatternPaddedTo64Bytes_Throws`,
+  plus `SixteenByteBlockRepeatedTwiceToFill32Bytes_IsAccepted` pinning the two-tile boundary
+  explicitly). All pre-existing tests in that file (including the distinct-byte-floor and
+  alternating-pattern rejections) stay green unchanged.
+- **[RESOLVED] #287 (minor, latent - not currently exploitable) — `MeshAuthGate`'s `dispatchRole` check
+  matched only the literal `DispatchPath`, unlike its sibling `MeshDispatchGuardMiddleware.IsGuarded`,
+  which deliberately matches on canonical path OR topic (via the route finder) specifically so a route
+  alias reaching the same handler cannot reach it around the guard.** If a future change ever exposed a
+  second HTTP route to the same `benzene:mesh:dispatch` topic (none exists today - `Startup.Configure`
+  mounts dispatch at exactly one path, with no config knob to move it independently), a caller with
+  valid identity but without the configured `dispatchRole` could have reached
+  `MeshDispatchMessageHandler` via that alias while the role gate silently never fired, even though the
+  guard's own CSRF/identity/rate-limit checks would still have applied. Fixed by extracting
+  `IsGuarded`'s path-OR-topic predicate into a new shared static
+  `MeshPathCanonicalizer.IsPathOrTopicMatch` (in the same file/assembly as `IsGuarded`, which now calls
+  it too), and having `MeshAuthGate`'s `dispatchRole` check call the identical predicate - resolving
+  `IRouteFinder` null-tolerantly from `context.RequestServices` (this host's ASP.NET Core container does
+  not carry one today, since the Benzene pipeline's own registrations live in a separately-built
+  provider - see `MeshAuthGate`'s class remarks - so this currently still falls back to the path-only
+  comparison, byte-identical to before; if that ever changes, the topic fallback is already wired up
+  with nothing further to update). Also added `MeshAuthGate.DispatchTopic`, read off the same
+  `MeshDispatchGuardOptions` default as the pre-existing `DispatchPath`, so neither literal can drift
+  from `Startup`'s own options instance. Files:
+  `src/Benzene.Mesh.Artifacts/MeshDispatchGuardMiddleware.cs` (new
+  `MeshPathCanonicalizer.IsPathOrTopicMatch`; `IsGuarded` now delegates to it),
+  `deploy/Mesh/Benzene.Mesh.Host/MeshAuthGate.cs` (`DispatchTopic`, `InvokeAsync`'s `dispatchRole`
+  check). Regression tests: `test/Benzene.Mesh.Test/MeshPathCanonicalizerTest.cs` (new - unit coverage
+  of the extracted predicate's path-match, topic-match, and topic-absent-falls-back-to-path-only cases)
+  and `deploy/Mesh/Benzene.Mesh.Host.Test/MeshAuthGateTest.cs`
+  (`DispatchRole_RouteAliasResolvingToTheDispatchTopic_IsAlsoGated`, confirmed red against the
+  literal-path-only check and green after routing through the shared predicate; plus
+  `DispatchRole_UnrelatedRouteResolvingToADifferentTopic_IsNotGated` as the negative case). No
+  end-to-end alias-route test - there is no second route to mount one against.
+## Round 17, WP-J: CLI healthcheck non-JSON-body tolerance (2026-08-30)
+
+- **[RESOLVED] `#282` `benzene healthcheck` crashed with a raw, unhandled
+  `Newtonsoft.Json.JsonReaderException` on a non-JSON (or empty) health-check response body, even
+  though the command already special-cased "a response shape this tool doesn't recognize" one line
+  later.** `HealthCheckCommand.ExecuteAsync` calls `Console.Out.WriteJson(json)` before evaluating
+  `Trips`/`IsHealthy`, and `Extensions.WriteJson` called `JValue.Parse(json)` with no exception
+  handling at all - so an empty body, a plain-text error body, or an HTML error page (a target
+  Lambda not running `UseHealthCheck()`'s standard shape, or an intermediate proxy/adapter
+  returning something other than the health contract's `{isHealthy, healthChecks}` JSON) crashed
+  the whole CLI invocation with a Newtonsoft stack trace instead of a diagnosable result, one line
+  before `IsHealthy`'s own "don't fail-loud on a response shape this tool doesn't recognize" comment
+  was ever reached. `IsHealthy` had the identical gap one level down: `JObject.Parse(json)` with no
+  handling, so even reordering the two calls wouldn't have been enough on its own. Fixed both:
+  `Extensions.WriteJson` now wraps `JValue.Parse` in `try`/`catch (JsonException)` and writes the
+  raw body verbatim on a parse failure instead of throwing; `HealthCheckCommand.IsHealthy` wraps
+  `JObject.Parse` the same way and returns `true` (not tripped) on a parse failure - matching the
+  existing "absent `isHealthy`" tolerance immediately below it, so `--fail-on unhealthy` never treats
+  an unparseable body as an explicit `isHealthy: false`. Files:
+  `src/Benzene.CodeGen.Cli.Core/Commands/HealthCheck/Extensions.cs`,
+  `src/Benzene.CodeGen.Cli.Core/Commands/HealthCheck/HealthCheckCommand.cs`. Regression tests added
+  to `test/Benzene.Core.Test/Autogen/CodeGen/Cli/HealthCheckCommandFailOnTest.cs`:
+  `ExecuteAsync_EmptyBody_DoesNotThrow_AndWritesRawBody`,
+  `ExecuteAsync_NonJsonBody_DoesNotThrow_AndWritesRawBodyVerbatim` (plain-text body, asserts the raw
+  body is written to `Console.Out` verbatim), and
+  `ExecuteAsync_HtmlErrorBody_FailOnUnhealthy_DoesNotThrow` (an HTML error page under the default
+  `--fail-on unhealthy` must not be treated as an explicit unhealthy signal). Confirmed red before
+  the fix (`Newtonsoft.Json.JsonReaderException` from `Extensions.WriteJson` at `Extensions.cs:10`,
+  called from `HealthCheckCommand.ExecuteAsync` at `HealthCheckCommand.cs:49`, for all three new
+  cases) and green after -
+  `dotnet test test/Benzene.Core.Test/Benzene.Test.csproj -c Release --filter
+  "FullyQualifiedName~HealthCheckCommandFailOnTest|FullyQualifiedName~HealthCheckCommandTest|FullyQualifiedName~HealthCheckClientTest"`:
+  23 passed (8 existing/updated in `HealthCheckCommandFailOnTest` + the rest of the `HealthCheck` CLI
+  suite unchanged), 0 failed.
 
 ## Open — maintainer decisions (the real remaining backlog)
 
@@ -3122,6 +5048,94 @@ None of these is a clean self-contained bug; each changes behaviour, a public AP
 - **[DECISION] Version unknown-version passthrough** — an unknown requested version silently falls
   back to the max version (`VersionSelector.cs:21-29`). A documented per-policy behaviour.
 
+### Tracked findings rounds 12–14, WP-J — Cache + RateLimiting round-13 residue (done)
+Ruled in [`bug-fix-plan-rounds12-14-2026-08.md`](archive/bug-fix-plan-rounds12-14-2026-08.md) §"WP-J" and
+[`bug-fix-designs-round13-2026-08.md`](archive/bug-fix-designs-round13-2026-08.md) — round 13's blind
+re-audit of the round-11-fixed `Benzene.RateLimiting`/`Benzene.Cache.Core`/`.Redis` packages (#198–202,
+3 worth-fixing + 2 minor). Read alongside the round-11 `#133`–`#147` entries above, none of which are
+regressed by this work package.
+- **[RESOLVED] #198 — `RedisCacheService.CreatePrefixActions` built a wildcard-invalidation pattern
+  with no check that the prefix was non-empty**, so an empty/whitespace prefix (a missing tenant id, an
+  unset config value) produced the literal pattern `"*"`, which `RedisWildcardActions.InvalidateEntryAsync`
+  then deleted in batches — every key in the logical database, one bad string interpolation away from a
+  full cache wipe. Fixed at both ends per the ruling's "fail fast, defense-in-depth" split:
+  `CreatePrefixActions` now throws `ArgumentException` on a null/empty/whitespace prefix before ever
+  building the glob (a loud startup/first-use error instead of a silent keyspace wipe), and
+  `RedisWildcardActions.InvalidateEntryAsync` independently refuses to execute a bare or
+  effectively-universal pattern (empty/whitespace, or — after trimming — composed entirely of `*`,
+  since Redis glob syntax treats `"*"`/`"**"`/`" * "` identically) with `InvalidOperationException`,
+  covering the still-reachable `CreateWildcardActions` escape hatch (an unescaped, caller-supplied
+  pattern by design) as a second, independent line of defense. A real, non-empty prefix still produces
+  the identical escaped `prefix*` pattern and invalidates exactly as before. Tests:
+  `CreatePrefixActions_EmptyOrWhitespacePrefix_ThrowsRatherThanBuildingAUniversalPattern`,
+  `CreatePrefixActions_RealPrefix_StillProducesTheEscapedPrefixStarPatternAndInvalidates`,
+  `WildcardActions_BarePattern_RefusesToRunRatherThanDeletingTheEntireKeyspace`,
+  `WildcardActions_OtherEffectivelyUniversalPatterns_AlsoRefuseToRun`,
+  `WildcardActions_NonUniversalPattern_StillRunsNormally` (`RedisCacheServiceTest.cs`).
+- **[RESOLVED] #199 — `CacheWriteActions.WriteThroughAsync`'s 3-arg overload ran the caller-supplied
+  `getCacheAction`/`getCacheValue` delegates outside the try/catch protection `SyncCacheAfterWriteAsync`
+  (#139) gives the actual cache I/O**, so a delegate throwing after a successful database write
+  propagated as if the database write itself had failed — exactly the failure mode #139 closed, just
+  reachable one call wider. Fixed by moving the whole decide-then-sync sequence (evaluating
+  `getCacheAction`, and — for `Set` — `getCacheValue`) inside the same `SyncCacheAfterWriteAsync` call
+  that already wraps the cache I/O, so a throw from either delegate degrades identically: logged and
+  swallowed, the already-successful database result still returned. A caller-driven
+  `OperationCanceledException` still propagates unchanged, matching #139's/#141's established
+  convention. Tests: `WriteThroughAsync_GetCacheValueDelegateThrows_StillReturnsTheSuccessfulDatabaseResult`,
+  `WriteThroughAsync_GetCacheActionDelegateThrows_StillReturnsTheSuccessfulDatabaseResult`,
+  `WriteThroughAsync_GetCacheValueDelegateThrowsOperationCanceled_Propagates` (`CacheEntryTest.cs`).
+- **[RESOLVED] #200 — the "one internally-owned rate limiter" guard round 11's `#133` fix added
+  (`UseInternallyOwnedRateLimiting`) was keyed on the shared `IBenzeneServiceContainer`, but
+  `MiddlewarePipelineBuilder<T>.Create<TNewContext>()` deliberately shares that same container across a
+  service's sibling pipelines for different transports** (the documented multi-transport pattern — see
+  `examples/AwsMesh`'s `MeshServiceWiring.Configure`, which wires ApiGateway/BenzeneMessage/Sqs/Sns/
+  EventBridge, each its own context type, off one shared `IBenzeneApplicationBuilder`) — so building two
+  unrelated pipelines off one container, each with its own `UseFixedWindowRateLimiting`, threw
+  `InvalidOperationException` on the second even though the docs and exception text both describe the
+  guard as "per pipeline." Re-keyed the guard (and the underlying DI registration) on a new internal
+  `Extensions.InternallyOwnedRateLimiterHolder<TContext>` wrapper type, closed over the pipeline's own
+  `TContext` — the identity this codebase already uses to distinguish sibling pipelines at registration
+  time (`MiddlewarePipelineBuilder<TContext>.Build()`'s own `PipelineDescriptor` is keyed the same way).
+  Two sibling pipelines (genuinely different `TContext`) now each get their own independent,
+  container-owned limiter; two `UseXRateLimiting` calls sharing one pipeline builder (and so the same
+  `TContext`) still collide on the same key and still fail fast exactly as before. The holder also
+  implements `IAsyncDisposable` itself, forwarding to the wrapped `RateLimiter` — necessary because the
+  container only disposes what it directly resolved (the holder), not a `RateLimiter` field buried
+  inside it, so #133's disposal fix is preserved rather than silently regressed by the extra layer of
+  indirection. Tests: `SiblingPipelines_OffOneSharedContainer_EachGetTheirOwnIndependentInternallyOwnedLimiter`
+  (new) plus the existing `InternallyCreatedLimiter_IsDisposedWhenTheContainerIsDisposed` (updated to
+  resolve through the new holder type — an internal type, exposed to the test assembly via
+  `InternalsVisibleTo`, the same pattern this repo already uses elsewhere) and
+  `StackingTwoInternallyCreatedLimiters_OnOnePipeline_FailsFast` (unchanged, still green) —
+  `RateLimitingPipelineTest.cs`.
+- **[RESOLVED] #201 (minor) — negative caching's presence check `!string.IsNullOrEmpty(cacheValue)`
+  conflated "key absent" with "the serializer emitted an empty string"**, silently reintroducing #140's
+  cache-penetration hazard for any `ISerializer` that encodes a null/default value as `""` rather than
+  the stock `System.Text.Json` serializer's 4-character `"null"`. Changed `CacheEntry.TryReadEntryAsync`'s
+  presence detection to `cacheValue != null` (a store miss is `null`; any real stored value — including
+  `""` — is a hit). Verified both read paths genuinely distinguish nil-from-store vs. empty-value before
+  relying on that: the in-memory test double's `GetEntryValueAsync` already returned a real `null` for a
+  missing dictionary key; `RedisCacheEntry.GetEntryValueAsync` did too for a genuine Redis miss
+  (`StringGetAsync`'s `RedisValue.Null` converts to a `null` string), **but its own error-handling catch
+  block returned `""` on a thrown exception** — which the new `cacheValue != null` check would have
+  misread as a hit of a genuinely-empty cached value instead of "the read failed." Fixed that catch to
+  return `null` too, so a Redis-side error stays indistinguishable from a genuine store miss under the
+  new presence rule. Test: `LazyLoadAsync_CustomSerializerEncodesNullAsEmptyString_ExplicitlyCachedNull_IsStillAHitWithoutCallingDb`
+  (`CacheEntryTest.cs`, using a new `EmptyStringForNullSerializer` test double).
+- **[RESOLVED] #202 (minor) — `RateLimitingMiddlewareBase.HandleAsync` caught `ObjectDisposedException`
+  around both the cost delegate and `Acquire()` in one block (per `#143`'s deliberate fix, which moved
+  the cost delegate inside this guard), always reporting "the rate limiter has already been disposed"
+  even when the exception came from an unrelated disposed dependency inside the cost delegate.** Split
+  into two catches: an `ObjectDisposedException` from the cost delegate is now reported as
+  `"Rate limit exceeded: the permit cost delegate depends on a resource that has already been disposed"`
+  (still failing CLOSED, per #134's ruling — a broken cost delegate must never silently bypass the
+  limiter), while one from `Acquire()` keeps #134's original
+  `"Rate limit exceeded: the rate limiter has already been disposed"` message unchanged. Every other
+  aspect of #143's/#134's behavior (negative-cost rejection, non-ODE exceptions from the cost delegate
+  still propagating unhandled, `Acquire()`'s `ArgumentOutOfRangeException` handling) is untouched. Test:
+  `BringYourOwnCost_CostDelegateThrowsObjectDisposedException_IsReportedAsACostDelegateFailure_NotAsTheLimiterDisposed`
+  (`RateLimitingPipelineTest.cs`).
+
 ### Health / convergence / lower-impact
 - **[DECISION] `DynamoDbHealthCheck` ignores `TableStatus`** — verdict is HTTP-200 only; `TableStatus`
   is now surfaced in the result data but doesn't fail a `DELETING`/`INACCESSIBLE_…` table. Which
@@ -3140,6 +5154,55 @@ None of these is a clean self-contained bug; each changes behaviour, a public AP
   `CosmosChangeType.Unknown` enum value.
 - **[DECISION] `SnsMessageBodyGetter` un-guarded `SnsRecord.Sns`** — adding `?.` would return null and
   weaken `GetBody`'s non-null contract; not production-reachable (AWS always populates `Sns`).
+
+### New from round 16, WP-B — Benzene.Resilience.Polly (2026-08-30)
+- **[OPEN] Should `PollyResilienceMiddleware<TContext>` ever support concurrent-attempt Polly
+  strategies (Hedging, or a hand-rolled concurrent-attempt strategy) via per-attempt isolation?**
+  #267's fix (below) makes the middleware fail fast with `NotSupportedException` on a concurrent
+  second attempt rather than corrupt shared state, but that's a guard, not support. The performance
+  review's option (b) — redesign the ambient-token/context exposure to be attempt-scoped (e.g. an
+  `AsyncLocal<CancellationToken>` per logical attempt instead of one mutable
+  `CancellationTokenAccessor` field, plus a defined merge/isolation semantics for the shared,
+  mutable `TContext` each attempt's `next()` closure currently writes to directly) is a bigger
+  architecture question deliberately deferred this round: per-attempt context cloning has no
+  obvious merge semantics for an arbitrary mutable message context (which attempt's writes win? do
+  they merge? is that even meaningful for a `MessageResult`?). Needs a maintainer decision on
+  whether concurrent-attempt strategies are worth that redesign at all, or whether the middleware's
+  documented position should simply stay "sequential-attempt only, hedge at a different layer."
+  (`work/review-round16-performance-2026-08.md` Finding 1, recommendation 2(b).)
+
+### New from round 17, WP-B — Mesh collector (2026-08-30)
+- **[OPEN] Should the mesh spec's `MeshTraceEvent` wire shape grow a `serviceVersion` field so
+  contract drift can be attributed per-version?** #283's fix makes `RecordObservedActivityAndDrift`
+  treat a topic as declared when ANY currently live version of a service declares it, mirroring
+  `HashMatches`'s any-live-version rule - but that's a documented approximation, not a precise
+  attribution. `MeshTraceEvent` (`src/Benzene.Mesh.Wire/MeshTraceEvent.cs`) carries no field
+  identifying which specific version of the service emitted it, so there is no clean way, without a
+  wire-shape change, to check a trace event against the ONE version that actually produced it. The
+  practical consequence: a genuine single-version drift (v1 calls an edge v1 never declared) goes
+  undetected for as long as ANY other live version (e.g. v2) happens to also declare that same edge -
+  it only surfaces once every other declaring version retires. Closing this precisely would mean the
+  mesh spec's wire contract growing a `serviceVersion` field on the trace event shape - a
+  cross-language spec change (`docs/specification/mesh.md` + every port's wire type +
+  `conformance/*.json` fixtures), not a change this repo can make unilaterally in one port. Needs a
+  maintainer/spec-owner decision on whether the attribution gain is worth the wire-shape churn across
+  every language port. (`work/review-round17-mesh-composition-2026-08.md` Finding 1;
+  `work/bug-fix-plan-round17-2026-08.md` WP-B ruling 1.)
+- **[OPEN] Is a hard max-versions-per-service cap the right retention policy for `MeshCollectorStore`'s
+  `Descriptors`, or should it be a heartbeat-TTL-based eviction instead?** #290 implements the cap
+  ruling specified for this round - `maxVersionsPerService` (default 8), evicting the
+  least-recently-registered non-current version, preferring one with no live instance, when a new
+  version registration would exceed it. That is a deliberately simpler policy than a TTL/heartbeat-
+  absence-driven one (e.g. "retire a version once no instance has heartbeated it for N minutes,
+  regardless of registration count"), which would track actual liveness over time rather than just
+  registration order at cap time, but is a materially bigger design surface (a new timer/sweep
+  concern, a policy for what "no heartbeat" means when heartbeats are themselves optional/degraded
+  per spec §6). A hard cap can, in principle, evict a version that is still receiving live traffic if
+  enough OTHER versions register in a burst before it heartbeats again; a TTL policy would not have
+  that failure mode but trades it for unbounded growth if instances stop heartbeating without ever
+  formally retiring. Needs a maintainer decision on whether the cap is the durable policy or an
+  interim guardrail pending a TTL-based redesign. (`work/review-round17-performance-2026-08.md`
+  Finding 3; `work/bug-fix-plan-round17-2026-08.md` WP-B ruling 3.)
 
 ---
 

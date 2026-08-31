@@ -27,11 +27,15 @@ public class EventBridgeLambdaHandlerTest
         var services = new ServiceCollection();
         var app = new MiddlewarePipelineBuilder<AwsEventStreamContext>(new MicrosoftBenzeneServiceContainer(services));
         app.UseEventBridge(eventBridge => eventBridge
-            .Use(null, (context, next) =>
-            {
-                handledContext = context;
-                return next();
-            })
+                .Use(null, (context, next) =>
+                {
+                    handledContext = context;
+                    return next();
+                }),
+            // This test is about the event reaching the pipeline, not message routing - the inline
+            // middleware never sets a MessageResult, so escalating on that (#229's null-result fix)
+            // would be unrelated noise here.
+            options => options.RaiseOnFailureStatus = false
         );
 
         var request = MessageBuilder.Create(Defaults.Topic, Defaults.MessageAsObject).AsEventBridge();

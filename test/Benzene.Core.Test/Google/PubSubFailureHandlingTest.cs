@@ -134,6 +134,27 @@ public class PubSubFailureHandlingTest
     }
 
     [Fact]
+    public async Task HandleAsync_RaiseOnFailureStatusTrue_PipelineNeverSetsAResult_ThrowsPubSubMessageProcessingException()
+    {
+        // #275: the pre-#229 "null MessageResult == success" convention. A pipeline that completes
+        // without ever setting context.MessageResult (an unroutable topic, or a short-circuit before
+        // MessageRouter runs) must be escalated exactly like an explicit failure - null is "not proven
+        // successful", matching SingleContextEscalatingApplicationBase/#229/#260's convention. Worse
+        // here than the AWS siblings: Cloud Functions delivers one Pub/Sub message per invocation with
+        // no batch-level fallback, so completing without throwing acks (and permanently drops) it.
+        var mockPipeline = new Mock<IMiddlewarePipeline<PubSubContext>>();
+        mockPipeline.Setup(x => x.HandleAsync(It.IsAny<PubSubContext>(), It.IsAny<IServiceResolver>()))
+            .Returns(Task.CompletedTask); // never touches context.MessageResult
+
+        var (_, resolverFactory) = CreateResolver();
+        var application = new PubSubMiddlewareApplication(mockPipeline.Object, new PubSubOptions { RaiseOnFailureStatus = true });
+
+        var exception = await Assert.ThrowsAsync<PubSubMessageProcessingException>(
+            () => application.HandleAsync(CreateData("msg-null-result"), resolverFactory.Object));
+        Assert.Equal("msg-null-result", exception.MessageId);
+    }
+
+    [Fact]
     public async Task HandleAsync_CatchExceptionsTrue_NoMessageOnEvent_LogsTheRealExceptionNotAnNre()
     {
         // Regression test for the NRE-masking bug: previously the catch block's own logging call

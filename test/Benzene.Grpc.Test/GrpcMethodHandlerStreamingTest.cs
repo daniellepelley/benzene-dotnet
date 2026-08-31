@@ -7,6 +7,7 @@ using Benzene.Grpc.Test.Helpers;
 using Benzene.Grpc.Test.Protos;
 using Benzene.Grpc.TestHelpers;
 using Benzene.Microsoft.Dependencies;
+using Benzene.Results;
 using Grpc.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -54,6 +55,28 @@ public class GrpcMethodHandlerStreamingTest
 
         Assert.Equal(StatusCode.NotFound, exception.StatusCode);
         Assert.Empty(writer.Written);
+    }
+
+    [Fact]
+    public async Task ServerStreamingAsync_WhenHandlerThrowsMidStream_ClassifiesTheExceptionAndWritesAFailureTrailer()
+    {
+        // #280: a mid-stream handler exception must be classified the same way MessageHandler
+        // classifies a unary handler's exception (here, an InvalidOperationException -> the generic
+        // ServiceUnavailable bucket), not surface as an unclassified RpcException(Unknown) with a
+        // stale success benzene-status trailer still attached.
+        var pipeline = BuildPipeline(out var serviceResolverFactory);
+        var handler = new GrpcMethodHandler(
+            new GrpcMethodDefinition("/x/y", "grpc-test-subscribe-throwing-topic"), serviceResolverFactory, pipeline);
+        var writer = new FakeServerStreamWriter<SubscribeReply>();
+        var callContext = TestServerCallContext.Create();
+
+        var exception = await Assert.ThrowsAsync<RpcException>(() =>
+            handler.ServerStreamingAsync<SubscribeRequest, SubscribeReply>(new SubscribeRequest { Topic = "t" }, writer, callContext));
+
+        Assert.Equal(StatusCode.Unavailable, exception.StatusCode);
+        Assert.Single(writer.Written);
+        Assert.Contains(callContext.ResponseTrailers, e => e.Key == "benzene-status" && e.Value == BenzeneResultStatus.ServiceUnavailable);
+        Assert.NotNull(callContext.ResponseTrailers.Get("grpc-status-details-bin"));
     }
 
     [Fact]
@@ -107,6 +130,30 @@ public class GrpcMethodHandlerStreamingTest
         await handler.DuplexStreamingAsync<ChatMessage, ChatMessage>(reader, writer, TestServerCallContext.Create());
 
         Assert.Equal(new[] { "Echo: a", "Echo: b" }, writer.Written.Select(x => x.Text));
+    }
+
+    [Fact]
+    public async Task DuplexStreamingAsync_WhenHandlerThrowsMidStream_ClassifiesTheExceptionAndWritesAFailureTrailer()
+    {
+        // #280, duplex-streaming shape.
+        var pipeline = BuildPipeline(out var serviceResolverFactory);
+        var handler = new GrpcMethodHandler(
+            new GrpcMethodDefinition("/x/y", "grpc-test-chat-throwing-topic"), serviceResolverFactory, pipeline);
+        var reader = new FakeAsyncStreamReader<ChatMessage>(new[]
+        {
+            new ChatMessage { Text = "a" },
+            new ChatMessage { Text = "b" },
+        });
+        var writer = new FakeServerStreamWriter<ChatMessage>();
+        var callContext = TestServerCallContext.Create();
+
+        var exception = await Assert.ThrowsAsync<RpcException>(() =>
+            handler.DuplexStreamingAsync<ChatMessage, ChatMessage>(reader, writer, callContext));
+
+        Assert.Equal(StatusCode.Unavailable, exception.StatusCode);
+        Assert.Single(writer.Written);
+        Assert.Contains(callContext.ResponseTrailers, e => e.Key == "benzene-status" && e.Value == BenzeneResultStatus.ServiceUnavailable);
+        Assert.NotNull(callContext.ResponseTrailers.Get("grpc-status-details-bin"));
     }
 
     private static IMiddlewarePipeline<GrpcContext> BuildPipeline(out IServiceResolverFactory serviceResolverFactory)

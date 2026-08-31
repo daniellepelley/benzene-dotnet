@@ -24,10 +24,12 @@ public static class DependencyInjectionExtensions
     public static IBenzeneServiceContainer AddKafka(this IBenzeneServiceContainer services)
     {
         services.TryAddScoped<JsonSerializer>();
+        services.TryAddScoped<PresetTopicHolder>();
 
         // TryAdd: a user registration made earlier (ConfigureServices runs before Configure, where
         // UseKafka calls this) wins over these per-context defaults.
-        services.TryAddScoped<IMessageTopicGetter<KafkaContext>, KafkaMessageTopicGetter>();
+        services.TryAddScoped<IMessageTopicGetter<KafkaContext>>(resolver =>
+            new PresetTopicMessageTopicGetter<KafkaContext>(new KafkaMessageTopicGetter(), resolver.GetService<PresetTopicHolder>()));
         services.TryAddHeaderMessageVersionGetter<KafkaContext>();
         services.TryAddScoped<IMessageHeadersGetter<KafkaContext>, KafkaMessageHeadersGetter>();
         services.TryAddScoped<IMessageBodyGetter<KafkaContext>, KafkaMessageBodyGetter>();

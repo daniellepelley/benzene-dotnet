@@ -22,9 +22,11 @@ public class JsonOpenApiSchemaBuilder
             JTokenType.String => CreateStringSchema(),
             JTokenType.Date => CreateDateTimeSchema(),
             JTokenType.Integer => CreateIntegerSchema(),
+            JTokenType.Float => CreateNumberSchema(),
             JTokenType.Boolean => CreateBooleanSchema(),
             JTokenType.Guid => CreateGuidSchema(),
-            JTokenType.Array => CreateArraySchema(key, jToken.First()),
+            JTokenType.Null => CreateNullPlaceholderSchema(),
+            JTokenType.Array => CreateArraySchema(key, jToken),
             JTokenType.Object => CreateObjectSchema(key, jToken),
             _ => throw new Exception($"No map for {jToken.Type}")
         };
@@ -53,6 +55,14 @@ public class JsonOpenApiSchemaBuilder
             Format = "int32"
         };
     }
+    private OpenApiSchema CreateNumberSchema()
+    {
+        return new OpenApiSchema
+        {
+            Type = "number",
+            Format = "double"
+        };
+    }
     private OpenApiSchema CreateBooleanSchema()
     {
         return new OpenApiSchema
@@ -69,12 +79,42 @@ public class JsonOpenApiSchemaBuilder
         };
     }
 
-    private OpenApiSchema CreateArraySchema(string key, JToken jToken)
+    // #264: a JSON `null` example value (an ordinary, legal shape for an optional/nullable field in
+    // a captured real-world example) has no case here and used to throw "No map for Null", aborting
+    // the whole document. Mirror CreateArraySchema's #242 "nothing in the example to infer from"
+    // convention exactly: an untyped schema - no `type` keyword, so it matches anything - marked
+    // Nullable, is the honest answer when a single null sample carries no type information at all.
+    private OpenApiSchema CreateNullPlaceholderSchema()
     {
         return new OpenApiSchema
         {
+            Nullable = true
+        };
+    }
+
+    private OpenApiSchema CreateArraySchema(string key, JToken jArrayToken)
+    {
+        // #242: an ordinary empty example array ("tags": []) carries no element to infer an item
+        // schema from. jToken.First() used to be called unconditionally here, throwing
+        // InvalidOperationException ("Sequence contains no elements") on any such array anywhere in
+        // the example payload. Match ExamplePayloadBuilder's own convention for "no known item
+        // schema" (GetValue's `resolved.Items == null` branch, elsewhere in this package) as closely
+        // as an OpenApiSchema allows: an untyped items schema - no `type` keyword, so it matches
+        // anything - is the honest answer when there is nothing in the example to infer from.
+        if (!jArrayToken.HasValues)
+        {
+            return new OpenApiSchema
+            {
+                Type = "array",
+                Items = new OpenApiSchema(),
+                Nullable = true
+            };
+        }
+
+        return new OpenApiSchema
+        {
             Type = "array",
-            Items = Create(key, jToken),
+            Items = Create(key, jArrayToken.First()),
             Nullable = true
         };
     }

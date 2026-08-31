@@ -36,7 +36,9 @@ public class ResponselessBindingsMarkHandledTest
     {
         var services = ServiceResolverMother.CreateServiceCollection();
         var app = new MiddlewarePipelineBuilder<AwsEventStreamContext>(new MicrosoftBenzeneServiceContainer(services));
-        app.UseSns(sns => sns.Use(null, (_, next) => next()));
+        // This test is about the outer claim, not message routing - the inline middleware never sets a
+        // MessageResult, so escalating on that (#229's null-result fix) would be unrelated noise here.
+        app.UseSns(sns => sns.Use(null, (_, next) => next()), configure: options => options.RaiseOnFailureStatus = false);
 
         var context = AwsEventStreamContextBuilder.Build(
             MessageBuilder.Create(Defaults.Topic, Defaults.MessageAsObject).AsSns());
@@ -50,7 +52,9 @@ public class ResponselessBindingsMarkHandledTest
     {
         var services = ServiceResolverMother.CreateServiceCollection();
         var app = new MiddlewarePipelineBuilder<AwsEventStreamContext>(new MicrosoftBenzeneServiceContainer(services));
-        app.UseEventBridge(eventBridge => eventBridge.Use(null, (_, next) => next()));
+        // This test is about the outer claim, not message routing - the inline middleware never sets a
+        // MessageResult, so escalating on that (#229's null-result fix) would be unrelated noise here.
+        app.UseEventBridge(eventBridge => eventBridge.Use(null, (_, next) => next()), options => options.RaiseOnFailureStatus = false);
 
         var context = AwsEventStreamContextBuilder.Build(
             MessageBuilder.Create(Defaults.Topic, Defaults.MessageAsObject).AsEventBridge());
@@ -64,7 +68,9 @@ public class ResponselessBindingsMarkHandledTest
     {
         var services = ServiceResolverMother.CreateServiceCollection();
         var app = new MiddlewarePipelineBuilder<AwsEventStreamContext>(new MicrosoftBenzeneServiceContainer(services));
-        app.UseS3(s3 => s3.Use(null, (_, next) => next()));
+        // This test is about the outer claim, not message routing - the inline middleware never sets a
+        // MessageResult, so escalating on that (#229's null-result fix) would be unrelated noise here.
+        app.UseS3(s3 => s3.Use(null, (_, next) => next()), configure: options => options.RaiseOnFailureStatus = false);
 
         var s3Event = new S3Event
         {

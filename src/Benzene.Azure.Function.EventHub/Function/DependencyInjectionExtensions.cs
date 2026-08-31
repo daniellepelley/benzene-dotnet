@@ -83,7 +83,8 @@ public static class DependencyInjectionExtensions
     /// <param name="action">The action that configures the Event Hub middleware pipeline.</param>
     /// <param name="configure">
     /// Configures the <see cref="EventHubOptions"/> - exception isolation, failure-result escalation,
-    /// and fan-out concurrency. Defaults (both flags off, unbounded) preserve the original behavior.
+    /// and fan-out concurrency. Defaults (safe-by-default: <see cref="EventHubOptions.RaiseOnFailureStatus"/>
+    /// on, <see cref="EventHubOptions.CatchExceptions"/> off, unbounded fan-out) preserve the original behavior.
     /// </param>
     /// <returns>The Azure Function app builder, for method chaining.</returns>
     public static IAzureFunctionAppBuilder UseEventHub(this IAzureFunctionAppBuilder app, Action<IMiddlewarePipelineBuilder<EventHubContext>> action, Action<EventHubOptions> configure)

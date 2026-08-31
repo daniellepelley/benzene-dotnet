@@ -110,11 +110,26 @@ public abstract class SingleContextEscalatingApplicationBase<TSelf, TContext>
         }
         catch (Exception ex) when (_catchExceptions)
         {
-            using var loggingScope = serviceResolverFactory.CreateScope();
-            loggingScope.GetService<ILogger<TSelf>>()
-                .LogError(ex, BenzeneFailure.IsInfrastructure(ex)
-                    ? BenzeneFailure.InfrastructureLogPrefix + " " + _failureLogMessage + " — this service is mis-wired; the message is not at fault"
-                    : _failureLogMessage, SafeId(context));
+            var isInfrastructure = BenzeneFailure.IsInfrastructure(ex);
+
+            using (var loggingScope = serviceResolverFactory.CreateScope())
+            {
+                loggingScope.GetService<ILogger<TSelf>>()
+                    .LogError(ex, isInfrastructure
+                        ? BenzeneFailure.InfrastructureLogPrefix + " " + _failureLogMessage + " — this service is mis-wired; the message is not at fault. Infrastructure failure — rethrowing despite CatchExceptions."
+                        : _failureLogMessage, SafeId(context));
+            }
+
+            // An infrastructure failure is not this message's fault and is not retryable per message.
+            // Unlike a business failure (a handler exception, or the failure result escalated above),
+            // this transport has no partial-failure channel to report it on - swallowing it here would
+            // mean the whole invocation reports success while every message fails the same way, forever.
+            // So it escapes CatchExceptions entirely and fails the invocation, exactly as SqsApplication's
+            // own unconditional infra rethrow does for the same reason.
+            if (isInfrastructure)
+            {
+                throw;
+            }
         }
     }
 

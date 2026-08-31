@@ -141,6 +141,129 @@ public class CodegenOutputCompilesTest
             string.Join(Environment.NewLine + "-----" + Environment.NewLine, files.Select(Text)));
     }
 
+    // #240: SuppliedSchemaCatalog schema ids are arbitrary caller strings, not pre-sanitized C#
+    // identifiers. "orderItem" (valid but not yet Pascal-cased) and "order-item" (hyphenated, unusable
+    // in C# at all) both used to flow into a generated property's *type* unformatted, while the class
+    // declaration for that same id was correctly formatted via CSharpNameFormatter - a guaranteed
+    // mismatch (CS0246 for "orderItem", a syntax error for "order-item").
+    private static EventServiceDocument BuildArbitraryCatalogueIdDocument(string itemSchemaId)
+    {
+        var schemas = new Dictionary<string, OpenApiSchema>
+        {
+            [itemSchemaId] = new()
+            {
+                Type = "object",
+                Properties = new Dictionary<string, OpenApiSchema> { ["sku"] = new() { Type = "string" } }
+            },
+            ["Order"] = new()
+            {
+                Type = "object",
+                Properties = new Dictionary<string, OpenApiSchema> { ["item"] = Ref(itemSchemaId) }
+            }
+        };
+
+        var requestResponse = new RequestResponse
+        {
+            Topic = "order:create",
+            Request = Ref("Order"),
+            Response = Ref("Order")
+        };
+
+        return new EventServiceDocument(
+            new OpenApiInfo { Title = "Orders", Version = "1.0" },
+            Array.Empty<OpenApiTag>(),
+            new[] { requestResponse },
+            Array.Empty<Event>(),
+            new OpenApiComponents { Schemas = schemas });
+    }
+
+    private static ICodeFile[] BuildFilesFor(EventServiceDocument document)
+    {
+        var typeBuilder = new OpenApiSchemaCSharpTypeBuilder(Namespace);
+        var options = new ClientSdkOptions { ServiceName = "Orders", Namespace = Namespace };
+        var builder = new MessageClientSdkBuilder(options, typeBuilder, new CSharpTypeName(),
+            new TopicReversedMethodName());
+
+        return builder.BuildCodeFiles(document);
+    }
+
+    [Theory]
+    [InlineData("orderItem")]
+    [InlineData("order-item")]
+    public void GeneratedClient_WithArbitraryCatalogueSchemaId_Compiles(string itemSchemaId)
+    {
+        var files = BuildFilesFor(BuildArbitraryCatalogueIdDocument(itemSchemaId));
+
+        var trees = files
+            .Select(f => CSharpSyntaxTree.ParseText(Text(f), path: f.Name))
+            .ToArray();
+
+        var compilation = CSharpCompilation.Create(
+            "WpF_CodegenCompileCheck_" + Guid.NewGuid().ToString("N"),
+            trees,
+            ReferenceAssemblies(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        var errors = compilation.GetDiagnostics().Where(x => x.Severity == DiagnosticSeverity.Error).ToArray();
+
+        Assert.True(errors.Length == 0,
+            "Generated code failed to compile:" + Environment.NewLine +
+            string.Join(Environment.NewLine, errors.Select(x => x.ToString())) + Environment.NewLine +
+            string.Join(Environment.NewLine + "-----" + Environment.NewLine, files.Select(Text)));
+    }
+
+    // #263: Discriminator.PropertyName and every mapping.Key are arbitrary caller-supplied strings
+    // (the discriminator *value*, not an identifier) - reachable via SuppliedSchemaCatalog or any
+    // hand-built EventServiceDocument, not only reflection-derived schemas - interpolated unescaped
+    // into a generated [JsonPolymorphic]/[JsonDerivedType] C# string literal. A value containing a
+    // `"` used to produce uncompilable output (7 cascading Roslyn errors from one bad character).
+    [Fact]
+    public void GeneratedClient_WithAdversarialDiscriminatorMappingKeyContainingAQuote_Compiles()
+    {
+        var schemas = new Dictionary<string, OpenApiSchema>
+        {
+            ["PaymentMethod"] = new()
+            {
+                Type = "object",
+                Properties = new Dictionary<string, OpenApiSchema> { ["currency"] = new() { Type = "string" } },
+                Discriminator = new OpenApiDiscriminator
+                {
+                    PropertyName = "type",
+                    Mapping = new Dictionary<string, string>
+                    {
+                        ["12\" wheel"] = "#/components/schemas/CardPayment"
+                    }
+                }
+            },
+            ["CardPayment"] = new()
+            {
+                Type = "object",
+                AllOf = new List<OpenApiSchema> { Ref("PaymentMethod") },
+                Properties = new Dictionary<string, OpenApiSchema> { ["cardNumber"] = new() { Type = "string" } }
+            }
+        };
+
+        var typeBuilder = new OpenApiSchemaCSharpTypeBuilder(Namespace);
+        var files = typeBuilder.BuildCodeFiles(schemas);
+
+        var trees = files
+            .Select(f => CSharpSyntaxTree.ParseText(Text(f), path: f.Name))
+            .ToArray();
+
+        var compilation = CSharpCompilation.Create(
+            "WpH_DiscriminatorEscapeCheck_" + Guid.NewGuid().ToString("N"),
+            trees,
+            ReferenceAssemblies(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        var errors = compilation.GetDiagnostics().Where(x => x.Severity == DiagnosticSeverity.Error).ToArray();
+
+        Assert.True(errors.Length == 0,
+            "Generated code failed to compile:" + Environment.NewLine +
+            string.Join(Environment.NewLine, errors.Select(x => x.ToString())) + Environment.NewLine +
+            string.Join(Environment.NewLine + "-----" + Environment.NewLine, files.Select(Text)));
+    }
+
     // Same approach as Benzene.Test.Docs.DocSnippetCompiler: TRUSTED_PLATFORM_ASSEMBLIES rather than
     // AppDomain.CurrentDomain.GetAssemblies(), since a project reference the test process hasn't
     // touched yet (e.g. Benzene.Abstractions.Results, Benzene.Clients) may not be loaded.

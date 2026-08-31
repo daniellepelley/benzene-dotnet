@@ -161,6 +161,52 @@ public class InMemoryEventStoreTest
     }
 
     [Fact]
+    public async Task Append_Exactly100Events_AtExpectedVersionZero_Succeeds()
+    {
+        // #271 contract parity — a brand-new stream (expectedVersion == 0) has no reserved
+        // condition-check slot, so a genuine 100-event append must still succeed here too.
+        var store = new InMemoryEventStore();
+        var exactly100 = Enumerable.Range(0, 100).Select(_ => Event("E")).ToArray();
+
+        var version = await store.AppendAsync("acct-1", 0, exactly100);
+
+        Assert.Equal(100, version);
+    }
+
+    [Fact]
+    public async Task Append_100EventsAtAnExpectedVersionGreaterThanZero_Throws()
+    {
+        // #271 contract parity — DynamoDbEventStore reserves one of its 100 transact-write items for
+        // the version ConditionCheck when appending onto an EXISTING stream (expectedVersion > 0), so
+        // its effective per-call cap there is 99, not 100. InMemoryEventStore must enforce the SAME
+        // observable contract so app code written against either store behaves identically, even
+        // though this store has no physical condition-check item of its own.
+        var store = new InMemoryEventStore();
+        var exactly100 = Enumerable.Range(0, 100).Select(_ => Event("E")).ToArray();
+
+        await Assert.ThrowsAsync<ArgumentException>(() => store.AppendAsync("acct-1", expectedVersion: 5, exactly100));
+    }
+
+    [Fact]
+    public async Task Append_99EventsAtAnExpectedVersionGreaterThanZero_Succeeds()
+    {
+        // #271 contract parity — 99 is exactly at the effective cap for an existing-stream append.
+        var store = new InMemoryEventStore();
+        var exactly99 = Enumerable.Range(0, 99).Select(_ => Event("E")).ToArray();
+
+        // Seed the stream up to version 5 so expectedVersion: 5 is valid.
+        await store.AppendAsync("acct-1", 0, new[] { Event("Seed") });
+        for (var v = 1; v < 5; v++)
+        {
+            await store.AppendAsync("acct-1", v, new[] { Event("Seed") });
+        }
+
+        var version = await store.AppendAsync("acct-1", expectedVersion: 5, exactly99);
+
+        Assert.Equal(104, version);
+    }
+
+    [Fact]
     public async Task Append_RejectedAgainstAnUnknownStream_DoesNotLeakAnEmptyStreamEntry()
     {
         // #132 — a rejected append must not register the unknown stream id at all; otherwise every

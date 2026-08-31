@@ -310,8 +310,9 @@ public class JaegerTraceSourceTest
         Assert.Contains(logger.Messages, m => m.Contains("billing-api", StringComparison.Ordinal));
     }
 
-    // A minimal ILogger that records formatted messages, for asserting on warning logs without pulling in
-    // a mocking framework's extension-method plumbing for ILogger (mirrors XRayTraceSourceTest).
+    // A minimal ILogger that records formatted messages, for asserting on the failed-service warning log
+    // without pulling in a mocking framework's extension-method plumbing for ILogger (matches
+    // XRayTraceSourceTest's RecordingLogger).
     private sealed class RecordingLogger : ILogger
     {
         public List<string> Messages { get; } = new();
@@ -327,5 +328,104 @@ public class JaegerTraceSourceTest
             public static readonly NullScope Instance = new();
             public void Dispose() { }
         }
+    }
+
+    // #189: a faulted per-service search must not discard the other services' already-fetched results via
+    // Task.WhenAll's fault semantics. Before the fix, billing-api's connection failure propagated out of
+    // BoundedFanOut.WhenAllAsync and faulted the whole fan-out, losing orders-api's successful result too.
+    [Fact]
+    public async Task GetCorrelationAsync_IsolatesAFaultedServiceSearch_AndReturnsTheHealthyServicesResults()
+    {
+        const string correlationId = "ticket-1";
+        var source = Source(path =>
+        {
+            Assert.Contains("benzene.correlation-id", Uri.UnescapeDataString(path));
+            return ServiceOf(path) switch
+            {
+                "orders-api" => (HttpStatusCode.OK, Data(Trace("t-a", "orders-api", "orders:create", "ok", correlationId))),
+                "billing-api" => throw new HttpRequestException("simulated transient connection failure"),
+                _ => (HttpStatusCode.OK, Data())
+            };
+        }, TwoServices, out _);
+
+        var view = await source.GetCorrelationAsync(correlationId);
+
+        Assert.NotNull(view);
+        Assert.Equal("t-a", Assert.Single(view!.Traces).TraceId); // orders-api's result survived billing-api's failure
+    }
+
+    // #252: a per-service HttpClient-level timeout throws TaskCanceledException (an OperationCanceledException
+    // subclass) completely independent of the caller's own cancellationToken - the isolation catch must not
+    // treat that the same as genuine host cancellation and let it fault the whole fan-out.
+    [Fact]
+    public async Task GetCorrelationAsync_IsolatesAPerServiceTimeout_NotTiedToTheCallersToken()
+    {
+        const string correlationId = "ticket-1";
+        var source = Source(path =>
+        {
+            Assert.Contains("benzene.correlation-id", Uri.UnescapeDataString(path));
+            return ServiceOf(path) switch
+            {
+                "orders-api" => (HttpStatusCode.OK, Data(Trace("t-a", "orders-api", "orders:create", "ok", correlationId))),
+                "billing-api" => throw new TaskCanceledException(
+                    "simulated HttpClient.Timeout for this one service, unrelated to the caller's token"),
+                _ => (HttpStatusCode.OK, Data())
+            };
+        }, TwoServices, out _);
+
+        // The caller's own cancellationToken is CancellationToken.None throughout - nothing the caller did
+        // requested cancellation, so billing-api's per-request timeout must be isolated exactly like the
+        // adjacent HttpRequestException test, not treated as genuine host cancellation.
+        var view = await source.GetCorrelationAsync(correlationId);
+
+        Assert.NotNull(view);
+        Assert.Equal("t-a", Assert.Single(view!.Traces).TraceId); // orders-api's result survived billing-api's timeout
+    }
+
+    // The complement of the above: when the CALLER's own token really is cancelled, the exception must
+    // propagate rather than being isolated away - matching MessageHandler.cs's token-verified convention.
+    // The token is cancelled from WITHIN billing-api's handler (not before the call starts) so this
+    // exercises the per-service catch's `when` filter directly, rather than a semaphore/gate short-circuit.
+    [Fact]
+    public async Task GetCorrelationAsync_PropagatesGenuineCancellation_WhenTheCallersOwnTokenIsCancelled()
+    {
+        const string correlationId = "ticket-1";
+        using var cts = new CancellationTokenSource();
+        var source = Source(path => ServiceOf(path) switch
+        {
+            "orders-api" => (HttpStatusCode.OK, Data(Trace("t-a", "orders-api", "orders:create", "ok", correlationId))),
+            "billing-api" => throw SimulateGenuineHostCancellation(cts),
+            _ => (HttpStatusCode.OK, Data())
+        }, TwoServices, out _);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => source.GetCorrelationAsync(correlationId, null, cts.Token));
+    }
+
+    // Cancels the ambient token AND throws the exception the fetch would see once it observes that
+    // cancellation - i.e. a genuine host shutdown/drain, not an unrelated per-request timeout.
+    private static Exception SimulateGenuineHostCancellation(CancellationTokenSource cts)
+    {
+        cts.Cancel();
+        return new TaskCanceledException("simulated genuine host cancellation", null, cts.Token);
+    }
+
+    [Fact]
+    public async Task GetCorrelationAsync_LogsTheFailedService_WhenIsolatingAFaultedSearch()
+    {
+        const string correlationId = "ticket-1";
+        var handler = new RoutingHandler(path => ServiceOf(path) switch
+        {
+            "orders-api" => (HttpStatusCode.OK, Data(Trace("t-a", "orders-api", "orders:create", "ok", correlationId))),
+            "billing-api" => throw new HttpRequestException("simulated transient connection failure"),
+            _ => (HttpStatusCode.OK, Data())
+        });
+        var logger = new RecordingLogger();
+        var options = new JaegerTraceSourceOptions(JaegerUrl) { Services = TwoServices };
+        var source = new JaegerTraceSource(new HttpClient(handler), options, logger);
+
+        await source.GetCorrelationAsync(correlationId);
+
+        Assert.Contains(logger.Messages, m => m.Contains("billing-api"));
     }
 }

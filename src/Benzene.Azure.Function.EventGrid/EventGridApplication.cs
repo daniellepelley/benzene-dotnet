@@ -26,7 +26,9 @@ public class EventGridApplication : EntryPointMiddlewareApplication<EventGridTri
     /// <param name="serviceResolverFactory">The service resolver factory used to process each invocation.</param>
     /// <param name="options">
     /// Configures how a handler's exceptions and failure results are handled, and the batch fan-out
-    /// concurrency. Defaults to a new <see cref="EventGridOptions"/> instance (both flags off) if omitted.
+    /// concurrency. Defaults to a new <see cref="EventGridOptions"/> instance (safe-by-default:
+    /// <see cref="EventGridOptions.RaiseOnFailureStatus"/> on, <see cref="EventGridOptions.CatchExceptions"/>
+    /// off) if omitted.
     /// </param>
     public EventGridApplication(IMiddlewarePipeline<EventGridContext> pipeline, IServiceResolverFactory serviceResolverFactory, EventGridOptions options = null)
         : base(new EventGridBatchApplication(pipeline, options), serviceResolverFactory)

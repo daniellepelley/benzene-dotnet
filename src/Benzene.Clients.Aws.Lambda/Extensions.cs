@@ -35,7 +35,8 @@ public static class Extensions
     public static IMiddlewarePipelineBuilder<LambdaSendMessageContext> UseAwsLambdaClient(
         this IMiddlewarePipelineBuilder<LambdaSendMessageContext> app)
     {
-        app.Register(x => x.AddScoped<AwsLambdaClientMiddleware>());
+        app.Register(x => x.AddScoped(resolver => new AwsLambdaClientMiddleware(
+            resolver.GetService<IAmazonLambda>(), resolver.TryGetService<ICancellationTokenAccessor>())));
         return app.Use<LambdaSendMessageContext, AwsLambdaClientMiddleware>();
     }
 
@@ -74,6 +75,7 @@ public static class Extensions
     /// <returns>The health check builder for method chaining.</returns>
     public static IHealthCheckBuilder AddLambdaHealthCheck(this IHealthCheckBuilder builder, string lambdaName, HealthCheckMode mode = HealthCheckMode.Reachability)
     {
-        return builder.AddHealthCheck(resolver => new AwsLambdaHealthCheck(lambdaName, resolver.GetService<IAmazonLambda>(), resolver.GetService<ILogger<AwsLambdaHealthCheck>>(), mode));
+        return builder.AddHealthCheck(resolver => new AwsLambdaHealthCheck(lambdaName, resolver.GetService<IAmazonLambda>(),
+            resolver.GetService<ILogger<AwsLambdaHealthCheck>>(), mode, resolver.TryGetService<ICancellationTokenAccessor>()));
     }
 }
