@@ -28,6 +28,32 @@ page is the static explorer exactly as described above.
 > missing file hides its sections, never breaks the page. The sections below describe the
 > original core; see `src/Benzene.Mesh.Ui/CLAUDE.md` for the full, current feature inventory.
 
+### Setup: what is wired, what is not, and what is failing
+
+The mesh is designed to work on a **subset** of what it could know — a service that publishes a
+spec but no health endpoint is still a service, an estate with no collector still has a catalog,
+an aggregator with no usage source still publishes topics. So the page never treats a missing
+piece as an error on the screen that piece would have fed. Every page renders only what it can
+stand behind (an unreadable feed still reads *unknown*, never zero), and every explanation of
+**why** a section is missing lives on one screen: **Setup** (`#setup`), the last entry in the nav.
+
+Setup has two halves. **This mesh** lists each capability — catalog, topics, topology, usage feed,
+live plane, dispatch, refresh, sign-in, environment label — with its state, what it unlocks, and
+how a host wires it (which `data-*` attribute or `MeshUiPage.GetHtml(...)` argument, which package).
+The states are deliberately four: *ready*, *not wired* (the ordinary shape of a partial mesh, never
+counted as a problem), *degraded* (wired and answering, with a caveat — a live plane that is
+connected but has never seen traffic) and *failing* (wired and broken — a 503 on `topics.json`, a
+collector that never answers). **Services** is one row per catalogued service showing which of the
+mesh's feeds it is actually supplying — reachable, declares topics, reporting to the collector,
+attributed in the usage feed — with a one-line "what to do" for each gap (never reported → add mesh
+reporting to the service; unreachable → check its well-known paths; and so on), plus any service
+the collector sees that the aggregator never catalogued.
+
+The nav's **Setup** button carries a count of the *failing* and *degraded* items only, so a
+partial mesh working as configured shows no number at all, and a broken feed shows one — in the
+same place on every screen — rather than a red banner above the estate. Setup is reachable even
+when `manifest.json` itself cannot be loaded; it is the page that explains that too.
+
 Shows a stats bar (total/healthy/unhealthy/unreachable/drift counts) and a searchable list of
 service cards — name, an optional owning-team label, status badge, drift badge, links to the
 service's raw spec/health URLs, and (when its spec advertised any) a chip row of the transports

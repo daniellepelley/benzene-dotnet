@@ -31,9 +31,13 @@ drill-down into health check detail. Optionally, when a host wires the correspon
 page also enriches the static catalog with a live Fleet plane (health/traffic polled from
 `Benzene.Mesh.Collector`), a Test Console that can dispatch a real message (`Benzene.Mesh.Dispatch`),
 sign-out (`Benzene.Mesh.Auth.Oidc`), and an on-demand refresh/aggregation trigger
-(`Benzene.Mesh.Artifacts`'s refresh guard). The exact feature set and behavior of all of this lives in
-`benzene-ui`, not here — the paragraphs below describe only the server-side contract this package
-exposes to configure it.
+(`Benzene.Mesh.Artifacts`'s refresh guard). Whatever a host does NOT wire is never an error on the
+page it would have fed: the page has a **Setup** screen (`#setup`) that lists each capability as
+ready / not wired / degraded / failing with the wiring it needs, and a per-service table of which
+feeds each service supplies; the nav counts only the failing and degraded items. See
+`docs/mesh-ui.md` "Setup". The exact feature set and behavior of all of this lives in `benzene-ui`,
+not here — the paragraphs below describe only the server-side contract this package exposes to
+configure it.
 
 This package renders the catalog; it does **not** generate it. Generation lives in
 `Benzene.Mesh.Aggregator`. It mirrors `Benzene.Spec.Ui`'s exact shape and philosophy, one level up
