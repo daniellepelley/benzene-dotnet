@@ -20,6 +20,9 @@ permissions:
 jobs:
   copy:
     runs-on: ubuntu-latest
+    # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY live in the "test" GitHub Environment on this repo
+    # (see mesh-example-aws-deploy.yml) — a job must declare the environment for them to be exposed.
+    environment: test
     env:
       GH_TOKEN: ${{ secrets.TARGET_REPO_TOKEN }}
       SOURCE_AWS_ACCESS_KEY_ID: ${{ vars.AWS_ACCESS_KEY_ID }}
