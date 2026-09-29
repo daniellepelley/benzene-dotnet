@@ -675,6 +675,7 @@ hosts — including AWS Lambda via `AwsLambdaHost<TStartUp>` — run on Microsof
 - [Azure Functions Setup](azure-functions.md)
 - [ASP.NET Core Integration](asp-net-core.md)
 - [gRPC Setup](getting-started-grpc.md)
+- [MCP: expose handlers as AI tools](mcp.md)
 - [Testing Benzene](testing-benzene.md)
 - [Middleware](middleware.md)
 - [Message Handlers](message-handlers.md)

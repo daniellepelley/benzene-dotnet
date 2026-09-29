@@ -16,6 +16,7 @@ Benzene is a hexagonal framework designed for services running in serverless env
     - [ASP.NET Core](getting-started-aspnet.md) — a plain web app or API
   - [Project Templates](getting-started-templates.md) — `dotnet new` starter projects for every host, consumable from Visual Studio and Rider
   - [Unified Hosting Model](hosting.md)
+  - [MCP: expose handlers as AI tools](mcp.md) — the Model Context Protocol as a transport binding: tools over Streamable HTTP or stdio, through the same pipeline
   - [Capability Matrix](capability-matrix.md) — what Benzene does, deliberately doesn't (and why), and how to fill the gap
   - [Message Handlers](message-handlers.md)
   - [Message Results](message-result.md)

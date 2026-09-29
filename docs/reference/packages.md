@@ -135,6 +135,7 @@ See [Worker Service Setup](../getting-started-worker.md#part-b-built-in-workers-
 | `Benzene.SelfHost` | Run Benzene as a standalone worker pipeline with no external transport — useful for background/worker services. |
 | `Benzene.HostedService` | Run Benzene inside a .NET Generic Host as an `IHostedService` / background worker. |
 | `Benzene.Grpc` | Expose message handlers over gRPC — includes the `[GrpcMethod]` attribute and method-handler factory. |
+| `Benzene.Mcp` | Expose message handlers to AI clients as [MCP](../mcp.md) tools — Streamable HTTP on any Benzene HTTP host (`UseMcp`) or stdio on the self-hosted worker (`UseMcpStdio`), dispatched through the same pipeline as every other transport. |
 
 ## Outbound messaging clients
 

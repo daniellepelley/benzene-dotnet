@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Benzene.Mcp</AssemblyName>
+    <RootNamespace>Benzene.Mcp</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Description>Model Context Protocol (MCP) transport binding for Benzene: expose message handlers as MCP tools over Streamable HTTP (any Benzene HTTP host) or stdio (the self-hosted worker), dispatched through the same middleware pipeline as every other transport.</Description>
+    <PackageTags>benzene;mcp;model-context-protocol;ai;tools;json-rpc;hexagonal;ports-and-adapters</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Benzene.Abstractions\Benzene.Abstractions.csproj" />
+    <ProjectReference Include="..\Benzene.Abstractions.MessageHandlers\Benzene.Abstractions.MessageHandlers.csproj" />
+    <ProjectReference Include="..\Benzene.Abstractions.Messages\Benzene.Abstractions.Messages.csproj" />
+    <ProjectReference Include="..\Benzene.Abstractions.Pipelines\Benzene.Abstractions.Pipelines.csproj" />
+    <ProjectReference Include="..\Benzene.Core\Benzene.Core.csproj" />
+    <ProjectReference Include="..\Benzene.Core.MessageHandlers\Benzene.Core.MessageHandlers.csproj" />
+    <ProjectReference Include="..\Benzene.Core.Messages\Benzene.Core.Messages.csproj" />
+    <ProjectReference Include="..\Benzene.Core.Middleware\Benzene.Core.Middleware.csproj" />
+    <ProjectReference Include="..\Benzene.Http\Benzene.Http.csproj" />
+    <ProjectReference Include="..\Benzene.Results\Benzene.Results.csproj" />
+    <ProjectReference Include="..\Benzene.SelfHost\Benzene.SelfHost.csproj" />
+  </ItemGroup>
+
+</Project>
