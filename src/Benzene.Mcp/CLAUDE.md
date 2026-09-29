@@ -21,7 +21,7 @@ dispatch; **tool design stays in the application** (see "Do NOT").
   `Log`. `Build()` validates names (`^[A-Za-z0-9_-]{1,64}$`, unique), descriptions and the topic/body rule.
 - `McpServer` - the protocol (JSON-RPC 2.0): `initialize` (version negotiation, `serverInfo`, `instructions`),
   `tools/list`, `tools/call`, `ping`; notifications return `null` (send nothing). Unknown methods →
-  `-32601`; `McpRequestException` while reading a request → `-32602`; inside a tool body → a refused
+  `-32601`; `McpRequestException` while reading a request (no tool name, unknown tool) → `-32602`; inside a tool body → a refused
   tool result (`isError: true`); anything else → logged under a short reference, `-32603` with only the reference.
 - `IMcpMessageDispatcher` / `McpMessageDispatcher` - one message through the pipeline in a fresh DI
   scope (`BenzeneMessageApplication`); sends `benzene-version` when set, `mcp-tool` for topic-bound calls,

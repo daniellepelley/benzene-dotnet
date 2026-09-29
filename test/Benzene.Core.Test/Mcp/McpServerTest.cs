@@ -169,14 +169,17 @@ public class McpServerTest
     }
 
     [Fact]
-    public async Task ToolsCall_UnknownTool_IsARefusedToolResult()
+    public async Task ToolsCall_UnknownTool_IsAnInvalidParamsProtocolError()
     {
+        // The protocol's own rule: a tool that does not exist is -32602, not a tool result. A client holding
+        // a stale tool list is broken in a way a model cannot correct by rewording its arguments.
         var server = CreateServer();
 
         var response = await server.SendAsync("tools/call", new JsonObject { ["name"] = "nope" });
 
-        Assert.True(ToolIsError(response));
-        Assert.Contains("no tool called 'nope'", ToolText(response));
+        Assert.Null(response!["result"]);
+        Assert.Equal(-32602, response["error"]!["code"]!.GetValue<int>());
+        Assert.Contains("no tool called 'nope'", response["error"]!["message"]!.GetValue<string>());
     }
 
     [Fact]

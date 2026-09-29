@@ -96,7 +96,7 @@ string, `"£1,234.00"`, a comma-separated list.
 | Tool body threw `McpRequestException` | Tool result with `isError: true`: the message |
 | Tool body threw an exception you mapped with `OnToolFailure` | Tool result with `isError: true`: your text |
 | Tool body threw anything else | JSON-RPC `-32603` with a short reference; the detail is logged under that reference and never sent |
-| Unknown tool, missing tool name | Tool result with `isError: true` naming the problem |
+| Unknown tool, missing tool name | JSON-RPC `-32602` naming the problem (the protocol's rule: a stale tool list is a client fault, not something the model can reword) |
 | Unknown method, bad JSON | JSON-RPC `-32601` / `-32700` |
 
 Map your domain's own "no" with `OnToolFailure`, so a locked period or a missing permission reaches
