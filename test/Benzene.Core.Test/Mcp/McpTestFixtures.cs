@@ -54,9 +54,10 @@ public static class McpTestFixtures
         var container = new MicrosoftBenzeneServiceContainer(services);
         container.AddBenzeneMessage();
 
-        var pipeline = container.CreateMiddlewarePipeline<BenzeneMessageContext>(p =>
-            p.UseMessageHandlers(Array.Empty<Type>(),
-                router => router.AddMessageHandler<EchoHandler, EchoRequest, EchoResponse>("mcp:echo")));
+        var builder = new MiddlewarePipelineBuilder<BenzeneMessageContext>(container);
+        builder.UseMessageHandlers(Array.Empty<Type>(),
+            router => router.AddMessageHandler<EchoHandler, EchoRequest, EchoResponse>("mcp:echo"));
+        var pipeline = builder.Build();
 
         var resolver = new MicrosoftServiceResolverAdapter(services.BuildServiceProvider());
         return (resolver, pipeline);

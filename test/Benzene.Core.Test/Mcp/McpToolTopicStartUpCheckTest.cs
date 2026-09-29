@@ -20,9 +20,9 @@ public class McpToolTopicStartUpCheckTest
         var container = new MicrosoftBenzeneServiceContainer(services);
         container.AddBenzeneMessage();
         container.AddSingleton(new McpToolCatalog(tools));
-        container.CreateMiddlewarePipeline<BenzeneMessageContext>(p =>
-            p.UseMessageHandlers(Array.Empty<Type>(),
-                router => router.AddMessageHandler<EchoHandler, EchoRequest, EchoResponse>("mcp:echo")));
+        new MiddlewarePipelineBuilder<BenzeneMessageContext>(container)
+            .UseMessageHandlers(Array.Empty<Type>(),
+                router => router.AddMessageHandler<EchoHandler, EchoRequest, EchoResponse>("mcp:echo"));
         return new MicrosoftServiceResolverAdapter(services.BuildServiceProvider());
     }
 

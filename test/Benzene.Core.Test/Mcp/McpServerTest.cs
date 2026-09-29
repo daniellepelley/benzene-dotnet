@@ -208,7 +208,7 @@ public class McpServerTest
         Assert.Null(await server.SendAsync("notifications/initialized", notification: true));
 
         var ping = await server.SendAsync("ping");
-        Assert.Equal(0, ((JsonObject)ping!["result"]!).Count);
+        Assert.Empty((JsonObject)ping!["result"]!);
 
         var unknown = await server.SendAsync("resources/list");
         Assert.Equal(-32601, unknown!["error"]!["code"]!.GetValue<int>());
