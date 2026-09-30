@@ -18,6 +18,7 @@ using Benzene.Azure.Function.Timer;
 using Benzene.Core;
 using Benzene.Core.MessageHandlers;
 using Benzene.Core.Middleware;
+using Benzene.Results;
 using Benzene.Test.Examples;
 using Benzene.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -44,9 +45,12 @@ public class AzureFunctionCancellationTest
             .ConfigureServices(services => services.ConfigureServiceCollection())
             .Configure(app => app
                 .UseServiceBus(serviceBus => serviceBus
-                    .Use("Capture", (IServiceResolver resolver, ServiceBusContext _, Func<Task> next) =>
+                    .Use("Capture", (IServiceResolver resolver, ServiceBusContext context, Func<Task> next) =>
                     {
                         observed = resolver.GetService<ICancellationTokenAccessor>().CancellationToken;
+                        // The item has to end with an outcome: one that ends with none is retried, not acknowledged, on this
+                        // transport (work/settlement-consistency-fix-plan.md §1), which is not what this test is about.
+                        context.MessageResult = BenzeneResult.Ok();
                         return next();
                     })))
             .Build();
@@ -112,9 +116,12 @@ public class AzureFunctionCancellationTest
             .ConfigureServices(services => services.ConfigureServiceCollection())
             .Configure(app => app
                 .UseQueueStorage(queue => queue
-                    .Use("Capture", (IServiceResolver resolver, QueueStorageContext _, Func<Task> next) =>
+                    .Use("Capture", (IServiceResolver resolver, QueueStorageContext context, Func<Task> next) =>
                     {
                         observed = resolver.GetService<ICancellationTokenAccessor>().CancellationToken;
+                        // The item has to end with an outcome: one that ends with none is retried, not acknowledged, on this
+                        // transport (work/settlement-consistency-fix-plan.md §1), which is not what this test is about.
+                        context.MessageResult = BenzeneResult.Ok();
                         return next();
                     })))
             .Build();
@@ -156,9 +163,12 @@ public class AzureFunctionCancellationTest
             .ConfigureServices(services => services.ConfigureServiceCollection())
             .Configure(app => app
                 .UseEventGrid(eventGrid => eventGrid
-                    .Use("Capture", (IServiceResolver resolver, EventGridContext _, Func<Task> next) =>
+                    .Use("Capture", (IServiceResolver resolver, EventGridContext context, Func<Task> next) =>
                     {
                         observed = resolver.GetService<ICancellationTokenAccessor>().CancellationToken;
+                        // The item has to end with an outcome: one that ends with none is retried, not acknowledged, on this
+                        // transport (work/settlement-consistency-fix-plan.md §1), which is not what this test is about.
+                        context.MessageResult = BenzeneResult.Ok();
                         return next();
                     })))
             .Build();

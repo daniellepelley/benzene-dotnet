@@ -298,15 +298,13 @@ public class RateLimitingPipelineTest
         // Verification technique mirrors BringYourOwnLimiter_AlreadyDisposed_FailsClosedInsteadOfCrashing
         // above: a disposed RateLimiter throws ObjectDisposedException from AttemptAcquire, which
         // #202's catch turns into a fail-CLOSED TooManyRequests naming the limiter, not a crash and
-        // not silent continued acceptance. The two HandleAsync calls share ONE resolver scope opened
-        // before the container is disposed (a scope's own lifetime is independent of the root
-        // provider it was created from), because the pipeline's own scope-per-message plumbing
-        // (BenzeneMessageApplication.HandleAsync) would otherwise open a NEW scope for the second
-        // message from an already-disposed root provider and throw ObjectDisposedException there
-        // instead - a real host doesn't do that (it disposes the container once, at shutdown, after
-        // which it stops sending it new messages entirely), and that's not what this test is
-        // measuring: it measures whether the LIMITER a message-processing scope already holds a
-        // reference to gets disposed, not whether a brand-new scope can still be opened afterwards.
+        // not silent continued acceptance. The second message goes through a SECOND container built
+        // from the same registrations: Microsoft.Extensions.DependencyInjection refuses every
+        // resolution once the root provider is disposed - even through a scope opened before it was -
+        // so writing the rejection needs a live container. The built pipeline's middleware holds the
+        // limiter object itself (the container only owns its disposal), so the second container runs
+        // the very limiter the first one disposed; what this measures is exactly whether disposing the
+        // container disposed the limiter the pipeline holds.
         var serviceCollection = ServiceResolverMother.CreateServiceCollection();
         serviceCollection.UsingBenzene(x => x.AddBenzeneMessage());
 
@@ -317,16 +315,14 @@ public class RateLimitingPipelineTest
         var builtPipeline = pipelineBuilder.Build();
 
         var provider = serviceCollection.BuildServiceProvider();
-        var resolverFactory = new MicrosoftServiceResolverFactory(provider);
 
-        // Opened while the container is alive - this is what forces the OwnedRateLimiter factory
-        // singleton to actually be constructed (and disposal-tracked) the first time a message flows
-        // through (Extensions.cs's UseInternallyOwnedRateLimiting), and it's kept open across the
-        // container's disposal below so a second message can still be dispatched afterwards.
-        using var scope = resolverFactory.CreateScope();
-
+        // The first message forces the OwnedRateLimiter factory singleton to be constructed (and so
+        // disposal-tracked by this container) - Extensions.cs's UseInternallyOwnedRateLimiting.
         var firstContext = new BenzeneMessageContext(CreateRequest());
-        await builtPipeline.HandleAsync(firstContext, scope);
+        using (var scope = new MicrosoftServiceResolverFactory(provider).CreateScope())
+        {
+            await builtPipeline.HandleAsync(firstContext, scope);
+        }
         Assert.Equal(BenzeneResultStatus.Ok, firstContext.BenzeneMessageResponse.StatusCode);
 
         // The caller's ordinary shutdown path. This is the ONLY trigger for disposal in this test -
@@ -334,8 +330,10 @@ public class RateLimitingPipelineTest
         // provider it was registered on.
         await provider.DisposeAsync();
 
+        await using var secondProvider = serviceCollection.BuildServiceProvider();
+        using var secondScope = new MicrosoftServiceResolverFactory(secondProvider).CreateScope();
         var secondContext = new BenzeneMessageContext(CreateRequest());
-        await builtPipeline.HandleAsync(secondContext, scope);
+        await builtPipeline.HandleAsync(secondContext, secondScope);
 
         Assert.Equal(BenzeneResultStatus.TooManyRequests, secondContext.BenzeneMessageResponse.StatusCode);
         Assert.Contains("the rate limiter has already been disposed", secondContext.BenzeneMessageResponse.Body,

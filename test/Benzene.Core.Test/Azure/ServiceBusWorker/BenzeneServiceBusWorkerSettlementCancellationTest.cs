@@ -218,14 +218,14 @@ public class BenzeneServiceBusWorkerSettlementCancellationTest
             It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
     }
 
-    // Regression pin for round 14-15 #232 - proving BenzeneServiceBusWorker was ALREADY correct here
-    // (the self-hosted sibling the Functions-triggered ServiceBusApplication fix ports its guard
-    // from), not just assuming it from the handler-throws variant above. Same double-fault shape the
-    // ruling names - "both the primary settle and the fallback abandon throw" - but with the primary
-    // failure originating from SettleAsync (the handler itself succeeds) rather than from the handler
-    // pipeline, exercising CompleteMessageAsync specifically rather than AbandonMessageAsync twice.
+    // Round 14-15 #232 pinned a double fault here: the handler succeeds, CompleteMessageAsync throws,
+    // and the fallback abandon throws too, with the complete's exception propagating. Round 17 #277
+    // (work/bug-fix-plan-round17-2026-08.md, ruling 2) removed the fallback for a successful handler:
+    // a failed settle is logged as a settlement failure and swallowed, and the lock's own expiry drives
+    // redelivery. So the double fault cannot happen any more - abandon is never tried, and nothing
+    // escapes even when it would have thrown.
     [Fact]
-    public async Task HandlerSucceeds_SettleThrows_AbandonAlsoThrows_OriginalSettleExceptionStillPropagates()
+    public async Task HandlerSucceeds_SettleThrows_AbandonWouldAlsoThrow_IsNeverTried_AndNothingEscapes()
     {
         var mockPipeline = new Mock<IMiddlewarePipeline<ServiceBusConsumerContext>>();
         mockPipeline.Setup(x => x.HandleAsync(It.IsAny<ServiceBusConsumerContext>(), It.IsAny<IServiceResolver>()))
@@ -247,24 +247,18 @@ public class BenzeneServiceBusWorkerSettlementCancellationTest
 
         var args = new ProcessMessageEventArgs(message, mockReceiver.Object, CancellationToken.None);
 
-        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() => InvokeOnProcessMessageAsync(worker, args));
+        await InvokeOnProcessMessageAsync(worker, args);
 
-        // The original settle (CompleteMessageAsync) failure - not the fallback abandon's own
-        // exception - is what propagates; the fallback abandon failure never masks it.
-        Assert.Same(settleException, thrown);
+        mockReceiver.Verify(x => x.AbandonMessageAsync(It.IsAny<ServiceBusReceivedMessage>(),
+            It.IsAny<IDictionary<string, object>>(), It.IsAny<CancellationToken>()), Times.Never);
 
+        // The complete's failure is logged once, as a settlement failure naming the message.
         logger.Verify(x => x.Log(
             LogLevel.Error,
             It.IsAny<EventId>(),
-            It.Is<It.IsAnyType>((state, _) => true),
+            It.Is<It.IsAnyType>((state, _) => state.ToString()!.Contains("Settling", StringComparison.OrdinalIgnoreCase) &&
+                                               state.ToString()!.Contains("settle-boom")),
             It.Is<Exception>(ex => ex == settleException),
-            It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
-
-        logger.Verify(x => x.Log(
-            LogLevel.Error,
-            It.IsAny<EventId>(),
-            It.Is<It.IsAnyType>((state, _) => true),
-            It.Is<Exception>(ex => ex != null && ex.Message == "fallback abandon also blew up"),
             It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
     }
 }

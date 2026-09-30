@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using Amazon.EventBridge;
@@ -38,26 +37,65 @@ namespace Benzene.Test.Clients.Aws;
 /// deadline) unless it observes a cancelled token. Before the fix the deadline never actually aborted
 /// the call (it ran for the full <see cref="MockDelay"/> regardless); after the fix, the ambient token
 /// reaches the SDK call and the deadline is genuinely enforced, so the call finishes in a small
-/// fraction of <see cref="MockDelay"/>. The gap between the 50ms deadline and the generous 2s assertion
-/// ceiling (40x) is deliberate slack for scheduler jitter on a loaded box, matching
-/// <c>MeshDispatchTest.UseTimeout_AroundTheDispatchHandler_ActuallyBoundsTheRealDispatchCall</c>'s
-/// pattern - the assertion is about the fix's mechanism, not about scheduler precision.
+/// fraction of <see cref="MockDelay"/>. The assertion is on how the mocked SDK call ended - aborted by
+/// the token, or run to completion - not on wall-clock time: a stopwatch ceiling failed whenever the
+/// rest of the suite, running in parallel, starved the thread pool (a 50ms deadline measured at 15s
+/// there, and at 0.4s run alone), which says nothing about the mechanism under test.
 /// </summary>
 public class OutboundClientCancellationTest
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromMilliseconds(50);
     private static readonly TimeSpan MockDelay = TimeSpan.FromSeconds(5);
-    private static readonly TimeSpan AssertionCeiling = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// The mocked SDK call: waits <see cref="MockDelay"/> unless its token is cancelled, and records
+    /// which of the two ended it. <see cref="Ended"/> completes either way, so a test can wait for the
+    /// call to finish unwinding before asking how it ended.
+    /// </summary>
+    private sealed class SdkCall
+    {
+        private readonly TaskCompletionSource _ended = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public bool AbortedByToken { get; private set; }
+
+        public Task Ended => _ended.Task;
+
+        public async Task RunAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                await Task.Delay(MockDelay, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                AbortedByToken = true;
+                throw;
+            }
+            finally
+            {
+                _ended.TrySetResult();
+            }
+        }
+
+        /// <summary>Waits for the call to finish (generously: it is bounded by <see cref="MockDelay"/> either way) and asserts the token ended it.</summary>
+        public async Task AssertAbortedByTheDeadlineAsync(string what)
+        {
+            await Ended.WaitAsync(TimeSpan.FromSeconds(60));
+            Assert.True(AbortedByToken,
+                $"Expected the {what} to be aborted by the deadline's token, but the mocked SDK call ran its full {MockDelay}.");
+        }
+    }
 
     [Fact]
     public async Task Sqs_UseTimeoutAroundTheClientMiddleware_ActuallyBoundsTheSdkCall()
     {
         var accessor = new CancellationTokenAccessor();
+        var sdkCall = new SdkCall();
         var mockSqs = new Mock<IAmazonSQS>();
         mockSqs.Setup(x => x.SendMessageAsync(It.IsAny<SendMessageRequest>(), It.IsAny<CancellationToken>()))
             .Returns<SendMessageRequest, CancellationToken>(async (_, ct) =>
             {
-                await Task.Delay(MockDelay, ct);
+                await sdkCall.RunAsync(ct);
                 return new SendMessageResponse();
             });
 
@@ -65,13 +103,10 @@ public class OutboundClientCancellationTest
         var timeoutMiddleware = new TimeoutMiddleware<SqsSendMessageContext>(accessor, Timeout);
         var context = new SqsSendMessageContext(new SendMessageRequest());
 
-        var stopwatch = Stopwatch.StartNew();
         var thrown = await Assert.ThrowsAsync<TimeoutException>(
             () => timeoutMiddleware.HandleAsync(context, () => middleware.HandleAsync(context, () => Task.CompletedTask)));
-        stopwatch.Stop();
 
-        Assert.True(stopwatch.Elapsed < AssertionCeiling,
-            $"Expected the send to be cancelled well short of the mocked SDK call's {MockDelay} delay, but it took {stopwatch.Elapsed}.");
+        await sdkCall.AssertAbortedByTheDeadlineAsync("send");
         Assert.NotNull(thrown);
         mockSqs.Verify(x => x.SendMessageAsync(It.IsAny<SendMessageRequest>(), It.Is<CancellationToken>(t => t.CanBeCanceled)));
     }
@@ -80,11 +115,12 @@ public class OutboundClientCancellationTest
     public async Task Sns_UseTimeoutAroundTheClientMiddleware_ActuallyBoundsTheSdkCall()
     {
         var accessor = new CancellationTokenAccessor();
+        var sdkCall = new SdkCall();
         var mockSns = new Mock<IAmazonSimpleNotificationService>();
         mockSns.Setup(x => x.PublishAsync(It.IsAny<PublishRequest>(), It.IsAny<CancellationToken>()))
             .Returns<PublishRequest, CancellationToken>(async (_, ct) =>
             {
-                await Task.Delay(MockDelay, ct);
+                await sdkCall.RunAsync(ct);
                 return new PublishResponse();
             });
 
@@ -92,13 +128,10 @@ public class OutboundClientCancellationTest
         var timeoutMiddleware = new TimeoutMiddleware<SnsSendMessageContext>(accessor, Timeout);
         var context = new SnsSendMessageContext(new PublishRequest());
 
-        var stopwatch = Stopwatch.StartNew();
         var thrown = await Assert.ThrowsAsync<TimeoutException>(
             () => timeoutMiddleware.HandleAsync(context, () => middleware.HandleAsync(context, () => Task.CompletedTask)));
-        stopwatch.Stop();
 
-        Assert.True(stopwatch.Elapsed < AssertionCeiling,
-            $"Expected the publish to be cancelled well short of the mocked SDK call's {MockDelay} delay, but it took {stopwatch.Elapsed}.");
+        await sdkCall.AssertAbortedByTheDeadlineAsync("publish");
         Assert.NotNull(thrown);
         mockSns.Verify(x => x.PublishAsync(It.IsAny<PublishRequest>(), It.Is<CancellationToken>(t => t.CanBeCanceled)));
     }
@@ -107,11 +140,12 @@ public class OutboundClientCancellationTest
     public async Task EventBridge_UseTimeoutAroundTheClientMiddleware_ActuallyBoundsTheSdkCall()
     {
         var accessor = new CancellationTokenAccessor();
+        var sdkCall = new SdkCall();
         var mockEventBridge = new Mock<IAmazonEventBridge>();
         mockEventBridge.Setup(x => x.PutEventsAsync(It.IsAny<PutEventsRequest>(), It.IsAny<CancellationToken>()))
             .Returns<PutEventsRequest, CancellationToken>(async (_, ct) =>
             {
-                await Task.Delay(MockDelay, ct);
+                await sdkCall.RunAsync(ct);
                 return new PutEventsResponse();
             });
 
@@ -119,13 +153,10 @@ public class OutboundClientCancellationTest
         var timeoutMiddleware = new TimeoutMiddleware<EventBridgeSendMessageContext>(accessor, Timeout);
         var context = new EventBridgeSendMessageContext(new PutEventsRequest());
 
-        var stopwatch = Stopwatch.StartNew();
         var thrown = await Assert.ThrowsAsync<TimeoutException>(
             () => timeoutMiddleware.HandleAsync(context, () => middleware.HandleAsync(context, () => Task.CompletedTask)));
-        stopwatch.Stop();
 
-        Assert.True(stopwatch.Elapsed < AssertionCeiling,
-            $"Expected the put-events call to be cancelled well short of the mocked SDK call's {MockDelay} delay, but it took {stopwatch.Elapsed}.");
+        await sdkCall.AssertAbortedByTheDeadlineAsync("put-events call");
         Assert.NotNull(thrown);
         mockEventBridge.Verify(x => x.PutEventsAsync(It.IsAny<PutEventsRequest>(), It.Is<CancellationToken>(t => t.CanBeCanceled)));
     }
@@ -134,11 +165,12 @@ public class OutboundClientCancellationTest
     public async Task Lambda_UseTimeoutAroundTheClientMiddleware_ActuallyBoundsTheSdkCall()
     {
         var accessor = new CancellationTokenAccessor();
+        var sdkCall = new SdkCall();
         var mockLambda = new Mock<IAmazonLambda>();
         mockLambda.Setup(x => x.InvokeAsync(It.IsAny<InvokeRequest>(), It.IsAny<CancellationToken>()))
             .Returns<InvokeRequest, CancellationToken>(async (_, ct) =>
             {
-                await Task.Delay(MockDelay, ct);
+                await sdkCall.RunAsync(ct);
                 return new InvokeResponse();
             });
 
@@ -146,13 +178,10 @@ public class OutboundClientCancellationTest
         var timeoutMiddleware = new TimeoutMiddleware<LambdaSendMessageContext>(accessor, Timeout);
         var context = new LambdaSendMessageContext(new InvokeRequest());
 
-        var stopwatch = Stopwatch.StartNew();
         var thrown = await Assert.ThrowsAsync<TimeoutException>(
             () => timeoutMiddleware.HandleAsync(context, () => middleware.HandleAsync(context, () => Task.CompletedTask)));
-        stopwatch.Stop();
 
-        Assert.True(stopwatch.Elapsed < AssertionCeiling,
-            $"Expected the invoke to be cancelled well short of the mocked SDK call's {MockDelay} delay, but it took {stopwatch.Elapsed}.");
+        await sdkCall.AssertAbortedByTheDeadlineAsync("invoke");
         Assert.NotNull(thrown);
         mockLambda.Verify(x => x.InvokeAsync(It.IsAny<InvokeRequest>(), It.Is<CancellationToken>(t => t.CanBeCanceled)));
     }
@@ -165,11 +194,12 @@ public class OutboundClientCancellationTest
     public async Task StepFunctions_UseTimeoutAroundTheClient_ActuallyBoundsTheSdkCall()
     {
         var accessor = new CancellationTokenAccessor();
+        var sdkCall = new SdkCall();
         var mockStepFunctions = new Mock<IAmazonStepFunctions>();
         mockStepFunctions.Setup(x => x.StartExecutionAsync(It.IsAny<StartExecutionRequest>(), It.IsAny<CancellationToken>()))
             .Returns<StartExecutionRequest, CancellationToken>(async (_, ct) =>
             {
-                await Task.Delay(MockDelay, ct);
+                await sdkCall.RunAsync(ct);
                 return new StartExecutionResponse();
             });
 
@@ -178,16 +208,13 @@ public class OutboundClientCancellationTest
         var timeoutMiddleware = new TimeoutMiddleware<object>(accessor, Timeout);
 
         Task<IBenzeneResult<ExampleResponsePayload>> callTask = null!;
-        var stopwatch = Stopwatch.StartNew();
         await timeoutMiddleware.HandleAsync(new object(), () =>
         {
             callTask = client.StartExecutionAsync<ExampleRequestPayload, ExampleResponsePayload>(new ExampleRequestPayload());
             return callTask;
         });
-        stopwatch.Stop();
 
-        Assert.True(stopwatch.Elapsed < AssertionCeiling,
-            $"Expected the start-execution call to be cancelled well short of the mocked SDK call's {MockDelay} delay, but it took {stopwatch.Elapsed}.");
+        await sdkCall.AssertAbortedByTheDeadlineAsync("start-execution call");
 
         var result = await callTask;
         Assert.Equal(BenzeneResultStatus.ServiceUnavailable, result.Status);

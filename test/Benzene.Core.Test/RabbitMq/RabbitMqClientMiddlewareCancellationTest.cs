@@ -85,6 +85,11 @@ public class RabbitMqClientMiddlewareCancellationTest
 
         await middleware.HandleAsync(SampleContext(), () => Task.CompletedTask);
 
-        mockChannel.Verify(x => x.GetNextPublishSequenceNumberAsync(CancellationToken.None), Times.Once);
+        // Twice with None: the coordinator's one-off "are confirms enabled" probe the first time a channel
+        // is used (RabbitMqMandatoryPublishCoordinator.GetOrCreate), then the publish's own read. The tests
+        // above tell the two apart by the ambient token; with no accessor both carry None, and no other
+        // token may appear.
+        mockChannel.Verify(x => x.GetNextPublishSequenceNumberAsync(CancellationToken.None), Times.Exactly(2));
+        mockChannel.Verify(x => x.GetNextPublishSequenceNumberAsync(It.Is<CancellationToken>(t => t != CancellationToken.None)), Times.Never);
     }
 }

@@ -65,8 +65,12 @@ public class QueueStoragePipelineTest
         mockExampleService.Verify(x => x.Register(Defaults.Name));
     }
 
+    // A text that is not an envelope reaches no handler, so nothing records an outcome. Queue Storage
+    // retains that rather than acknowledging it - the queue retries it and, past its dequeue limit, moves
+    // it to the poison queue - where it used to vanish without a trace
+    // (work/settlement-consistency-fix-plan.md §1 row 4, which says this expectation changes).
     [Fact]
-    public async Task NonEnvelopeMessage_OnBenzeneMessagePipeline_IsDeferredWithoutError()
+    public async Task NonEnvelopeMessage_OnBenzeneMessagePipeline_IsRetainedNotAcknowledged()
     {
         var mockExampleService = new Mock<IExampleService>();
 
@@ -80,7 +84,8 @@ public class QueueStoragePipelineTest
                         .UseMessageHandlers())))
             .Build();
 
-        await app.HandleQueueMessage("just some text, not an envelope");
+        await Assert.ThrowsAsync<QueueStorageMessageProcessingException>(() =>
+            app.HandleQueueMessage("just some text, not an envelope"));
 
         mockExampleService.Verify(x => x.Register(It.IsAny<string>()), Times.Never);
     }
@@ -112,6 +117,10 @@ public class QueueStoragePipelineTest
                     .Use("Capture", async (QueueStorageContext context, Func<Task> next) =>
                     {
                         observed = context;
+                        // The item has to end with an outcome: one that ends with none is retried, not
+                        // acknowledged (work/settlement-consistency-fix-plan.md §1 row 4), which is not
+                        // what this test is about.
+                        context.MessageResult = BenzeneResult.Ok();
                         await next();
                     })))
             .Build();

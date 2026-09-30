@@ -431,7 +431,9 @@ public class RedisCacheServiceTest
 
         var result = await actions.InvalidateAsync();
 
-        Assert.False(result);
+        // Matching no keys is still a completed invalidation (#252 - see
+        // CacheWildcard_PatternMatchesZeroKeys_ReturnsTrue_AndProducesNoStaleDataWarning below).
+        Assert.True(result);
         connectionFactory.DataBaseMock.Verify(x => x.ExecuteAsync("KEYS", "TEST_*"), Times.Once);
     }
 

@@ -19,15 +19,18 @@ namespace Benzene.Test.Clients.Http;
 /// pipeline (unlike the DI-resolved sibling overload, which already picked up
 /// <see cref="ICancellationTokenAccessor"/> via constructor injection). Mirrors
 /// <c>PubSubCancellationTest</c>'s "assert the actual token" model - a capturing
-/// <see cref="HttpMessageHandler"/>, not <c>It.IsAny&lt;CancellationToken&gt;()</c>.
+/// <see cref="HttpClient"/>, not <c>It.IsAny&lt;CancellationToken&gt;()</c>.
 /// </summary>
 public class HttpClientMiddlewareCancellationTest
 {
-    private sealed class CapturingHandler : HttpMessageHandler
+    // Captured at HttpClient.SendAsync itself, which is the call the middleware makes. An HttpMessageHandler
+    // underneath never sees the caller's token: HttpClient links it with its own timeout source first, so
+    // a handler-side capture can equal neither the forwarded token nor CancellationToken.None.
+    private sealed class CapturingHttpClient : HttpClient
     {
         public CancellationToken? ObservedToken { get; private set; }
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        public override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             ObservedToken = cancellationToken;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
@@ -45,8 +48,7 @@ public class HttpClientMiddlewareCancellationTest
     public async Task UseHttpClient_GivenInstance_ForwardsTheAmbientTokenToSendAsync()
     {
         using var cts = new CancellationTokenSource();
-        var handler = new CapturingHandler();
-        var httpClient = new HttpClient(handler);
+        var httpClient = new CapturingHttpClient();
 
         var pipeline = new MiddlewarePipelineBuilder<HttpSendMessageContext>(new NullBenzeneServiceContainer())
             .UseHttpClient(httpClient)
@@ -55,14 +57,13 @@ public class HttpClientMiddlewareCancellationTest
         var context = new HttpSendMessageContext(new HttpRequestMessage(HttpMethod.Get, "https://example.test/"));
         await pipeline.HandleAsync(context, CreateResolver(cts.Token));
 
-        Assert.Equal(cts.Token, handler.ObservedToken);
+        Assert.Equal(cts.Token, httpClient.ObservedToken);
     }
 
     [Fact]
     public async Task UseHttpClient_GivenInstance_WithNoAccessorRegistered_SendsWithNoneToken()
     {
-        var handler = new CapturingHandler();
-        var httpClient = new HttpClient(handler);
+        var httpClient = new CapturingHttpClient();
 
         var pipeline = new MiddlewarePipelineBuilder<HttpSendMessageContext>(new NullBenzeneServiceContainer())
             .UseHttpClient(httpClient)
@@ -71,6 +72,6 @@ public class HttpClientMiddlewareCancellationTest
         var context = new HttpSendMessageContext(new HttpRequestMessage(HttpMethod.Get, "https://example.test/"));
         await pipeline.HandleAsync(context, new NullServiceResolver());
 
-        Assert.Equal(CancellationToken.None, handler.ObservedToken);
+        Assert.Equal(CancellationToken.None, httpClient.ObservedToken);
     }
 }

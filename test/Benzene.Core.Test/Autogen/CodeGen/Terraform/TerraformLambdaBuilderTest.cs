@@ -1,4 +1,5 @@
-﻿using System.IO;
+﻿using System.Text.RegularExpressions;
+using System.IO;
 using Benzene.CodeGen.Terraform;
 using Benzene.Test.Autogen.CodeGen.Helpers;
 using Xunit;
@@ -49,9 +50,17 @@ public class TerraformLambdaBuilderTest
 
         Assert.Contains($"  function_name = {HclLiteral.Format(adversarialName)}", lines);
         Assert.Contains($"    name = {HclLiteral.Format(adversarialName)}", lines);
-        // The sharpest edge of the finding: a live "${" must never survive into the generated .tf -
-        // it would be evaluated by Terraform as an expression, not read back as this literal text.
-        Assert.DoesNotContain(lines, line => line.Contains("\"${"));
+        // The sharpest edge of the finding: the name's "${" must never survive live into the generated
+        // .tf - it would be evaluated by Terraform as an expression, not read back as this literal text.
+        // (The generator's own "${path.module}/file.zip" is a deliberate expression, so the check is for
+        // the payload's, unescaped - HclLiteral writes it as "$${".)
+        Assert.DoesNotContain(lines, line => Regex.IsMatch(line, @"(?<!\$)\$\{aws_iam_role\.admin"));
+        // And the name can't break out through the resource label or the reference built from it: both
+        // have to be Terraform identifiers, which a quote cannot close.
+        var label = Regex.Match(lines[0], "^resource \"aws_lambda_function\" \"([^\"]*)\" \\{$");
+        Assert.True(label.Success, lines[0]);
+        Assert.Matches("^[A-Za-z_][A-Za-z0-9_]*$", label.Groups[1].Value);
+        Assert.Contains($"  role = aws_iam_role.{label.Groups[1].Value}_role.arn", lines);
     }
 
     [Fact]

@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Xml;
 using Benzene.Abstractions.Serialization;
+using Benzene.Core.Exceptions;
 
 namespace Benzene.Xml;
 
@@ -116,7 +118,18 @@ public class XmlSerializer : ISerializer
         // shape would otherwise drive the reflection-generated deserializer into a CLR stack overflow.
         // See DepthGuardedXmlReader/XmlOptions.MaxDepth.
         using var depthGuardedReader = new DepthGuardedXmlReader(xmlReader, _maxDepth);
-        return GetSerializer(type).Deserialize(depthGuardedReader);
+        try
+        {
+            return GetSerializer(type).Deserialize(depthGuardedReader);
+        }
+        catch (InvalidOperationException ex) when (ex.InnerException is BenzeneException guard)
+        {
+            // System.Xml.Serialization wraps anything the reader throws in "There is an error in XML
+            // document (line, col)". The depth guard is Benzene's own refusal, so surface it as itself
+            // rather than as a generic XML error; malformed XML still arrives as the framework's wrapper.
+            ExceptionDispatchInfo.Capture(guard).Throw();
+            throw;
+        }
     }
 
     /// <summary>Deserializes an XML string to a strongly-typed object.</summary>

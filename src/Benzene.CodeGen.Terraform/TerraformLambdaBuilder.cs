@@ -141,6 +141,6 @@ public class TerraformLambdaBuilder : ICodeBuilder<TerraformLambdaSettings>
 
     private static string GetLambdaName(string name)
     {
-        return name.Replace("-", "_");
+        return NameFormatter.UnderScoreCase(name);
     }
 }

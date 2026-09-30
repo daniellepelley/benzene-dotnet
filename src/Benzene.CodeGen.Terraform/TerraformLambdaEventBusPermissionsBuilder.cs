@@ -5,9 +5,32 @@ namespace Benzene.CodeGen.Terraform;
 
 public static class NameFormatter
 {
+    /// <summary>
+    /// Turns a caller-supplied name into a Terraform identifier, for resource labels and the
+    /// references built from them (<c>aws_iam_role.{name}_role</c>). Every character that is not a
+    /// letter, digit or underscore becomes <c>_</c> (so <c>order-service</c> is <c>order_service</c>, as
+    /// it always was), and a name that would start with a digit gets a leading <c>_</c>.
+    /// </summary>
+    /// <remarks>
+    /// Labels are not string literals, so <see cref="HclLiteral"/> cannot make them safe: a label has to
+    /// be an identifier, and a <c>"</c> in the name used to close the label and let the rest of the name
+    /// be read as HCL (#212/#263's escaping covered the literals, not the labels). Any name this changes
+    /// beyond the dash was already producing a label Terraform rejects.
+    /// </remarks>
     public static string UnderScoreCase(string name)
     {
-        return name.Replace("-", "_");
+        var identifier = new System.Text.StringBuilder(name.Length + 1);
+        foreach (var c in name)
+        {
+            identifier.Append(char.IsAsciiLetterOrDigit(c) || c == '_' ? c : '_');
+        }
+
+        if (identifier.Length == 0 || char.IsAsciiDigit(identifier[0]))
+        {
+            identifier.Insert(0, '_');
+        }
+
+        return identifier.ToString();
     }
 }
 

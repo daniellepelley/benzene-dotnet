@@ -84,7 +84,8 @@ public class EventGridPipelineTest
         var mockExampleService = new Mock<IExampleService>();
         var app = CreateApp(mockExampleService);
 
-        await Assert.ThrowsAsync<System.Text.Json.JsonException>(() => app.HandleEventGridEvent("not valid json"));
+        // ThrowsAny: System.Text.Json raises its internal JsonReaderException, a JsonException subclass.
+        await Assert.ThrowsAnyAsync<System.Text.Json.JsonException>(() => app.HandleEventGridEvent("not valid json"));
 
         mockExampleService.Verify(x => x.Register(It.IsAny<string>()), Times.Never);
     }
@@ -143,8 +144,9 @@ public class EventGridPipelineTest
     {
         var context = new EventGridContext("not valid json");
 
-        var first = Assert.Throws<System.Text.Json.JsonException>(() => context.Event);
-        var second = Assert.Throws<System.Text.Json.JsonException>(() => context.Event);
+        // ThrowsAny: System.Text.Json raises its internal JsonReaderException, a JsonException subclass.
+        var first = Assert.ThrowsAny<System.Text.Json.JsonException>(() => context.Event);
+        var second = Assert.ThrowsAny<System.Text.Json.JsonException>(() => context.Event);
 
         Assert.Same(first, second);
     }
