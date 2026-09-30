@@ -36,12 +36,14 @@ namespace Benzene.Mesh.Test;
 /// several tests in this assembly discover handlers by a whole-assembly scan - a second class at an
 /// identical route would collide with theirs. The topic name is incidental to what this test checks
 /// (that the guard sits in front of the handler), so sharing the double costs nothing - EXCEPT its
-/// static <c>Invocations</c> counter, which this test deliberately never touches (xUnit can run this
-/// class and <see cref="AwsMeshRefreshEndpointTest"/> concurrently, in different collections, so a
-/// shared static counter would race); the response status code alone is sufficient evidence of
-/// whether the guard let the request through.
+/// static <c>Invocations</c> counter. This test never reads it, since the response status code alone
+/// is sufficient evidence of whether the guard let the request through, but every pass it lets through
+/// still increments it. So both classes share <see cref="AwsMeshRefreshEndpointTest.Collection"/>,
+/// which runs them one after the other. Otherwise a pass here lands between
+/// <see cref="AwsMeshRefreshEndpointTest"/>'s reset and its assertion.
 /// </para>
 /// </summary>
+[Collection(AwsMeshRefreshEndpointTest.Collection)]
 public class AzureMeshRefreshEndpointTest
 {
     private sealed class StubArtifactStore : IMeshArtifactStore

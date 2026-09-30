@@ -32,8 +32,15 @@ namespace Benzene.Mesh.Test;
 /// header, the throttle, the route table's method scoping, and the envelope endpoint's topic filter.
 /// </para>
 /// </summary>
+[Collection(Collection)]
 public class AwsMeshRefreshEndpointTest
 {
+    /// <summary>
+    /// Every test class that sends a request through to <see cref="SpyAggregateHandler"/>. Its static
+    /// counter is reset per test and asserted on, so no other class may drive it concurrently.
+    /// </summary>
+    public const string Collection = "Mesh refresh spy handler";
+
     /// <summary>
     /// Stands in for the example's <c>MeshAggregateHandler</c>: same topic and same single POST
     /// endpoint, but it records an invocation instead of costing money. "Did this run?" is the
