@@ -14,6 +14,7 @@ namespace Benzene.Test.Autogen.CodeGen.Cli;
 // `benzene diff` wraps SchemaCompatibility.Compare/SchemaCompatibilityComparer over two files on
 // disk and turns the report into a CI-friendly exit code: throws (-> non-zero, per Phase 2's
 // fail-loud CLI) when the report trips --fail-on, otherwise returns normally (-> exit 0).
+[Collection(ConsoleRedirectionCollection.Name)]
 public class DiffCommandTest
 {
     public class CreateOrderV1 { public string Id { get; set; } = ""; public string Note { get; set; } = ""; }

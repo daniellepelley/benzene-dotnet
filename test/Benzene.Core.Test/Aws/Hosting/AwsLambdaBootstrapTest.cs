@@ -23,7 +23,8 @@ namespace Benzene.Test.Aws.Hosting;
 /// it returns before contacting the (absent) Lambda runtime API, which lets the disposal contract be
 /// asserted in a plain unit test.
 /// </summary>
-public class AwsLambdaBootstrapTest
+[Collection(ConsoleRedirectionCollection.Name)]
+public class AwsLambdaBootstrapTest : ConsoleRedirection
 {
     private static CancellationToken Cancelled()
     {

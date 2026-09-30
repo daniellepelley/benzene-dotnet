@@ -21,7 +21,8 @@ namespace Benzene.Test.Aws.AspNet;
 /// internal (never a public type - only ever reached through <c>IServer</c>), so this test relies on
 /// <c>InternalsVisibleTo("Benzene.Test")</c> on the package to construct it directly.
 /// </summary>
-public class BenzeneLambdaServerStartAsyncOrderingTest
+[Collection(ConsoleRedirectionCollection.Name)]
+public class BenzeneLambdaServerStartAsyncOrderingTest : ConsoleRedirection
 {
     private sealed class FakeHttpApplication : IHttpApplication<object>
     {

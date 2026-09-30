@@ -9,6 +9,7 @@ using Xunit;
 
 namespace Benzene.Test.Cli.Core
 {
+    [Collection(ConsoleRedirectionCollection.Name)]
     public class CommandRouterTest
     {
         [Fact]

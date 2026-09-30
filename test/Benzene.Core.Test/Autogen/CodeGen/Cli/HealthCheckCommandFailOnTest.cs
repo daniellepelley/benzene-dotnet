@@ -19,6 +19,7 @@ namespace Benzene.Test.Autogen.CodeGen.Cli;
 // hatch like SpecCommand has), so this drives it through the HealthCheckClient(IAwsLambdaClient)
 // test seam instead: a fake IAwsLambdaClient stands in for the real AWS invoke, and the command's
 // HealthCheckClient? constructor overload lets a test wire that fake in directly.
+[Collection(ConsoleRedirectionCollection.Name)]
 public class HealthCheckCommandFailOnTest
 {
     private class FakeAwsLambdaClient : IAwsLambdaClient

@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
@@ -113,6 +112,7 @@ public class SqsHealthCheckTest
     [Fact]
     public async Task ProcessorTimeout_BoundsAHungSqsCall()
     {
+        var callCancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var mockSqsClient = new Mock<IAmazonSQS>();
         mockSqsClient
             .Setup(x => x.GetQueueAttributesAsync(It.IsAny<GetQueueAttributesRequest>(), It.IsAny<CancellationToken>()))
@@ -120,22 +120,28 @@ public class SqsHealthCheckTest
             {
                 // Never completes on its own - only cancellation (the processor's timeout, forwarded by
                 // SqsHealthCheck) can end this await.
-                await Task.Delay(Timeout.Infinite, ct);
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    callCancelled.TrySetResult();
+                    throw;
+                }
                 return new GetQueueAttributesResponse { HttpStatusCode = HttpStatusCode.OK };
             });
 
         var healthCheck = new SqsHealthCheck("some-queue-url", mockSqsClient.Object);
         var processor = new HealthCheckProcessor(TimeSpan.FromMilliseconds(50));
 
-        var stopwatch = Stopwatch.StartNew();
-        var result = await processor.PerformHealthChecksAsync(new IHealthCheck[] { healthCheck });
-        stopwatch.Stop();
-
-        // Bounded by the processor's 50ms timeout, not the call's real (never-completing) duration.
-        // A generous outer bound: this only guards against a genuine "never returns" regression, not
-        // ordinary scheduling latency under host contention - the cancellation itself is immediate.
-        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(30),
-            $"Expected the processor's timeout to bound the hung SQS call; took {stopwatch.Elapsed}.");
+        // The check returns, and the SDK call ended because its token was cancelled - the processor's 50ms
+        // timeout, forwarded into the call. Both waits are only "never returns" guards, far above the
+        // timeout: a stopwatch ceiling here failed whenever the parallel suite starved the thread pool
+        // (38s against 50ms on CI), which says nothing about the mechanism. If the token were not
+        // forwarded, the infinite delay would never be cancelled and the second wait would time out.
+        var result = await processor.PerformHealthChecksAsync(new IHealthCheck[] { healthCheck }).WaitAsync(TimeSpan.FromMinutes(2));
+        await callCancelled.Task.WaitAsync(TimeSpan.FromMinutes(2));
 
         var response = result.PayloadAsObject as HealthCheckResponse;
         Assert.NotNull(response);
