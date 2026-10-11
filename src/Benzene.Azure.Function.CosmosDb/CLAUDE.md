@@ -69,6 +69,11 @@ doesn't checkpoint at all.
 This is a documentation clarification, not a behavior change (Batch 3 of
 `work/settlement-consistency-fix-plan.md` — see row 20 of its §1 table).
 
+**Unit of settlement:** the triggered batch. **At-most-once override** (spec 0.2,
+transport-bindings.md §1 obligation 8): `UseCosmosDbChangeFeed<T>(action, options =>
+options.AtMostOnce = true)` (`CosmosDbChangeFeedOptions`) logs a throwing batch and returns normally,
+so the trigger checkpoints past it; an infrastructure failure still propagates.
+
 ## Declared triggers (source-generated)
 Instead of hand-writing the `[Function]`/`[…Trigger]` class, declare the trigger and let
 Benzene's source generator (shipped in `Benzene.Azure.Function.Core`) emit it:

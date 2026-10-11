@@ -217,6 +217,17 @@ Provides complete implementation of message handler infrastructure for command/q
   `"DeriveTopic"` (distinct from `PresetTopic` in traces). It resets `ResolvedTopicCache` on override,
   same as `PresetTopicMiddleware`. Covered by
   `test/Benzene.Core.Test/Core/Core/MessageHandling/DeriveTopicMiddlewareTest.cs`
+- `UnmatchedTopicAsIgnoredMiddleware<TContext>` + `UseUnmatchedTopicAsIgnored<TContext>()`
+  (`UnmatchedTopicExtensions.cs`) - the unmatched-topic settlement option of transport-bindings.md §1,
+  obligation 8: placed immediately before `UseMessageHandlers`, it settles a message whose topic **id**
+  has no handler at any version (`MessageHandlerDefinitionIndex.GetByTopicId`) as `ignored` - a
+  success, so a one-way binding acknowledges it - instead of letting the router answer `not-found`.
+  For a subscriber on a shared bus. Never ignores a reserved `benzene:` topic, a message with no
+  topic, or a known topic at an unserved version. One name and shape on every binding (it is a
+  pipeline extension, so no binding carries its own copy); off unless called. Note the router records
+  `not-found` for an unmatched topic - a failure result, not a missing one - so without this option an
+  unmatched topic settles like any failure on every binding. Covered by
+  `test/Benzene.Core.Test/Contract/UnmatchedTopicAsIgnoredTest.cs`
 
 ### Cold-start warm-up (`WarmUp/`)
 - `IWarmUpTask` (in **Benzene.Abstractions**, `Benzene.Abstractions.WarmUp`, so plugin packages can

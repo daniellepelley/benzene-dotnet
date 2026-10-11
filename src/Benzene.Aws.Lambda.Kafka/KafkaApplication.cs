@@ -88,6 +88,11 @@ public class KafkaApplication : IMiddlewareApplication<KafkaEvent, KafkaBatchRes
         KafkaEvent @event, string partitionKey, IEnumerable<KafkaEvent.KafkaEventRecord> records,
         IServiceResolverFactory serviceResolverFactory)
     {
+        // The at-most-once override (transport-bindings §1, obligation 8): a failed record is logged
+        // and skipped rather than stopping its partition, and nothing is reported for redelivery. An
+        // infrastructure (mis-wiring) failure is not a record's outcome and still stops the partition.
+        var atMostOnce = _options.BatchFailureMode == KafkaBatchFailureMode.AtMostOnce;
+
         foreach (var record in records.OrderBy(r => r.Offset))
         {
             var context = new KafkaContext(@event, record);
@@ -105,6 +110,11 @@ public class KafkaApplication : IMiddlewareApplication<KafkaEvent, KafkaBatchRes
                     ? BenzeneFailure.InfrastructureLogPrefix + " Processing Kafka record {partition}@{offset} failed — this service is mis-wired; the message is not at fault"
                     : "Processing Kafka record {partition}@{offset} failed", partitionKey, record.Offset);
 
+                if (atMostOnce && !BenzeneFailure.IsInfrastructure(ex))
+                {
+                    continue;
+                }
+
                 return new KafkaBatchResponse.BatchItemFailure(partitionKey, record.Offset);
             }
 
@@ -116,6 +126,15 @@ public class KafkaApplication : IMiddlewareApplication<KafkaEvent, KafkaBatchRes
             // behaviour for unrouted records, adding failure reporting only for genuine failures.
             if (context.MessageResult?.IsSuccessful == false)
             {
+                if (atMostOnce)
+                {
+                    using var loggingScope = serviceResolverFactory.CreateScope();
+                    loggingScope.GetService<ILogger<KafkaApplication>>().LogWarning(
+                        "Kafka record {partition}@{offset} failed with {status}; acknowledged without redelivery (BatchFailureMode.AtMostOnce)",
+                        partitionKey, record.Offset, context.MessageResult.Status);
+                    continue;
+                }
+
                 return new KafkaBatchResponse.BatchItemFailure(partitionKey, record.Offset);
             }
         }

@@ -50,7 +50,11 @@ never ran, so the outcome is unset) is left on the queue individually for redeli
 This is a behavioral change from earlier versions, which defaulted to `WholeBatch` (a returned
 failure or unrouted message was deleted along with the batch unless a handler *threw*). Set
 `AckMode = SqsConsumerAckMode.WholeBatch` for the older all-or-nothing-on-throw behavior — see
-`SqsConsumerAckMode`'s doc comments below. A redelivered message means the handler needs to be
+`SqsConsumerAckMode`'s doc comments below. `AckMode = SqsConsumerAckMode.AtMostOnce` is the
+at-most-once override spec 0.2 requires (transport-bindings.md §1, obligation 8): every message is
+deleted whatever its outcome, a thrown exception included (logged; `WholeBatch` keeps the batch on a
+throw), except after an infrastructure failure, which deletes nothing. An unmatched topic is a
+`not-found` failure; `UseUnmatchedTopicAsIgnored()` deletes it as `ignored`. A redelivered message means the handler needs to be
 idempotent — see [Capability Matrix](../../docs/capability-matrix.md) /
 [Idempotency](../../docs/cookbooks/idempotency.md).
 

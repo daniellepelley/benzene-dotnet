@@ -58,6 +58,12 @@ behavior, not Benzene's): the classic blob trigger is polling-based via blob rec
 can lag on large containers, and the host recommends Event Grid-based triggers for latency-
 sensitive work. Neither concern changes anything in this package.
 
+This is the `blob-storage` binding of the spec's `settlementDefaults` (one-shot: a failure fails the
+invocation). Its at-most-once override (transport-bindings.md §1, obligation 8) is
+`UseBlobStorage(action, options => options.AtMostOnce = true)` (`BlobStorageOptions`): a throwing
+delivery is logged and the invocation returns normally, so the host does not retry it; an
+infrastructure failure still propagates. Tests: `AtMostOnceOverrideTest`.
+
 ## No TestHelpers package
 Deliberate: the dispatch surface is `HandleBlob(name, content)` with primitive arguments — there
 is nothing to build.

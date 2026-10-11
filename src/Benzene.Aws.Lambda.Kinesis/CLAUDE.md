@@ -57,6 +57,11 @@ app.UseKinesisStream(kinesis => kinesis
   `InvocationId` is a freshly generated id, not derived from any record.
 
 ## Settlement: no null/failure-result axis here — signal failure by throwing or withholding the checkpoint
+**Unit of settlement:** the batch from the reported resume point on. **At-most-once override** (spec
+0.2, transport-bindings.md §1 obligation 8): `KinesisStreamOptions.AtMostOnce = true` - a throwing
+pipeline is logged and the whole batch checkpointed, whatever `CatchExceptions` says (an
+infrastructure failure excepted).
+
 Unlike every fan-**out** transport in `work/settlement-consistency-fix-plan.md` §1 (rows 1-18), this
 package has no per-record `MessageResult`/failure-result axis to have a settlement policy about: the
 whole batch is handed to one handler as a `StreamContext<KinesisEventRecord>`, and nothing inspects a

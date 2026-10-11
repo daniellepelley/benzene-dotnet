@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Settlement (spec 0.2, transport-bindings §1 obligation 8 / D16): an at-most-once override on every
+  one-way binding, and unmatched-topic-as-ignored.** Additive; no default changes. Where a binding's
+  knobs did not already compose to "acknowledge whatever the outcome", it gains one:
+  `SqsBatchFailureMode.AtMostOnce` (Lambda SQS), `KafkaBatchFailureMode.AtMostOnce` (Lambda MSK),
+  `SqsConsumerAckMode.AtMostOnce` (self-hosted SQS), `ServiceBusConsumerAckMode.AtMostOnce` (self-hosted
+  Service Bus), `DynamoDbOptions.AtMostOnce` (new, via `UseDynamoDb(action, configure)`),
+  `KinesisStreamOptions.AtMostOnce`, `CosmosDbChangeFeedOptions.AtMostOnce` (new, via
+  `UseCosmosDbChangeFeed<T>(action, configure)`) and `BlobStorageOptions.AtMostOnce` (new, via
+  `UseBlobStorage(action, configure)`). Each still refuses to acknowledge an infrastructure
+  (mis-wiring) failure. `UseUnmatchedTopicAsIgnored()` (`Benzene.Core.MessageHandlers`), placed before
+  `UseMessageHandlers()` on any binding's pipeline, settles a message whose topic no handler serves as
+  `ignored` (acknowledged) instead of `not-found` (redelivered) - for subscribers on a shared bus.
+  Every binding's shape and defaults are now asserted against the fixture's `settlementDefaults`
+  (`SettlementDefaultsConformanceTest`).
 - **`SagaResult` gains `Failures` and `StateStoreFailure` (additive - both new members, no existing
   member changed shape or removed).** `Failures` (`IReadOnlyList<SagaStepOutcome>`) carries every step
   that failed within the failing stage, not just one - the normal case when two steps in the same

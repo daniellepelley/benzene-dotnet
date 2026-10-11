@@ -24,4 +24,13 @@ public enum KafkaBatchFailureMode
     /// should stop the whole invocation.
     /// </summary>
     FailWholeBatch = 1,
+
+    /// <summary>
+    /// At-most-once: every record in the batch is acknowledged whatever its outcome - a failure
+    /// result or a thrown exception - so no partition is redriven, and a failed record no longer stops
+    /// the records after it in its partition (skip-and-continue). Each failure is still logged. The
+    /// at-most-once override transport-bindings.md §1 (obligation 8) requires every one-way binding
+    /// to offer; use it only for loss-tolerant workloads.
+    /// </summary>
+    AtMostOnce = 2,
 }

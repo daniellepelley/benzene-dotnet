@@ -70,7 +70,11 @@ invocation populated. No application code changes needed for either fix.
   redrives just those). `UseSqs(..., configure)` takes an optional `SqsOptions` delegate; set
   `BatchFailureMode = SqsBatchFailureMode.FailWholeBatch` to instead throw `SqsBatchProcessingException`
   on any failure, failing the whole invocation so SQS retries every message in the batch. Purely
-  additive/opt-in - see `docs/cookbooks/handling-sqs-failures.md`
+  additive/opt-in - see `docs/cookbooks/handling-sqs-failures.md`. `SqsBatchFailureMode.AtMostOnce` is
+  the at-most-once override spec 0.2 requires (transport-bindings.md §1, obligation 8): every message
+  is acknowledged whatever its outcome (failure result, no result, thrown exception - logged), except
+  an infrastructure failure, which still fails the invocation. An unmatched topic is a `not-found`
+  failure; `UseUnmatchedTopicAsIgnored()` acknowledges it as `ignored` instead
 - **Bounded batch fan-out** (`SqsOptions.MaxDegreeOfParallelism`): defaults to `null` (unbounded -
   every record in the batch starts at once, the original behavior). Set a positive value to cap how
   many records run concurrently, e.g. so a large batch can't open more scoped DB connections than the

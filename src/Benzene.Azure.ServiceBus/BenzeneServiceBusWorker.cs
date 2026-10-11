@@ -1,6 +1,7 @@
 using Azure.Messaging.ServiceBus;
 using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Hosting;
+using Benzene.Core;
 using Microsoft.Extensions.Logging;
 
 namespace Benzene.Azure.ServiceBus;
@@ -173,10 +174,25 @@ public class BenzeneServiceBusWorker : IBenzeneWorker
             return;
         }
 
+        var atMostOnce = _config.AckMode == ServiceBusConsumerAckMode.AtMostOnce;
         ServiceBusSettlementDecision decision;
         try
         {
             decision = await _application.HandleAsync(settler.Message, _serviceResolverFactory, settler.CancellationToken);
+        }
+        catch (Exception ex) when (atMostOnce && !BenzeneFailure.IsInfrastructure(ex))
+        {
+            // The at-most-once override (transport-bindings §1, obligation 8): a thrown handler is
+            // logged and the message completed below like any other outcome. An infrastructure
+            // (mis-wiring) failure is no message's outcome and takes the abandon path instead.
+            using (var loggingScope = _serviceResolverFactory.CreateScope())
+            {
+                loggingScope.GetService<ILogger<BenzeneServiceBusWorker>>()
+                    .LogError(ex, "Processing Service Bus message {messageId} failed; completing it without redelivery (AckMode.AtMostOnce)",
+                        settler.Message.MessageId);
+            }
+
+            decision = new ServiceBusSettlementDecision(null, null);
         }
         catch (Exception ex)
         {
@@ -222,7 +238,7 @@ public class BenzeneServiceBusWorker : IBenzeneWorker
         // extra side effect on top of an already-decided-successful outcome" checkpoint handling.
         try
         {
-            await SettleAsync(settler, decision);
+            await SettleAsync(settler, decision, atMostOnce);
         }
         catch (Exception ex)
         {
@@ -237,7 +253,7 @@ public class BenzeneServiceBusWorker : IBenzeneWorker
         }
     }
 
-    private static async Task SettleAsync(IServiceBusMessageSettler settler, ServiceBusSettlementDecision decision)
+    private static async Task SettleAsync(IServiceBusMessageSettler settler, ServiceBusSettlementDecision decision, bool atMostOnce)
     {
         // An explicit settlement the handler requested wins; otherwise fall back to the
         // outcome-based default (unsuccessful result → abandon, else complete).
@@ -261,11 +277,12 @@ public class BenzeneServiceBusWorker : IBenzeneWorker
             }
         }
 
-        // Abandon on a failure OR a null result (a pipeline that short-circuited without setting one),
+        // AtMostOnce completes whatever the outcome (the at-most-once override). Otherwise: abandon on a
+        // failure OR a null result (a pipeline that short-circuited without setting one),
         // completing only on a genuine success - matching the SQS reference's "null errs toward
         // redelivery, never toward silent loss". Previously `== false` completed a null result, dropping
         // a message whose outcome was never established.
-        if (decision.MessageResult?.IsSuccessful != true)
+        if (!atMostOnce && decision.MessageResult?.IsSuccessful != true)
         {
             await settler.AbandonMessageAsync();
         }

@@ -87,8 +87,13 @@ code changes needed for either fix.
 - **Failure handling** (`KafkaOptions`, passed via `UseKafka(action, configure)`):
   `BatchFailureMode.PartialBatchFailure` (default) reports each failed partition's resume offset via
   `KafkaBatchResponse` for `ReportBatchItemFailures`-configured triggers; `FailWholeBatch` throws
-  `KafkaBatchProcessingException` to retry the whole batch. A returned `IsSuccessful == false` result
-  or a thrown exception is a failure; an unset outcome (unrouted record) is skipped, not reported.
+  `KafkaBatchProcessingException` to retry the whole batch; `AtMostOnce` (spec 0.2's at-most-once
+  override, transport-bindings.md §1 obligation 8) logs a failed record and carries on, reporting
+  nothing. A returned `IsSuccessful == false` result or a thrown exception is a failure; an unset
+  outcome (a middleware that ended the pipeline without a result) is skipped, not reported -
+  skip-and-continue, the stream carve-out. An **unmatched topic is not an unset outcome**: the router
+  records `not-found`, a failure, so it stops its partition - `UseUnmatchedTopicAsIgnored()` settles it
+  `ignored` instead. **Unit of settlement:** per topic-partition, the first failed offset onwards.
 - Message key available in context
 - Supports both MSK and self-managed Kafka
 - **Bounded partition fan-out**: `KafkaOptions.MaxDegreeOfParallelism` (via `UseKafka(action,

@@ -126,7 +126,11 @@ public class SqsConsumerApplication : IMiddlewareApplication<ReceiveMessageRespo
                                 : "Processing SQS message {messageId} failed", pair.Message.MessageId);
                     }
 
-                    if (_options.AckMode == SqsConsumerAckMode.WholeBatch)
+                    // WholeBatch keeps the whole batch on the queue on any throw. AtMostOnce deletes the
+                    // whole batch whatever the outcome - except after an infrastructure (mis-wiring)
+                    // failure, which is no message's outcome: rethrown, so nothing is deleted.
+                    if (_options.AckMode == SqsConsumerAckMode.WholeBatch
+                        || (_options.AckMode == SqsConsumerAckMode.AtMostOnce && BenzeneFailure.IsInfrastructure(ex)))
                     {
                         throw;
                     }

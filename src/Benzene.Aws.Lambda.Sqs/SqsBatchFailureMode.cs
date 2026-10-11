@@ -23,4 +23,14 @@ public enum SqsBatchFailureMode
     /// doesn't have <c>ReportBatchItemFailures</c> configured.
     /// </summary>
     FailWholeBatch = 1,
+
+    /// <summary>
+    /// At-most-once: every message in the batch is acknowledged whatever its outcome - a failure
+    /// result, no result, or a thrown exception - so SQS deletes it and nothing is redelivered or
+    /// dead-lettered. Each failure is still logged. The at-most-once override transport-bindings.md
+    /// §1 (obligation 8) requires every one-way binding to offer; use it only for loss-tolerant
+    /// workloads. An infrastructure (mis-wiring) failure still fails the invocation, as in every mode:
+    /// it is not a message outcome.
+    /// </summary>
+    AtMostOnce = 2,
 }
