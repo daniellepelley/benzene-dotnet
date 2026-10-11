@@ -16,7 +16,7 @@ namespace Benzene.Test.CloudService.Probe;
 /// <summary>
 /// Unit-level tests for <see cref="CloudServiceProbe"/>'s verdict/parsing logic, driven against a
 /// real loopback <see cref="HttpListener"/> returning scripted responses - the same pattern used by
-/// <c>UseBenzeneCloudServiceTest</c>'s <c>WithHandlers_DerivesTheDescriptorEagerlyAndStartsAnnouncingBeforeAnyRequest</c>
+/// <c>UseBenzeneCloudServiceTest</c>'s <c>FakeCollector</c>
 /// - rather than a mocking framework, since this is exercising real HTTP behavior.
 /// </summary>
 public class CloudServiceProbeTest
@@ -31,7 +31,7 @@ public class CloudServiceProbeTest
         fake.OnInvoke = (ctx, topic) => topic switch
         {
             "benzene:healthcheck" => WriteJsonAsync(ctx, 200, Envelope("{\"isHealthy\":true}")),
-            "benzene:mesh" => WriteJsonAsync(ctx, 200, Envelope("{\"service\":\"orders\",\"topics\":[{\"id\":\"order:create\"}]}")),
+            "benzene:spec" => WriteJsonAsync(ctx, 200, Envelope("{\"service\":\"orders\",\"requests\":[{\"topic\":\"order:create\",\"request\":{}}]}")),
             _ => WriteJsonAsync(ctx, 404, "{}")
         };
 
@@ -47,8 +47,8 @@ public class CloudServiceProbeTest
         AssertVerdict(report, "R7", CloudServiceProbeVerdict.Satisfied);
         AssertVerdict(report, "R8", CloudServiceProbeVerdict.Inconclusive);
 
-        // R6 is Satisfied for the observable descriptor check, but its reason must still say the
-        // registration/heartbeat half was never actually verified - a passing descriptor check
+        // R6 is Satisfied for the observable self-description (benzene:spec), but its reason must still
+        // say the registration/heartbeat half was never actually verified - a passing benzene:spec check
         // must not silently imply the whole of R6.
         var r6 = report.Requirements.Single(x => x.Id == "R6");
         Assert.Contains("registration", r6.Reason, StringComparison.OrdinalIgnoreCase);
@@ -117,7 +117,7 @@ public class CloudServiceProbeTest
         AssertVerdict(report, "R4", CloudServiceProbeVerdict.NotSatisfied);
         AssertVerdict(report, "R5", CloudServiceProbeVerdict.NotSatisfied);
         AssertVerdict(report, "R6", CloudServiceProbeVerdict.NotSatisfied);
-        // No mesh descriptor was reachable, so there's no evidence either way for the registry.
+        // No contract document was reachable over benzene:spec, so there's no evidence either way for the registry.
         AssertVerdict(report, "R2", CloudServiceProbeVerdict.Inconclusive);
         // Default paths were used, but nothing checked out there.
         AssertVerdict(report, "R7", CloudServiceProbeVerdict.NotSatisfied);
@@ -133,7 +133,7 @@ public class CloudServiceProbeTest
         fake.OnSpec = ctx => WriteJsonAsync(ctx, 404, "{}");
         fake.OnInvoke = (ctx, topic) => topic == "benzene:healthcheck"
             ? WriteJsonAsync(ctx, 200, Envelope("{\"isHealthy\":true}"))
-            : WriteJsonAsync(ctx, 404, "{}"); // the reserved "benzene:mesh" topic is not served either
+            : WriteJsonAsync(ctx, 404, "{}"); // the reserved "benzene:spec" topic is not served either
 
         using var client = new HttpClient { BaseAddress = new Uri($"http://localhost:{port}") };
         var report = await CloudServiceProbe.RunAsync(client);
@@ -142,7 +142,7 @@ public class CloudServiceProbeTest
         AssertVerdict(report, "R4", CloudServiceProbeVerdict.Satisfied);
         AssertVerdict(report, "R5", CloudServiceProbeVerdict.NotSatisfied);
         AssertVerdict(report, "R6", CloudServiceProbeVerdict.NotSatisfied);
-        // No mesh descriptor and the spec format isn't assumed - so no evidence about the registry.
+        // No contract document over benzene:spec - so no evidence about the registry.
         AssertVerdict(report, "R2", CloudServiceProbeVerdict.Inconclusive);
         // Used default paths, but R5/R6 didn't check out there.
         AssertVerdict(report, "R7", CloudServiceProbeVerdict.NotSatisfied);
@@ -162,7 +162,7 @@ public class CloudServiceProbeTest
         fake.OnInvoke = (ctx, topic) => topic switch
         {
             "benzene:healthcheck" => WriteJsonAsync(ctx, 200, Envelope("{\"isHealthy\":true}")),
-            "benzene:mesh" => WriteJsonAsync(ctx, 200, Envelope("{\"service\":\"orders\",\"topics\":[]}")),
+            "benzene:spec" => WriteJsonAsync(ctx, 200, Envelope("{\"service\":\"orders\",\"requests\":[]}")),
             _ => WriteJsonAsync(ctx, 404, "{}")
         };
 
@@ -197,7 +197,7 @@ public class CloudServiceProbeTest
         fake.OnInvoke = (ctx, topic) => topic switch
         {
             "benzene:healthcheck" => WriteJsonAsync(ctx, 200, Envelope("{\"isHealthy\":true}")),
-            "benzene:mesh" => WriteJsonAsync(ctx, 200, Envelope("{\"service\":\"orders\",\"topics\":[]}")),
+            "benzene:spec" => WriteJsonAsync(ctx, 200, Envelope("{\"service\":\"orders\",\"requests\":[]}")),
             _ => WriteJsonAsync(ctx, 404, "{}")
         };
 

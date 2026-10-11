@@ -59,7 +59,7 @@ public class CloudServiceProbeIntegrationTest
             // Not observable from a single service no matter how conformant it is.
             AssertVerdict(report, "R8", CloudServiceProbeVerdict.Inconclusive);
 
-            // R6's descriptor surface checks out (no collector needed for that), but its reason
+            // R6's self-description (benzene:spec) checks out (no collector needed for that), but its reason
             // must still be honest that registration/heartbeat delivery was never actually
             // exercised by this probe - the two halves of R6 stay distinguishable in the reason.
             var r6 = report.Requirements.Single(x => x.Id == "R6");

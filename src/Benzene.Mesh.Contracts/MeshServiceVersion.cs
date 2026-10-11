@@ -7,7 +7,7 @@ namespace Benzene.Mesh.Contracts;
 /// How a declared <c>serviceVersion</c>'s values are compared (mesh.md §2.5).
 /// </summary>
 /// <remarks>
-/// A closed set, declared on the descriptor and never inferred from the value. <c>"10"</c> and
+/// A closed set, declared on the registration (its <c>versionScheme</c>) and never inferred from the value. <c>"10"</c> and
 /// <c>"9"</c> order one way as integers and the opposite way as strings, so a port that guesses will
 /// disagree with a port that guesses differently — about which release is newer, inside a tool used
 /// to decide deployments. There is deliberately no default: a version declared without a scheme is an
@@ -168,7 +168,7 @@ public static class MeshVersionOrder
     /// Compares two service versions <b>of the same service</b>, in their wire form.
     /// </summary>
     /// <remarks>
-    /// This is the entry point a caller holding descriptor data actually wants, and it is where §2.5's
+    /// This is the entry point a caller holding registration data actually wants, and it is where §2.5's
     /// "there is no default scheme" rule is enforced: an absent or unrecognised
     /// <c>versionScheme</c> yields <see cref="MeshVersionOrdering.NotOrderable"/> rather than a
     /// fallback comparison. A silent fallback here would be indistinguishable from a correct answer.

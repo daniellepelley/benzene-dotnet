@@ -1,13 +1,10 @@
 using System.Text;
 using System.Text.Json;
-using Benzene.Abstractions.MessageHandlers;
-using Benzene.Abstractions.Messages;
 using Benzene.Core.MessageHandlers;
 using Benzene.Core.MessageHandlers.BenzeneMessage;
 using Benzene.Core.MessageHandlers.DI;
 using Benzene.Core.Messages.BenzeneMessage;
 using Benzene.Core.Middleware;
-using Benzene.HealthChecks.Core;
 using Benzene.Mesh.Wire;
 using Benzene.Microsoft.Dependencies;
 using Microsoft.AspNetCore.Http;
@@ -18,33 +15,17 @@ namespace Benzene.Examples.Mesh.Shared;
 /// <summary>
 /// Hosts a set of message handlers behind a wire-envelope HTTP endpoint
 /// (<c>POST {topic, headers, body}</c> in, <c>{statusCode, headers, body}</c> out) - the
-/// service-to-service surface the mesh speaks. When given a <see cref="MeshServiceInfo"/> and a
-/// collector envelope URL, the pipeline is meshed per docs/specification/mesh.md: the reserved
-/// <c>mesh</c> descriptor topic, per-invocation trace events pushed to the collector, and
-/// <see cref="StartAnnouncing"/> for registration + heartbeats (log-and-continue - an unreachable
-/// collector reduces the mesh, never the service).
+/// service-to-service surface the mesh speaks. The aggregator host uses it to serve the
+/// <c>Benzene.Mesh.Collector</c> handlers; the services themselves are meshed by
+/// <c>UseBenzeneCloudService</c> (registration of their contract document, heartbeats, traces).
 /// </summary>
 public sealed class EnvelopeHost
 {
     private readonly BenzeneMessageApplication _application;
     private readonly Abstractions.DI.IServiceResolverFactory _resolverFactory;
-    private readonly MeshServiceInfo? _meshInfo;
-    private readonly MeshServiceDescriptor? _descriptor;
-    private readonly string? _collectorEnvelopeUrl;
-    private readonly Func<bool>? _healthy;
-    private static readonly HttpClient Http = new();
 
-    public EnvelopeHost(
-        Type[] handlerTypes,
-        Action<IServiceCollection>? configureServices = null,
-        MeshServiceInfo? meshInfo = null,
-        string? collectorEnvelopeUrl = null,
-        Func<bool>? healthy = null)
+    public EnvelopeHost(Type[] handlerTypes, Action<IServiceCollection>? configureServices = null)
     {
-        _meshInfo = meshInfo;
-        _collectorEnvelopeUrl = collectorEnvelopeUrl;
-        _healthy = healthy;
-
         var services = new ServiceCollection();
         services.AddLogging();
         configureServices?.Invoke(services);
@@ -53,21 +34,6 @@ public sealed class EnvelopeHost
         container.AddBenzene().AddBenzeneMessage();
 
         var pipelineBuilder = new MiddlewarePipelineBuilder<BenzeneMessageContext>(container);
-        if (meshInfo != null && collectorEnvelopeUrl != null)
-        {
-            _descriptor = MeshDescriptorFactory.Create(
-                new TypesLookUp(new ReflectionMessageHandlersFinder(handlerTypes).FindDefinitions()), meshInfo);
-            pipelineBuilder.UseMeshTrace(meshInfo,
-                new HttpMeshTraceExporter(Http, collectorEnvelopeUrl, batchSize: 8, flushInterval: TimeSpan.FromSeconds(1)),
-                new BenzeneMessageMeshStatusReader());
-            // The issue feed (spec §4.1), immediately INSIDE UseMeshTrace so each issue's exemplar
-            // trace id is the enclosing invocation's. Short flush for the demo (spec default is 30s);
-            // empty interval batches are the feed's liveness assertion.
-            pipelineBuilder.UseMeshIssues(meshInfo,
-                new HttpMeshIssueExporter(Http, collectorEnvelopeUrl, meshInfo.Service, flushInterval: TimeSpan.FromSeconds(2)),
-                new BenzeneMessageMeshStatusReader());
-            pipelineBuilder.UseMeshDescriptor(_descriptor);
-        }
         pipelineBuilder.UseMessageHandlers(handlerTypes);
 
         _application = new BenzeneMessageApplication(pipelineBuilder.Build());
@@ -90,64 +56,15 @@ public sealed class EnvelopeHost
         }, _resolverFactory);
 
         context.Response.ContentType = "application/json";
+        // isSuccessful is required (wire-contracts §1.2): a sender reads it as the success signal - the
+        // cloud service's announcer retried every registration while it was missing here.
         await context.Response.WriteAsync(JsonSerializer.Serialize(new
         {
             statusCode = response.StatusCode,
+            isSuccessful = response.IsSuccessful,
             headers = response.Headers ?? new Dictionary<string, string>(),
             body = response.Body ?? string.Empty
         }));
-    }
-
-    /// <summary>
-    /// Registers with the collector (retrying until it's up) and then heartbeats every 10s,
-    /// carrying <c>healthy()</c> and the descriptor hash. Fire-and-forget from startup; failures
-    /// log to console and never affect the service.
-    /// </summary>
-    public void StartAnnouncing(CancellationToken cancellationToken = default)
-    {
-        if (_descriptor == null || _collectorEnvelopeUrl == null)
-        {
-            return;
-        }
-        _ = Task.Run(async () =>
-        {
-            for (var attempt = 0; attempt < 30 && !cancellationToken.IsCancellationRequested; attempt++)
-            {
-                if (await SendAsync(MeshTopics.Register, MeshJson.Serialize(_descriptor)))
-                {
-                    Console.WriteLine($"[mesh] {_meshInfo!.Service} registered with the collector");
-                    break;
-                }
-                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
-            }
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                await SendAsync(MeshTopics.Heartbeat, MeshJson.Serialize(new MeshHeartbeat
-                {
-                    Service = _meshInfo!.Service,
-                    InstanceId = _meshInfo.InstanceId,
-                    DescriptorHash = _descriptor.DescriptorHash,
-                    SentAt = DateTimeOffset.UtcNow,
-                    Health = new HealthCheckResponse(_healthy?.Invoke() ?? true, new Dictionary<string, HealthCheckResult>())
-                }));
-                await Task.Delay(TimeSpan.FromSeconds(10), cancellationToken);
-            }
-        }, cancellationToken);
-    }
-
-    private async Task<bool> SendAsync(string topic, string body)
-    {
-        try
-        {
-            var envelope = JsonSerializer.Serialize(new { topic, headers = new Dictionary<string, string>(), body });
-            using var content = new StringContent(envelope, Encoding.UTF8, "application/json");
-            using var response = await Http.PostAsync(_collectorEnvelopeUrl, content);
-            return response.IsSuccessStatusCode;
-        }
-        catch
-        {
-            return false; // collector down: reduced mesh, never a service failure
-        }
     }
 
     private class Envelope
@@ -155,18 +72,6 @@ public sealed class EnvelopeHost
         public string Topic { get; set; } = string.Empty;
         public Dictionary<string, string>? Headers { get; set; }
         public string? Body { get; set; }
-    }
-
-    private class TypesLookUp : IMessageHandlerDefinitionLookUp
-    {
-        private readonly IMessageHandlerDefinition[] _definitions;
-
-        public TypesLookUp(IMessageHandlerDefinition[] definitions) => _definitions = definitions;
-
-        public IMessageHandlerDefinition? FindHandler(ITopic topic) =>
-            _definitions.FirstOrDefault(x => x.Topic.Id == topic.Id && x.Topic.Version == topic.Version);
-
-        public IMessageHandlerDefinition[] GetAllHandlers() => _definitions;
     }
 }
 

@@ -85,32 +85,38 @@ public class MeshCollectorStoreTest
         Assert.Equal("topic", fleet.Traces[0].Topic); // the flow's entry topic (earliest event's)
     }
 
-    private static MeshServiceDescriptor Descriptor(
-        string service, string[]? topics = null, string[]? produces = null, string? serviceVersion = null)
+    private static List<MeshRegisteredEntry> Entries(string[]? topics) =>
+        (topics ?? Array.Empty<string>()).Select(id => new MeshRegisteredEntry { Topic = id }).ToList();
+
+    // A registration is the service's contract document (mesh.md §2); these carry only the members a
+    // test needs, as the collector fixtures' bodies do.
+    private static MeshRegistration Registration(
+        string service, string[]? requests = null, string[]? sends = null, string? serviceVersion = null,
+        string[]? events = null)
     {
-        return new MeshServiceDescriptor
+        return new MeshRegistration
         {
             Service = service,
-            Topics = (topics ?? Array.Empty<string>()).Select(id => new MeshTopicDescriptor { Id = id }).ToList(),
-            Produces = (produces ?? Array.Empty<string>()).Select(id => new MeshTopicDescriptor { Id = id }).ToList(),
+            Requests = Entries(requests),
+            Events = Entries(events),
+            Sends = Entries(sends),
             ServiceVersion = serviceVersion
         };
     }
 
     // ---- declared graph (spec §4): the SOLE source of producer/consumer edges ----
     //
-    // Role assignment, since the 2026-08 inversion: `topics` (the topics a service HANDLES) makes it
-    // a CONSUMER of them; `produces` (its outbound registration) makes it a PROVIDER. That is the
-    // way every broker in the field uses the words, and the opposite of what this file asserted
-    // before the inversion.
+    // Role assignment: `requests` (the topics a service HANDLES) makes it a CONSUMER of them; `events`
+    // (what it publishes) and `sends` (what it sends to topics others define) make it a PROVIDER. That
+    // is the way every broker in the field uses the words.
 
     [Fact]
-    public void Graph_IsDeclaredFromTopicsAndProduces_ZeroTrafficStillReportsTheFullGraph()
+    public void Graph_IsDeclaredFromRequestsAndSends_ZeroTrafficStillReportsTheFullGraph()
     {
         var store = new MeshCollectorStore();
         // payments HANDLES payments:capture, so it CONSUMES it. orders SENDS it, so it PROVIDES it.
-        store.Register(Descriptor("payments", topics: new[] { "payments:capture" }));
-        store.Register(Descriptor("orders", topics: new[] { "order:create" }, produces: new[] { "payments:capture" }));
+        store.Register(Registration("payments", requests: new[] { "payments:capture" }));
+        store.Register(Registration("orders", requests: new[] { "order:create" }, sends: new[] { "payments:capture" }));
 
         var topic = store.Topic("payments:capture", null);
 
@@ -124,7 +130,7 @@ public class MeshCollectorStoreTest
     public void TraceParentage_NeverAdmitsOrRemovesAGraphEdge_OnlyFeedsStatsAndLiveness()
     {
         var store = new MeshCollectorStore();
-        store.Register(Descriptor("greeter", topics: new[] { "greet" }));
+        store.Register(Registration("greeter", requests: new[] { "greet" }));
         var now = DateTimeOffset.UtcNow;
         var caller = Event("trace-1", "span-parent", "frontdoor", "welcome", now);
         var callee = Event("trace-1", "span-child", "greeter", "greet", now.AddMilliseconds(1));
@@ -146,12 +152,12 @@ public class MeshCollectorStoreTest
     public void Reregistration_ReplacesProviderAndConsumerEdges_Wholesale()
     {
         var store = new MeshCollectorStore();
-        store.Register(Descriptor("payments", topics: new[] { "payments:capture" }));
-        store.Register(Descriptor("orders", topics: new[] { "order:create" }, produces: new[] { "payments:capture" }));
+        store.Register(Registration("payments", requests: new[] { "payments:capture" }));
+        store.Register(Registration("orders", requests: new[] { "order:create" }, sends: new[] { "payments:capture" }));
         Assert.Equal(new List<string> { "orders" }, store.Topic("payments:capture", null)!.Providers);
 
         // orders redeploys and drops both the topic it handled and the one it produced.
-        store.Register(Descriptor("orders", topics: new[] { "order:cancel" }));
+        store.Register(Registration("orders", requests: new[] { "order:cancel" }));
 
         Assert.Empty(store.Topic("order:create", null)!.Consumers);
         Assert.Empty(store.Topic("payments:capture", null)!.Providers);
@@ -164,7 +170,7 @@ public class MeshCollectorStoreTest
     public void Register_WithServiceVersion_IsRetainedAndExposedOnFleetAndServiceQueries()
     {
         var store = new MeshCollectorStore();
-        store.Register(Descriptor("orders", topics: new[] { "order:create" }, serviceVersion: "2.3.1"));
+        store.Register(Registration("orders", requests: new[] { "order:create" }, serviceVersion: "2.3.1"));
 
         var summary = store.Fleet().Services.Single(s => s.Service == "orders");
         var view = store.Service("orders", null);
@@ -172,14 +178,14 @@ public class MeshCollectorStoreTest
         Assert.Equal("2.3.1", summary.ServiceVersion);
         Assert.NotNull(view);
         Assert.Equal("2.3.1", view!.ServiceVersion);
-        Assert.Equal("2.3.1", view.Descriptor?.ServiceVersion); // still on the full descriptor too
+        Assert.Equal("2.3.1", view.Registration?.ServiceVersion); // still on the registered document too
     }
 
     [Fact]
     public void Register_WithNoServiceVersion_LeavesItNull_NotDefaultedOrDropped()
     {
         var store = new MeshCollectorStore();
-        store.Register(Descriptor("orders", topics: new[] { "order:create" })); // no serviceVersion
+        store.Register(Registration("orders", requests: new[] { "order:create" })); // no serviceVersion
 
         var summary = store.Fleet().Services.Single(s => s.Service == "orders");
 
@@ -187,11 +193,11 @@ public class MeshCollectorStoreTest
     }
 
     [Fact]
-    public void Reregistration_ReplacesServiceVersion_WithTheLatestDescriptors()
+    public void Reregistration_ReplacesServiceVersion_WithTheLatestRegistration()
     {
         var store = new MeshCollectorStore();
-        store.Register(Descriptor("orders", topics: new[] { "order:create" }, serviceVersion: "1.0.0"));
-        store.Register(Descriptor("orders", topics: new[] { "order:create" }, serviceVersion: "2.0.0"));
+        store.Register(Registration("orders", requests: new[] { "order:create" }, serviceVersion: "1.0.0"));
+        store.Register(Registration("orders", requests: new[] { "order:create" }, serviceVersion: "2.0.0"));
 
         var summary = store.Fleet().Services.Single(s => s.Service == "orders");
 
@@ -203,8 +209,8 @@ public class MeshCollectorStoreTest
     {
         // D26: one fleet row per service; the per-version breakdown lives on the service view.
         var store = new MeshCollectorStore();
-        store.Register(Descriptor("payments", topics: new[] { "payment:take" }, serviceVersion: "1"));
-        store.Register(Descriptor("payments", topics: new[] { "payment:take", "payment:refund" }, serviceVersion: "2"));
+        store.Register(Registration("payments", requests: new[] { "payment:take" }, serviceVersion: "1"));
+        store.Register(Registration("payments", requests: new[] { "payment:take", "payment:refund" }, serviceVersion: "2"));
 
         var view = store.Service("payments", null)!;
 
@@ -213,17 +219,17 @@ public class MeshCollectorStoreTest
         Assert.Equal(new[] { 1, 2 }, view.Versions.Select(v => v.Topics));
 
         // Re-registering v1 makes it the most recent registration - and the headline.
-        store.Register(Descriptor("payments", topics: new[] { "payment:take" }, serviceVersion: "1"));
+        store.Register(Registration("payments", requests: new[] { "payment:take" }, serviceVersion: "1"));
         view = store.Service("payments", null)!;
         Assert.Equal(new[] { "2", "1" }, view.Versions.Select(v => v.ServiceVersion));
         Assert.Equal("1", view.ServiceVersion);
     }
 
     [Fact]
-    public void ServiceView_Versions_AnUnversionedDescriptorIsOneEntryWithNoServiceVersion()
+    public void ServiceView_Versions_AnUnversionedRegistrationIsOneEntryWithNoServiceVersion()
     {
         var store = new MeshCollectorStore();
-        store.Register(Descriptor("orders", topics: new[] { "order:create" }));
+        store.Register(Registration("orders", requests: new[] { "order:create" }));
 
         var version = Assert.Single(store.Service("orders", null)!.Versions);
         Assert.Null(version.ServiceVersion);
@@ -236,8 +242,8 @@ public class MeshCollectorStoreTest
     public void DeclaredEdge_WithNoMatchingTrace_ReportsAbsentLastObservedAt()
     {
         var store = new MeshCollectorStore();
-        store.Register(Descriptor("payments", topics: new[] { "payments:capture" }));
-        store.Register(Descriptor("orders", topics: new[] { "order:create" }, produces: new[] { "payments:capture" }));
+        store.Register(Registration("payments", requests: new[] { "payments:capture" }));
+        store.Register(Registration("orders", requests: new[] { "order:create" }, sends: new[] { "payments:capture" }));
 
         var topic = store.Topic("payments:capture", null)!;
 
@@ -251,8 +257,8 @@ public class MeshCollectorStoreTest
     public void DeclaredEdge_OnceExercised_ReportsLastObservedAt()
     {
         var store = new MeshCollectorStore();
-        store.Register(Descriptor("payments", topics: new[] { "payments:capture" }));
-        store.Register(Descriptor("orders", topics: new[] { "order:create" }, produces: new[] { "payments:capture" }));
+        store.Register(Registration("payments", requests: new[] { "payments:capture" }));
+        store.Register(Registration("orders", requests: new[] { "order:create" }, sends: new[] { "payments:capture" }));
         var now = DateTimeOffset.UtcNow;
         var caller = Event("trace-1", "span-parent", "orders", "order:create", now);
         var callee = Event("trace-1", "span-child", "payments", "payments:capture", now.AddMilliseconds(1));
@@ -274,7 +280,7 @@ public class MeshCollectorStoreTest
     {
         var store = new MeshCollectorStore();
         // "greeter" registers but never declares "greet" among the topics it handles.
-        store.Register(Descriptor("greeter", topics: Array.Empty<string>()));
+        store.Register(Registration("greeter", requests: Array.Empty<string>()));
 
         store.AddEvents(new[] { Event("trace-1", "span-1", "greeter", "greet", DateTimeOffset.UtcNow) });
 
@@ -288,9 +294,9 @@ public class MeshCollectorStoreTest
     public void UndeclaredProviderEdge_FilesAContractDriftIssue()
     {
         var store = new MeshCollectorStore();
-        store.Register(Descriptor("payments", topics: new[] { "payments:capture" }));
+        store.Register(Registration("payments", requests: new[] { "payments:capture" }));
         // "orders" registers but never declares "payments:capture" in its produces.
-        store.Register(Descriptor("orders", topics: new[] { "order:create" }));
+        store.Register(Registration("orders", requests: new[] { "order:create" }));
         var now = DateTimeOffset.UtcNow;
         var caller = Event("trace-1", "span-parent", "orders", "order:create", now);
         var callee = Event("trace-1", "span-child", "payments", "payments:capture", now.AddMilliseconds(1));
@@ -307,7 +313,7 @@ public class MeshCollectorStoreTest
     public void RepeatedUndeclaredCalls_MergeIntoOneIssue_CountingEachOccurrence()
     {
         var store = new MeshCollectorStore();
-        store.Register(Descriptor("greeter", topics: Array.Empty<string>()));
+        store.Register(Registration("greeter", requests: Array.Empty<string>()));
         var now = DateTimeOffset.UtcNow;
 
         store.AddEvents(new[] { Event("trace-1", "span-1", "greeter", "greet", now) });
@@ -329,16 +335,144 @@ public class MeshCollectorStoreTest
     }
 
     [Fact]
-    public void DegradedDescriptor_IsNeverFlaggedAsDrift()
+    public void DegradedRequests_AreUnknown_NeverFlaggedAsDrift()
     {
-        // A service that HAS registered but honestly marked its registry/outbound-registry as
-        // degraded doesn't know its own topics/produces yet - flagging it would be a false positive.
+        // A service that HAS registered but named requests in degraded doesn't know its own topics -
+        // the member is unknown (mesh.md §2), so a trace on it is not undeclared.
         var store = new MeshCollectorStore();
-        store.Register(new MeshServiceDescriptor { Service = "greeter", Degraded = new List<string> { "registry" } });
+        store.Register(new MeshRegistration
+        {
+            Service = "greeter", Requests = new List<MeshRegisteredEntry>(), Degraded = new List<string> { "requests" }
+        });
 
         store.AddEvents(new[] { Event("trace-1", "span-1", "greeter", "greet", DateTimeOffset.UtcNow) });
 
         Assert.Empty(store.Fleet().Issues);
+    }
+
+    [Fact]
+    public void AbsentRequests_AreUnknown_NeverFlaggedAsDrift()
+    {
+        // A body carrying only service (mesh.md §2): every member is unknown.
+        var store = new MeshCollectorStore();
+        store.Register(new MeshRegistration { Service = "greeter" });
+
+        store.AddEvents(new[] { Event("trace-1", "span-1", "greeter", "greet", DateTimeOffset.UtcNow) });
+
+        Assert.Empty(store.Fleet().Issues);
+        Assert.Equal(0, store.Service("greeter")!.Topics);
+    }
+
+    [Fact]
+    public void UnknownSends_TheCallerIsNotFlaggedAsAnUndeclaredProvider()
+    {
+        // The caller's sends are degraded: the topic might be among them, so the edge is not undeclared.
+        var store = new MeshCollectorStore();
+        store.Register(Registration("payments", requests: new[] { "payments:capture" }));
+        store.Register(new MeshRegistration
+        {
+            Service = "orders",
+            Requests = Entries(new[] { "order:create" }),
+            Events = new List<MeshRegisteredEntry>(),
+            Sends = new List<MeshRegisteredEntry>(),
+            Degraded = new List<string> { "sends" }
+        });
+        var now = DateTimeOffset.UtcNow;
+        var caller = Event("trace-1", "span-parent", "orders", "order:create", now);
+        var callee = Event("trace-1", "span-child", "payments", "payments:capture", now.AddMilliseconds(1));
+        callee.ParentSpanId = "span-parent";
+
+        store.AddEvents(new[] { caller, callee });
+
+        Assert.DoesNotContain(store.Fleet().Issues, x => x.Service == "orders");
+    }
+
+    [Fact]
+    public void APublishedEvent_MakesItsPublisherAProvider_AndIsNotUndeclared()
+    {
+        var store = new MeshCollectorStore();
+        store.Register(Registration("orders", requests: new[] { "order:create" }, events: new[] { "order:placed" }));
+        store.Register(Registration("shipping", requests: new[] { "order:placed" }));
+        var now = DateTimeOffset.UtcNow;
+        var publisher = Event("trace-1", "span-parent", "orders", "order:create", now);
+        var subscriber = Event("trace-1", "span-child", "shipping", "order:placed", now.AddMilliseconds(1));
+        subscriber.ParentSpanId = "span-parent";
+
+        store.AddEvents(new[] { publisher, subscriber });
+
+        var topic = store.Topic("order:placed", null)!;
+        Assert.Equal(new[] { "orders" }, topic.Providers);
+        Assert.Equal(new[] { "shipping" }, topic.Consumers);
+        Assert.Empty(store.Fleet().Issues);
+    }
+
+    [Fact]
+    public void ATraceOfAReservedTopic_IsNeverAnUndeclaredEdge()
+    {
+        // mesh.md §4.2: no document lists a benzene: topic, so a trace of one is never contract-drift -
+        // on either side of the edge.
+        var store = new MeshCollectorStore();
+        store.Register(Registration("orders", requests: new[] { "order:create" }));
+        store.Register(Registration("payments", requests: new[] { "payments:capture" }));
+        var now = DateTimeOffset.UtcNow;
+        var caller = Event("trace-1", "span-parent", "orders", "order:create", now);
+        var spec = Event("trace-1", "span-child", "payments", "benzene:spec", now.AddMilliseconds(1));
+        spec.ParentSpanId = "span-parent";
+
+        store.AddEvents(new[]
+        {
+            caller, spec,
+            Event("trace-2", "span-2", "orders", "benzene:healthcheck", now)
+        });
+
+        Assert.Empty(store.Fleet().Issues);
+    }
+
+    [Fact]
+    public void BenzeneEntries_ContributeNoEdges()
+    {
+        var store = new MeshCollectorStore();
+        store.Register(Registration("orders", requests: new[] { "order:create", "benzene:spec" },
+            sends: new[] { "benzene:mesh:traces" }));
+
+        Assert.Null(store.Topic("benzene:spec", null));
+        Assert.Null(store.Topic("benzene:mesh:traces", null));
+        Assert.Equal(1, store.Service("orders")!.Topics);
+    }
+
+    // ---- mesh.md §5: a heartbeat's registrationHash is compared with ITS OWN version's registration ----
+
+    [Fact]
+    public void HeartbeatHash_IsComparedWithTheRegistrationForItsOwnServiceVersion()
+    {
+        var store = new MeshCollectorStore();
+        store.Register(new MeshRegistration { Service = "payments", ServiceVersion = "1", RegistrationHash = "sha256:aaaa" });
+        store.Register(new MeshRegistration { Service = "payments", ServiceVersion = "2", RegistrationHash = "sha256:bbbb" });
+
+        // v1 reporting v2's hash: v2 registered it, but this instance is v1 - a mismatch, where comparing
+        // with any registered version would have read it as a match.
+        store.Heartbeat(new MeshHeartbeat { Service = "payments", ServiceVersion = "1", InstanceId = "a", RegistrationHash = "sha256:bbbb" });
+        store.Heartbeat(new MeshHeartbeat { Service = "payments", ServiceVersion = "2", InstanceId = "b", RegistrationHash = "sha256:bbbb" });
+        // A version no document registered: an unregistered instance, not a mismatch.
+        store.Heartbeat(new MeshHeartbeat { Service = "payments", ServiceVersion = "3", InstanceId = "c", RegistrationHash = "sha256:cccc" });
+
+        var instances = store.Service("payments")!.Instances.ToDictionary(x => x.InstanceId);
+        Assert.False(instances["a"].HashMatches);
+        Assert.True(instances["b"].HashMatches);
+        Assert.Null(instances["c"].HashMatches);
+        Assert.Equal("1", instances["a"].ServiceVersion);
+        Assert.Equal("sha256:bbbb", instances["a"].RegistrationHash);
+    }
+
+    [Fact]
+    public void ARegistration_IsNeverRejectedOrRecomputedForItsHash()
+    {
+        // mesh.md §2: the carried registrationHash is trusted - a fake value is stored and compared as is.
+        var store = new MeshCollectorStore();
+        store.Register(new MeshRegistration { Service = "orders", RegistrationHash = "sha256:aaaa", Requests = Entries(new[] { "order:create" }) });
+        store.Heartbeat(new MeshHeartbeat { Service = "orders", InstanceId = "i1", RegistrationHash = "sha256:aaaa" });
+
+        Assert.True(Assert.Single(store.Service("orders")!.Instances).HashMatches);
     }
 
     // ---- correlation lookup (mesh:query:correlation, mesh-product-owner ruling 2026-07-23) ----
@@ -422,20 +556,20 @@ public class MeshCollectorStoreTest
     // collector contract requires it be accepted as empty instead.
 
     [Fact]
-    public void Register_NullTopicsAndProduces_IsAcceptedAsAnEmptyDeclaredGraph()
+    public void Register_NullRequestsAndSends_IsAcceptedAsUnknownMembers()
     {
-        var descriptor = System.Text.Json.JsonSerializer.Deserialize<MeshServiceDescriptor>(
-            "{\"service\":\"svc\",\"topics\":null,\"produces\":null}", MeshJson.Options)!;
+        var registration = System.Text.Json.JsonSerializer.Deserialize<MeshRegistration>(
+            "{\"service\":\"svc\",\"requests\":null,\"sends\":null}", MeshJson.Options)!;
         var store = new MeshCollectorStore();
 
-        store.Register(descriptor);
+        store.Register(registration);
 
         var view = store.Service("svc");
         Assert.NotNull(view);
-        Assert.Equal(0, view!.Topics); // Descriptor.Topics.Count read back with no NRE
-        Assert.NotNull(view.Descriptor);
-        Assert.Empty(view.Descriptor!.Topics);
-        Assert.Empty(view.Descriptor.Produces);
+        Assert.Equal(0, view!.Topics); // read back with no NRE
+        Assert.NotNull(view.Registration);
+        Assert.False(view.Registration!.IsKnown(MeshRegistrationMembers.Requests));
+        Assert.False(view.Registration.IsKnown(MeshRegistrationMembers.Sends));
     }
 
     [Fact]
@@ -513,12 +647,12 @@ public class MeshCollectorStoreTest
     public void OlderLiveVersion_HandlingItsOwnDeclaredTopic_IsNotFlaggedAsDrift_OnceANewerVersionRegisters()
     {
         var store = new MeshCollectorStore();
-        var v1 = Descriptor("orders", topics: new[] { "topic-a" }, serviceVersion: "1.0.0");
-        var v2 = Descriptor("orders", topics: new[] { "topic-b" }, serviceVersion: "2.0.0");
+        var v1 = Registration("orders", requests: new[] { "topic-a" }, serviceVersion: "1.0.0");
+        var v2 = Registration("orders", requests: new[] { "topic-b" }, serviceVersion: "2.0.0");
         store.Register(v1);
         store.Register(v2); // v2 becomes CurrentVersionKey - the "headline" row
 
-        // A v1 instance handles topic-a - exactly what v1's OWN live, registered descriptor declares.
+        // A v1 instance handles topic-a - exactly what v1's OWN live, registered document declares.
         store.AddEvents(new[] { Event("trace-1", "span-1", "orders", "topic-a", DateTimeOffset.UtcNow) });
 
         Assert.Empty(store.Fleet().Issues);
@@ -536,10 +670,10 @@ public class MeshCollectorStoreTest
     public void ReregisteringOneVersion_WithoutATopic_KeepsTheEdgeASiblingVersionStillDeclares()
     {
         var store = new MeshCollectorStore();
-        store.Register(Descriptor("payments", topics: new[] { "payment:take" }, produces: new[] { "ledger:post" }, serviceVersion: "1"));
-        store.Register(Descriptor("payments", topics: new[] { "payment:take" }, produces: new[] { "ledger:post" }, serviceVersion: "2"));
+        store.Register(Registration("payments", requests: new[] { "payment:take" }, sends: new[] { "ledger:post" }, serviceVersion: "1"));
+        store.Register(Registration("payments", requests: new[] { "payment:take" }, sends: new[] { "ledger:post" }, serviceVersion: "2"));
 
-        store.Register(Descriptor("payments", serviceVersion: "1")); // v1 redeploys declaring nothing
+        store.Register(Registration("payments", serviceVersion: "1")); // v1 redeploys declaring nothing
 
         Assert.Equal(new[] { "payments" }, store.Topic("payment:take", null)!.Consumers);
         Assert.Equal(new[] { "payments" }, store.Topic("ledger:post", null)!.Providers);
@@ -549,10 +683,10 @@ public class MeshCollectorStoreTest
     public void ReregisteringTheOnlyVersionThatDeclaredATopic_StillRetractsTheEdge()
     {
         var store = new MeshCollectorStore();
-        store.Register(Descriptor("payments", topics: new[] { "payment:take", "payment:refund" }, serviceVersion: "1"));
-        store.Register(Descriptor("payments", topics: new[] { "payment:take" }, serviceVersion: "2"));
+        store.Register(Registration("payments", requests: new[] { "payment:take", "payment:refund" }, serviceVersion: "1"));
+        store.Register(Registration("payments", requests: new[] { "payment:take" }, serviceVersion: "2"));
 
-        store.Register(Descriptor("payments", topics: new[] { "payment:take" }, serviceVersion: "1"));
+        store.Register(Registration("payments", requests: new[] { "payment:take" }, serviceVersion: "1"));
 
         Assert.Empty(store.Topic("payment:refund", null)!.Consumers); // no live version declares it now
         Assert.Equal(new[] { "payments" }, store.Topic("payment:take", null)!.Consumers);
@@ -562,8 +696,8 @@ public class MeshCollectorStoreTest
     public void TopicNoLiveVersionDeclares_IsStillFlaggedAsDrift_EvenWithMultipleLiveVersions()
     {
         var store = new MeshCollectorStore();
-        var v1 = Descriptor("orders", topics: new[] { "topic-a" }, serviceVersion: "1.0.0");
-        var v2 = Descriptor("orders", topics: new[] { "topic-b" }, serviceVersion: "2.0.0");
+        var v1 = Registration("orders", requests: new[] { "topic-a" }, serviceVersion: "1.0.0");
+        var v2 = Registration("orders", requests: new[] { "topic-b" }, serviceVersion: "2.0.0");
         store.Register(v1);
         store.Register(v2);
 
@@ -575,62 +709,62 @@ public class MeshCollectorStoreTest
         Assert.Equal("topic-c", issue.Topic);
     }
 
-    // ---- #290: ServiceState.Descriptors has no eviction policy - a service that legitimately
+    // ---- #290: ServiceState.Registrations has no eviction policy - a service that legitimately
     // re-registers under a new ServiceVersion on every deploy accumulates one permanent entry per
     // historical deploy, forever. A max-versions-per-service cap (default 8) bounds it, evicting the
     // least-recently-registered non-current version (preferring one with no live instance) and
     // retracting its topic edges so nothing dangles.
 
-    private static int DescriptorCountFor(MeshCollectorStore store, string serviceName)
+    private static int RegistrationCountFor(MeshCollectorStore store, string serviceName)
     {
         var servicesField = typeof(MeshCollectorStore)
             .GetField("_services", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
         var services = (System.Collections.IDictionary)servicesField.GetValue(store)!;
         var state = services[serviceName]!;
         var descriptorsField = state.GetType()
-            .GetField("Descriptors", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)!;
+            .GetField("Registrations", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)!;
         var descriptors = (System.Collections.IDictionary)descriptorsField.GetValue(state)!;
         return descriptors.Count;
     }
 
     [Fact]
-    public void Register_ManyDistinctVersions_DescriptorsAreCappedAtTheConfiguredMax()
+    public void Register_ManyDistinctVersions_RegistrationsAreCappedAtTheConfiguredMax()
     {
         var store = new MeshCollectorStore(maxVersionsPerService: 8);
         const int deployCount = 5000; // simulates 5,000 CI/CD deploys of one logical service
         for (var i = 0; i < deployCount; i++)
         {
-            store.Register(Descriptor("orders-api", topics: new[] { $"topic-{i}" }, serviceVersion: $"deploy-{i}"));
+            store.Register(Registration("orders-api", requests: new[] { $"topic-{i}" }, serviceVersion: $"deploy-{i}"));
         }
 
-        Assert.Equal(8, DescriptorCountFor(store, "orders-api"));
+        Assert.Equal(8, RegistrationCountFor(store, "orders-api"));
     }
 
     [Fact]
     public void Register_OverCap_EvictsTheLeastRecentlyRegisteredVersionWithNoLiveInstance_NotACurrentOrLiveOne()
     {
         var store = new MeshCollectorStore(maxVersionsPerService: 2);
-        store.Register(new MeshServiceDescriptor
+        store.Register(new MeshRegistration
         {
-            Service = "orders", ServiceVersion = "v1", DescriptorHash = "hash-v1",
-            Topics = new List<MeshTopicDescriptor> { new() { Id = "topic-old" } }
+            Service = "orders", ServiceVersion = "v1", RegistrationHash = "hash-v1",
+            Requests = Entries(new[] { "topic-old" })
         });
-        // v1 has a live instance reporting ITS hash - it must survive eviction in favor of a dead version.
-        store.Heartbeat(new MeshHeartbeat { Service = "orders", InstanceId = "i1", DescriptorHash = "hash-v1" });
-        store.Register(new MeshServiceDescriptor
+        // v1 has a live instance heartbeating it - it must survive eviction in favor of a dead version.
+        store.Heartbeat(new MeshHeartbeat { Service = "orders", ServiceVersion = "v1", InstanceId = "i1", RegistrationHash = "hash-v1" });
+        store.Register(new MeshRegistration
         {
-            Service = "orders", ServiceVersion = "v2", DescriptorHash = "hash-v2",
-            Topics = new List<MeshTopicDescriptor> { new() { Id = "topic-mid" } }
-        }); // no instance ever reports hash-v2
+            Service = "orders", ServiceVersion = "v2", RegistrationHash = "hash-v2",
+            Requests = Entries(new[] { "topic-mid" })
+        }); // no instance ever heartbeats v2
 
         // Registering v3 exceeds the cap of 2: v2 (no live instance) must be evicted over v1 (live instance).
-        store.Register(new MeshServiceDescriptor
+        store.Register(new MeshRegistration
         {
-            Service = "orders", ServiceVersion = "v3", DescriptorHash = "hash-v3",
-            Topics = new List<MeshTopicDescriptor> { new() { Id = "topic-new" } }
+            Service = "orders", ServiceVersion = "v3", RegistrationHash = "hash-v3",
+            Requests = Entries(new[] { "topic-new" })
         });
 
-        Assert.Equal(2, DescriptorCountFor(store, "orders"));
+        Assert.Equal(2, RegistrationCountFor(store, "orders"));
         // v1's edge survives...
         Assert.Equal(new List<string> { "orders" }, store.Topic("topic-old", null)!.Consumers);
         // ...v2's edge was retracted (evicted), not left dangling in the topic catalog...
@@ -643,13 +777,13 @@ public class MeshCollectorStoreTest
     public void Register_OverCap_NeverEvictsTheCurrentVersion()
     {
         var store = new MeshCollectorStore(maxVersionsPerService: 1);
-        store.Register(Descriptor("orders", topics: new[] { "topic-a" }, serviceVersion: "v1"));
+        store.Register(Registration("orders", requests: new[] { "topic-a" }, serviceVersion: "v1"));
 
         // Registering v2 exceeds the cap of 1 - v1 (the only other version) is evicted, never v2
         // itself (the version just registered, which becomes current).
-        store.Register(Descriptor("orders", topics: new[] { "topic-b" }, serviceVersion: "v2"));
+        store.Register(Registration("orders", requests: new[] { "topic-b" }, serviceVersion: "v2"));
 
-        Assert.Equal(1, DescriptorCountFor(store, "orders"));
+        Assert.Equal(1, RegistrationCountFor(store, "orders"));
         var summary = store.Fleet().Services.Single(s => s.Service == "orders");
         Assert.Equal("v2", summary.ServiceVersion);
         Assert.Empty(store.Topic("topic-a", null)!.Consumers); // v1's edge retracted on eviction

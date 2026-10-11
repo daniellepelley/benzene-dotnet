@@ -62,7 +62,7 @@ public sealed class CloudServiceProbeRequirement
 /// The result of one <see cref="CloudServiceProbe"/> run against a live service: an external,
 /// black-box, tri-state assessment of R1-R8 (docs/specification/cloud-service-profile.md §2) built
 /// entirely from what the probe itself observed over real HTTP - it never trusts anything the
-/// target service claims about itself (e.g. a <c>profile</c> field on its own descriptor). This is
+/// target service claims about itself (e.g. the <c>profile</c> field on its own contract document). This is
 /// the distinct, harder half of conformance checking described in the profile spec's §5: the
 /// self-check (<c>Benzene.CloudService.CloudServiceProfileReport</c>) answers "what did this
 /// service's own setup call provision"; this report answers "what can an outside operator or CI job

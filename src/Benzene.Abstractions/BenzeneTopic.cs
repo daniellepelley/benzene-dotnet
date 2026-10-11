@@ -3,7 +3,7 @@ namespace Benzene.Abstractions;
 /// <summary>
 /// The framework-owned reserved topic ids — Benzene's own endpoints, as opposed to the
 /// application's topics (see <c>docs/specification/cloud-service-profile.md</c> and
-/// <c>docs/specification/mesh.md</c> §1).
+/// <c>docs/specification/mesh.md</c>).
 /// <para>
 /// Every id here carries the <see cref="Prefix"/> marker, per the naming principle
 /// (<c>work/benzene-naming-principle.md</c>): <b>where Benzene puts a name into a namespace it
@@ -48,9 +48,6 @@ public static class BenzeneTopic
     /// <summary>Readiness: should this instance receive traffic?</summary>
     public const string Readiness = "benzene:readiness";
 
-    /// <summary>The mesh descriptor topic a meshed service intercepts (mesh spec §1, Profile R6).</summary>
-    public const string Mesh = "benzene:mesh";
-
     /// <summary>The transport reachability probe used by the queue/stream health checks.</summary>
     public const string Ping = "benzene:ping";
 
@@ -59,6 +56,8 @@ public static class BenzeneTopic
     //     a topic id. Declaring "benzene:invoke" would invent wire surface nothing routes.
     //   "report" — the real id is MeshTopics.Report ("benzene:mesh:report"); the bare entry was an
     //     alias in the filter list that no handler ever bound to.
+    //   "mesh" — benzene:mesh served the ServiceDescriptor until spec-0.4.0, which retired it: a
+    //     service's self-description is its contract document at benzene:spec (mesh.md §1).
 
     private static readonly HashSet<string> ReservedIds = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -67,7 +66,6 @@ public static class BenzeneTopic
         HealthCheck,
         Liveness,
         Readiness,
-        Mesh,
         Ping
     };
 

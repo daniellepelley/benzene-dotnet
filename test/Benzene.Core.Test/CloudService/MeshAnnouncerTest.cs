@@ -9,14 +9,14 @@ using Benzene.Abstractions.MessageHandlers;
 using Benzene.CloudService;
 using Benzene.HealthChecks.Core;
 using Benzene.Mesh.Wire;
+using Benzene.Schema.OpenApi.EventService;
 using Xunit;
 
 namespace Benzene.Test.CloudService;
 
 /// <summary>
-/// #47: <c>MeshAnnouncer.EnsureStarted</c> flips <c>_started</c> to 1 before deriving the
-/// descriptor. The null-descriptor path already resets it and retries on the next invocation - the
-/// residual gap this locks in is a <em>thrown</em> descriptor derivation: before the fix, the
+/// #47: <c>MeshAnnouncer.EnsureStarted</c> derives the contract document (the register body) from the
+/// invocation's container. The residual gap this locks in is a <em>thrown</em> derivation: before the fix, the
 /// exception propagated out of <c>EnsureStarted</c> (failing whatever invocation triggered the lazy
 /// start) and left <c>_started</c> stuck at 1 forever, permanently disabling the announcer. Per the
 /// class's own documented contract (spec §6), every failure here must be swallowed and retried on
@@ -25,29 +25,30 @@ namespace Benzene.Test.CloudService;
 public class MeshAnnouncerTest
 {
     [Fact]
-    public async Task EnsureStarted_WhenDescriptorDerivationThrows_SwallowsAndRetriesOnNextInvocation()
+    public async Task EnsureStarted_WhenDocumentDerivationThrows_SwallowsAndRetriesOnNextInvocation()
     {
         var info = new MeshServiceInfo("orders");
         var report = CloudServiceProfileReport.Evaluate(new CloudServiceBuilder("orders"), null);
-        var descriptorSource = new CloudServiceDescriptorSource(info, report, handlerTypes: null);
+        var documentSource = new CloudServiceDocumentSource("orders", null, null, CloudServicePaths.Invoke,
+            new ContractDocumentDeployment { Profile = report.ToProfile() }, handlerTypes: null);
         var resolver = new ThrowOnceResolver();
         var handler = new SignalingHandler();
         var http = new HttpClient(handler);
         await using var announcer = new MeshAnnouncer(
             info,
-            descriptorSource,
+            documentSource,
             "http://collector.invalid/benzene/invoke",
             Array.Empty<IHealthCheck>(),
             http,
             TimeSpan.FromSeconds(5));
 
-        // First invocation: the registry lookup throws deriving the descriptor. Before the fix this
+        // First invocation: the registry lookup throws deriving the document. Before the fix this
         // propagated straight out of EnsureStarted - failing the caller's invocation - and left
         // _started stuck at 1 forever.
         var thrown = Record.Exception(() => announcer.EnsureStarted(resolver));
         Assert.Null(thrown);
 
-        // Nothing should have been registered yet: the descriptor was never successfully derived,
+        // Nothing should have been registered yet: the document was never successfully derived,
         // so no announce loop can have started.
         var tooEarly = await Task.WhenAny(handler.RequestReceived, Task.Delay(TimeSpan.FromMilliseconds(200)));
         Assert.NotSame(handler.RequestReceived, tooEarly);

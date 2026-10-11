@@ -2,6 +2,7 @@ using Benzene.Abstractions.Middleware;
 using Benzene.Core.Messages.BenzeneMessage;
 using Benzene.HealthChecks.Core;
 using Benzene.Mesh.Wire;
+using Benzene.Schema.OpenApi.EventService;
 
 namespace Benzene.CloudService;
 
@@ -15,25 +16,28 @@ namespace Benzene.CloudService;
 public interface ICloudServiceBuilder
 {
     /// <summary>
-    /// Sets the service version: the contract document's <c>serviceVersion</c> (through
-    /// <c>IApplicationInfo</c>, the one source of the service's identity) and the descriptor's.
+    /// Sets the service version - the contract document's <c>serviceVersion</c> (through
+    /// <c>IApplicationInfo</c>, the one source of the service's identity), which heartbeats carry too -
+    /// and, optionally, its <c>versionScheme</c> (<c>integer</c>, <c>semver</c> or <c>lexicographic</c>;
+    /// service-versions.md §2), which says how versions order.
     /// </summary>
-    ICloudServiceBuilder WithServiceVersion(string serviceVersion);
+    ICloudServiceBuilder WithServiceVersion(string serviceVersion, string? versionScheme = null);
 
-    /// <summary>Sets the instance id reported in the descriptor, traces, and heartbeats. Defaults to a generated per-process id.</summary>
+    /// <summary>Sets the instance id reported in traces, issues and heartbeats. Defaults to a generated per-process id.</summary>
     ICloudServiceBuilder WithInstanceId(string instanceId);
 
     /// <summary>
-    /// Sets the placement reported in the descriptor. Per mesh.md §2, only set a region the platform
-    /// actually documents - never guess. When not set, placement defaults to <c>self-hosted</c>.
+    /// Sets the placement on the contract document (contract-document.md §1). Only set a region the
+    /// platform actually documents - never guess. When not set, placement defaults to <c>self-hosted</c>.
     /// </summary>
     ICloudServiceBuilder WithPlacement(string cloud, string? region = null);
 
     /// <summary>
     /// Sets the collector's envelope URL, enabling the outbound mesh feeds (profile R6):
-    /// <c>mesh:register</c> on startup, <c>mesh:heartbeat</c>, and the <c>mesh:traces</c> feed.
-    /// Without a collector the service still serves its descriptor on the reserved <c>mesh</c>
-    /// topic, but the outbound feeds have nowhere to go and R6 is reported as missing.
+    /// <c>benzene:mesh:register</c> (its body the contract document <c>benzene:spec</c> serves),
+    /// <c>benzene:mesh:heartbeat</c> and the <c>benzene:mesh:traces</c> feed. Without a collector the
+    /// service still answers <c>benzene:spec</c>, but the outbound feeds have nowhere to go and R6 is
+    /// reported as missing.
     /// </summary>
     ICloudServiceBuilder WithCollector(string collectorEnvelopeUrl);
 
@@ -41,10 +45,11 @@ public interface ICloudServiceBuilder
     ICloudServiceBuilder WithHealthChecks(params IHealthCheck[] healthChecks);
 
     /// <summary>
-    /// Registers the message handler types the service serves (profile R2). When given, the
-    /// descriptor is derived eagerly at wire-up and mesh registration starts immediately; when
-    /// omitted, handlers come from the container's existing registrations and the descriptor is
-    /// derived on the first invocation instead.
+    /// Registers the message handler types the service serves (profile R2). When given, a reduced
+    /// registration (its <c>events</c> and <c>sends</c> named <c>degraded</c>, since those declarations
+    /// live in the container) is derived at wire-up and mesh registration starts immediately; the first
+    /// invocation re-registers the complete document. When omitted, handlers come from the container's
+    /// existing registrations and registration starts on the first invocation.
     /// </summary>
     ICloudServiceBuilder WithHandlers(params Type[] handlerTypes);
 
@@ -53,11 +58,10 @@ public interface ICloudServiceBuilder
     /// declarations (contract-document.md §3.2): the explicit, no-handler, no-destination record of
     /// the (topic, version, request type, response type) tuples it may send. They become the contract
     /// document's <c>sends[]</c> (a response type of <c>Void</c>, or <c>Register&lt;TRequest&gt;</c>,
-    /// is one-way: no <c>response</c>) and, until the descriptor is retired, the mesh descriptor's
-    /// <c>produces</c>. Events this service publishes and defines are not sends: declare them with
-    /// <c>AddResponseEventDeclarations</c>. Without this call the descriptor marks <c>produces</c>
-    /// degraded (<c>"outbound-registry"</c>) rather than asserting an empty claim. Build the registry
-    /// with <see cref="MeshOutboundRegistry"/>
+    /// is one-way: no <c>response</c>) - in the document <c>benzene:spec</c> serves and the mesh register
+    /// body alike, where they make this service the topics' provider. Events this service publishes and
+    /// defines are not sends: declare them with <c>AddResponseEventDeclarations</c>. A generated client
+    /// declares the topics it calls itself. Build the registry with <see cref="MeshOutboundRegistry"/>
     /// (e.g. <c>new MeshOutboundRegistry().Register&lt;PaymentsCaptureRequest&gt;("payments:capture")</c>).
     /// </summary>
     ICloudServiceBuilder WithSends(MeshOutboundRegistry sends);
@@ -68,7 +72,7 @@ public interface ICloudServiceBuilder
 
     /// <summary>
     /// Adds custom middleware to the wire-envelope pipeline, inside the profile's own middleware
-    /// (trace, health, descriptor) and before the message router. Custom middleware for the outer
+    /// (trace, health) and before the message router. Custom middleware for the outer
     /// HTTP pipeline needs no hook: add it to that pipeline before calling
     /// <c>UseBenzeneCloudService</c>.
     /// </summary>
@@ -97,14 +101,15 @@ public interface ICloudServiceBuilder
     /// Runs <paramref name="callback"/> with the wiring-time <see cref="CloudServiceProfileReport"/> once
     /// it has been evaluated, for services (or tests) that want to inspect the self-assessment at wire-up
     /// without resolving it back out of DI - e.g. logging a startup warning when the profile isn't fully
-    /// met. The same report is also registered in DI and stamped on the descriptor (mesh.md §2's
-    /// <c>profile</c> field); this is a convenience for the wire-up call site itself.
+    /// met. The same report is also registered in DI and stamped on the contract document
+    /// (contract-document.md §1's <c>profile</c> field); this is a convenience for the wire-up call site
+    /// itself.
     /// </summary>
     ICloudServiceBuilder WithProfileReport(Action<CloudServiceProfileReport> callback);
 
     /// <summary>
-    /// Declines the mesh feeds entirely: no reserved <c>mesh</c> topic, no trace middleware, no
-    /// registration or heartbeats. The service remains a working Benzene Core service and the
+    /// Declines the mesh feeds entirely: no trace middleware, no registration or heartbeats
+    /// (<c>benzene:spec</c> still answers). The service remains a working Benzene Core service and the
     /// profile report marks R6 and R8 as missing - use this for a deliberate opt-out, not as a
     /// substitute for simply not configuring a collector.
     /// </summary>
@@ -120,8 +125,9 @@ internal sealed class CloudServiceBuilder : ICloudServiceBuilder
 
     public string ServiceName { get; }
     public string? ServiceVersion { get; private set; }
+    public string? VersionScheme { get; private set; }
     public string? InstanceId { get; private set; }
-    public MeshPlacement? Placement { get; private set; }
+    public ContractDocumentPlacement? Placement { get; private set; }
     public string? CollectorEnvelopeUrl { get; private set; }
     public List<IHealthCheck> HealthChecks { get; } = new();
     public Type[]? HandlerTypes { get; private set; }
@@ -144,14 +150,13 @@ internal sealed class CloudServiceBuilder : ICloudServiceBuilder
         return new MeshServiceInfo(
             ServiceName,
             ServiceVersion,
-            InstanceId ?? $"{ServiceName}-{Guid.NewGuid().ToString("N")[..4]}",
-            binding: "http",
-            placement: Placement);
+            InstanceId ?? $"{ServiceName}-{Guid.NewGuid().ToString("N")[..4]}");
     }
 
-    public ICloudServiceBuilder WithServiceVersion(string serviceVersion)
+    public ICloudServiceBuilder WithServiceVersion(string serviceVersion, string? versionScheme = null)
     {
         ServiceVersion = serviceVersion;
+        VersionScheme = versionScheme;
         return this;
     }
 
@@ -163,7 +168,7 @@ internal sealed class CloudServiceBuilder : ICloudServiceBuilder
 
     public ICloudServiceBuilder WithPlacement(string cloud, string? region = null)
     {
-        Placement = new MeshPlacement { Cloud = cloud, Region = region };
+        Placement = new ContractDocumentPlacement(cloud, region);
         return this;
     }
 

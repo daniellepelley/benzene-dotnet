@@ -119,20 +119,32 @@ public class UseBenzeneCloudServiceTest
         Assert.Contains("isHealthy", response.Body);
     }
 
-    [Fact]
-    public async Task MeshTopic_ServesTheDescriptor_WithTheProfileSelfAssessment()
+    private static System.Text.Json.Nodes.JsonObject EnvelopeBody(string response)
     {
-        var host = CreateHost();
+        var envelope = System.Text.Json.Nodes.JsonNode.Parse(response)!.AsObject();
+        Assert.Equal("ok", envelope["statusCode"]!.GetValue<string>());
+        return System.Text.Json.Nodes.JsonNode.Parse(envelope["body"]!.GetValue<string>())!.AsObject();
+    }
+
+    [Fact]
+    public async Task SpecTopic_ServesTheContractDocument_WithTheProfileSelfAssessmentAndDeploymentFields()
+    {
+        var host = CreateHost(x => x.WithPlacement("aws", "eu-west-1"));
 
         var response = await host.SendApiGatewayAsync(
-            HttpBuilder.Create("POST", CloudServicePaths.Invoke, CreateEnvelope("benzene:mesh", "{}")));
+            HttpBuilder.Create("POST", CloudServicePaths.Invoke, CreateEnvelope("benzene:spec", "{}")));
 
         Assert.Equal(200, response.StatusCode);
-        Assert.Contains("orders", response.Body);
-        Assert.Contains(CloudServiceProfileReport.ProfileName, response.Body);
+        var document = EnvelopeBody(response.Body);
+        Assert.Equal("orders", document["service"]!.GetValue<string>());
+        Assert.Equal("dotnet", document["runtime"]!.GetValue<string>());
+        Assert.Equal("aws", document["placement"]!["cloud"]!.GetValue<string>());
+        Assert.Equal("eu-west-1", document["placement"]!["region"]!.GetValue<string>());
+        Assert.Equal(CloudServiceProfileReport.ProfileName, document["profile"]!["name"]!.GetValue<string>());
         // No collector configured: the outbound feeds have no destination, so the service honestly
-        // reports R6 as missing rather than claiming full conformance.
-        Assert.Contains("R6", response.Body);
+        // reports R6 (and R8) as missing rather than claiming full conformance.
+        var missing = document["profile"]!["missing"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
+        Assert.Equal(new[] { "R6", "R8" }, missing);
     }
 
     [Fact]
@@ -143,26 +155,37 @@ public class UseBenzeneCloudServiceTest
         var host = CreateHost(cloud => cloud.WithCollector("http://localhost:9/benzene/invoke"));
 
         var response = await host.SendApiGatewayAsync(
-            HttpBuilder.Create("POST", CloudServicePaths.Invoke, CreateEnvelope("benzene:mesh", "{}")));
+            HttpBuilder.Create("POST", CloudServicePaths.Invoke, CreateEnvelope("benzene:spec", "{}")));
 
         Assert.Equal(200, response.StatusCode);
-        Assert.Contains(CloudServiceProfileReport.ProfileName, response.Body);
-        Assert.DoesNotContain("R6", response.Body);
-        Assert.DoesNotContain("R7", response.Body);
-        Assert.DoesNotContain("R8", response.Body);
+        var profile = EnvelopeBody(response.Body)["profile"]!.AsObject();
+        Assert.Equal(CloudServiceProfileReport.ProfileName, profile["name"]!.GetValue<string>());
+        Assert.False(profile.ContainsKey("missing"));
     }
 
     [Fact]
-    public async Task WithoutMesh_TheMeshTopicIsNotIntercepted()
+    public async Task TheRetiredBenzeneMeshTopic_IsNotServed()
     {
-        var host = CreateHost(cloud => cloud.WithoutMesh());
+        // spec-0.4.0 retired the ServiceDescriptor topic: the self-description is benzene:spec.
+        var host = CreateHost(cloud => cloud.WithCollector("http://localhost:9/benzene/invoke"));
 
         var response = await host.SendApiGatewayAsync(
             HttpBuilder.Create("POST", CloudServicePaths.Invoke, CreateEnvelope("benzene:mesh", "{}")));
 
-        // Processed (200), and not-found inside: nothing intercepted the topic.
+        // Processed (200), and not-found inside: nothing answers the topic.
         Assert.Equal(200, response.StatusCode);
         Assert.Contains("\"statusCode\":\"not-found\"", response.Body);
+    }
+
+    [Fact]
+    public async Task WithoutMesh_TheSpecTopicStillAnswers()
+    {
+        var host = CreateHost(cloud => cloud.WithoutMesh());
+
+        var response = await host.SendApiGatewayAsync(
+            HttpBuilder.Create("POST", CloudServicePaths.Invoke, CreateEnvelope("benzene:spec", "{}")));
+
+        Assert.Equal("orders", EnvelopeBody(response.Body)["service"]!.GetValue<string>());
     }
 
     [Fact]
@@ -171,10 +194,10 @@ public class UseBenzeneCloudServiceTest
         var host = CreateHost(cloud => cloud.WithInvokePath("/custom-invoke"));
 
         var response = await host.SendApiGatewayAsync(
-            HttpBuilder.Create("POST", "/custom-invoke", CreateEnvelope("benzene:mesh", "{}")));
+            HttpBuilder.Create("POST", "/custom-invoke", CreateEnvelope("benzene:spec", "{}")));
 
         Assert.Equal(200, response.StatusCode);
-        Assert.Contains("R7", response.Body);
+        Assert.Contains("R7", EnvelopeBody(response.Body)["profile"]!["missing"]!.AsArray().Select(x => x!.GetValue<string>()));
     }
 
     [Fact]
@@ -191,33 +214,123 @@ public class UseBenzeneCloudServiceTest
         Assert.Equal(200, viaHttp.StatusCode);
     }
 
-    [Fact]
-    public async Task WithHandlers_DerivesTheDescriptorEagerlyAndStartsAnnouncingBeforeAnyRequest()
+    /// <summary>A loopback listener standing in for the collector: records every envelope it receives
+    /// and answers each with an accepted envelope.</summary>
+    private sealed class FakeCollector : IDisposable
     {
-        // A real loopback listener standing in for the collector: WithHandlers means the
-        // descriptor is built at wire-up (not on first invocation), so registration should reach
-        // the collector even though this test never sends any request to the service itself.
-        var port = GetFreeTcpPort();
-        using var listener = new HttpListener();
-        listener.Prefixes.Add($"http://localhost:{port}/benzene/invoke/");
-        listener.Start();
-        var receiveRegisterAsync = Task.Run(async () =>
+        private readonly HttpListener _listener = new();
+        private readonly System.Collections.Concurrent.ConcurrentQueue<System.Text.Json.Nodes.JsonObject> _envelopes = new();
+
+        public FakeCollector()
         {
-            var context = await listener.GetContextAsync();
-            using var reader = new StreamReader(context.Request.InputStream);
-            var body = await reader.ReadToEndAsync();
-            context.Response.StatusCode = 200;
-            context.Response.OutputStream.Close();
-            return body;
-        });
+            Port = GetFreeTcpPort();
+            _listener.Prefixes.Add($"http://localhost:{Port}/benzene/invoke/");
+            _listener.Start();
+            _ = Task.Run(async () =>
+            {
+                while (_listener.IsListening)
+                {
+                    HttpListenerContext context;
+                    try
+                    {
+                        context = await _listener.GetContextAsync();
+                    }
+                    catch
+                    {
+                        return;
+                    }
+                    using var reader = new StreamReader(context.Request.InputStream);
+                    _envelopes.Enqueue(System.Text.Json.Nodes.JsonNode.Parse(await reader.ReadToEndAsync())!.AsObject());
+                    var answer = System.Text.Encoding.UTF8.GetBytes("{\"statusCode\":\"ok\",\"isSuccessful\":true,\"headers\":{},\"body\":\"{\\\"accepted\\\":1}\"}");
+                    context.Response.StatusCode = 200;
+                    await context.Response.OutputStream.WriteAsync(answer);
+                    context.Response.OutputStream.Close();
+                }
+            });
+        }
+
+        public int Port { get; }
+
+        public string Url => $"http://localhost:{Port}/benzene/invoke";
+
+        /// <summary>The bodies received on <paramref name="topic"/>, in order, parsed.</summary>
+        public System.Text.Json.Nodes.JsonObject[] Bodies(string topic) => _envelopes
+            .Where(x => x["topic"]!.GetValue<string>() == topic)
+            .Select(x => System.Text.Json.Nodes.JsonNode.Parse(x["body"]!.GetValue<string>())!.AsObject())
+            .ToArray();
+
+        public async Task<System.Text.Json.Nodes.JsonObject[]> WaitForAsync(string topic, Func<System.Text.Json.Nodes.JsonObject[], bool> done)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(15);
+            while (DateTime.UtcNow < deadline)
+            {
+                var bodies = Bodies(topic);
+                if (done(bodies))
+                {
+                    return bodies;
+                }
+                await Task.Delay(50);
+            }
+            return Bodies(topic);
+        }
+
+        public void Dispose() => _listener.Close();
+    }
+
+    [Fact]
+    public async Task WithHandlers_RegistersAReducedDocumentAtWireUp_BeforeAnyRequest()
+    {
+        // WithHandlers means a document is derivable at wire-up (not on first invocation), so
+        // registration reaches the collector even though this test never sends the service a request.
+        // Its events and sends are declared in the container, which wire-up cannot see: they are named
+        // degraded, and empty, rather than asserted as none (contract-document.md §1).
+        using var collector = new FakeCollector();
 
         CreateHost(cloud => cloud
             .WithHandlers(typeof(ExampleMessageHandler))
-            .WithCollector($"http://localhost:{port}/benzene/invoke"));
+            .WithCollector(collector.Url));
 
-        var completed = await Task.WhenAny(receiveRegisterAsync, Task.Delay(TimeSpan.FromSeconds(10)));
-        Assert.Same(receiveRegisterAsync, completed);
-        Assert.Contains("benzene:mesh:register", await receiveRegisterAsync);
+        var registrations = await collector.WaitForAsync("benzene:mesh:register", x => x.Length > 0);
+        var document = Assert.Single(registrations);
+        Assert.Equal("orders", document["service"]!.GetValue<string>());
+        Assert.Equal("openapi-3.0", document["schemaDialect"]!.GetValue<string>());
+        Assert.NotEmpty(document["requests"]!.AsArray());
+        Assert.Equal(new[] { "events", "sends" }, document["degraded"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray());
+        Assert.False(document.ContainsKey("topics")); // not the retired ServiceDescriptor
+        Assert.False(document.ContainsKey("instanceId"));
+    }
+
+    [Fact]
+    public async Task TheRegisterBody_IsTheDocumentBenzeneSpecServes_AndHeartbeatsCarryItsRegistrationHash()
+    {
+        // mesh.md §2: the register body is the same document benzene:spec serves. The wire-up path
+        // registers a reduced one first; the first invocation re-registers the complete document.
+        using var collector = new FakeCollector();
+        var host = CreateHost(cloud => cloud
+            .WithHandlers(typeof(ExampleMessageHandler))
+            .WithServiceVersion("1.4.2", "semver")
+            .WithSends(new MeshOutboundRegistry().Register<ExampleRequestPayload>("payments:take"))
+            .WithCollector(collector.Url));
+
+        var spec = await host.SendApiGatewayAsync(HttpBuilder.Create("GET", CloudServicePaths.Spec, new { }));
+        var served = System.Text.Json.Nodes.JsonNode.Parse(spec.Body)!.AsObject();
+
+        var registrations = await collector.WaitForAsync("benzene:mesh:register",
+            x => x.Any(d => !d.ContainsKey("degraded")));
+        var complete = registrations.Last();
+        Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(served, complete),
+            $"registered {complete.ToJsonString()}\n served {served.ToJsonString()}");
+        Assert.Equal("1.4.2", complete["serviceVersion"]!.GetValue<string>());
+        Assert.Equal("semver", complete["versionScheme"]!.GetValue<string>());
+        Assert.Contains(complete["sends"]!.AsArray(), x => x!["topic"]!.GetValue<string>() == "payments:take");
+
+        var hash = complete["registrationHash"]!.GetValue<string>();
+        var heartbeats = await collector.WaitForAsync("benzene:mesh:heartbeat",
+            x => x.Any(h => h["registrationHash"]?.GetValue<string>() == hash));
+        var heartbeat = heartbeats.Last(h => h["registrationHash"]?.GetValue<string>() == hash);
+        Assert.Equal("orders", heartbeat["service"]!.GetValue<string>());
+        Assert.Equal("1.4.2", heartbeat["serviceVersion"]!.GetValue<string>());
+        Assert.False(heartbeat.ContainsKey("descriptorHash"));
     }
 
     [Fact]

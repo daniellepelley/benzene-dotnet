@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Benzene.Abstractions.MessageHandlers.Mappers;
+using Benzene.Core.MessageHandlers;
 using Benzene.Core.MessageHandlers.BenzeneMessage;
 using Benzene.Core.MessageHandlers.DI;
 using Benzene.Core.Messages.BenzeneMessage;
@@ -37,49 +39,15 @@ public class ExtensionsTest
         return await app.HandleAsync(request, new MicrosoftServiceResolverFactory(services));
     }
 
-    [Fact]
-    public async Task UseMeshDescriptor_MatchingTopic_ShortCircuitsWithTheDescriptor()
+    // A terminal step answering ok, standing in for a handler.
+    private static void UseOk(MiddlewarePipelineBuilder<BenzeneMessageContext> pipeline)
     {
-        var (pipeline, services) = NewPipeline();
-        var descriptor = new MeshServiceDescriptor { Service = "orders-service" };
-        pipeline.UseMeshDescriptor(descriptor);
-
-        var response = await SendAsync(pipeline, services, MeshTopics.Descriptor);
-
-        Assert.Equal(BenzeneResultStatus.Ok, response.StatusCode);
-        Assert.Contains("orders-service", response.Body);
-    }
-
-    [Fact]
-    public async Task UseMeshDescriptor_AliasTopic_ShortCircuitsWithTheDescriptor()
-    {
-        var (pipeline, services) = NewPipeline();
-        var descriptor = new MeshServiceDescriptor { Service = "orders-service" };
-        pipeline.UseMeshDescriptor(descriptor, "orders.mesh");
-
-        var response = await SendAsync(pipeline, services, "orders.mesh");
-
-        Assert.Equal(BenzeneResultStatus.Ok, response.StatusCode);
-        Assert.Contains("orders-service", response.Body);
-    }
-
-    [Fact]
-    public async Task UseMeshDescriptor_NonMatchingTopic_FallsThroughToNextMiddleware()
-    {
-        var (pipeline, services) = NewPipeline();
-        var descriptor = new MeshServiceDescriptor { Service = "orders-service" };
-        var nextRan = false;
-        pipeline
-            .UseMeshDescriptor(descriptor)
-            .Use(_ => new FuncWrapperMiddleware<BenzeneMessageContext>("Terminal", (_, next) =>
-            {
-                nextRan = true;
-                return next();
-            }));
-
-        await SendAsync(pipeline, services, "some-other-topic");
-
-        Assert.True(nextRan);
+        pipeline.Use(resolver => new TerminalFuncWrapperMiddleware<BenzeneMessageContext>("Ok", async (context, _) =>
+        {
+            var topic = resolver.GetService<IMessageGetter<BenzeneMessageContext>>().GetTopic(context);
+            await resolver.GetService<IMessageHandlerResultSetter<BenzeneMessageContext>>().SetResultAsync(context,
+                new MessageHandlerResult(topic, MessageHandlerDefinition.Empty(), BenzeneResult.Ok(new { service = "orders-service" })));
+        }));
     }
 
     [Fact]
@@ -109,13 +77,13 @@ public class ExtensionsTest
         mockExporter.Setup(x => x.Export(It.IsAny<MeshTraceEvent>())).Callback<MeshTraceEvent>(e => exported = e);
 
         pipeline
-            .UseMeshTrace(new MeshServiceInfo("orders-service"), mockExporter.Object, new BenzeneMessageMeshStatusReader())
-            .UseMeshDescriptor(new MeshServiceDescriptor { Service = "orders-service" });
+            .UseMeshTrace(new MeshServiceInfo("orders-service"), mockExporter.Object, new BenzeneMessageMeshStatusReader());
+        UseOk(pipeline);
 
-        await SendAsync(pipeline, services, MeshTopics.Descriptor);
+        await SendAsync(pipeline, services, "order:create");
 
         Assert.NotNull(exported);
-        Assert.Equal(MeshTopics.Descriptor, exported!.Topic);
+        Assert.Equal("order:create", exported!.Topic);
         Assert.Equal("orders-service", exported.Service);
         Assert.Equal(BenzeneResultStatus.Ok, exported.Status);
         Assert.True(exported.DurationMs >= 0);
@@ -230,10 +198,10 @@ public class ExtensionsTest
         mockExporter.Setup(x => x.Export(It.IsAny<MeshTraceEvent>())).Throws(new System.InvalidOperationException("boom"));
 
         pipeline
-            .UseMeshTrace(new MeshServiceInfo("orders-service"), mockExporter.Object)
-            .UseMeshDescriptor(new MeshServiceDescriptor { Service = "orders-service" });
+            .UseMeshTrace(new MeshServiceInfo("orders-service"), mockExporter.Object);
+        UseOk(pipeline);
 
-        var response = await SendAsync(pipeline, services, MeshTopics.Descriptor);
+        var response = await SendAsync(pipeline, services, "order:create");
 
         Assert.Equal(BenzeneResultStatus.Ok, response.StatusCode);
         mockExporter.Verify(x => x.Export(It.IsAny<MeshTraceEvent>()), Times.Once);
@@ -248,10 +216,10 @@ public class ExtensionsTest
         mockExporter.Setup(x => x.Export(It.IsAny<MeshTraceEvent>())).Callback<MeshTraceEvent>(e => exported = e);
 
         pipeline
-            .UseMeshTrace(new MeshServiceInfo("orders-service"), mockExporter.Object)
-            .UseMeshDescriptor(new MeshServiceDescriptor { Service = "orders-service" });
+            .UseMeshTrace(new MeshServiceInfo("orders-service"), mockExporter.Object);
+        UseOk(pipeline);
 
-        await SendAsync(pipeline, services, MeshTopics.Descriptor);
+        await SendAsync(pipeline, services, "order:create");
 
         Assert.NotNull(exported);
         Assert.Equal(string.Empty, exported!.Status);

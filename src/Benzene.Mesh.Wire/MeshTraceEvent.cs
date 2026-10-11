@@ -51,18 +51,25 @@ public class MeshTraceBatch
 }
 
 /// <summary>
-/// The body of a <c>mesh:heartbeat</c> message (spec §5): the standard aggregate health response
-/// reused as-is, wrapped with identity and the contract hash.
+/// The body of a <c>benzene:mesh:heartbeat</c> message (mesh.md §5): the standard aggregate health
+/// response reused as-is, wrapped with identity and the <c>registrationHash</c> of the document this
+/// instance registered. A collector compares that hash with the registration for the same
+/// <c>(service, serviceVersion)</c>.
 /// </summary>
 public class MeshHeartbeat
 {
     public string Service { get; set; } = string.Empty;
 
+    /// <summary>The release this instance runs; omitted when it declares none.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ServiceVersion { get; set; }
+
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? InstanceId { get; set; }
 
+    /// <summary>The <c>registrationHash</c> of the document this instance registered.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? DescriptorHash { get; set; }
+    public string? RegistrationHash { get; set; }
 
     public DateTimeOffset SentAt { get; set; }
 
@@ -70,7 +77,9 @@ public class MeshHeartbeat
 }
 
 /// <summary>
-/// The mesh wire-contract topic names (spec §1/§4), shared by services and collectors.
+/// The mesh wire-contract topic names (spec §4), shared by services and collectors. A service's
+/// self-description is its contract document at <c>benzene:spec</c>; the mesh has no topic of its own
+/// for it.
 /// <para>
 /// All ids carry the <c>benzene:</c> marker per the naming principle
 /// (<c>work/benzene-naming-principle.md</c>) — they live in the same namespace as the
@@ -82,10 +91,7 @@ public class MeshHeartbeat
 /// </summary>
 public static class MeshTopics
 {
-    /// <summary>The reserved descriptor topic a meshed service intercepts (spec §1).</summary>
-    public const string Descriptor = Benzene.Abstractions.BenzeneTopic.Mesh;
-
-    /// <summary>A service announces its descriptor to a collector (spec §4).</summary>
+    /// <summary>A service registers its contract document with a collector (spec §2, §4).</summary>
     public const string Register = "benzene:mesh:register";
 
     /// <summary>A service instance's periodic health report to a collector (spec §5).</summary>

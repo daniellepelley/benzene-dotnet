@@ -1,6 +1,6 @@
 using System;
 using System.IO;
-using System.Text.Json;
+using System.Text.Json.Nodes;
 using Benzene.Descriptor;
 using Benzene.Schema.OpenApi.EventService;
 using Xunit;
@@ -19,81 +19,79 @@ public class DescriptorEmitterTest
     private static string MinimalAssemblyPath =>
         typeof(Benzene.Examples.Aws.Minimal.StartUp).Assembly.Location;
 
-    private static EmitOptions Options(string emit = "both", string? output = null, string? startup = null) => new()
+    private static EmitOptions Options(string? output = null, string? startup = null, string? cloud = null,
+        string? region = null, string? service = "minimal") => new()
     {
         AssemblyPath = MinimalAssemblyPath,
-        ServiceName = "minimal",
+        ServiceName = service,
         ServiceVersion = "1.0.0",
-        Emit = emit,
+        VersionScheme = "semver",
         OutputPath = output,
         StartupTypeName = startup,
+        Cloud = cloud,
+        Region = region,
     };
 
     [Fact]
-    public void Emit_Both_ProducesTwoParseableArtifacts()
+    public void Emit_ProducesTheContractDocument_RoundTrippingThroughEventServiceDocumentDeserializer()
     {
-        var result = DescriptorEmitter.Emit(Options("both"));
+        var result = DescriptorEmitter.Emit(Options());
 
-        Assert.NotNull(result.SpecJson);
-        Assert.NotNull(result.DescriptorJson);
+        var doc = new EventServiceDocumentDeserializer().Deserialize(result.SpecJson);
 
-        // Both must be well-formed JSON.
-        using var _ = JsonDocument.Parse(result.SpecJson!);
-        using var __ = JsonDocument.Parse(result.DescriptorJson!);
-    }
-
-    [Fact]
-    public void Emit_Spec_RoundTripsThroughEventServiceDocumentDeserializer()
-    {
-        var result = DescriptorEmitter.Emit(Options("spec"));
-
-        Assert.NotNull(result.SpecJson);
-        Assert.Null(result.DescriptorJson);
-
-        var doc = new EventServiceDocumentDeserializer().Deserialize(result.SpecJson!);
-
+        Assert.Equal(EventServiceDocument.SchemaDialectOpenApi30, doc.SchemaDialect);
         Assert.Contains(doc.Requests, r => r.Topic == "order:placed");
     }
 
     [Fact]
-    public void Emit_Descriptor_IsTheMeshSection2ServiceDescriptor_NotTheOldDistilledProjection()
+    public void Emit_CarriesTheIdentityAndDeploymentFieldsThisBuildWasTold()
     {
-        var result = DescriptorEmitter.Emit(Options("descriptor"));
+        // #171: --version-scheme used to be validated and then discarded. It now reaches the emitted
+        // document's versionScheme, beside serviceVersion (contract-document.md §1).
+        var result = DescriptorEmitter.Emit(Options(cloud: "aws", region: "eu-west-1"));
 
-        Assert.Null(result.SpecJson);
-        Assert.NotNull(result.DescriptorJson);
+        var root = JsonNode.Parse(result.SpecJson)!.AsObject();
+        Assert.Equal("minimal", root["service"]!.GetValue<string>());
+        Assert.Equal("1.0.0", root["serviceVersion"]!.GetValue<string>());
+        Assert.Equal("semver", root["versionScheme"]!.GetValue<string>());
+        Assert.Equal("dotnet", root["runtime"]!.GetValue<string>());
+        Assert.Equal("aws", root["placement"]!["cloud"]!.GetValue<string>());
+        Assert.Equal("eu-west-1", root["placement"]!["region"]!.GetValue<string>());
+        Assert.StartsWith("sha256:", root["contractHash"]!.GetValue<string>());
+        Assert.StartsWith("sha256:", root["registrationHash"]!.GetValue<string>());
+    }
 
-        using var doc = JsonDocument.Parse(result.DescriptorJson!);
-        var root = doc.RootElement;
+    [Fact]
+    public void Emit_IdentityAndPlacementAreOutsideBothHashes()
+    {
+        var plain = JsonNode.Parse(DescriptorEmitter.Emit(Options(service: null)).SpecJson)!.AsObject();
+        var placed = JsonNode.Parse(DescriptorEmitter.Emit(Options(cloud: "gcp")).SpecJson)!.AsObject();
 
-        // Mesh §2 shape: service/serviceVersion/placement/topics[]/produces[]/descriptorHash.
-        Assert.Equal("minimal", root.GetProperty("service").GetString());
-        Assert.Equal("1.0.0", root.GetProperty("serviceVersion").GetString());
-        Assert.True(root.TryGetProperty("topics", out var topics));
-        Assert.True(topics.GetArrayLength() > 0);
-        Assert.StartsWith("sha256:", root.GetProperty("descriptorHash").GetString());
+        Assert.Equal(plain["contractHash"]!.GetValue<string>(), placed["contractHash"]!.GetValue<string>());
+        Assert.Equal(plain["registrationHash"]!.GetValue<string>(), placed["registrationHash"]!.GetValue<string>());
+    }
 
-        // §2.3's `produces` (renamed from `consumes` by the 2026-08 role inversion) IS part of the
-        // mesh §2 shape - present, but empty and honestly degraded: this offline, no-running-service
-        // tool has no outbound registration to read (§2.3 forbids inferring it from assembly
-        // reflection or call-site scanning), so it marks the gap rather than asserting "produces
-        // nothing".
-        Assert.True(root.TryGetProperty("produces", out var produces));
-        Assert.Equal(0, produces.GetArrayLength());
-        Assert.True(root.TryGetProperty("degraded", out var degraded));
-        Assert.Contains(degraded.EnumerateArray(), d => d.GetString() == "outbound-registry");
+    [Fact]
+    public void Emit_WithoutACloud_EmitsNoPlacement_ABuildDoesNotGuessWhereItWillRun()
+    {
+        var root = JsonNode.Parse(DescriptorEmitter.Emit(Options()).SpecJson)!.AsObject();
 
-        // NOT the OLD, unrelated distilled deployment projection (descriptorVersion/
-        // transportsResolved - a completely different, now-deferred `--emit deploy` shape; see
-        // DescriptorEmitter's own doc comment).
-        //
-        // That old shape also had a `produces` key, which is why this used to assert its absence.
-        // The 2026-08 role inversion took that name for the mesh §2 outbound field (previously
-        // `consumes`), so `produces` is now expected to be PRESENT and is asserted above - the two
-        // shapes are still told apart by descriptorVersion/transportsResolved, which the mesh
-        // descriptor has never carried.
-        Assert.False(root.TryGetProperty("descriptorVersion", out _));
-        Assert.False(root.TryGetProperty("transportsResolved", out _));
+        Assert.False(root.ContainsKey("placement"));
+    }
+
+    [Fact]
+    public void Emit_IsNotTheRetiredServiceDescriptor()
+    {
+        var root = JsonNode.Parse(DescriptorEmitter.Emit(Options()).SpecJson)!.AsObject();
+
+        // mesh.md §2 (spec-0.4.0): the register body is the contract document - no topics/produces,
+        // no descriptorHash.
+        Assert.False(root.ContainsKey("topics"));
+        Assert.False(root.ContainsKey("produces"));
+        Assert.False(root.ContainsKey("descriptorHash"));
+        Assert.True(root.ContainsKey("requests"));
+        Assert.True(root.ContainsKey("events"));
+        Assert.True(root.ContainsKey("sends"));
     }
 
     [Fact]
@@ -111,7 +109,7 @@ public class DescriptorEmitterTest
     [Fact]
     public void Emit_ExplicitStartup_Works()
     {
-        var result = DescriptorEmitter.Emit(Options("spec", startup: "Benzene.Examples.Aws.Minimal.StartUp"));
+        var result = DescriptorEmitter.Emit(Options(startup: "Benzene.Examples.Aws.Minimal.StartUp"));
 
         Assert.NotNull(result.SpecJson);
     }
@@ -119,45 +117,48 @@ public class DescriptorEmitterTest
     [Fact]
     public void Emit_UnknownStartupTypeName_Throws()
     {
-        var bad = Options("spec", startup: "Nonexistent.Type.Name");
+        var bad = Options(startup: "Nonexistent.Type.Name");
 
         Assert.Throws<InvalidOperationException>(() => DescriptorEmitter.Emit(bad));
     }
 
     [Fact]
-    public void ResolveOutputPaths_NoOutput_DefaultsNextToTheAssembly()
+    public void ResolveOutputPath_NoOutput_DefaultsNextToTheAssembly()
     {
-        var (specPath, descriptorPath) = DescriptorEmitter.ResolveOutputPaths(Options("both"));
+        var path = DescriptorEmitter.ResolveOutputPath(Options());
 
         var expectedBase = Path.Combine(
             Path.GetDirectoryName(Path.GetFullPath(MinimalAssemblyPath))!,
             Path.GetFileNameWithoutExtension(MinimalAssemblyPath));
 
-        Assert.Equal(expectedBase + ".spec.json", specPath);
-        Assert.Equal(expectedBase + ".service.json", descriptorPath);
+        Assert.Equal(expectedBase + ".spec.json", path);
     }
 
     [Fact]
-    public void ResolveOutputPaths_BothEmit_DerivesSpecPathFromServiceJsonOutput()
+    public void ResolveOutputPath_TreatsOutputAsTheExactPath()
     {
-        var (specPath, descriptorPath) = DescriptorEmitter.ResolveOutputPaths(
-            Options("both", output: "/tmp/foo/bar.service.json"));
+        Assert.Equal("/tmp/foo/custom.json", DescriptorEmitter.ResolveOutputPath(Options(output: "/tmp/foo/custom.json")));
+    }
 
-        Assert.Equal("/tmp/foo/bar.service.json", descriptorPath);
-        Assert.Equal("/tmp/foo/bar.spec.json", specPath);
+    [Theory]
+    [InlineData("descriptor")]
+    [InlineData("both")]
+    public void ValidateArtifacts_RejectsTheRetiredDescriptorEmits(string emit)
+    {
+        var opts = EmitOptions.Parse(["--assembly", "svc.dll", "--emit", emit]);
+
+        Assert.NotNull(opts);
+        Assert.Contains("contract document", opts.ValidateArtifacts());
     }
 
     [Fact]
-    public void ResolveOutputPaths_SingleEmit_TreatsOutputAsTheExactPath()
+    public void ValidateArtifacts_AcceptsSpec_AndRejectsARegionWithoutACloud()
     {
-        var (specPath, _) = DescriptorEmitter.ResolveOutputPaths(Options("spec", output: "/tmp/foo/custom.json"));
-        Assert.Equal("/tmp/foo/custom.json", specPath);
-
-        var (_, descriptorPath) = DescriptorEmitter.ResolveOutputPaths(Options("descriptor", output: "/tmp/foo/custom.json"));
-        Assert.Equal("/tmp/foo/custom.json", descriptorPath);
+        Assert.Null(EmitOptions.Parse(["--assembly", "svc.dll", "--emit", "spec"])!.ValidateArtifacts());
+        Assert.NotNull(EmitOptions.Parse(["--assembly", "svc.dll", "--region", "eu-west-1"])!.ValidateArtifacts());
     }
 
-    // ── mesh.md §2.5: version order is declared, and declared wrong fails the build ───────────────
+    // ── service-versions.md §2: version order is declared, and declared wrong fails the build ───────────────
     //
     // The build that declares a version is the cheapest place in the system to catch a mismatch.
     // After here the value travels: into a catalogue, into a comparison, and onto a screen where
@@ -195,7 +196,7 @@ public class DescriptorEmitterTest
     [Fact]
     public void ValidateVersion_RequiresASchemeWheneverAVersionIsDeclared()
     {
-        // §2.5 defines no default on purpose. A version with no declared comparison rule is an
+        // service-versions.md §2 defines no default on purpose. A version with no declared comparison rule is an
         // identity, not a position in an order, and picking a rule for it silently would be a guess
         // wearing a specification's clothes.
         var error = Versioned("42", null).ValidateVersion();
@@ -224,7 +225,7 @@ public class DescriptorEmitterTest
     [Fact]
     public void ValidateVersion_IsSilentWhenNoVersionIsDeclaredAtAll()
     {
-        // mesh.md §2.4 case 3: a service that declares no version has exactly one service version.
+        // service-versions.md §1 case 3: a service that declares no version has exactly one service version.
         // That is not an error and must not be reported as one — including here.
         Assert.Null(Versioned(null, null).ValidateVersion());
     }

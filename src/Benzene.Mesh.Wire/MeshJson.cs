@@ -6,8 +6,8 @@ namespace Benzene.Mesh.Wire;
 /// <summary>
 /// The one place this package's wire serialization settings live: camelCase names (the wire
 /// contract's casing, docs/specification/wire-contracts.md §6), nulls omitted where a shape marks
-/// them ignorable. Both the descriptor hash canonicalization and the trace exporter use these
-/// options, so the two can't drift apart.
+/// them ignorable. The trace, issue and heartbeat feeds all serialize through these
+/// options, so they can't drift apart.
 /// </summary>
 public static class MeshJson
 {

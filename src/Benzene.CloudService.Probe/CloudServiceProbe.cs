@@ -8,7 +8,8 @@ namespace Benzene.CloudService.Probe;
 /// <summary>
 /// Runs an external, black-box conformance probe against a live Benzene Cloud Service
 /// (docs/specification/cloud-service-profile.md), asserting R1-R8's observable surfaces from
-/// outside - health response shape, envelope round-trip, spec and descriptor presence, default
+/// outside - health response shape, envelope round-trip, the derived spec and the self-description
+/// on the <c>benzene:spec</c> topic, default
 /// paths - over real HTTP, without relying on anything the service says about itself.
 ///
 /// This is intentionally decoupled from <c>Benzene.CloudService</c> (see
@@ -20,10 +21,10 @@ public static class CloudServiceProbe
     private const string HealthDescription = "Health checks";
     private const string InvokeDescription = "Wire-envelope invocability";
     private const string SpecDescription = "Derived spec";
-    private const string MeshDescription = "Mesh service-side feeds (observable half - see reason)";
+    private const string MeshDescription = "Self-description at benzene:spec and the mesh feeds (observable half - see reason)";
 
     private const string HealthcheckEnvelope = "{\"topic\":\"benzene:healthcheck\",\"headers\":{},\"body\":\"{}\"}";
-    private const string MeshEnvelope = "{\"topic\":\"benzene:mesh\",\"headers\":{},\"body\":\"{}\"}";
+    private const string SpecEnvelope = "{\"topic\":\"benzene:spec\",\"headers\":{},\"body\":\"{}\"}";
 
     /// <summary>
     /// Probes the service at <paramref name="httpClient"/>'s <c>BaseAddress</c> and returns a
@@ -147,41 +148,41 @@ public static class CloudServiceProbe
             $"GET {options.SpecPath} returned 200 with a non-empty JSON object body"), true);
     }
 
-    // ---- R6 (observable half only): POST topic "mesh"; satisfied iff 200 envelope wraps a descriptor with a non-empty "service" (mesh.md §2). ----
+    // ---- R6 (observable half only): POST topic "benzene:spec"; satisfied iff the 200 envelope wraps a contract document with a non-empty "service" (cloud-service-profile.md R6, contract-document.md §7). ----
     private static async Task<(CloudServiceProbeRequirement Requirement, bool Reached, JsonArray? Topics)> ProbeMeshAsync(
         HttpClient client, CloudServiceProbeOptions options, CancellationToken ct)
     {
         const string caveat =
-            "Registration (mesh:register) and heartbeat (mesh:heartbeat) delivery to a collector cannot be observed " +
-            "by probing the service alone, so that half of R6 stays unverified even when the descriptor endpoint " +
-            "itself checks out - a passing descriptor check does not imply the whole of R6.";
+            "Registration (benzene:mesh:register), heartbeat (benzene:mesh:heartbeat) and trace delivery to a collector " +
+            "cannot be observed by probing the service alone, so that half of R6 stays unverified even when the " +
+            "self-description itself checks out - a passing benzene:spec check does not imply the whole of R6.";
 
         var (reached, status, body, failure) = await PostAsync(
-            client, options.InvokePath, MeshEnvelope, options.SendTraceParentProbe, ct).ConfigureAwait(false);
+            client, options.InvokePath, SpecEnvelope, options.SendTraceParentProbe, ct).ConfigureAwait(false);
         if (!reached)
         {
             return (new CloudServiceProbeRequirement("R6", MeshDescription, CloudServiceProbeVerdict.NotSatisfied,
-                $"POST {options.InvokePath} with topic 'mesh' did not reach the service: {failure}. {caveat}"), false, null);
+                $"POST {options.InvokePath} with topic 'benzene:spec' did not reach the service: {failure}. {caveat}"), false, null);
         }
         if (status != 200)
         {
             return (new CloudServiceProbeRequirement("R6", MeshDescription, CloudServiceProbeVerdict.NotSatisfied,
-                $"POST {options.InvokePath} with topic 'mesh' returned {status}, expected 200 (the reserved mesh topic does not appear to be served). {caveat}"), true, null);
+                $"POST {options.InvokePath} with topic 'benzene:spec' returned {status}, expected 200 (the reserved spec topic does not appear to be served over the envelope). {caveat}"), true, null);
         }
         if (!TryParseEnvelopeResponse(body, out var innerBody, out var envelopeReason))
         {
             return (new CloudServiceProbeRequirement("R6", MeshDescription, CloudServiceProbeVerdict.NotSatisfied,
-                $"200 response to the 'mesh' topic did not have the {{statusCode, headers, body}} envelope shape (wire-contracts.md §1.2): {envelopeReason}. {caveat}"), true, null);
+                $"200 response to the 'benzene:spec' topic did not have the {{statusCode, headers, body}} envelope shape (wire-contracts.md §1.2): {envelopeReason}. {caveat}"), true, null);
         }
-        if (!TryParseDescriptor(innerBody, out var descriptor, out var descriptorReason))
+        if (!TryParseContractDocument(innerBody, out var document, out var documentReason))
         {
             return (new CloudServiceProbeRequirement("R6", MeshDescription, CloudServiceProbeVerdict.NotSatisfied,
-                $"200 response to the 'mesh' topic did not parse as a descriptor with a non-empty 'service' field (mesh.md §2): {descriptorReason}. {caveat}"), true, null);
+                $"200 response to the 'benzene:spec' topic did not parse as a contract document with a non-empty 'service' field (contract-document.md §1): {documentReason}. {caveat}"), true, null);
         }
 
-        var topics = descriptor!["topics"] as JsonArray;
+        var topics = document!["requests"] as JsonArray;
         return (new CloudServiceProbeRequirement("R6", MeshDescription, CloudServiceProbeVerdict.Satisfied,
-            $"the reserved 'mesh' topic served a descriptor for service '{descriptor["service"]}' - the observable half of R6 checks out. {caveat}"), true, topics);
+            $"the reserved 'benzene:spec' topic served the contract document for service '{document["service"]}' - the self-description its registration carries, the observable half of R6. {caveat}"), true, topics);
     }
 
     // ---- R1: inferential - satisfied iff anything responded at all, since that proves a hosted pipeline exists. ----
@@ -197,10 +198,10 @@ public static class CloudServiceProbe
             ? new CloudServiceProbeRequirement("R1", description, CloudServiceProbeVerdict.Satisfied,
                 "at least one probed surface responded over HTTP, which proves a hosted pipeline exists behind a transport binding - an in-process-only pipeline would have nothing for this probe to reach")
             : new CloudServiceProbeRequirement("R1", description, CloudServiceProbeVerdict.NotSatisfied,
-                "none of the health, invoke, spec, or mesh surfaces responded at all; no hosted pipeline was reachable at the configured base address");
+                "none of the health, invoke, spec, or benzene:spec surfaces responded at all; no hosted pipeline was reachable at the configured base address");
     }
 
-    // ---- R2: inferential from R6's descriptor topics only - the profile doesn't mandate a spec format, so topic counts can't be read from R5. ----
+    // ---- R2: inferential from the contract document's requests, read over the benzene:spec topic (R6) - GET /benzene/spec (R5) is only checked for a non-empty object. ----
     private static CloudServiceProbeRequirement EvaluateR2(
         (CloudServiceProbeRequirement Requirement, bool Reached, JsonArray? Topics) mesh)
     {
@@ -208,15 +209,15 @@ public static class CloudServiceProbe
         if (mesh.Requirement.Verdict != CloudServiceProbeVerdict.Satisfied)
         {
             return new CloudServiceProbeRequirement("R2", description, CloudServiceProbeVerdict.Inconclusive,
-                "no reachable mesh descriptor to read registered topics from, and the profile does not mandate a spec document format, so topic counts can't be read from the spec surface either - absence of evidence isn't evidence of absence");
+                "no contract document reachable over the benzene:spec topic to read registered topics from - absence of evidence isn't evidence of absence");
         }
         if (mesh.Topics is { Count: > 0 })
         {
             return new CloudServiceProbeRequirement("R2", description, CloudServiceProbeVerdict.Satisfied,
-                $"the mesh descriptor lists {mesh.Topics.Count} registered topic(s) (mesh.md §2), which can only be populated from the handler registry");
+                $"the contract document lists {mesh.Topics.Count} served topic(s) in 'requests' (contract-document.md §2), which can only be populated from the handler registry");
         }
         return new CloudServiceProbeRequirement("R2", description, CloudServiceProbeVerdict.Inconclusive,
-            "the mesh descriptor is reachable but lists no topics; a service can legitimately have zero handlers registered so far - absence of evidence isn't evidence of absence");
+            "the contract document is reachable but lists no requests; a service can legitimately have zero handlers registered so far - absence of evidence isn't evidence of absence");
     }
 
     // ---- R7: only assessable when the probe itself used the defaults; otherwise it can't tell what the service defaults to. ----
@@ -238,7 +239,7 @@ public static class CloudServiceProbe
         if (health.Requirement.Verdict != CloudServiceProbeVerdict.Satisfied) failing.Add("R3 (health)");
         if (invoke.Requirement.Verdict != CloudServiceProbeVerdict.Satisfied) failing.Add("R4 (invoke)");
         if (spec.Requirement.Verdict != CloudServiceProbeVerdict.Satisfied) failing.Add("R5 (spec)");
-        if (mesh.Requirement.Verdict != CloudServiceProbeVerdict.Satisfied) failing.Add("R6 (mesh)");
+        if (mesh.Requirement.Verdict != CloudServiceProbeVerdict.Satisfied) failing.Add("R6 (benzene:spec)");
 
         if (failing.Count == 0)
         {
@@ -260,8 +261,8 @@ public static class CloudServiceProbe
             "trace context propagation cannot be verified by a single-service black-box HTTP probe; proving it " +
             "requires either a second service to observe forwarded traceparent headers, or a mesh collector " +
             "observing a declared edge actually being exercised via trace parentage (mesh.md §3, §4.2 - " +
-            "observed liveness only, since the 2026-08 revision: the producer/consumer graph itself is " +
-            "declared from ServiceDescriptor.topics/consumes, never derived from trace parentage)";
+            "observed liveness only: the producer/consumer graph itself is declared by each registered " +
+            "contract document's requests, events and sends, never derived from trace parentage)";
 
         if (!options.SendTraceParentProbe)
         {
@@ -424,10 +425,10 @@ public static class CloudServiceProbe
         return true;
     }
 
-    /// <summary>Parses an envelope's inner body as a ServiceDescriptor (mesh.md §2) and requires a non-empty "service" field.</summary>
-    private static bool TryParseDescriptor(string? innerBody, out JsonObject? descriptor, out string? reason)
+    /// <summary>Parses an envelope's inner body as a contract document (contract-document.md §1) and requires a non-empty "service" field.</summary>
+    private static bool TryParseContractDocument(string? innerBody, out JsonObject? document, out string? reason)
     {
-        descriptor = null;
+        document = null;
         reason = null;
         if (string.IsNullOrWhiteSpace(innerBody))
         {
@@ -454,7 +455,7 @@ public static class CloudServiceProbe
             reason = "missing a non-empty string 'service' field";
             return false;
         }
-        descriptor = obj;
+        document = obj;
         return true;
     }
 }

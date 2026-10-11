@@ -11,35 +11,39 @@ namespace Benzene.Descriptor;
 public sealed class EmitOptions
 {
     public const string Usage =
-        "Usage: benzene-descriptor --assembly <service.dll> [--output <path>] " +
-        "[--emit spec|descriptor|both] [--service <name>] " +
-        "[--service-version <v> --version-scheme <integer|semver|lexicographic>] " +
-        "[--cloud <aws>] [--region <r>] [--host <neutral|aws-lambda>] [--startup <fullTypeName>]";
+        "Usage: benzene-descriptor --assembly <service.dll> [--output <path>] [--emit spec] " +
+        "[--service <name>] [--service-version <v> --version-scheme <integer|semver|lexicographic>] " +
+        "[--cloud <aws|azure|gcp|self-hosted|...> [--region <r>]] [--host <neutral|aws-lambda>] " +
+        "[--startup <fullTypeName>]";
 
-    private static readonly string[] ValidEmitValues = { "spec", "descriptor", "both" };
+    /// <summary>The only artifact: the contract document.</summary>
+    public const string SpecEmit = "spec";
 
     public required string AssemblyPath { get; init; }
 
     /// <summary>
-    /// Where to write output. For <c>--emit spec</c>/<c>descriptor</c> this is the exact file path
-    /// (stdout if null). For <c>--emit both</c> this is treated as the *descriptor* path and the
-    /// spec path is derived from it (see <see cref="DescriptorEmitter.ResolveOutputPaths"/>); if
-    /// null, both files default next to the assembly, named after it.
+    /// Where to write the contract document; if null, <c>&lt;AssemblyName&gt;.spec.json</c> next to the
+    /// assembly (see <see cref="DescriptorEmitter.ResolveOutputPath"/>).
     /// </summary>
     public string? OutputPath { get; init; }
 
-    public required string ServiceName { get; init; }
+    /// <summary>
+    /// The document's <c>service</c>. Null keeps the service's own name (its <c>IApplicationInfo</c>),
+    /// falling back to the assembly's simple name when the service sets none.
+    /// </summary>
+    public string? ServiceName { get; init; }
 
     /// <summary>
-    /// The immutable release identity for this build — mesh.md §2.4. Supplied by the pipeline (a build
-    /// number, a tag, a run id) and never derived from the contract, because two builds may declare
-    /// byte-identical contracts and still be different releases.
+    /// The immutable release identity for this build - the document's <c>serviceVersion</c>
+    /// (service-versions.md §1). Supplied by the pipeline (a build number, a tag, a run id) and never
+    /// derived from the contract, because two builds may declare byte-identical contracts and still be
+    /// different releases.
     /// </summary>
     public string? ServiceVersion { get; init; }
 
     /// <summary>
-    /// How <see cref="ServiceVersion"/>'s values are compared — mesh.md §2.5. Required whenever a
-    /// version is declared; there is no default.
+    /// How <see cref="ServiceVersion"/>'s values are compared - the document's <c>versionScheme</c>
+    /// (service-versions.md §2). Required whenever a version is declared; there is no default.
     /// </summary>
     /// <remarks>
     /// The scheme is declared rather than inferred because <c>"10"</c> and <c>"9"</c> order one way as
@@ -47,14 +51,24 @@ public sealed class EmitOptions
     /// upgrade, and would do so silently.
     /// </remarks>
     public string? VersionScheme { get; init; }
-    public string Cloud { get; init; } = "aws";
-    public string Region { get; init; } = "eu-west-1";
+
+    /// <summary>
+    /// The document's <c>placement.cloud</c> (contract-document.md §1), or null to emit no placement: a
+    /// build-time artifact does not know where it will run unless it is told.
+    /// </summary>
+    public string? Cloud { get; init; }
+
+    /// <summary>The document's <c>placement.region</c>; only with <see cref="Cloud"/>, and only where the platform documents one.</summary>
+    public string? Region { get; init; }
 
     /// <summary>Force a specific host adapter (e.g. "neutral" for the cloud-agnostic core); auto-selected if null.</summary>
     public string? Host { get; init; }
 
-    /// <summary>"spec", "descriptor", or "both". Defaults to "both" (2026-08-12 owner design review, Amendment A).</summary>
-    public string Emit { get; init; } = "both";
+    /// <summary>
+    /// Always <see cref="SpecEmit"/>. <c>descriptor</c> and <c>both</c> were removed with the mesh
+    /// ServiceDescriptor (spec-0.4.0): the mesh register body is the contract document (mesh.md §2).
+    /// </summary>
+    public string Emit { get; init; } = SpecEmit;
 
     /// <summary>
     /// Full type name of the service's <c>BenzeneStartUp</c>, required only when the assembly
@@ -87,27 +101,39 @@ public sealed class EmitOptions
 
         if (string.IsNullOrWhiteSpace(assembly)) return null;
 
-        var resolvedEmit = emit ?? "both";
-        if (!ValidEmitValues.Contains(resolvedEmit)) return null;
-
         return new EmitOptions
         {
             AssemblyPath = assembly,
             OutputPath = output,
-            // Default the service name to the assembly's simple name if not supplied.
-            ServiceName = service ?? Path.GetFileNameWithoutExtension(assembly),
+            ServiceName = string.IsNullOrWhiteSpace(service) ? null : service,
             ServiceVersion = version,
             VersionScheme = versionScheme,
-            Cloud = cloud ?? "aws",
-            Region = region ?? "eu-west-1",
+            Cloud = string.IsNullOrWhiteSpace(cloud) ? null : cloud,
+            Region = string.IsNullOrWhiteSpace(region) ? null : region,
             Host = host,
-            Emit = resolvedEmit,
+            Emit = emit ?? SpecEmit,
             StartupTypeName = startup,
         };
     }
 
+    /// <summary>Checks <see cref="Emit"/> and the placement flags, returning an error message or null.</summary>
+    public string? ValidateArtifacts()
+    {
+        if (Emit != SpecEmit)
+        {
+            return Emit is "descriptor" or "both"
+                ? $"--emit {Emit} is no longer supported: the mesh ServiceDescriptor was retired in spec-0.4.0 and a "
+                  + "service registers its contract document (mesh.md §2), which --emit spec (the default) writes."
+                : $"--emit '{Emit}' is not supported; the only artifact is the contract document (--emit spec).";
+        }
+
+        return Region != null && Cloud == null
+            ? "--region was given without --cloud; a region places nothing on its own."
+            : null;
+    }
+
     /// <summary>
-    /// Checks the declared version against its declared scheme (mesh.md §2.5), returning an error
+    /// Checks the declared version against its declared scheme (service-versions.md §2), returning an error
     /// message or null.
     /// </summary>
     /// <remarks>
@@ -118,7 +144,7 @@ public sealed class EmitOptions
     /// a deployment.
     /// </para>
     /// <para>
-    /// Declaring a version without a scheme is an error rather than a default. §2.5 has no default on
+    /// Declaring a version without a scheme is an error rather than a default. service-versions.md §2 has no default on
     /// purpose: a version with no declared comparison rule is an identity, not a position in an order,
     /// and silently picking one for it would be a guess wearing a specification's clothes.
     /// </para>
@@ -138,14 +164,14 @@ public sealed class EmitOptions
         if (!hasScheme)
         {
             return $"--service-version '{ServiceVersion}' needs --version-scheme "
-                   + "(integer, semver or lexicographic). mesh.md §2.5 defines no default: without a "
+                   + "(integer, semver or lexicographic). service-versions.md §2 defines no default: without a "
                    + "scheme this build declares an identity, not a position in an order.";
         }
 
         if (!MeshVersionOrder.TryParseScheme(VersionScheme, out var scheme))
         {
             return $"--version-scheme '{VersionScheme}' is not one of integer, semver, lexicographic. "
-                   + "The set is closed (mesh.md §2.5) so an unknown scheme is rejected rather than "
+                   + "The set is closed (service-versions.md §2) so an unknown scheme is rejected rather than "
                    + "falling back to string comparison, which would be indistinguishable from a "
                    + "correct answer.";
         }

@@ -25,9 +25,9 @@ public class SchemaBuilder : ISchemaBuilder
     {
         // #169: the derived spec's schema property names were PascalCase (Swashbuckle's own default
         // when the resolver's JsonSerializerOptions carries no naming policy) while the wire, the
-        // spec's own `example` block (ExamplePayloadBuilder.CamelCase), and the sibling
-        // .service.json from the same build (MeshSchemaGenerator) are all camelCase - one
-        // benzene-descriptor --emit both run produced self-contradictory casing. Benzene's default
+        // spec's own `example` block (ExamplePayloadBuilder.CamelCase), and the then-sibling
+        // .service.json from the same build were all camelCase - one benzene-descriptor run
+        // produced self-contradictory casing. Benzene's default
         // JSON serializer camelCases (Benzene.Core.MessageHandlers.Serialization.JsonSerializer), so
         // the schema generator must match it at the root rather than leaving downstream consumers to
         // patch around a PascalCase schema.

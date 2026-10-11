@@ -9,39 +9,49 @@ using Benzene.Mesh.Wire;
 namespace Benzene.CloudService;
 
 /// <summary>
-/// The outbound announcement half of the mesh feeds (mesh.md §4–§5): registers the service's
-/// descriptor with the collector on startup (retrying until the collector is up), then heartbeats
-/// on an interval, carrying the aggregated health check response and the descriptor hash.
+/// The outbound announcement half of the mesh feeds (mesh.md §2, §4–§5): registers the service's
+/// contract document with the collector (retrying until the collector is up), then heartbeats on an
+/// interval, carrying the aggregated health check response, the service version and the registered
+/// document's <c>registrationHash</c>.
 ///
 /// The §6 degradation rule applies throughout: every failure - collector down, send faulted,
-/// health check throwing - is swallowed and retried on the next tick, and nothing here ever runs
-/// on, blocks, or fails an invocation. Started at wire-up when the descriptor is available
-/// eagerly, otherwise by the first invocation (see <see cref="EnsureStarted"/>).
+/// document derivation or health check throwing - is swallowed and retried later, and nothing here
+/// ever runs on, blocks, or fails an invocation. Started at wire-up when a reduced document is
+/// available then (explicit handler types), otherwise by the first invocation; either way the first
+/// invocation derives the complete document - the one <c>benzene:spec</c> serves - and the announcer
+/// re-registers when it differs from what it registered (see <see cref="EnsureStarted"/>).
 /// </summary>
 internal sealed class MeshAnnouncer : IAsyncDisposable, IDisposable
 {
     private static readonly HttpClient DefaultHttp = new();
 
+    private readonly object _gate = new();
     private readonly MeshServiceInfo _info;
-    private readonly CloudServiceDescriptorSource _descriptorSource;
+    private readonly CloudServiceDocumentSource _documentSource;
     private readonly string _collectorEnvelopeUrl;
     private readonly IHealthCheck[] _healthChecks;
     private readonly HttpClient _http;
     private readonly TimeSpan _heartbeatInterval;
     private readonly CancellationTokenSource _stopping = new();
-    private int _started;
+    // Wakes the loop early when a new document is offered, so a re-registration doesn't wait out a
+    // heartbeat interval.
+    private readonly SemaphoreSlim _wake = new(0, 1);
+    private int _complete;
     private Task? _runTask;
+    // The document the collector last accepted, and the one waiting to replace it (null when none).
+    private volatile RegistrationDocument? _registered;
+    private volatile RegistrationDocument? _pending;
 
     public MeshAnnouncer(
         MeshServiceInfo info,
-        CloudServiceDescriptorSource descriptorSource,
+        CloudServiceDocumentSource documentSource,
         string collectorEnvelopeUrl,
         IEnumerable<IHealthCheck> healthChecks,
         HttpClient? http = null,
         TimeSpan? heartbeatInterval = null)
     {
         _info = info;
-        _descriptorSource = descriptorSource;
+        _documentSource = documentSource;
         _collectorEnvelopeUrl = collectorEnvelopeUrl;
         _healthChecks = healthChecks.ToArray();
         _http = http ?? DefaultHttp;
@@ -49,67 +59,117 @@ internal sealed class MeshAnnouncer : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Starts the announce loop exactly once; safe to call from every invocation. The
-    /// <paramref name="resolver"/> is used only if the descriptor still needs deriving from the
-    /// registry (the lazy path); pass null when the descriptor was built eagerly.
+    /// Offers this service's document to the announce loop, starting the loop on the first offer; safe
+    /// (and, once the complete document is in hand, free) to call from every invocation. With a
+    /// <paramref name="resolver"/> the complete document is derived from the container; without one
+    /// (wire-up) only the reduced wire-up document, if any, is available. A derivation that throws is
+    /// swallowed and retried on the next call (#47).
     /// </summary>
     public void EnsureStarted(IServiceResolver? resolver)
     {
-        if (Interlocked.Exchange(ref _started, 1) == 1)
+        if (Volatile.Read(ref _complete) == 1)
         {
             return;
         }
 
-        MeshServiceDescriptor? descriptor;
+        RegistrationDocument? document;
         try
         {
-            descriptor = resolver == null ? _descriptorSource.TryGet() : _descriptorSource.Get(resolver);
+            document = resolver == null ? _documentSource.TryGetWireUp() : _documentSource.Get(resolver);
         }
         catch
         {
-            // Deriving the descriptor threw (e.g. the registry isn't ready yet) - per the class's
-            // own §6 contract, swallow it and let the next invocation retry, rather than failing
-            // the invocation that happened to trigger the lazy start or leaving _started stuck at
-            // 1 forever (#47).
-            Interlocked.Exchange(ref _started, 0);
+            // Deriving the document threw (e.g. the registry isn't ready yet) - swallow it and let the
+            // next invocation retry, rather than failing the invocation that triggered it (#47).
             return;
         }
 
-        if (descriptor == null)
+        if (document == null)
         {
-            // No descriptor available yet (lazy path started without a resolver) - let the next
-            // invocation try again rather than announcing an empty contract.
-            Interlocked.Exchange(ref _started, 0);
-            return;
+            return; // nothing to announce yet - the next invocation derives it
         }
 
-        _runTask = Task.Run(() => RunAsync(descriptor, _stopping.Token));
+        if (document.Complete)
+        {
+            Interlocked.Exchange(ref _complete, 1);
+        }
+
+        lock (_gate)
+        {
+            if (_registered?.Json == document.Json || _pending?.Json == document.Json)
+            {
+                return; // already registered, or about to be
+            }
+
+            _pending = document;
+            if (_runTask == null)
+            {
+                _runTask = Task.Run(() => RunAsync(_stopping.Token));
+                return;
+            }
+
+            try
+            {
+                if (_wake.CurrentCount == 0)
+                {
+                    _wake.Release(); // the loop is between heartbeats: register now
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+                // disposed while an invocation offered a document - nothing left to announce to
+            }
+        }
     }
 
-    private async Task RunAsync(MeshServiceDescriptor descriptor, CancellationToken cancellationToken)
+    private async Task RunAsync(CancellationToken cancellationToken)
     {
         try
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                if (await SendAsync(MeshTopics.Register, MeshJson.Serialize(descriptor)))
+                var pending = _pending;
+                if (pending != null)
                 {
-                    break;
-                }
-                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
-            }
+                    if (!await SendAsync(MeshTopics.Register, pending.Json))
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+                        continue;
+                    }
 
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                await SendAsync(MeshTopics.Heartbeat, MeshJson.Serialize(new MeshHeartbeat
+                    lock (_gate)
+                    {
+                        _registered = pending;
+                        if (ReferenceEquals(_pending, pending))
+                        {
+                            _pending = null;
+                        }
+                    }
+                }
+
+                var registered = _registered;
+                if (registered != null)
                 {
-                    Service = _info.Service,
-                    InstanceId = _info.InstanceId,
-                    DescriptorHash = descriptor.DescriptorHash,
-                    SentAt = DateTimeOffset.UtcNow,
-                    Health = await GetHealthAsync()
-                }));
-                await Task.Delay(_heartbeatInterval, cancellationToken);
+                    try
+                    {
+                        await SendAsync(MeshTopics.Heartbeat, MeshJson.Serialize(new MeshHeartbeat
+                        {
+                            Service = _info.Service,
+                            ServiceVersion = _info.ServiceVersion,
+                            InstanceId = _info.InstanceId,
+                            RegistrationHash = registered.RegistrationHash,
+                            SentAt = DateTimeOffset.UtcNow,
+                            Health = await GetHealthAsync()
+                        }));
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        // a heartbeat that cannot be built or sent is lost; the loop - and the next
+                        // heartbeat - must survive it (spec §6)
+                    }
+                }
+
+                await _wake.WaitAsync(_heartbeatInterval, cancellationToken);
             }
         }
         catch (OperationCanceledException)
@@ -189,7 +249,11 @@ internal sealed class MeshAnnouncer : IAsyncDisposable, IDisposable
         // in-flight SendAsync, so disposing the source out from under it would throw
         // ObjectDisposedException (swallowed, but a real use-after-dispose). Mirrors
         // HttpMeshTraceExporter, which stores and awaits its pump task the same way.
-        var runTask = _runTask;
+        Task? runTask;
+        lock (_gate)
+        {
+            runTask = _runTask;
+        }
         if (runTask != null)
         {
             try
@@ -203,6 +267,7 @@ internal sealed class MeshAnnouncer : IAsyncDisposable, IDisposable
         }
 
         _stopping.Dispose();
+        _wake.Dispose();
     }
 
     /// <summary>

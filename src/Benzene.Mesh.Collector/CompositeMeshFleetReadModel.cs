@@ -16,7 +16,7 @@ namespace Benzene.Mesh.Collector;
 /// isolation (a throwing source degrades its own slice to empty, never blanks the whole view — the
 /// aggregator's fetch-isolation rule):
 /// <list type="bullet">
-/// <item>Topics + their stats come from the usage feed. A usage backend has no descriptor and (for the
+/// <item>Topics + their stats come from the usage feed. A usage backend has no registration and (for the
 /// shipped CloudWatch/App-Insights adapters) no duration, so those dimensions are marked absent on each
 /// topic row (<see cref="TopicSummary.MissingFeeds"/>) rather than shown as zero.</item>
 /// <item>Recent flows and the (anonymous-but-live) service list come from the trace source. Traces are
@@ -24,7 +24,7 @@ namespace Benzene.Mesh.Collector;
 /// marked absent (<see cref="ServiceSummary.MissingFeeds"/>) — the same "from traffic alone" rule the
 /// push collector applies to an unregistered service.</item>
 /// <item>A single service's detail and a single topic's catalog row are omitted (return null): neither a
-/// trace store nor a usage feed can answer them here (no descriptor feed). They compose in a later increment.</item>
+/// trace store nor a usage feed can answer them here (no registration feed). They compose in a later increment.</item>
 /// </list>
 /// The error rule for topic stats follows the <c>result</c> tag vocabulary the usage feed carries
 /// (<c>docs/mesh-usage-feed.md</c> §1), NOT the wire-status classifiers — see <see cref="IsErrorResult"/>.
@@ -76,7 +76,7 @@ public class CompositeMeshFleetReadModel : IMeshFleetReadModel
         }
     }
 
-    // No descriptor feed on this plane, so neither a single service nor a single topic can be answered
+    // No registration feed on this plane, so neither a single service nor a single topic can be answered
     // (the fleet view derives what it can from usage + traces; the per-entity pages compose later).
     public Task<ServiceView?> ServiceAsync(string name, MeshTimeRange? range = null, CancellationToken cancellationToken = default)
         => Task.FromResult<ServiceView?>(null);
@@ -238,7 +238,7 @@ public class CompositeMeshFleetReadModel : IMeshFleetReadModel
             StatusCounts = statusCounts
         };
 
-        // Providers come from a descriptor feed this plane doesn't have; duration is absent unless a usage
+        // Providers come from a registration feed this plane doesn't have; duration is absent unless a usage
         // source measured it. Mark both so the UI renders "—", not a fabricated zero.
         summary.MissingFeeds.Add("descriptor");
         if (durationSamples == 0)

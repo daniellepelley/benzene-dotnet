@@ -75,8 +75,8 @@ namespace Benzene.CodeGen.Core
         }
 
         /// <summary>
-        /// HMAC-SHA256 (empty key) of <paramref name="json"/> as lowercase hex - the mesh descriptor's
-        /// <c>descriptorHash</c> primitive (<c>Benzene.Mesh.Contracts.MeshHashing</c> mirrors it). Not a
+        /// HMAC-SHA256 (empty key) of <paramref name="json"/> as lowercase hex - the aggregator's
+        /// artifact-drift primitive (<c>Benzene.Mesh.Contracts.MeshHashing</c> mirrors it). Not a
         /// contract hash: the contract document's two hashes are <see cref="ContractHash"/>'s.
         /// </summary>
         public static string GenerateHash(string json)

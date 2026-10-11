@@ -8,7 +8,7 @@ namespace Benzene.Mesh.Collector;
 /// <summary>
 /// The in-memory state behind the spec collector (docs/specification/mesh.md §4-§6):
 /// cumulative per-service and per-topic stats, the latest heartbeat per instance, registered
-/// descriptors (the SOLE source of the producer/consumer graph, §4), and a bounded ring of recent
+/// contract documents (mesh.md §2 - the SOLE source of the producer/consumer graph, §4), and a bounded ring of recent
 /// trace events (the trace query and the additive §4.2 observed-liveness/drift signals derive
 /// from). Everything is derived - a service that never registered still appears once its traces do
 /// (anonymous but live, with its missing feeds named), a registered service with no traffic is a
@@ -47,7 +47,7 @@ public class MeshCollectorStore : IMeshFleetReadModel
     private const int MaxFleetTraces = 20;
 
     /// <param name="maxVersionsPerService">The retention cap on how many distinct
-    /// <c>(service, serviceVersion)</c> descriptors (#251) a single service name may hold at once
+    /// <c>(service, serviceVersion)</c> registrations (#251) a single service name may hold at once
     /// (#290) - side-by-side deployments realistically hold 2-3 live versions; 8 gives generous
     /// headroom without accumulating one permanent entry per historical deploy for the life of a
     /// long-running collector process. See <see cref="EvictOneVersion"/>.</param>
@@ -67,17 +67,18 @@ public class MeshCollectorStore : IMeshFleetReadModel
 
     private class ServiceState
     {
-        /// <summary>Every currently live <c>(service, serviceVersion)</c> descriptor, keyed by
-        /// <c>ServiceVersion ?? ""</c> - the catalog key spec §2.4 requires: two releases deployed
-        /// side by side (a canary/blue-green) are two independent entries here, neither evicting the
-        /// other. A re-registration of the SAME key replaces that key's entry wholesale (today's
-        /// behavior, unchanged); a DIFFERENT key is added alongside, never removing a sibling.</summary>
-        public readonly Dictionary<string, MeshServiceDescriptor> Descriptors = new();
+        /// <summary>Every currently live <c>(service, serviceVersion)</c> registration, keyed by
+        /// <c>ServiceVersion ?? ""</c> - the catalog key mesh.md §4 gives a collector implementing Service
+        /// Versions (<c>versionScheme</c> orders versions; it is not part of the key): two releases
+        /// deployed side by side (a canary/blue-green) are two independent entries here, neither evicting
+        /// the other. A re-registration of the SAME key replaces that key's entry wholesale; a DIFFERENT
+        /// key is added alongside, never removing a sibling.</summary>
+        public readonly Dictionary<string, MeshRegistration> Registrations = new();
 
         /// <summary>Monotonic registration-order stamp per version key (#290), set every time
-        /// <see cref="Descriptors"/> gains or refreshes that key - what makes "least-recently-
+        /// <see cref="Registrations"/> gains or refreshes that key - what makes "least-recently-
         /// registered" well-defined for <see cref="EvictOneVersion"/>'s eviction ordering.</summary>
-        public readonly Dictionary<string, long> DescriptorRegisteredAt = new();
+        public readonly Dictionary<string, long> RegisteredAt = new();
         public readonly Dictionary<string, InstanceState> Instances = new();
         public DateTimeOffset LastSeen;
         public long Invocations;
@@ -88,22 +89,26 @@ public class MeshCollectorStore : IMeshFleetReadModel
 
         /// <summary>The most recently registered version's key. The service-NAME-level summary row
         /// (<see cref="ServiceSummary"/>/<see cref="ServiceView"/>'s scalar Runtime/Binding/Placement/
-        /// Topics/ServiceVersion/Descriptor fields) reports THIS version, preserving today's
+        /// Topics/ServiceVersion/Registration fields) reports THIS version, preserving the
         /// one-row-per-name shape for every caller that queries by name alone. Older still-live
-        /// versions remain fully present in <see cref="Descriptors"/> (and in the topic catalog's
+        /// versions remain fully present in <see cref="Registrations"/> (and in the topic catalog's
         /// Providers/Consumers) for hash comparison and the declared graph - they're just not the
         /// name-level "headline" row.</summary>
         public string? CurrentVersionKey;
 
-        public MeshServiceDescriptor? Descriptor =>
-            CurrentVersionKey != null && Descriptors.TryGetValue(CurrentVersionKey, out var d) ? d : null;
+        public MeshRegistration? Registration =>
+            CurrentVersionKey != null && Registrations.TryGetValue(CurrentVersionKey, out var r) ? r : null;
     }
 
     private class InstanceState
     {
         public bool Healthy;
         public DateTimeOffset LastHeartbeat;
-        public string? DescriptorHash;
+        /// <summary>The heartbeat's <c>serviceVersion</c> key (<c>""</c> when it declared none) - which
+        /// registration its hash is compared with (mesh.md §5).</summary>
+        public string VersionKey = string.Empty;
+        public string? ServiceVersion;
+        public string? RegistrationHash;
     }
 
     private class TopicState
@@ -117,69 +122,75 @@ public class MeshCollectorStore : IMeshFleetReadModel
         public DateTimeOffset LastSeen;
     }
 
-    /// <summary>Stores the descriptor as the service's current contract, replacing any previous
-    /// registration wholesale - a redeploy that drops a topic drops the consumer claim with it, and
-    /// one that drops a produced topic drops the provider claim with it, symmetrically (spec §4).
-    /// This - <c>topics</c> for CONSUMERS, <c>produces</c> for PROVIDERS - is the SOLE source of the
-    /// producer/consumer graph: trace parentage never admits or removes an edge here, only feeds the
-    /// separate observed signals in <see cref="RecordObservedActivityAndDrift"/>.</summary>
+    /// <summary>Stores the registered contract document (mesh.md §2) as this <c>(service,
+    /// serviceVersion)</c>'s current contract, replacing any previous registration of the same key
+    /// wholesale - a redeploy that drops a topic from <c>requests</c> drops the consumer claim with it,
+    /// and one that drops a topic from <c>events</c> or <c>sends</c> drops the provider claim with it,
+    /// symmetrically (spec §4). This - <c>requests</c> for CONSUMERS, <c>events</c> ∪ <c>sends</c> for
+    /// PROVIDERS - is the SOLE source of the producer/consumer graph: trace parentage never admits or
+    /// removes an edge here, only feeds the separate observed signals in
+    /// <see cref="RecordObservedActivityAndDrift"/>.</summary>
     /// <remarks>
-    /// The role assignment inverted in the 2026-08 revision: registering a handler for a topic makes
-    /// a service that topic's consumer, not its provider, matching how every broker in the field
-    /// uses the words. Before that, <c>topics</c> fed Providers and a field named <c>consumes</c>
-    /// fed Consumers - exactly backwards.
+    /// Only <c>service</c> is required (mesh.md §2); the caller has checked it. A member that is absent
+    /// or named in <c>degraded</c> is unknown and contributes no edges, and <c>benzene:</c> entries are
+    /// ignored (<see cref="MeshRegistration.KnownEntries"/>). The carried <c>registrationHash</c> is
+    /// trusted as is - never recomputed, never a reason to reject.
     /// </remarks>
-    public void Register(MeshServiceDescriptor descriptor)
+    public void Register(MeshRegistration registration)
     {
-        // A wire payload can deserialize "topics"/"produces": null into an actual null (nullable-
-        // reference annotations aren't enforced at runtime). Coalesce on the descriptor itself - not
-        // just a local variable - so every later read of state.Descriptor.Topics/Produces (e.g.
-        // ContainsTopic/ServiceSummaryLocked) also sees an empty list rather than null (spec §6: no
-        // missing feed ever fails ingestion).
-        descriptor.Topics ??= new List<MeshTopicDescriptor>();
-        descriptor.Produces ??= new List<MeshTopicDescriptor>();
-
-        var versionKey = descriptor.ServiceVersion ?? string.Empty;
+        var versionKey = registration.ServiceVersion ?? string.Empty;
 
         lock (_lock)
         {
-            var state = EnsureService(descriptor.Service);
+            var state = EnsureService(registration.Service);
 
             // Retract only what THIS version previously declared, not every topic the service name
-            // has ever touched (spec §2.4): a re-registration of the SAME (service, version) pair
-            // replaces its edges wholesale, exactly like before; a DIFFERENT version registering
-            // alongside it must never evict a still-live sibling version's edges - two versions
-            // producing/consuming different topics side by side is the expected canary/blue-green
-            // state, not something to silently retire.
-            if (state.Descriptors.ContainsKey(versionKey))
+            // has ever touched (spec §4): a re-registration of the SAME (service, version) pair
+            // replaces its edges wholesale; a DIFFERENT version registering alongside it must never
+            // evict a still-live sibling version's edges - two versions producing/consuming different
+            // topics side by side is the expected canary/blue-green state.
+            if (state.Registrations.ContainsKey(versionKey))
             {
-                RetractEdges(state, versionKey, descriptor.Service);
+                RetractEdges(state, versionKey, registration.Service);
             }
-            else if (state.Descriptors.Count >= _maxVersionsPerService)
+            else if (state.Registrations.Count >= _maxVersionsPerService)
             {
-                // versionKey is a brand-new key, not yet in Descriptors, and is about to become
+                // versionKey is a brand-new key, not yet in Registrations, and is about to become
                 // CurrentVersionKey below - so it is never itself an eviction candidate here, and
                 // the OLD current version's protection lapses the instant its successor registers
                 // (#290: it stops being this service's headline the moment this call completes).
-                EvictOneVersion(state, descriptor.Service);
+                EvictOneVersion(state, registration.Service);
             }
 
-            state.Descriptors[versionKey] = descriptor;
-            state.DescriptorRegisteredAt[versionKey] = ++_versionSequence;
+            state.Registrations[versionKey] = registration;
+            state.RegisteredAt[versionKey] = ++_versionSequence;
             state.CurrentVersionKey = versionKey;
             state.LastSeen = DateTimeOffset.UtcNow;
 
-            // topics -> Consumers, produces -> Providers. Handling a topic makes you its consumer.
-            foreach (var topic in descriptor.Topics)
+            // requests -> Consumers; events ∪ sends -> Providers. Handling a topic makes you its
+            // consumer; publishing an event on it or sending to it makes you its provider.
+            foreach (var key in ConsumedKeys(registration))
             {
-                EnsureTopic((topic.Id, topic.Version ?? string.Empty)).Consumers.Add(descriptor.Service);
+                EnsureTopic(key).Consumers.Add(registration.Service);
             }
-            foreach (var topic in descriptor.Produces)
+            foreach (var key in ProvidedKeys(registration))
             {
-                EnsureTopic((topic.Id, topic.Version ?? string.Empty)).Providers.Add(descriptor.Service);
+                EnsureTopic(key).Providers.Add(registration.Service);
             }
         }
     }
+
+    private static (string Id, string Version) Key(MeshRegisteredEntry entry) => (entry.Topic, entry.Version ?? string.Empty);
+
+    /// <summary>The topics a registration consumes: its known <c>requests</c>.</summary>
+    private static IEnumerable<(string Id, string Version)> ConsumedKeys(MeshRegistration registration)
+        => registration.KnownEntries(MeshRegistrationMembers.Requests).Select(Key).Distinct();
+
+    /// <summary>The topics a registration provides: its known <c>events</c> ∪ <c>sends</c>.</summary>
+    private static IEnumerable<(string Id, string Version)> ProvidedKeys(MeshRegistration registration)
+        => registration.KnownEntries(MeshRegistrationMembers.Events)
+            .Concat(registration.KnownEntries(MeshRegistrationMembers.Sends))
+            .Select(Key).Distinct();
 
     /// <summary>Removes the provider/consumer edges one specific service+version's prior registration
     /// (<paramref name="versionKey"/>) contributed, leaving every other service's edges - and every
@@ -189,47 +200,41 @@ public class MeshCollectorStore : IMeshFleetReadModel
     /// The edge sets hold service NAMES, because graph membership is by service, not by version (spec
     /// §4): two live versions declaring one topic contribute one edge. So retracting one version must
     /// not remove a name a sibling version still declares - re-registering v1 without a topic would
-    /// otherwise erase the edge v2 keeps declaring, which §2.4 forbids ("MUST NOT disturb a different
+    /// otherwise erase the edge v2 keeps declaring, which §4 forbids ("MUST NOT disturb a different
     /// service version of the same service"). Called before <paramref name="versionKey"/>'s entry is
     /// replaced or removed, so the sibling check excludes it explicitly.
     /// </remarks>
     private void RetractEdges(ServiceState state, string versionKey, string service)
     {
-        var retracted = state.Descriptors[versionKey];
-        var siblings = state.Descriptors.Where(x => x.Key != versionKey).Select(x => x.Value).ToList();
+        var retracted = state.Registrations[versionKey];
+        var siblings = state.Registrations.Where(x => x.Key != versionKey).Select(x => x.Value).ToList();
 
-        foreach (var topic in retracted.Topics)
+        foreach (var key in ConsumedKeys(retracted))
         {
-            var key = (topic.Id, topic.Version ?? string.Empty);
-            if (_topics.TryGetValue(key, out var topicState)
-                && !siblings.Any(d => d.Topics.Any(t => (t.Id, t.Version ?? string.Empty) == key)))
+            if (_topics.TryGetValue(key, out var topicState) && !siblings.Any(r => ConsumedKeys(r).Contains(key)))
             {
                 topicState.Consumers.Remove(service);
             }
         }
-        foreach (var topic in retracted.Produces)
+        foreach (var key in ProvidedKeys(retracted))
         {
-            var key = (topic.Id, topic.Version ?? string.Empty);
-            if (_topics.TryGetValue(key, out var topicState)
-                && !siblings.Any(d => d.Produces.Any(t => (t.Id, t.Version ?? string.Empty) == key)))
+            if (_topics.TryGetValue(key, out var topicState) && !siblings.Any(r => ProvidedKeys(r).Contains(key)))
             {
                 topicState.Providers.Remove(service);
             }
         }
     }
 
-    /// <summary>Evicts one version from <paramref name="state"/>'s <see cref="ServiceState.Descriptors"/>
+    /// <summary>Evicts one version from <paramref name="state"/>'s <see cref="ServiceState.Registrations"/>
     /// (#290) when a brand-new version registration would otherwise push the service over
-    /// <see cref="_maxVersionsPerService"/> - the dictionary has held one permanent entry per
-    /// historical <c>ServiceVersion</c> ever since #251 introduced it, unboundedly, for the life of a
-    /// long-running collector process. Preference order: the least-recently-registered version (by
-    /// <see cref="ServiceState.DescriptorRegisteredAt"/>) that has NO live instance currently
-    /// reporting its <see cref="MeshServiceDescriptor.DescriptorHash"/> (<see cref="HasLiveInstance"/>);
-    /// if every retained version has one, the cap still wins and the least-recently-registered version
-    /// is evicted regardless - this is a bounded in-memory diagnostic store, not a health signal, so
-    /// nothing is logged or counted. The evicted version's provider/consumer edges are retracted
-    /// (<see cref="RetractEdges"/>) exactly as a same-key re-registration does today, so nothing is
-    /// left dangling in the topic catalog.</summary>
+    /// <see cref="_maxVersionsPerService"/> - without the cap the map would hold one permanent entry per
+    /// historical <c>serviceVersion</c> for the life of a long-running collector process. Preference
+    /// order: the least-recently-registered version (by <see cref="ServiceState.RegisteredAt"/>) that
+    /// has NO live instance currently heartbeating it (<see cref="HasLiveInstance"/>); if every
+    /// retained version has one, the cap still wins and the least-recently-registered version is
+    /// evicted regardless - this is a bounded in-memory diagnostic store, not a health signal. The
+    /// evicted version's provider/consumer edges are retracted (<see cref="RetractEdges"/>) exactly as
+    /// a same-key re-registration does, so nothing is left dangling in the topic catalog.</summary>
     private void EvictOneVersion(ServiceState state, string service)
     {
         string? deadVictim = null;
@@ -237,15 +242,15 @@ public class MeshCollectorStore : IMeshFleetReadModel
         string? anyVictim = null;
         var anyVictimOrder = long.MaxValue;
 
-        foreach (var key in state.Descriptors.Keys)
+        foreach (var key in state.Registrations.Keys)
         {
-            var order = state.DescriptorRegisteredAt.GetValueOrDefault(key, 0);
+            var order = state.RegisteredAt.GetValueOrDefault(key, 0);
             if (order < anyVictimOrder)
             {
                 anyVictim = key;
                 anyVictimOrder = order;
             }
-            if (!HasLiveInstance(state, state.Descriptors[key].DescriptorHash) && order < deadVictimOrder)
+            if (!HasLiveInstance(state, key) && order < deadVictimOrder)
             {
                 deadVictim = key;
                 deadVictimOrder = order;
@@ -255,20 +260,18 @@ public class MeshCollectorStore : IMeshFleetReadModel
         var evictKey = deadVictim ?? anyVictim;
         if (evictKey == null)
         {
-            return; // nothing to evict (e.g. Descriptors is empty)
+            return; // nothing to evict (e.g. Registrations is empty)
         }
 
         RetractEdges(state, evictKey, service);
-        state.Descriptors.Remove(evictKey);
-        state.DescriptorRegisteredAt.Remove(evictKey);
+        state.Registrations.Remove(evictKey);
+        state.RegisteredAt.Remove(evictKey);
     }
 
-    /// <summary>Whether any currently reporting instance's last heartbeat hash matches this specific
-    /// version's descriptor hash (spec §2.4-shaped signal, reused from <see cref="ServiceState.Instances"/>
-    /// for #290's eviction preference) - a version with no descriptor hash can never be "live" by this
-    /// check (nothing to match), matching <see cref="HashMatches"/>'s null-is-unknown treatment.</summary>
-    private static bool HasLiveInstance(ServiceState state, string? descriptorHash)
-        => descriptorHash != null && state.Instances.Values.Any(i => i.DescriptorHash == descriptorHash);
+    /// <summary>Whether any currently reporting instance heartbeats this version (its heartbeat's
+    /// <c>serviceVersion</c> is <paramref name="versionKey"/>) - #290's eviction preference.</summary>
+    private static bool HasLiveInstance(ServiceState state, string versionKey)
+        => state.Instances.Values.Any(i => i.VersionKey == versionKey);
 
     /// <summary>Records the latest health report for one instance.</summary>
     public void Heartbeat(MeshHeartbeat heartbeat)
@@ -281,7 +284,9 @@ public class MeshCollectorStore : IMeshFleetReadModel
             {
                 Healthy = heartbeat.Health?.IsHealthy ?? false,
                 LastHeartbeat = DateTimeOffset.UtcNow,
-                DescriptorHash = heartbeat.DescriptorHash
+                VersionKey = heartbeat.ServiceVersion ?? string.Empty,
+                ServiceVersion = string.IsNullOrEmpty(heartbeat.ServiceVersion) ? null : heartbeat.ServiceVersion,
+                RegistrationHash = heartbeat.RegistrationHash
             };
         }
     }
@@ -516,25 +521,26 @@ public class MeshCollectorStore : IMeshFleetReadModel
                 Invocations = summary.Invocations,
                 Errors = summary.Errors,
                 MissingFeeds = summary.MissingFeeds,
-                Descriptor = state.Descriptor,
+                Registration = state.Registration,
                 Instances = state.Instances
                     .OrderBy(x => x.Key, StringComparer.Ordinal)
                     .Select(pair => new InstanceView
                     {
                         InstanceId = pair.Key,
+                        ServiceVersion = pair.Value.ServiceVersion,
                         Healthy = pair.Value.Healthy,
                         LastHeartbeat = pair.Value.LastHeartbeat,
-                        DescriptorHash = pair.Value.DescriptorHash,
-                        HashMatches = HashMatches(state, pair.Value.DescriptorHash)
+                        RegistrationHash = pair.Value.RegistrationHash,
+                        HashMatches = HashMatches(state, pair.Value)
                     })
                     .ToList(),
                 // D26: the per-version breakdown, oldest registration first (the headline is last).
-                Versions = state.Descriptors
-                    .OrderBy(x => state.DescriptorRegisteredAt.GetValueOrDefault(x.Key, 0))
+                Versions = state.Registrations
+                    .OrderBy(x => state.RegisteredAt.GetValueOrDefault(x.Key, 0))
                     .Select(x => new ServiceVersionSummary
                     {
                         ServiceVersion = x.Value.ServiceVersion,
-                        Topics = x.Value.Topics.Count
+                        Topics = ConsumedKeys(x.Value).Count()
                     })
                     .ToList(),
                 // The service's counts are cumulative-since-start; a requested window is reported (with
@@ -637,25 +643,23 @@ public class MeshCollectorStore : IMeshFleetReadModel
         return state;
     }
 
-    /// <summary>Whether an instance's reported hash matches the descriptor of ITS OWN live version
-    /// (spec §2.4). Compared against EVERY currently registered <c>(service, version)</c> pair's
-    /// hash for this service, not just the name-level "current" row - so two different, live
-    /// versions each reporting their own correct-but-different hash both read as matching (the
-    /// expected side-by-side deployment state), and only a hash that matches none of the service's
-    /// live descriptors reads as drift. Null when either side has nothing to compare - no hash
-    /// reported by the instance, or no live descriptor for the service carries a hash at all -
-    /// unknown, never treated as drift.</summary>
-    private static bool? HashMatches(ServiceState state, string? reportedHash)
+    /// <summary>Whether an instance's reported <c>registrationHash</c> matches the document registered
+    /// for ITS OWN <c>(service, serviceVersion)</c> (mesh.md §5) - the heartbeat's
+    /// <c>serviceVersion</c> picks the registration, and its hash is compared with that registration's
+    /// carried <c>registrationHash</c>, never with a different release's: two releases deployed side by
+    /// side legitimately report different hashes. Null (unknown, never drift) when the instance reported
+    /// no hash, when no document is registered for its version (an unregistered instance, not a
+    /// mismatch), or when that document carried no hash.</summary>
+    private static bool? HashMatches(ServiceState state, InstanceState instance)
     {
-        if (reportedHash == null)
+        if (instance.RegistrationHash == null
+            || !state.Registrations.TryGetValue(instance.VersionKey, out var registration)
+            || registration.RegistrationHash == null)
         {
             return null;
         }
-        var knownHashes = state.Descriptors.Values
-            .Select(d => d.DescriptorHash)
-            .Where(hash => hash != null)
-            .ToList();
-        return knownHashes.Count == 0 ? null : knownHashes.Contains(reportedHash);
+
+        return registration.RegistrationHash == instance.RegistrationHash;
     }
 
     private TopicState EnsureTopic((string Id, string Version) key)
@@ -679,12 +683,13 @@ public class MeshCollectorStore : IMeshFleetReadModel
     /// <see cref="TopicSummaryLocked"/> can report a per-edge last-observed-at rather than a boolean.
     /// The two sides follow the same 2026-08 inversion as the declared graph: whoever handles the
     /// message consumes it, whoever sent it provides it.</item>
-    /// <item><b>Undeclared → contract-drift</b>: when the handling/calling service HAS a registered,
-    /// non-degraded descriptor, but this topic isn't in its declared <c>topics</c>/<c>produces</c>, the
+    /// <item><b>Undeclared → contract-drift</b>: when the handling/calling service HAS registered, with
+    /// the relevant members known, but this topic isn't in its declared <c>requests</c> (handler) or
+    /// <c>events</c> ∪ <c>sends</c> (caller), the
     /// running system disagrees with the declared contract - filed as a contract-drift issue (spec
     /// §4.1's classification vocabulary already reserves this bucket) via the same merged <see cref="_issues"/>
-    /// map the emitter-reported feed uses. An anonymous/never-registered service (no descriptor at
-    /// all) is never flagged - it has no contract to diverge from.</item>
+    /// map the emitter-reported feed uses. An anonymous/never-registered service is never flagged - it
+    /// has no contract to diverge from - nor is one whose relevant member is unknown.</item>
     /// </list>
     /// </summary>
     private void RecordObservedActivityAndDrift(MeshTraceEvent traceEvent)
@@ -696,14 +701,17 @@ public class MeshCollectorStore : IMeshFleetReadModel
 
         var key = (traceEvent.Topic, traceEvent.TopicVersion ?? string.Empty);
         var observedAt = DateTimeOffset.UtcNow;
+        // A reserved (benzene:) topic is never an undeclared edge (mesh.md §4.2): no document lists one
+        // (contract-document.md §1), so a trace of benzene:spec or benzene:healthcheck is no drift.
+        var mayDrift = !Benzene.Abstractions.BenzeneTopic.IsReserved(traceEvent.Topic);
 
         if (!string.IsNullOrEmpty(traceEvent.Service))
         {
             var handler = traceEvent.Service!;
             EnsureActivity(_consumerActivity, key)[handler] = observedAt;
 
-            if (_services.TryGetValue(handler, out var handlerState) &&
-                IsDeclared(handlerState, MeshDescriptorFactory.RegistryFeed) &&
+            if (mayDrift && _services.TryGetValue(handler, out var handlerState) &&
+                CanBeUndeclared(handlerState, consumerSide: true) &&
                 !ContainsTopicInAnyLiveVersion(handlerState, key, consumerSide: true))
             {
                 FileContractDrift(handler, traceEvent);
@@ -716,8 +724,8 @@ public class MeshCollectorStore : IMeshFleetReadModel
         {
             EnsureActivity(_providerActivity, key)[caller] = observedAt;
 
-            if (_services.TryGetValue(caller, out var callerState) &&
-                IsDeclared(callerState, MeshDescriptorFactory.OutboundRegistryFeed) &&
+            if (mayDrift && _services.TryGetValue(caller, out var callerState) &&
+                CanBeUndeclared(callerState, consumerSide: false) &&
                 !ContainsTopicInAnyLiveVersion(callerState, key, consumerSide: false))
             {
                 FileContractDrift(caller, traceEvent);
@@ -742,33 +750,27 @@ public class MeshCollectorStore : IMeshFleetReadModel
         return map;
     }
 
-    /// <summary>A service "has a contract to diverge from" only when at least one of its currently
-    /// LIVE descriptors' relevant list isn't itself degraded (a port that hasn't wired up the
-    /// registry/outbound-registry yet genuinely doesn't know its own topics/consumes, so flagging it
-    /// would be a false positive, not a real drift). Checked across every live version (#283), not
-    /// just the "headline" one - mirroring <see cref="HashMatches"/>'s any-live-version rule.</summary>
-    private static bool IsDeclared(ServiceState state, string feedName)
-        => state.Descriptors.Values.Any(d => !(d.Degraded?.Contains(feedName) ?? false));
+    /// <summary>A service "has a contract to diverge from" on one side only when it has registered and
+    /// EVERY currently live registration knows that side's members - <c>requests</c> for the consumer
+    /// side, both <c>events</c> and <c>sends</c> for the provider side. A member that is absent or named
+    /// in <c>degraded</c> is unknown (mesh.md §2): the topic might be in it, so a trace on it is not
+    /// undeclared (§4.2), and flagging it would be a false positive. Checked across every live version
+    /// (#283), like <see cref="ContainsTopicInAnyLiveVersion"/>.</summary>
+    private static bool CanBeUndeclared(ServiceState state, bool consumerSide)
+        => state.Registrations.Count > 0 && state.Registrations.Values.All(r => consumerSide
+            ? r.IsKnown(MeshRegistrationMembers.Requests)
+            : r.IsKnown(MeshRegistrationMembers.Events) && r.IsKnown(MeshRegistrationMembers.Sends));
 
     /// <summary>Whether ANY currently live version of the service declares <paramref name="key"/> on
-    /// the relevant side (consumer/<c>Topics</c> or provider/<c>Produces</c>) - the #283 fix.
-    /// <see cref="RecordObservedActivityAndDrift"/> is the OTHER place (besides <see cref="HashMatches"/>)
-    /// the collector infers contract drift from <see cref="ServiceState.Descriptors"/>, and it must
-    /// reason about live versions the same way: before this fix it read only
-    /// <c>Descriptors[CurrentVersionKey]</c> (the most-recently-registered version), so a trace event
-    /// from an OLDER, still-live, correctly-registered version was checked against a NEWER sibling
-    /// version's declared topics/produces - reintroducing, one call path lower in this same file, the
-    /// exact false-positive #251 fixed for <see cref="HashMatches"/> (a healthy side-by-side canary/
-    /// blue-green deployment misfiled as contract drift). Accepted trade-off, documented rather than a
-    /// silent false positive: <c>MeshTraceEvent</c> carries no per-event <c>ServiceVersion</c> (a
-    /// wire-shape gap - tracked as an open maintainer question in <c>work/outstanding-bugs.md</c>), so
-    /// a genuine single-version drift on an edge that another live version happens to also declare
-    /// goes undetected until that other version retires.</summary>
+    /// the relevant side (consumer: <c>requests</c>; provider: <c>events</c> ∪ <c>sends</c>) - the #283
+    /// fix: a trace event from an OLDER, still-live, correctly-registered version must not be checked
+    /// against a NEWER sibling's declared topics only, or a healthy side-by-side canary/blue-green
+    /// deployment is misfiled as contract drift. Accepted trade-off, documented rather than a silent
+    /// false positive: <c>MeshTraceEvent</c> carries no per-event <c>serviceVersion</c> (tracked in
+    /// <c>work/outstanding-bugs.md</c>), so a genuine single-version drift on an edge another live
+    /// version also declares goes undetected until that other version retires.</summary>
     private static bool ContainsTopicInAnyLiveVersion(ServiceState state, (string Id, string Version) key, bool consumerSide)
-        => state.Descriptors.Values.Any(d => ContainsTopic(consumerSide ? d.Topics : d.Produces, key));
-
-    private static bool ContainsTopic(List<MeshTopicDescriptor> topics, (string Id, string Version) key)
-        => topics.Any(t => t.Id == key.Id && (t.Version ?? string.Empty) == key.Version);
+        => state.Registrations.Values.Any(r => (consumerSide ? ConsumedKeys(r) : ProvidedKeys(r)).Contains(key));
 
     /// <summary>Synthesizes one contract-drift occurrence and merges it into the same fingerprint-keyed
     /// <see cref="_issues"/> map <see cref="AddIssues"/> merges emitter-reported occurrences into (spec
@@ -828,17 +830,22 @@ public class MeshCollectorStore : IMeshFleetReadModel
             Errors = state.Errors
         };
 
-        if (state.Descriptor != null)
+        var registration = state.Registration;
+        if (registration != null)
         {
-            summary.Runtime = state.Descriptor.Runtime;
-            summary.Binding = state.Descriptor.Binding;
-            summary.Placement = state.Descriptor.Placement;
-            summary.Topics = state.Descriptor.Topics.Count;
-            summary.ServiceVersion = state.Descriptor.ServiceVersion;
+            summary.Runtime = registration.Runtime;
+            // The read model's binding (Provisional): the registration's first transport, now that the
+            // document carries transports rather than a single binding.
+            summary.Binding = registration.Transports?.FirstOrDefault(x => !string.IsNullOrEmpty(x));
+            summary.Placement = registration.Placement ?? new MeshPlacement();
+            summary.Topics = ConsumedKeys(registration).Count();
+            summary.ServiceVersion = registration.ServiceVersion;
         }
         else
         {
-            summary.MissingFeeds.Add("descriptor"); // known only from traffic: anonymous but live
+            // Known only from traffic: anonymous but live. The read models name the registration feed
+            // "descriptor" (mesh.md §6).
+            summary.MissingFeeds.Add("descriptor");
         }
 
         if (state.Instances.Count == 0)

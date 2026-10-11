@@ -11,8 +11,7 @@ namespace Benzene.CodeGen.Core;
 /// <c>Number::toString</c> algorithm JCS mandates, no insignificant whitespace, and the I-JSON
 /// (RFC 7493) string-escaping rules. This is what <see cref="ContractHash"/> canonicalizes over
 /// before hashing - see <c>docs/specification/contract-document.md</c> §6.2/§6.3 for why JCS (rather
-/// than a documented member order, as <c>Benzene.Mesh.Contracts.MeshHashing</c>'s sibling
-/// <c>descriptorHash</c> uses) is required here: <c>contractHash</c> is compared across independently
+/// than a documented member order, as the retired mesh <c>descriptorHash</c> used) is required here: <c>contractHash</c> is compared across independently
 /// implemented ports, so canonicalization must be mechanical rather than a hand-implementable
 /// convention four implementations could each get subtly wrong.
 /// </summary>

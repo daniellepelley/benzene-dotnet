@@ -6,7 +6,7 @@ namespace Benzene.Schema.OpenApi;
 /// <summary>
 /// The reserved "utility" topics of the Benzene Cloud Service Profile
 /// (docs/specification/cloud-service-profile.md) — operational surfaces (spec, health, mesh
-/// descriptor, envelope, self-report) that every conformant service exposes but which are not part
+/// feeds, envelope, self-report) that every conformant service exposes but which are not part
 /// of its business domain. Spec and mesh tooling use this to separate them from a service's domain
 /// topics (e.g. hide them behind a "show utilities" toggle).
 /// </summary>

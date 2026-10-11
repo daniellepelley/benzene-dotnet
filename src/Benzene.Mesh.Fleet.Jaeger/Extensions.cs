@@ -22,7 +22,7 @@ public static class Extensions
     /// Registers an <see cref="HttpClient"/> unless one is already registered. Add a usage source
     /// separately for topic stats; without one the composite still serves traces/correlation/recent-flows/
     /// services and reports no topic stats (honest empty). Per-service and single-topic pages stay omitted
-    /// (no descriptor feed here).
+    /// (no registration feed here).
     /// </remarks>
     /// <param name="services">The service container to register with.</param>
     /// <param name="options">Where and over what windows to query Jaeger.</param>

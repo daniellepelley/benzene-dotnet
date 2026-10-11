@@ -1,39 +1,38 @@
 using System.Reflection;
 using Benzene.Abstractions.Hosting;
-using Benzene.Abstractions.MessageHandlers;
-using Benzene.Abstractions.Messages;
-using Benzene.Core.MessageHandlers;
-using Benzene.Mesh.Wire;
 using Benzene.Microsoft.Dependencies;
 using Benzene.Schema.OpenApi;
+using Benzene.Schema.OpenApi.EventService;
+using Microsoft.OpenApi;
+using Microsoft.OpenApi.Extensions;
 
 namespace Benzene.Descriptor;
 
 /// <summary>
-/// The contract artifact(s) <see cref="DescriptorEmitter"/> produced from a built service, one or
-/// both depending on <see cref="EmitOptions.Emit"/>. Both are wire-shape JSON text, ready to write to
-/// disk or compare against a mesh artifact store.
+/// The contract artifact <see cref="DescriptorEmitter"/> produced from a built service: the contract
+/// document as JSON, ready to write to disk or compare against a mesh artifact store.
 /// </summary>
-public sealed record DescriptorEmitResult(string? SpecJson, string? DescriptorJson);
+public sealed record DescriptorEmitResult(string SpecJson);
 
 /// <summary>
-/// Emits a service's contract artifacts from a built, non-running Benzene service:
-/// <c>spec</c> — the <c>EventServiceDocument</c> (codegen/gate input), and <c>descriptor</c> — the
-/// mesh §2 <c>ServiceDescriptor</c> wire shape, exactly as <c>benzene:mesh:register</c> sends it
-/// (<c>MeshJson.Serialize(MeshDescriptorFactory.Create(...))</c> — see <c>docs/specification/mesh.md</c>
-/// §2 in the Benzene repo). No deploy, no socket.
+/// Emits a service's contract document (contract-document.md) from a built, non-running Benzene
+/// service - the document its <c>benzene:spec</c> topic serves and, with the deployment-side fields,
+/// the body it registers with a mesh collector (mesh.md §2). One builder (<see cref="SpecBuilder"/>)
+/// for all three. No deploy, no socket.
 ///
-/// (The older distilled deployment projection — consumes/produces/transportKind — is deferred as a
-/// future <c>--emit deploy</c>; see the 2026-08-12 owner design review, Amendment A, in
-/// <c>work/archive/spec-mesh-tooling-implementation-plan-2026-08.md</c>. <see cref="OutboundRouteInspector"/> is kept,
-/// unused for now, for when that lands.)
+/// The mesh ServiceDescriptor (<c>{name}.service.json</c>) this tool used to emit beside it was retired
+/// in spec-0.4.0: the contract document is the register body. (The older distilled deployment
+/// projection - consumes/produces/transportKind - is deferred as a future <c>--emit deploy</c>; see the
+/// 2026-08-12 owner design review, Amendment A, in
+/// <c>work/archive/spec-mesh-tooling-implementation-plan-2026-08.md</c>.
+/// <see cref="OutboundRouteInspector"/> is kept, unused for now, for when that lands.)
 /// </summary>
 public static class DescriptorEmitter
 {
     /// <summary>
-    /// Builds the requested artifact(s) in-process. Callable directly (no process spawn) so tests
-    /// can assert on the JSON without shelling out to <c>Program.cs</c>; <c>Program.cs</c> itself is
-    /// a thin shell over this plus file I/O and exit codes.
+    /// Builds the contract document in-process. Callable directly (no process spawn) so tests can
+    /// assert on the JSON without shelling out to <c>Program.cs</c>; <c>Program.cs</c> itself is a thin
+    /// shell over this plus file I/O and exit codes.
     /// </summary>
     public static DescriptorEmitResult Emit(EmitOptions options)
     {
@@ -53,51 +52,23 @@ public static class DescriptorEmitter
             : HostAdapters.Select(assembly);
         var build = adapter.Build(startUpType);
 
-        string? specJson = null;
-        string? descriptorJson = null;
-
-        if (options.Emit is "spec" or "both")
-            specJson = BuildSpec(build.Resolver);
-
-        if (options.Emit is "descriptor" or "both")
-            descriptorJson = BuildMesh(assembly, options);
-
-        return new DescriptorEmitResult(specJson, descriptorJson);
+        return new DescriptorEmitResult(BuildSpec(build.Resolver, assembly, options));
     }
 
     /// <summary>
-    /// Resolves where each requested artifact should be written, per Amendment C's "next to build
-    /// output, <c>--output</c> overridable" rule: no <c>--output</c> defaults both files next to the
-    /// assembly, named after it (<c>&lt;AssemblyName&gt;.spec.json</c> / <c>.service.json</c>); a
-    /// single-artifact <c>--emit</c> treats <c>--output</c> as that artifact's exact path; with
-    /// <c>--emit both</c>, <c>--output</c> is treated as the *descriptor* path and the spec path is
-    /// derived from it (<c>.service.json</c> → <c>.spec.json</c>, else <c>.spec.json</c> appended).
+    /// Where the contract document is written, per Amendment C's "next to build output,
+    /// <c>--output</c> overridable" rule: <c>--output</c> is the exact path; without it,
+    /// <c>&lt;AssemblyName&gt;.spec.json</c> next to the assembly.
     /// </summary>
-    public static (string? SpecPath, string? DescriptorPath) ResolveOutputPaths(EmitOptions options)
+    public static string ResolveOutputPath(EmitOptions options)
     {
-        var wantsSpec = options.Emit is "spec" or "both";
-        var wantsDescriptor = options.Emit is "descriptor" or "both";
-
-        if (options.OutputPath is null)
+        if (options.OutputPath is not null)
         {
-            var fullPath = Path.GetFullPath(options.AssemblyPath);
-            var baseName = Path.Combine(
-                Path.GetDirectoryName(fullPath) ?? ".",
-                Path.GetFileNameWithoutExtension(fullPath));
-            return (
-                wantsSpec ? baseName + ".spec.json" : null,
-                wantsDescriptor ? baseName + ".service.json" : null);
+            return options.OutputPath;
         }
 
-        if (options.Emit == "spec") return (options.OutputPath, null);
-        if (options.Emit == "descriptor") return (null, options.OutputPath);
-
-        // "both": --output is the descriptor path; derive the spec path from it.
-        var descriptorPath = options.OutputPath;
-        var specPath = descriptorPath.EndsWith(".service.json", StringComparison.OrdinalIgnoreCase)
-            ? descriptorPath[..^".service.json".Length] + ".spec.json"
-            : descriptorPath + ".spec.json";
-        return (specPath, descriptorPath);
+        var fullPath = Path.GetFullPath(options.AssemblyPath);
+        return Path.Combine(Path.GetDirectoryName(fullPath) ?? ".", Path.GetFileNameWithoutExtension(fullPath)) + ".spec.json";
     }
 
     // The README's documented ALC pinning risk: ServiceLoadContext always prefers the tool's own
@@ -151,43 +122,46 @@ public static class DescriptorEmitter
         };
     }
 
-    // Runs SpecBuilder directly against the built container — no host round-trip, no I/O. For the
+    // Runs SpecBuilder directly against the built container - no host round-trip, no I/O. For the
     // neutral adapter this yields everything except the inbound transports (empty); for a host adapter
-    // it also carries transports and validation-enriched schemas. This is the EventServiceDocument
-    // shape (SpecRequest type "benzene") — the same shape EventServiceDocumentDeserializer reads back.
-    private static string BuildSpec(Benzene.Abstractions.DI.IServiceResolver resolver)
+    // it also carries transports and validation-enriched schemas. It is the contract document
+    // (SpecRequest type "benzene"), with the identity and deployment-side fields this build was told
+    // (contract-document.md §1) - outside both hashes, so they never change them.
+    private static string BuildSpec(Benzene.Abstractions.DI.IServiceResolver resolver, Assembly assembly, EmitOptions options)
     {
         var stdout = Console.Out;
         Console.SetOut(Console.Error);
         try
         {
-            return new SpecBuilder().CreateSpec(resolver, new SpecRequest("benzene", "json"));
+            var builder = (EventServiceDocumentBuilder)new SpecBuilder().CreateBuilder(resolver, SpecBuilder.BenzeneType);
+            var document = builder.Build();
+
+            if (options.ServiceName is not null)
+            {
+                document.Service = options.ServiceName;
+            }
+            else if (string.IsNullOrEmpty(document.Service))
+            {
+                document.Service = assembly.GetName().Name ?? Path.GetFileNameWithoutExtension(options.AssemblyPath);
+            }
+
+            if (!string.IsNullOrWhiteSpace(options.ServiceVersion))
+            {
+                document.ServiceVersion = options.ServiceVersion;
+                document.VersionScheme = options.VersionScheme;
+            }
+
+            document.Runtime = ContractDocumentDeployment.DotNetRuntime;
+            if (options.Cloud is not null)
+            {
+                document.Placement = new ContractDocumentPlacement(options.Cloud, options.Region);
+            }
+
+            return document.SerializeAsJson(OpenApiSpecVersion.OpenApi3_0);
         }
         finally
         {
             Console.SetOut(stdout);
         }
-    }
-
-    // The mesh §2 ServiceDescriptor wire shape, exactly as benzene:mesh:register sends it — no
-    // distillation. See mesh.md §2 in the Benzene repo and conformance/mesh-descriptor-cases.json.
-    private static string BuildMesh(Assembly assembly, EmitOptions options)
-    {
-        var definitions = new ReflectionMessageHandlersFinder(assembly).FindDefinitions();
-        var descriptor = MeshDescriptorFactory.Create(
-            new DefinitionsLookUp(definitions),
-            new MeshServiceInfo(options.ServiceName, serviceVersion: options.ServiceVersion,
-                instanceId: options.ServiceName,
-                placement: new MeshPlacement { Cloud = options.Cloud, Region = options.Region }));
-        return MeshJson.Serialize(descriptor);
-    }
-
-    private sealed class DefinitionsLookUp : IMessageHandlerDefinitionLookUp
-    {
-        private readonly IMessageHandlerDefinition[] _definitions;
-        public DefinitionsLookUp(IMessageHandlerDefinition[] definitions) => _definitions = definitions;
-        public IMessageHandlerDefinition? FindHandler(ITopic topic)
-            => _definitions.FirstOrDefault(x => x.Topic.Id == topic.Id && x.Topic.Version == topic.Version);
-        public IMessageHandlerDefinition[] GetAllHandlers() => _definitions;
     }
 }

@@ -89,7 +89,6 @@ namespace Benzene.CodeGen.SourceGenerators
             "benzene:healthcheck",
             "benzene:liveness",
             "benzene:readiness",
-            "benzene:mesh",
             "benzene:ping");
 
         public void Initialize(IncrementalGeneratorInitializationContext context)

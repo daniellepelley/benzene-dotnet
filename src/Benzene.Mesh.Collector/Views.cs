@@ -51,7 +51,8 @@ public class FleetView
 }
 
 /// <summary>One service's fleet row. MissingFeeds names the feeds the collector has not received
-/// for it ("descriptor", "health", "traces") - reduced is visible, never mistaken for empty.</summary>
+/// for it ("descriptor" - its registration -, "health", "traces", "issues") - reduced is visible,
+/// never mistaken for empty.</summary>
 public class ServiceSummary
 {
     public string Service { get; set; } = string.Empty;
@@ -67,8 +68,8 @@ public class ServiceSummary
     public int Instances { get; set; }
     public string Health { get; set; } = MeshHealth.Unknown;
 
-    /// <summary>The service's declared version (mesh.md §2.5), from the latest registered descriptor's
-    /// <see cref="MeshServiceDescriptor.ServiceVersion"/> - null when no descriptor has registered yet
+    /// <summary>The service's declared version, from the latest registration's
+    /// <see cref="MeshRegistration.ServiceVersion"/> - null when nothing has registered yet
     /// (the "descriptor" MissingFeeds entry already names that case) or the service never declared one
     /// (versioning is opt-in). Omitted from the wire when absent, matching every other optional field
     /// here.</summary>
@@ -86,8 +87,8 @@ public class ServiceSummary
     public List<string> MissingFeeds { get; set; } = new();
 }
 
-/// <summary>One topic's catalog row: providers AND consumers come from the latest registered
-/// ServiceDescriptor alone (spec §4, 2026-08 revision) - the full declared graph, reported even for a
+/// <summary>One topic's catalog row: providers (<c>events</c> ∪ <c>sends</c>) AND consumers
+/// (<c>requests</c>) come from the latest registrations alone (spec §4) - the full declared graph, reported even for a
 /// topic with zero traffic. Stats (invocations/errors/duration/statusCounts) still come from the
 /// trace feed, unaffected by the revision. <see cref="ProviderActivity"/>/<see cref="ConsumerActivity"/>
 /// are the separate, additive §4.2 observed signal layered on top - never part of graph membership.</summary>
@@ -156,10 +157,11 @@ public class TraceSummary
     public string? Topic { get; set; }
 }
 
-/// <summary>The <c>mesh:query:service</c> response: the fleet row plus the registered descriptor
-/// and per-instance heartbeat state. HashMatches is false when an instance runs a different
-/// contract than the collector knows (a redeploy it hasn't re-learned), null when either side
-/// didn't supply a hash.</summary>
+/// <summary>The <c>mesh:query:service</c> response: the fleet row plus the registered contract
+/// document and per-instance heartbeat state. HashMatches is false when an instance runs a different
+/// contract than the collector registered for its <c>(service, serviceVersion)</c> (a redeploy it
+/// hasn't re-learned), null when either side didn't supply a hash or the instance's version never
+/// registered.</summary>
 public class ServiceView
 {
     public string Service { get; set; } = string.Empty;
@@ -176,7 +178,7 @@ public class ServiceView
 
     /// <summary>See <see cref="ServiceSummary.ServiceVersion"/> - duplicated here at the top level
     /// (like <see cref="Runtime"/>/<see cref="Binding"/>/<see cref="Placement"/> already are) so a
-    /// reader doesn't have to drill into <see cref="Descriptor"/> for it.</summary>
+    /// reader doesn't have to drill into <see cref="Registration"/> for it.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ServiceVersion { get; set; }
 
@@ -186,17 +188,19 @@ public class ServiceView
     public long Errors { get; set; }
     public List<string> MissingFeeds { get; set; } = new();
 
+    /// <summary>The headline version's registered contract document (mesh.md §2), as received; null
+    /// when the service is known only from traffic.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public MeshServiceDescriptor? Descriptor { get; set; }
+    public MeshRegistration? Registration { get; set; }
 
     public List<InstanceView> Instances { get; set; } = new();
 
     /// <summary>
-    /// The service's live versions (mesh.md §2.4, D26): one entry per <c>(service, serviceVersion)</c>
-    /// the collector holds a descriptor for, in registration order - oldest first, so a re-registered
+    /// The service's live versions (mesh.md §4, D26): one entry per <c>(service, serviceVersion)</c>
+    /// the collector holds a registration for, in registration order - oldest first, so a re-registered
     /// version moves to the end and the last entry is the one the scalar fields above headline. The
     /// fleet query keeps one row per service; this is where the per-version breakdown lives. Empty when
-    /// no descriptor has registered (the service is known only from traffic).
+    /// nothing has registered (the service is known only from traffic).
     /// </summary>
     public List<ServiceVersionSummary> Versions { get; set; } = new();
 
@@ -209,11 +213,11 @@ public class ServiceView
 /// <summary>One live version of a service on <see cref="ServiceView.Versions"/>.</summary>
 public class ServiceVersionSummary
 {
-    /// <summary>The declared <c>serviceVersion</c>; omitted for a descriptor that declared none.</summary>
+    /// <summary>The declared <c>serviceVersion</c>; omitted for a registration that declared none.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ServiceVersion { get; set; }
 
-    /// <summary>How many topics this version's descriptor declares it handles.</summary>
+    /// <summary>How many topics this version's registration declares it handles (its <c>requests</c>).</summary>
     public int Topics { get; set; }
 }
 
@@ -221,11 +225,17 @@ public class ServiceVersionSummary
 public class InstanceView
 {
     public string InstanceId { get; set; } = string.Empty;
+
+    /// <summary>The release the instance's heartbeat reported; omitted when it declared none.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ServiceVersion { get; set; }
+
     public bool Healthy { get; set; }
     public DateTimeOffset LastHeartbeat { get; set; }
 
+    /// <summary>The <c>registrationHash</c> the instance's heartbeat carried.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? DescriptorHash { get; set; }
+    public string? RegistrationHash { get; set; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? HashMatches { get; set; }

@@ -1,10 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    Benzene.Descriptor — emits a service's contract artifacts (`{Service}.spec.json`, the
-    EventServiceDocument, and `{Service}.service.json`, the mesh §2 ServiceDescriptor) at BUILD TIME
-    from a non-running, non-deployed service, by constructing it in-process and reading the
-    descriptors it already computes. See src/Benzene.Descriptor/README.md and
+    Benzene.Descriptor — emits a service's contract document (`{Service}.spec.json`: the document its
+    benzene:spec topic serves and its mesh register body) at BUILD TIME from a non-running,
+    non-deployed service, by constructing it in-process and deriving the document it already computes. See src/Benzene.Descriptor/README.md and
     work/deployment-descriptor-design.md.
 
     Packaged as a dotnet tool (command: benzene-descriptor). sln-approved (implementation plan
@@ -35,6 +34,8 @@
     <ProjectReference Include="..\Benzene.Testing\Benzene.Testing.csproj" />
     <ProjectReference Include="..\Benzene.Schema.OpenApi\Benzene.Schema.OpenApi.csproj" />
     <ProjectReference Include="..\Benzene.Mesh.Contracts\Benzene.Mesh.Contracts.csproj" />
+    <!-- Loaded by the tool so a service's send declarations (MeshOutboundRegistry) share type
+         identity across the ServiceLoadContext boundary. -->
     <ProjectReference Include="..\Benzene.Mesh.Wire\Benzene.Mesh.Wire.csproj" />
     <!-- Cloud-neutral outbound routing model (for produces[].transportKind). -->
     <ProjectReference Include="..\Benzene.Clients\Benzene.Clients.csproj" />

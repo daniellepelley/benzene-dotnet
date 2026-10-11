@@ -46,15 +46,18 @@ public static class MeshCollectorHandlers
     };
 }
 
-/// <summary>Ingests a service's descriptor (spec §4): re-registration replaces provider edges wholesale.</summary>
+/// <summary>Ingests a service's registration - its contract document (mesh.md §2, §4). Only
+/// <c>service</c> is required: no dialect check, no other member required, and the carried
+/// <c>registrationHash</c> is trusted. Re-registration replaces that (service, serviceVersion)'s edges
+/// wholesale.</summary>
 [Message(MeshTopics.Register)]
-public class RegisterMessageHandler : IMessageHandler<MeshServiceDescriptor, Ack>
+public class RegisterMessageHandler : IMessageHandler<MeshRegistration, Ack>
 {
     private readonly MeshCollectorStore _store;
 
     public RegisterMessageHandler(MeshCollectorStore store) => _store = store;
 
-    public Task<IBenzeneResult<Ack>> HandleAsync(MeshServiceDescriptor request)
+    public Task<IBenzeneResult<Ack>> HandleAsync(MeshRegistration request)
     {
         if (string.IsNullOrEmpty(request.Service))
         {
@@ -144,7 +147,7 @@ public class FleetQueryMessageHandler : IMessageHandler<FleetQuery, FleetView>
     }
 }
 
-/// <summary>One service: fleet row + descriptor + per-instance heartbeat state.</summary>
+/// <summary>One service: fleet row + registered document + per-instance heartbeat state.</summary>
 [Message(MeshTopics.QueryService)]
 public class ServiceQueryMessageHandler : IMessageHandler<ServiceQuery, ServiceView>
 {

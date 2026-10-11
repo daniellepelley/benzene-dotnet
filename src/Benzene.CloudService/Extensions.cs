@@ -12,6 +12,7 @@ using Benzene.Http.Routing;
 using Benzene.Mesh.Wire;
 using Benzene.Results;
 using Benzene.Schema.OpenApi;
+using Benzene.Schema.OpenApi.EventService;
 
 namespace Benzene.CloudService;
 
@@ -25,7 +26,8 @@ namespace Benzene.CloudService;
 /// <item>the wire-envelope endpoint at <c>/benzene/invoke</c> (R4)</item>
 /// <item>the derived spec at <c>/benzene/spec</c> (R5)</item>
 /// <item>health checks on the reserved topic and at <c>/benzene/health</c> (R3)</item>
-/// <item>the reserved <c>mesh</c> descriptor topic, trace feed, registration, and heartbeats (R6, R8)</item>
+/// <item>the trace feed, registration (its body the contract document <c>benzene:spec</c> serves) and
+/// heartbeats (R6, R8)</item>
 /// <item>message handlers via the registry, routed on both the HTTP and envelope pipelines (R1, R2)</item>
 /// </list>
 ///
@@ -34,8 +36,8 @@ namespace Benzene.CloudService;
 /// overridden through <see cref="ICloudServiceBuilder"/>, and a service that wants full manual
 /// control simply composes the underlying <c>Use*</c> calls itself (Benzene Core setup). Overrides
 /// that step outside the profile are reflected in the <see cref="CloudServiceProfileReport"/>
-/// carried on the service's descriptor, so a running service can always be asked whether it meets
-/// the profile (via the reserved <c>mesh</c> topic).
+/// carried on the service's contract document (its <c>profile</c> field), so a running service can
+/// always be asked whether it meets the profile (via <c>benzene:spec</c>).
 /// </summary>
 public static class Extensions
 {
@@ -46,7 +48,7 @@ public static class Extensions
     /// </summary>
     /// <typeparam name="TContext">The HTTP transport's context type.</typeparam>
     /// <param name="app">The hosted HTTP pipeline to wire the service onto.</param>
-    /// <param name="serviceName">The logical service name (the descriptor's required <c>service</c> field).</param>
+    /// <param name="serviceName">The logical service name (the contract document's required <c>service</c> field).</param>
     /// <param name="configure">Optional configuration; every setting has a profile-conformant default.</param>
     /// <returns>The pipeline builder, for chaining.</returns>
     public static IMiddlewarePipelineBuilder<TContext> UseBenzeneCloudService<TContext>(
@@ -57,7 +59,7 @@ public static class Extensions
     {
         if (string.IsNullOrWhiteSpace(serviceName))
         {
-            throw new ArgumentException("A cloud service needs a logical service name (the descriptor's required field).", nameof(serviceName));
+            throw new ArgumentException("A cloud service needs a logical service name (the contract document's required field).", nameof(serviceName));
         }
 
         var builder = new CloudServiceBuilder(serviceName);
@@ -78,23 +80,32 @@ public static class Extensions
 
         var report = CloudServiceProfileReport.Evaluate(builder, traceExporter);
         builder.ProfileReportCallback?.Invoke(report);
-        var descriptorSource = new CloudServiceDescriptorSource(info, report, builder.HandlerTypes, builder.OutboundRegistry);
+        // The deployment-side fields of the contract document (contract-document.md §1), outside both
+        // hashes: every document SpecBuilder derives carries them - the one benzene:spec serves and the
+        // mesh register body alike, which are the same document (mesh.md §2).
+        var deployment = new ContractDocumentDeployment
+        {
+            Placement = builder.Placement ?? new ContractDocumentPlacement("self-hosted"),
+            Profile = report.ToProfile()
+        };
+        var documentSource = new CloudServiceDocumentSource(serviceName, builder.ServiceVersion, builder.VersionScheme,
+            builder.InvokePath, deployment, builder.HandlerTypes);
         var healthChecks = builder.HealthChecks.ToArray();
 
         var announcer = builder.MeshEnabled && builder.CollectorEnvelopeUrl != null
-            ? new MeshAnnouncer(info, descriptorSource, builder.CollectorEnvelopeUrl, healthChecks)
+            ? new MeshAnnouncer(info, documentSource, builder.CollectorEnvelopeUrl, healthChecks)
             : null;
 
         app.Register(x =>
         {
             x.AddBenzeneMessage();
-            // Make the logical service name the application's name, from the one source of truth: it already
-            // feeds the mesh descriptor (info.service) and now the log scope + the benzene.service span
-            // attribute (Benzene.Diagnostics), so a trace-store mesh reader can label a flow with the real
-            // service name rather than the backend's segment name. Same string, three surfaces, never adrift.
-            // IApplicationInfo is the single source of the contract document's service/serviceVersion
-            // (contract-document.md §1) as well.
-            x.SetApplicationInfo(serviceName, builder.ServiceVersion ?? string.Empty, string.Empty);
+            // Make the logical service name the application's name, from the one source of truth: it feeds
+            // the contract document (its service/serviceVersion/versionScheme, contract-document.md §1 -
+            // and so the mesh registration), the mesh traces and heartbeats (info.Service), and the log
+            // scope + the benzene.service span attribute (Benzene.Diagnostics), so a trace-store mesh
+            // reader can label a flow with the real service name. Same string, every surface, never adrift.
+            x.SetApplicationInfo(serviceName, builder.ServiceVersion ?? string.Empty, string.Empty, builder.VersionScheme);
+            x.SetContractDocumentDeployment(deployment);
             if (builder.OutboundRegistry != null)
             {
                 // Send declarations: the contract document's sends[] (contract-document.md §3.2).
@@ -155,27 +166,23 @@ public static class Extensions
             }));
         }
 
-        // Eager path: handler types were given, so the descriptor exists now - register with the
-        // collector immediately, before any traffic. Lazy path: the registry lives in the container,
-        // so the first invocation (usually a platform health probe) triggers registration instead.
+        // Wire-up path: handler types were given, so a reduced registration exists now - register with
+        // the collector immediately, before any traffic. Either way the first invocation (usually a
+        // platform health probe) derives the complete document and registers it.
         announcer?.EnsureStarted(null);
 
         // The wire-envelope surface (R4) and, inside it, the mesh feeds (R6/R8): trace outermost so
-        // it sees every invocation, then health and descriptor interception, then the app's own
-        // middleware, then the router.
+        // it sees every invocation, then health interception, then the app's own middleware, then the
+        // router - which answers benzene:spec (R5, R6's self-description) like any other topic.
         app.UseBenzeneMessage(new BenzeneMessageHttpOptions { Path = builder.InvokePath }, envelope =>
         {
             RealizeMeshDisposables(envelope);
-            UseAnnouncerStart(envelope, announcer, descriptorSource);
+            UseAnnouncerStart(envelope, announcer);
             if (traceExporter != null)
             {
                 envelope.UseMeshTrace(info, traceExporter, new BenzeneMessageMeshStatusReader());
             }
             envelope.UseHealthCheck(HealthChecks.Constants.DefaultHealthCheckTopic, healthChecks);
-            if (builder.MeshEnabled)
-            {
-                UseDescriptor(envelope, descriptorSource);
-            }
             builder.EnvelopeMiddleware?.Invoke(envelope);
             UseHandlers(envelope, builder);
         });
@@ -183,7 +190,7 @@ public static class Extensions
         // The HTTP-native surfaces: spec (R5) and health (R3) at their default-standard paths (R7),
         // and the app's own HTTP-routed topics through the same registry (R2).
         RealizeMeshDisposables(app);
-        UseAnnouncerStart(app, announcer, descriptorSource);
+        UseAnnouncerStart(app, announcer);
         app.UseSpec();
         app.UseHealthCheck(HealthChecks.Constants.DefaultHealthCheckTopic, healthChecks);
         UseHandlers(app, builder);
@@ -204,39 +211,14 @@ public static class Extensions
     }
 
     /// <summary>
-    /// Reserved <c>mesh</c> topic interception (mesh.md §1), like <c>UseMeshDescriptor</c> but
-    /// against the shared descriptor source so the lazy path can derive the descriptor from the
-    /// invocation's registry on first use.
+    /// Lets the first invocation on either pipeline hand the announcer the complete contract document
+    /// (derived from the invocation's container), starting registration and heartbeats if the wire-up
+    /// path didn't, and re-registering if the wire-up document was reduced. A single volatile read once
+    /// the complete document is in hand; not wired at all when there is no announcer.
     /// </summary>
-    private static void UseDescriptor(
-        IMiddlewarePipelineBuilder<BenzeneMessageContext> app, CloudServiceDescriptorSource descriptorSource)
+    private static void UseAnnouncerStart<TContext>(IMiddlewarePipelineBuilder<TContext> app, MeshAnnouncer? announcer)
     {
-        // Terminal: it answers the descriptor topic itself.
-        app.Use(resolver => new TerminalFuncWrapperMiddleware<BenzeneMessageContext>("CloudServiceDescriptor", async (context, next) =>
-        {
-            var messageGetter = resolver.GetService<IMessageGetter<BenzeneMessageContext>>();
-            var topic = messageGetter.GetTopic(context);
-            if (topic?.Id != MeshTopics.Descriptor)
-            {
-                await next();
-                return;
-            }
-
-            var resultSetter = resolver.GetService<IMessageHandlerResultSetter<BenzeneMessageContext>>();
-            await resultSetter.SetResultAsync(context, new MessageHandlerResult(
-                topic, MessageHandlerDefinition.Empty(), BenzeneResult.Ok(descriptorSource.Get(resolver))));
-        }));
-    }
-
-    /// <summary>
-    /// On the lazy path, lets the first invocation on either pipeline start registration and
-    /// heartbeats. No-op middleware-wise beyond an started-already check; not wired at all when
-    /// there is no announcer, and a no-op when the announcer started eagerly.
-    /// </summary>
-    private static void UseAnnouncerStart<TContext>(
-        IMiddlewarePipelineBuilder<TContext> app, MeshAnnouncer? announcer, CloudServiceDescriptorSource descriptorSource)
-    {
-        if (announcer == null || descriptorSource.TryGet() != null)
+        if (announcer == null)
         {
             return;
         }

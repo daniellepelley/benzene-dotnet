@@ -10,17 +10,17 @@ using Benzene.Results;
 namespace Benzene.Mesh.Wire;
 
 /// <summary>
-/// Pipeline wiring for the mesh wire layer (docs/specification/mesh.md): the reserved descriptor
-/// topic (§1) and the trace feed (§3). Each feed is independent and optional per §6 - leaving
-/// either call out reduces the mesh, never the service.
+/// Pipeline wiring for the mesh wire layer (docs/specification/mesh.md): the trace feed (§3), the
+/// issue feed (§4.1) and send declarations. Each feed is independent and optional per §6 - leaving
+/// any call out reduces the mesh, never the service.
 /// </summary>
 public static class Extensions
 {
     /// <summary>
     /// Registers <paramref name="sends"/> as this service's send declarations (contract-document.md
     /// §3.2): the contract document's <c>sends[]</c> - messages to topics another party defines. Also
-    /// makes the registry resolvable as <see cref="MeshOutboundRegistry"/> and
-    /// <see cref="IMeshOutboundDefinitionLookUp"/>.
+    /// makes the registry resolvable as <see cref="MeshOutboundRegistry"/>. Other send declarations
+    /// (each generated client's) are registered alongside it; every one reaches the document.
     /// </summary>
     /// <param name="services">The container.</param>
     /// <param name="sends">The send declarations.</param>
@@ -28,43 +28,14 @@ public static class Extensions
     public static IBenzeneServiceContainer AddSendDeclarations(this IBenzeneServiceContainer services, MeshOutboundRegistry sends)
     {
         services.AddSingleton(sends);
-        services.AddSingleton<IMeshOutboundDefinitionLookUp>(sends);
         services.AddSingleton<Benzene.Abstractions.Messages.IMessageDefinitionFinder<Benzene.Abstractions.Messages.IMessageSenderDefinition>>(sends);
         return services;
     }
 
     /// <summary>
-    /// Intercepts the reserved <c>mesh</c> topic (plus any <paramref name="aliases"/>) and
-    /// short-circuits with <paramref name="descriptor"/>, exactly as health-check interception
-    /// works - by topic id alone, ignoring version. Not wiring this in is the "descriptor endpoint
-    /// withheld" deployment: every other mesh feed keeps working.
-    /// </summary>
-    public static IMiddlewarePipelineBuilder<TContext> UseMeshDescriptor<TContext>(
-        this IMiddlewarePipelineBuilder<TContext> app, MeshServiceDescriptor descriptor, params string[] aliases)
-    {
-        var topics = new HashSet<string>(aliases) { MeshTopics.Descriptor };
-
-        // Terminal: it answers the descriptor topic itself.
-        return app.Use(resolver => new TerminalFuncWrapperMiddleware<TContext>("MeshDescriptor", async (context, next) =>
-        {
-            var messageGetter = resolver.GetService<IMessageGetter<TContext>>();
-            var topic = messageGetter.GetTopic(context);
-            if (topic?.Id == null || !topics.Contains(topic.Id))
-            {
-                await next();
-                return;
-            }
-
-            var resultSetter = resolver.GetService<IMessageHandlerResultSetter<TContext>>();
-            await resultSetter.SetResultAsync(context,
-                new MessageHandlerResult(topic, MessageHandlerDefinition.Empty(), BenzeneResult.Ok(descriptor)));
-        }));
-    }
-
-    /// <summary>
     /// Observes every invocation that passes through it and hands the resulting
     /// <see cref="MeshTraceEvent"/> to <paramref name="exporter"/> after downstream middleware
-    /// finishes. Wire it outermost (before health-check/descriptor interception) so it sees every
+    /// finishes. Wire it outermost (before health-check interception) so it sees every
     /// invocation. Because the message handler layer already converts a missing handler, a request
     /// conversion failure, and a handler exception into results, every routed invocation produces a
     /// status - trace coverage is structural.
