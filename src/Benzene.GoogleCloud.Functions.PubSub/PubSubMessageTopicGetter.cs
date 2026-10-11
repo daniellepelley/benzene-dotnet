@@ -52,7 +52,8 @@ public class PubSubMessageTopicGetter : IMessageTopicGetter<PubSubContext>
         // Null-conditional throughout: a CloudEvent with no Pub/Sub message (or a message with no
         // attributes) must degrade to "no topic attribute", not throw - matching the SNS/SQS
         // getters' hardening for the equivalent malformed-delivery case.
-        return context.Message?.Attributes != null && context.Message.Attributes.TryGetValue(_topicAttributeKey, out var value)
+        // Case-insensitive on read (wire-contracts §2): the attribute map's own lookup is ordinal.
+        return MetadataKeys.TryGetValue(context.Message?.Attributes, _topicAttributeKey, out var value)
             ? value
             : null;
     }

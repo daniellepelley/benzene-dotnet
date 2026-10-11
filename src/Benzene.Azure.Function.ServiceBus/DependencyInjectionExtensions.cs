@@ -47,7 +47,8 @@ public static class DependencyInjectionExtensions
         services.TryAddScoped<IMessageTopicGetter<ServiceBusContext>>(resolver =>
             new PresetTopicMessageTopicGetter<ServiceBusContext>(new ServiceBusMessageTopicGetter(topicPropertyKey), resolver.GetService<PresetTopicHolder>()));
         services.TryAddHeaderMessageVersionGetter<ServiceBusContext>();
-        services.TryAddScoped<IMessageHeadersGetter<ServiceBusContext>, ServiceBusMessageHeadersGetter>();
+        // The headers getter leaves out the same key the topic getter consumes (headersExclude).
+        services.TryAddScoped<IMessageHeadersGetter<ServiceBusContext>>(_ => new ServiceBusMessageHeadersGetter(topicPropertyKey));
         services.TryAddScoped<IMessageBodyGetter<ServiceBusContext>, ServiceBusMessageBodyGetter>();
         services.TryAddScoped<IMessageHandlerResultSetter<ServiceBusContext>, ServiceBusMessageHandlerResultSetter>();
 

@@ -52,7 +52,9 @@ public static class DependencyInjectionExtensions
                 new ServiceBusConsumerMessageTopicGetter(ResolveTopicPropertyKey(resolver, topicPropertyKey)),
                 resolver.GetService<PresetTopicHolder>()));
         services.TryAddHeaderMessageVersionGetter<ServiceBusConsumerContext>();
-        services.TryAddScoped<IMessageHeadersGetter<ServiceBusConsumerContext>, ServiceBusConsumerMessageHeadersGetter>();
+        // The headers getter leaves out the same key the topic getter consumes (headersExclude).
+        services.TryAddScoped<IMessageHeadersGetter<ServiceBusConsumerContext>>(resolver =>
+            new ServiceBusConsumerMessageHeadersGetter(ResolveTopicPropertyKey(resolver, topicPropertyKey)));
         services.TryAddScoped<IMessageBodyGetter<ServiceBusConsumerContext>, ServiceBusConsumerMessageBodyGetter>();
         services.TryAddScoped<IMessageHandlerResultSetter<ServiceBusConsumerContext>, ServiceBusConsumerMessageHandlerResultSetter>();
         services.AddMediaFormatNegotiation<ServiceBusConsumerContext>();

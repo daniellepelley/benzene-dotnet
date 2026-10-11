@@ -49,7 +49,9 @@ public static class DependencyInjectionExtensions
                 new EventHubConsumerMessageTopicGetter(ResolveTopicPropertyKey(resolver, topicPropertyKey)),
                 resolver.GetService<PresetTopicHolder>()));
         services.TryAddHeaderMessageVersionGetter<EventHubConsumerContext>();
-        services.TryAddScoped<IMessageHeadersGetter<EventHubConsumerContext>, EventHubConsumerMessageHeadersGetter>();
+        // The headers getter leaves out the same key the topic getter consumes (headersExclude).
+        services.TryAddScoped<IMessageHeadersGetter<EventHubConsumerContext>>(resolver =>
+            new EventHubConsumerMessageHeadersGetter(ResolveTopicPropertyKey(resolver, topicPropertyKey)));
         services.TryAddScoped<IMessageBodyGetter<EventHubConsumerContext>, EventHubConsumerMessageBodyGetter>();
         services.TryAddScoped<IMessageHandlerResultSetter<EventHubConsumerContext>, EventHubConsumerMessageHandlerResultSetter>();
         services.AddMediaFormatNegotiation<EventHubConsumerContext>();

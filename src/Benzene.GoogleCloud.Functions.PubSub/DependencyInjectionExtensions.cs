@@ -45,7 +45,8 @@ public static class DependencyInjectionExtensions
         // UsePubSub calls this) wins over these per-context defaults, matching Benzene.Aws.Lambda.Sns.
         services.TryAddScoped<IMessageTopicGetter<PubSubContext>>(_ => new PubSubMessageTopicGetter(topicAttributeKey));
         services.TryAddHeaderMessageVersionGetter<PubSubContext>();
-        services.TryAddScoped<IMessageHeadersGetter<PubSubContext>, PubSubMessageHeadersGetter>();
+        // The headers getter leaves out the same key the topic getter consumes (headersExclude).
+        services.TryAddScoped<IMessageHeadersGetter<PubSubContext>>(_ => new PubSubMessageHeadersGetter(topicAttributeKey));
         services.TryAddScoped<IMessageBodyGetter<PubSubContext>, PubSubMessageBodyGetter>();
         services.TryAddScoped<IMessageHandlerResultSetter<PubSubContext>, PubSubMessageHandlerResultSetter>();
 

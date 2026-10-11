@@ -373,9 +373,12 @@ public class SnsMessagePipelineTest
 
         await host.SendAsync(request);
 
+        // The inbound topic is routing metadata the headers getter leaves out (transport-metadata-cases.json
+        // headersExclude), so forwarding the headers does not carry it onto the outbound message - the
+        // rule KafkaInSnsOut pins (no re-routing to the topic being consumed).
         mockSqsClient.Verify(x => x.SendMessageAsync(It.Is<SendMessageRequest>(m =>
             m.MessageBody == Defaults.Message &&
-            m.MessageAttributes["topic"].StringValue == Defaults.Topic
+            !m.MessageAttributes.ContainsKey("topic")
             ), It.IsAny<CancellationToken>()));
     }
 
@@ -407,9 +410,12 @@ public class SnsMessagePipelineTest
 
         await host.SendAsync(request);
 
+        // The inbound topic is routing metadata the headers getter leaves out (transport-metadata-cases.json
+        // headersExclude), so forwarding the headers does not carry it onto the outbound message - the
+        // rule KafkaInSnsOut pins (no re-routing to the topic being consumed).
         mockSqsClient.Verify(x => x.SendMessageAsync(It.Is<SendMessageRequest>(m =>
             m.MessageBody == Defaults.Message &&
-            m.MessageAttributes["topic"].StringValue == Defaults.Topic
+            !m.MessageAttributes.ContainsKey("topic")
             ), It.IsAny<CancellationToken>()));
 
         Assert.True(isSuccessful);

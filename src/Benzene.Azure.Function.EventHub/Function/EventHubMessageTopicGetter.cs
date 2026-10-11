@@ -38,6 +38,7 @@ public class EventHubMessageTopicGetter : IMessageTopicGetter<EventHubContext>
     /// <returns>The topic.</returns>
     public ITopic GetTopic(EventHubContext context)
     {
-        return new Topic(context.EventData.Properties.TryGetValue(_topicPropertyKey, out var value) ? value as string : null);
+        // Case-insensitive on read (wire-contracts §2): EventData.Properties is an ordinal dictionary.
+        return new Topic(MetadataKeys.TryGetValue(context.EventData.Properties, _topicPropertyKey, out var value) ? value as string : null);
     }
 }

@@ -1,3 +1,5 @@
+using Benzene.Core.Messages;
+
 namespace Benzene.Aws.Lambda.Sns;
 
 /// <summary>
@@ -13,8 +15,7 @@ public static class SnsUtils
     /// <returns>The attribute value, or null if the attribute isn't present.</returns>
     public static string? GetFromAttributes(SnsRecordContext context, string key)
     {
-        var attributes = context.SnsRecord.Sns?.MessageAttributes;
-
-        return attributes != null && attributes.TryGetValue(key, out var value) ? value.Value : null;
+        // Case-insensitive on read (wire-contracts §2): the SDK's attribute map is an ordinal dictionary.
+        return MetadataKeys.TryGetValue(context.SnsRecord.Sns?.MessageAttributes, key, out var value) ? value?.Value : null;
     }
 }

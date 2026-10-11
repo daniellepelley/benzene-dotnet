@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Benzene.Abstractions.Messages.Mappers;
+using Benzene.Core.Messages;
 
 namespace Benzene.Aws.Lambda.Sqs;
 
@@ -9,6 +10,27 @@ namespace Benzene.Aws.Lambda.Sqs;
 /// </summary>
 public class SqsMessageHeadersGetter : IMessageHeadersGetter<SqsMessageContext>
 {
+    private readonly string _topicAttributeKey;
+
+    /// <summary>
+    /// Initializes a new instance that leaves out the default topic message attribute
+    /// (<see cref="SqsMessageTopicGetter.DefaultTopicAttribute"/>, <c>topic</c>) - the key <see cref="SqsMessageTopicGetter"/> consumes.
+    /// </summary>
+    public SqsMessageHeadersGetter()
+        : this(SqsMessageTopicGetter.DefaultTopicAttribute)
+    { }
+
+    /// <summary>
+    /// Initializes a new instance that leaves out <paramref name="topicAttributeKey"/>: the topic is routing
+    /// metadata, consumed by the topic getter, so it does not reappear in the header dictionary
+    /// (transport-metadata-cases.json <c>headersExclude</c>). Pass the same key the topic getter reads.
+    /// </summary>
+    /// <param name="topicAttributeKey">The message attribute the topic is carried on (matched case-insensitively).</param>
+    public SqsMessageHeadersGetter(string topicAttributeKey)
+    {
+        _topicAttributeKey = topicAttributeKey;
+    }
+
     /// <summary>
     /// Gets the string-typed message attributes as headers.
     /// </summary>
@@ -27,6 +49,11 @@ public class SqsMessageHeadersGetter : IMessageHeadersGetter<SqsMessageContext>
         {
             foreach (var attribute in context.SqsMessage.MessageAttributes)
             {
+                if (MetadataKeys.Matches(attribute.Key, _topicAttributeKey))
+                {
+                    continue;
+                }
+
                 if (attribute.Value.DataType == "String")
                 {
                     headers[attribute.Key] = attribute.Value.StringValue;

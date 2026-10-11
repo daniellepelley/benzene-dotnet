@@ -45,7 +45,8 @@ public static class DependencyInjectionExtensions
         // UseEventHub calls this) wins over these per-context defaults.
         services.TryAddScoped<IMessageTopicGetter<EventHubContext>>(_ => new EventHubMessageTopicGetter(topicPropertyKey));
         services.TryAddHeaderMessageVersionGetter<EventHubContext>();
-        services.TryAddScoped<IMessageHeadersGetter<EventHubContext>, EventHubMessageHeadersGetter>();
+        // The headers getter leaves out the same key the topic getter consumes (headersExclude).
+        services.TryAddScoped<IMessageHeadersGetter<EventHubContext>>(_ => new EventHubMessageHeadersGetter(topicPropertyKey));
         services.TryAddScoped<IMessageBodyGetter<EventHubContext>, EventHubMessageBodyGetter>();
         services.TryAddScoped<IMessageHandlerResultSetter<EventHubContext>, EventHubMessageHandlerResultSetter>();
         services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.EventHub));

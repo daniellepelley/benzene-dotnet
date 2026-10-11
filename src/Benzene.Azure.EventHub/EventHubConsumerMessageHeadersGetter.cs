@@ -1,4 +1,5 @@
 using Benzene.Abstractions.Messages.Mappers;
+using Benzene.Core.Messages;
 
 namespace Benzene.Azure.EventHub;
 
@@ -7,6 +8,27 @@ namespace Benzene.Azure.EventHub;
 /// </summary>
 public class EventHubConsumerMessageHeadersGetter : IMessageHeadersGetter<EventHubConsumerContext>
 {
+    private readonly string _topicPropertyKey;
+
+    /// <summary>
+    /// Initializes a new instance that leaves out the default topic event property
+    /// (<see cref="EventHubConsumerMessageTopicGetter.DefaultTopicProperty"/>, <c>topic</c>) - the key <see cref="EventHubConsumerMessageTopicGetter"/> consumes.
+    /// </summary>
+    public EventHubConsumerMessageHeadersGetter()
+        : this(EventHubConsumerMessageTopicGetter.DefaultTopicProperty)
+    { }
+
+    /// <summary>
+    /// Initializes a new instance that leaves out <paramref name="topicPropertyKey"/>: the topic is routing
+    /// metadata, consumed by the topic getter, so it does not reappear in the header dictionary
+    /// (transport-metadata-cases.json <c>headersExclude</c>). Pass the same key the topic getter reads.
+    /// </summary>
+    /// <param name="topicPropertyKey">The event property the topic is carried on (matched case-insensitively).</param>
+    public EventHubConsumerMessageHeadersGetter(string topicPropertyKey)
+    {
+        _topicPropertyKey = topicPropertyKey;
+    }
+
     /// <summary>
     /// Gets the headers for the event from its string-typed properties.
     /// </summary>
@@ -20,6 +42,11 @@ public class EventHubConsumerMessageHeadersGetter : IMessageHeadersGetter<EventH
 
         foreach (var property in context.EventData.Properties)
         {
+            if (MetadataKeys.Matches(property.Key, _topicPropertyKey))
+            {
+                continue;
+            }
+
             if (property.Value is string value)
             {
                 headers[property.Key] = value;

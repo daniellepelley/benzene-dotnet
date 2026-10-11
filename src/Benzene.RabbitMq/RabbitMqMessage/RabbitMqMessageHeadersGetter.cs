@@ -1,5 +1,6 @@
 using System.Text;
 using Benzene.Abstractions.Messages.Mappers;
+using Benzene.Core.Messages;
 
 namespace Benzene.RabbitMq.RabbitMqMessage;
 
@@ -12,6 +13,27 @@ namespace Benzene.RabbitMq.RabbitMqMessage;
 /// </summary>
 public class RabbitMqMessageHeadersGetter : IMessageHeadersGetter<RabbitMqContext>
 {
+    private readonly string _topicHeaderKey;
+
+    /// <summary>
+    /// Initializes a new instance that leaves out the default topic header
+    /// (<see cref="RabbitMqConstants.DefaultTopicHeader"/>, <c>topic</c>) - the key <see cref="RabbitMqMessageTopicGetter"/> consumes.
+    /// </summary>
+    public RabbitMqMessageHeadersGetter()
+        : this(RabbitMqConstants.DefaultTopicHeader)
+    { }
+
+    /// <summary>
+    /// Initializes a new instance that leaves out <paramref name="topicHeaderKey"/>: the topic is routing
+    /// metadata, consumed by the topic getter, so it does not reappear in the header dictionary
+    /// (transport-metadata-cases.json <c>headersExclude</c>). Pass the same key the topic getter reads.
+    /// </summary>
+    /// <param name="topicHeaderKey">The header the topic is carried on (matched case-insensitively).</param>
+    public RabbitMqMessageHeadersGetter(string topicHeaderKey)
+    {
+        _topicHeaderKey = topicHeaderKey;
+    }
+
     /// <inheritdoc />
     public IDictionary<string, string> GetHeaders(RabbitMqContext context)
     {
@@ -24,6 +46,11 @@ public class RabbitMqMessageHeadersGetter : IMessageHeadersGetter<RabbitMqContex
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var header in headers)
         {
+            if (MetadataKeys.Matches(header.Key, _topicHeaderKey))
+            {
+                continue;
+            }
+
             if (header.Value == null)
             {
                 continue;

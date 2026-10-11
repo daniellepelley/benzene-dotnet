@@ -49,6 +49,7 @@ public class ServiceBusConsumerMessageTopicGetter : IMessageTopicGetter<ServiceB
 
     private string? GetTopicProperty(ServiceBusConsumerContext context)
     {
-        return context.Message.ApplicationProperties.TryGetValue(_topicPropertyKey, out var value) ? value as string : null;
+        // Case-insensitive on read (wire-contracts §2): ApplicationProperties is an ordinal dictionary.
+        return MetadataKeys.TryGetValue(context.Message.ApplicationProperties, _topicPropertyKey, out var value) ? value as string : null;
     }
 }

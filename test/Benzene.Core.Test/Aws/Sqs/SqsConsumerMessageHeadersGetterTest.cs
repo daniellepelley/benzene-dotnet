@@ -14,14 +14,14 @@ public class SqsConsumerMessageHeadersGetterTest
         {
             MessageAttributes = new Dictionary<string, MessageAttributeValue>
             {
-                { "topic", new MessageAttributeValue { DataType = "String", StringValue = "some-topic" } },
+                { "tenant", new MessageAttributeValue { DataType = "String", StringValue = "acme" } },
                 { "count", new MessageAttributeValue { DataType = "Number", StringValue = "5" } }
             }
         });
 
         var headers = new SqsConsumerMessageHeadersGetter().GetHeaders(context);
 
-        Assert.Equal("some-topic", headers["topic"]);
+        Assert.Equal("acme", headers["tenant"]);
         Assert.False(headers.ContainsKey("count"));
     }
 
@@ -42,5 +42,26 @@ public class SqsConsumerMessageHeadersGetterTest
         var headers = new SqsConsumerMessageHeadersGetter().GetHeaders(context);
 
         Assert.Equal("abc-123", headers["correlation-id"]);
+    }
+
+    [Fact]
+    public void GetHeaders_LeavesOutTheConsumedTopicAttribute_UnderAnyCasing()
+    {
+        // The topic is routing metadata consumed by the topic getter; it must not reappear as a header
+        // (transport-metadata-cases.json headersExclude), and keys are case-insensitive on read.
+        var context = SqsConsumerMessageContext.CreateInstance(new Message
+        {
+            MessageAttributes = new Dictionary<string, MessageAttributeValue>
+            {
+                { "Topic", new MessageAttributeValue { DataType = "String", StringValue = "some-topic" } },
+                { "tenant", new MessageAttributeValue { DataType = "String", StringValue = "acme" } }
+            }
+        });
+
+        var headers = new SqsConsumerMessageHeadersGetter().GetHeaders(context);
+
+        Assert.False(headers.ContainsKey("topic"));
+        Assert.Equal("acme", headers["tenant"]);
+        Assert.Equal("some-topic", new SqsConsumerMessageTopicGetter().GetTopic(context).Id);
     }
 }

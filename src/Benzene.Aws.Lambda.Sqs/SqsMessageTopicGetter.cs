@@ -44,15 +44,11 @@ public class SqsMessageTopicGetter : IMessageTopicGetter<SqsMessageContext>
 
     private static string? GetFromAttributes(SqsMessageContext context, string key)
     {
-        // Null-guard the attribute map (a message deserialized from a payload with no attributes can
-        // yield null) - the sibling SqsMessageHeadersGetter was already hardened this way; this getter
-        // on the same context was not, leaving a latent NRE on the exact attribute-less case.
-        var attributes = context.SqsMessage.MessageAttributes;
-        if (attributes == null || !attributes.TryGetValue(key, out var value))
-        {
-            return null;
-        }
-
-        return value.StringValue;
+        // Header keys are case-insensitive on read (wire-contracts §2), and the SDK's attribute map is an
+        // ordinal dictionary - so `Topic` must route like `topic`. MetadataKeys also null-guards the map
+        // (a message deserialized from a payload with no attributes can yield null).
+        return MetadataKeys.TryGetValue(context.SqsMessage.MessageAttributes, key, out var value)
+            ? value?.StringValue
+            : null;
     }
 }

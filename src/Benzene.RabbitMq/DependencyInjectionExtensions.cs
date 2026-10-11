@@ -50,7 +50,9 @@ public static class DependencyInjectionExtensions
                 new RabbitMqMessageTopicGetter(ResolveTopicHeaderKey(resolver, topicHeaderKey)),
                 resolver.GetService<PresetTopicHolder>()));
         services.TryAddHeaderMessageVersionGetter<RabbitMqContext>();
-        services.TryAddScoped<IMessageHeadersGetter<RabbitMqContext>, RabbitMqMessageHeadersGetter>();
+        // The headers getter leaves out the same key the topic getter consumes (headersExclude).
+        services.TryAddScoped<IMessageHeadersGetter<RabbitMqContext>>(resolver =>
+            new RabbitMqMessageHeadersGetter(ResolveTopicHeaderKey(resolver, topicHeaderKey)));
         services.TryAddScoped<IMessageBodyGetter<RabbitMqContext>, RabbitMqMessageBodyGetter>();
         services.TryAddScoped<IMessageHandlerResultSetter<RabbitMqContext>, RabbitMqMessageHandlerResultSetter>();
         services.AddMediaFormatNegotiation<RabbitMqContext>();

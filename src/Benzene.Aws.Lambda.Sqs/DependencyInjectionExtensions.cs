@@ -45,7 +45,8 @@ public static class DependencyInjectionExtensions
         services.TryAddScoped<IMessageTopicGetter<SqsMessageContext>>(resolver =>
             new PresetTopicMessageTopicGetter<SqsMessageContext>(new SqsMessageTopicGetter(topicAttributeKey), resolver.GetService<PresetTopicHolder>()));
         services.TryAddHeaderMessageVersionGetter<SqsMessageContext>();
-        services.TryAddScoped<IMessageHeadersGetter<SqsMessageContext>, SqsMessageHeadersGetter>();
+        // The headers getter leaves out the same key the topic getter consumes (headersExclude).
+        services.TryAddScoped<IMessageHeadersGetter<SqsMessageContext>>(_ => new SqsMessageHeadersGetter(topicAttributeKey));
         services.TryAddScoped<IMessageBodyGetter<SqsMessageContext>, SqsMessageBodyGetter>();
         services.TryAddScoped<IMessageBodySetter<SqsMessageContext>, SqsMessageBodySetter>();
         services.TryAddScoped<IMessageHandlerResultSetter<SqsMessageContext>, SqsMessageHandlerResultSetter>();

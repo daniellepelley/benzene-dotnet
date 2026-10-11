@@ -52,6 +52,32 @@ public class BenzeneWireNamesOverrideTest
     }
 
     [Fact]
+    public void SqsConsumer_DefaultKeyLeftAsIs_HeadersGetterLeavesOutTheRegisteredTopicKey()
+    {
+        // The headers getter must leave out the same key the topic getter consumes (headersExclude): with
+        // the name overridden, the overridden key is routing metadata and `topic` is an ordinary header.
+        var services = ServiceResolverMother.CreateServiceCollection(x => x.AddSqsConsumer());
+        services.AddSingleton<IBenzeneWireNames>(new BenzeneWireNames(CustomTopicKey));
+
+        var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        var headersGetter = scope.ServiceProvider.GetRequiredService<Benzene.Abstractions.Messages.Mappers.IMessageHeadersGetter<SqsConsumerMessageContext>>();
+
+        var message = new Message
+        {
+            MessageAttributes = new Dictionary<string, MessageAttributeValue>
+            {
+                [CustomTopicKey] = new MessageAttributeValue { DataType = "String", StringValue = "order:create" },
+                ["topic"] = new MessageAttributeValue { DataType = "String", StringValue = "not-the-topic" }
+            }
+        };
+        var headers = headersGetter.GetHeaders(SqsConsumerMessageContext.CreateInstance(message));
+
+        Assert.False(headers.ContainsKey(CustomTopicKey));
+        Assert.Equal("not-the-topic", headers["topic"]);
+    }
+
+    [Fact]
     public void SqsConsumer_ExplicitKeyPassed_WireNamesDoesNotOverrideIt()
     {
         var services = ServiceResolverMother.CreateServiceCollection(x => x.AddSqsConsumer("explicit-key"));

@@ -45,7 +45,8 @@ public static class DependencyInjectionExtensions
         services.TryAddScoped<IMessageTopicGetter<SnsRecordContext>>(resolver =>
             new PresetTopicMessageTopicGetter<SnsRecordContext>(new SnsMessageTopicGetter(topicAttributeKey), resolver.GetService<PresetTopicHolder>()));
         services.TryAddHeaderMessageVersionGetter<SnsRecordContext>();
-        services.TryAddScoped<IMessageHeadersGetter<SnsRecordContext>, SnsMessageHeadersGetter>();
+        // The headers getter leaves out the same key the topic getter consumes (headersExclude).
+        services.TryAddScoped<IMessageHeadersGetter<SnsRecordContext>>(_ => new SnsMessageHeadersGetter(topicAttributeKey));
         services.TryAddScoped<IMessageBodyGetter<SnsRecordContext>, SnsMessageBodyGetter>();
         services.TryAddScoped<IMessageBodySetter<SnsRecordContext>, SnsMessageBodySetter>();
         services.TryAddScoped<IMessageHandlerResultSetter<SnsRecordContext>, SnsMessageHandlerResultSetter>();

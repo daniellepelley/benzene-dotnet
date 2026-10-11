@@ -57,10 +57,13 @@ public class PipelineTest
         var sqsEvent = MessageBuilder.Create(Defaults.Topic, exampleRequestPayload).AsSqs();
         var batchItems = await entryPoint.SendAsync(sqsEvent);
         
+        // The inbound topic is routing metadata the headers getter leaves out (transport-metadata-cases.json
+        // headersExclude), so forwarding the headers does not carry it onto the outbound message - the
+        // rule KafkaInSnsOut pins (no re-routing to the topic being consumed).
         mockAmazonSimpleNotificationService.Verify(x => 
             x.PublishAsync(It.Is<PublishRequest>(x => x
                 .Message.Contains("foo") &&
-                x.MessageAttributes["topic"].StringValue == Defaults.Topic
+                !x.MessageAttributes.ContainsKey("topic")
             ), It.IsAny<CancellationToken>()));
         Assert.Empty(batchItems.BatchItemFailures);
     }

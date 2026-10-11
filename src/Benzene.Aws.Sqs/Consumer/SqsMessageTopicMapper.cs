@@ -47,12 +47,10 @@ public class SqsConsumerMessageTopicGetter : IMessageTopicGetter<SqsConsumerMess
 
     private static string? GetFromAttributes(SqsConsumerMessageContext context, string key)
     {
-        var attributes = context.Message.MessageAttributes;
-        if (attributes == null || !attributes.ContainsKey(key))
-        {
-            return null;
-        }
-
-        return attributes[key].StringValue;
+        // Header keys are case-insensitive on read (wire-contracts §2); the SDK's attribute map is an
+        // ordinal dictionary, so the lookup goes through MetadataKeys rather than the map's own comparer.
+        return MetadataKeys.TryGetValue(context.Message.MessageAttributes, key, out var value)
+            ? value?.StringValue
+            : null;
     }
 }

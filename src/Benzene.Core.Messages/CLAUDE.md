@@ -43,6 +43,8 @@ types, and the context-predicate helpers used for pipeline branching. There is n
 ### Helpers
 - `MediaType`, `Constants`. (Dictionary/reflection helpers used across the framework live in the
   single canonical `Benzene.Core.Helper.DictionaryUtils` / `Utils`.)
+- `MetadataKeys` - the case-insensitive reader every metadata binding uses for its reserved keys
+  (`Matches`, `TryGetValue` - last value wins on a repeated key; wire-contracts §2).
 
 ## When to use this package
 - When using the in-process BenzeneMessage transport (e.g. direct Lambda message invoke).

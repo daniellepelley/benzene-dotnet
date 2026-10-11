@@ -47,7 +47,8 @@ public class RabbitMqMessageTopicGetter : IMessageTopicGetter<RabbitMqContext>
     private string? GetTopicHeader(RabbitMqContext context)
     {
         var headers = context.DeliverEventArgs.BasicProperties.Headers;
-        if (headers == null || !headers.TryGetValue(_topicHeaderKey, out var value) || value == null)
+        // Case-insensitive on read (wire-contracts §2): the AMQP header table's own lookup is ordinal.
+        if (!MetadataKeys.TryGetValue(headers, _topicHeaderKey, out var value) || value == null)
         {
             return null;
         }

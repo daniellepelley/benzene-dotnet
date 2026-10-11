@@ -49,7 +49,9 @@ public static class DependencyInjectionExtensions
                 new SqsConsumerMessageTopicGetter(ResolveTopicAttributeKey(resolver, topicAttributeKey)),
                 resolver.GetService<PresetTopicHolder>()));
         services.TryAddHeaderMessageVersionGetter<SqsConsumerMessageContext>();
-        services.TryAddScoped<IMessageHeadersGetter<SqsConsumerMessageContext>, SqsConsumerMessageHeadersGetter>();
+        // The headers getter leaves out the same key the topic getter consumes (headersExclude).
+        services.TryAddScoped<IMessageHeadersGetter<SqsConsumerMessageContext>>(resolver =>
+            new SqsConsumerMessageHeadersGetter(ResolveTopicAttributeKey(resolver, topicAttributeKey)));
         services.TryAddScoped<IMessageBodyGetter<SqsConsumerMessageContext>, SqsConsumerMessageBodyGetter>();
         // Only needed by Benzene.ClaimCheck's UseClaimCheck<SqsConsumerMessageContext>() hydrate
         // middleware, resolved with TryGetService there - registered unconditionally here (like the
