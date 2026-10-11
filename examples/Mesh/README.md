@@ -5,10 +5,11 @@ http://localhost:5300/mesh-ui:
 
 - **The live Fleet plane** (the "Fleet" nav, plus the live sections on each service/topic page): the
   spec mesh (`docs/specification/mesh.md`) running for real. The services register their *derived*
-  descriptors with a `Benzene.Mesh.Collector`, heartbeat every 10s, and trace every wire-envelope
-  invocation; the checkout handler calls payments-api forwarding its mesh span, so the collector
-  derives the `payments:get -> consumers: orders-api` edge and joins both services' events into one
-  flow. Nothing on that plane is declared anywhere.
+  contract documents (the ones their `benzene:spec` serves) with a `Benzene.Mesh.Collector`, heartbeat every 10s, and trace every wire-envelope
+  invocation. The `payments:get` edge (provider orders-api, from its `sends`; consumer payments-api,
+  from its `requests`) is declared by the two registrations; the checkout handler calls payments-api
+  forwarding its mesh span, so the collector observes that edge being exercised and joins both
+  services' events into one flow.
 - **The artifact pipeline** (the default catalog view): three small demo services, a real Benzene app
   that aggregates their specs and health into a catalog, rendered by `/mesh-ui`. The live Fleet plane
   above enriches this catalog in place — the catalog is the spine, the observed data merges into it.
@@ -60,7 +61,7 @@ end to end, with a **single handler**:
   - `GET /payments/{id}` → latest (V2, includes `"currency":"GBP"`)
   - `GET /v2/payments/{id}` → V2 (with currency)
   - `GET /v1/payments/{id}` → the V2 response **downcast to V1** (currency dropped) — same handler
-- `orders-api` is still pinned to **v1**: it declares it produces `payments:get@1` (spec `events`), so the
+- `orders-api` is still pinned to **v1**: it declares it sends `payments:get@1` (its contract document's `sends`), so the
   mesh sees a producer on v1 and a consumer on v2. The aggregator's **version compatibility** reconciliation
   (`topics.json` `versionCompatibility`) flags the skew, and the Mesh UI renders a **"Version compatibility"**
   panel on the `payments:get` topic page (produced `1`, consumed `2`, "produced, not consumed: 1"). The
@@ -227,7 +228,7 @@ restarting Payments (spec unchanged since the last run) clears the badge.
   `WithHealthPath`), purely so the aggregator's hardcoded polling URLs above
   and `run.sh` keep working unchanged - a real deployment would just keep the
   defaults. The service's `CloudServiceProfileReport` (carried on its
-  descriptor's `profile` field, visible via the live Fleet plane) honestly flags
+  contract document's `profile` field, visible via the live Fleet plane) honestly flags
   requirement R7 for that deliberate relocation.
 - `SpecMessageHandler` and the health-check middleware don't carry
   `[HttpEndpoint]` attributes, so reflection-based discovery never picks them

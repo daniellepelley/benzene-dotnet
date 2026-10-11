@@ -91,14 +91,15 @@ Payments spec:   http://localhost:5311/spec?type=benzene
 The Mesh Explorer's live Fleet plane (the "Fleet" nav on http://localhost:5300/mesh-ui, plus the live
 sections on each service/topic page) is the live collector - everything on it is derived from what the
 services themselves emit (docs/specification/mesh.md), nothing declared:
-  - orders-api and payments-api registered their derived descriptors and heartbeat every 10s
+  - orders-api and payments-api registered their derived contract documents and heartbeat every 10s
     (payments-api heartbeats unhealthy -> "degraded"; restart it with DEMO_PAYMENTS_HEALTHY=true
     to watch it flip)
-  - the payments:get topic shows "consumers: orders-api" - derived purely from the traceparent
-    the checkout handler propagated, and the recent flows join both services' events
+  - the payments:get topic shows provider orders-api (its sends) and consumer payments-api (its
+    requests) from the registrations; the traceparent the checkout handler propagated marks the
+    edge observed, and the recent flows join both services' events
   - shipping-api has NO row: it never started, so it never registered - start it and watch it
     appear
-  - payments-api's restart with DEMO_ADD_ENDPOINT=true changed its descriptor hash - the same
+  - payments-api's restart with DEMO_ADD_ENDPOINT=true changed its registrationHash - the same
     contract-drift story the aggregation dashboard tells, from live data
 
 The catalog (the default view of http://localhost:5300/mesh-ui) shows every declared state at once:

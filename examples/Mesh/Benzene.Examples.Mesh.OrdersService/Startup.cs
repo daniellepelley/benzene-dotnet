@@ -8,7 +8,6 @@ using Benzene.HealthChecks;
 using Benzene.Http.Routing;
 using Benzene.Mesh.Wire;
 using Benzene.Microsoft.Dependencies;
-using Benzene.ResponseEvents;
 using Microsoft.Extensions.DependencyInjection;
 
 public class Startup
@@ -22,13 +21,7 @@ public class Startup
             // ASP.NET wiring pattern from docs/kubernetes-health-checks.md.
             .AddSingleton<PaymentsContractClient>(_ => new PaymentsContractClient())
             .AddSingleton<IHttpEndpointDefinition>(_ =>
-                new HttpEndpointDefinition("GET", "/contracts", Constants.DefaultContractsTopic))
-            // orders-api is pinned to payments:get v1 while payments-api's handler has moved to v2.
-            // Declaring the produced event (spec `events`) puts a payments:get@1 producer in the fleet, so
-            // the mesh's version compatibility view shows the skew (produced v1, consumed v2) - bridged at
-            // runtime by payments-api's upcaster, which the mesh can't see. See versioning.md.
-            .AddResponseEventDeclarations(
-                new ResponseEventDefinition(new Benzene.Core.Messages.Topic("payments:get", "1"), typeof(PaymentsQueryV1))));
+                new HttpEndpointDefinition("GET", "/contracts", Constants.DefaultContractsTopic)));
     }
 
     public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
@@ -39,7 +32,7 @@ public class Startup
         // replaces the old hand-wired /benzene/invoke branch + StartAnnouncing() (MeshHost.cs,
         // deleted) with the wire-envelope endpoint, health checks (reserved topic + HTTP), the
         // derived spec, message handlers via the registry, and the mesh service-side feeds
-        // (descriptor, registration, heartbeats, trace) - all pre-wired in the right order. Handler
+        // (registration of that spec, heartbeats, trace) - all pre-wired in the right order. Handler
         // discovery stays attribute-based ([Message]/[HttpEndpoint] on GetOrdersMessageHandler /
         // CheckoutOrderMessageHandler), same idiom as before. Spec/health stay at this demo's
         // pre-existing /spec and /healthcheck paths (relocated from the /benzene/ defaults) so the
@@ -61,13 +54,16 @@ public class Startup
                     .WithHealthChecks(new OrdersDatabaseHealthCheck(), new OrdersCacheHealthCheck(), new OrdersQueueHealthCheck())
                     .WithCollector(Environment.GetEnvironmentVariable("MESH_COLLECTOR_ENVELOPE_URL")
                         ?? "http://localhost:5300/benzene/invoke")
-                    // mesh.md §2.3 outbound registration: orders-api explicitly declares that it CONSUMES
-                    // payments:get@1 (CheckoutOrderMessageHandler's cross-service call) - no handler, no
-                    // destination, the same PaymentsQueryV1 request shape the pre-existing response-event
-                    // declaration above already models. This is what puts a declared consumer edge on the
-                    // collector's Fleet view (spec §4, 2026-08 revision) for payments:get - present even
-                    // before checkout is ever called, and dropped automatically if a future redeploy stops
-                    // declaring it (re-registration replaces `consumes` wholesale, spec §4).
+                    // A send declaration (contract-document.md §3.2): orders-api sends payments:get@1
+                    // (CheckoutOrderMessageHandler's cross-service call) to a topic payments-api defines -
+                    // no handler, no destination. It is in orders-api's contract document's sends, so its
+                    // registration makes orders-api a declared provider of payments:get@1 on the
+                    // collector's Fleet view (mesh.md §4) - present before checkout is ever called, and
+                    // dropped if a redeploy stops declaring it. orders-api is pinned to v1 while
+                    // payments-api's handler has moved to v2, so the mesh's version compatibility view
+                    // shows the skew (sent v1, served v2) - bridged at runtime by payments-api's upcaster,
+                    // which the mesh can't see. See versioning.md. (A send, not an event: a (topic,
+                    // version) declared as both fails the document, contract-document.md §3.3.)
                     .WithSends(new MeshOutboundRegistry().Register<PaymentsQueryV1>("payments:get", "1"))
                     .WithSpecPath("/spec")
                     .WithHealthPath("/healthcheck")

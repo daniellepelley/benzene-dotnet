@@ -12,7 +12,7 @@
     <!-- provided.al2023 ships no libicu; run globalization-invariant so the apphost starts. -->
     <InvariantGlobalization>true</InvariantGlobalization>
     <!-- Dogfoods benzene-descriptor (docs/contract-artifacts.md): emits
-         Benzene.Examples.AwsMesh.Payments.spec.json / .service.json into bin/ on every build.
+         Benzene.Examples.AwsMesh.Payments.spec.json (the contract document) into bin/ on every build.
          BenzeneDescriptorCommand is set in examples/Directory.Build.props (runs the tool from
          source, since this repo's CI builds Benzene.Examples.sln in a job separate from the one
          that builds Benzene.Descriptor). -->

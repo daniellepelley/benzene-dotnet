@@ -37,7 +37,7 @@ public class Startup : BenzeneStartUp
     {
         var blobServiceUri = Environment.GetEnvironmentVariable("MESH_BLOB_URI")
                              ?? throw new InvalidOperationException("MESH_BLOB_URI is required (e.g. https://acct.blob.core.windows.net).");
-        var container = Environment.GetEnvironmentVariable("MESH_BLOB_CONTAINER") ?? "benzene:mesh";
+        var container = Environment.GetEnvironmentVariable("MESH_BLOB_CONTAINER") ?? "mesh";
         var prefix = Environment.GetEnvironmentVariable("MESH_BLOB_PREFIX") ?? "";
 
         // The OTLP exporter is only attached when OTEL_EXPORTER_OTLP_ENDPOINT is set — the

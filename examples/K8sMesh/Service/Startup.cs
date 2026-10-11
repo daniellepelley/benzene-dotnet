@@ -17,7 +17,7 @@ using Benzene.Http;
 using Benzene.Http.BenzeneMessage;
 using Benzene.Microsoft.Dependencies;
 using Benzene.OpenTelemetry;
-using Benzene.ResponseEvents;
+using Benzene.Mesh.Wire;
 using Benzene.Spec.Ui;
 using Microsoft.Extensions.DependencyInjection;
 using OpenTelemetry.Metrics;
@@ -100,8 +100,9 @@ public class Startup : BenzeneStartUp
     //  - payments-api runs a single V2 handler and registers the V1->V2 upcaster + payload casting, so a v1
     //    payload from orders-api is upcast (currency seeded) before the handler sees it. The version travels
     //    in the benzene-version envelope header (orders sends SendMessageAsync(..., version: "1")).
-    //  - orders-api declares it produces payment:take@1 (spec events), so the mesh's version compatibility
-    //    view surfaces the producer-v1 / consumer-v2 skew the upcaster bridges.
+    //  - orders-api declares it sends payment:take@1 (a send declaration: payments-api defines the topic,
+    //    contract-document.md §3.2), so the mesh's version compatibility view surfaces the producer-v1 /
+    //    consumer-v2 skew the upcaster bridges - providers are events ∪ sends (mesh.md §4).
     private static void ConfigureVersioning(IBenzeneServiceContainer x)
     {
         if (ServiceName == "payments")
@@ -122,9 +123,8 @@ public class Startup : BenzeneStartUp
         }
         else if (ServiceName == "orders")
         {
-            x.AddResponseEventDeclarations(
-                new ResponseEventDefinition(new Benzene.Core.Messages.Topic("payment:take", "1"),
-                    typeof(Model.V1.TakePaymentRequest)));
+            x.AddSendDeclarations(new MeshOutboundRegistry()
+                .Register<Model.V1.TakePaymentRequest>("payment:take", "1"));
         }
     }
 

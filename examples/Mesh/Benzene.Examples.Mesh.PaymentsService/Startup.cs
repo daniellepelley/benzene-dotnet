@@ -62,8 +62,8 @@ public class Startup
 
         // Benzene Cloud Service setup (docs/specification/cloud-service-profile.md) - see
         // OrdersService/Startup.cs for the full before/after story this replaces (MeshHost.cs,
-        // deleted). DEMO_ADD_ENDPOINT changes the derived descriptor (and so its hash) exactly as
-        // it changes the OpenAPI spec - the same contract-drift story the aggregator demo tells,
+        // deleted). DEMO_ADD_ENDPOINT changes the derived contract document (and so its
+        // registrationHash) - the same contract-drift story the aggregator demo tells,
         // visible on the Fleet view as a hash mismatch until the restarted instance re-registers.
         // DEMO_PAYMENTS_HEALTHY drives the health check below, so the Fleet view mirrors the
         // dashboard's unhealthy badge. Spec/health stay at the demo's pre-existing /spec and
