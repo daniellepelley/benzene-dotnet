@@ -118,6 +118,15 @@ Derivation happens on the first `benzene:spec` request. To fail at start-up inst
 message is handled - opt in with `services.AddContractDocumentStartUpCheck()`; `benzene-descriptor
 --emit spec` fails the build the same way.
 
+`UseBenzeneCloudService` turns the start-up check **on by default**. Deriving every schema costs a
+cold start, so a short-lived host such as an AWS Lambda function can opt out - and rely on the
+build-time check instead:
+
+```csharp
+app.UseBenzeneCloudService("orders", cloud => cloud
+    .WithoutContractDocumentStartUpCheck());
+```
+
 ## Message endpoint advertisement
 
 When the service exposes a BenzeneMessage-over-HTTP endpoint (`UseBenzeneMessage` — see

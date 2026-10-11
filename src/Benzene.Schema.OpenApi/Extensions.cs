@@ -54,7 +54,9 @@ public static class Extensions
     /// <summary>
     /// Derives the contract document at start-up (<see cref="ContractDocumentStartUpCheck"/>), so a
     /// component-name collision or an event/send conflict fails the host before any message is handled
-    /// rather than on the first <c>benzene:spec</c> request. Opt-in: it costs a cold start.
+    /// rather than on the first <c>benzene:spec</c> request. Opt-in here, since it costs a cold start;
+    /// <c>UseBenzeneCloudService</c> registers it by default (opt out with
+    /// <c>WithoutContractDocumentStartUpCheck()</c>).
     /// </summary>
     public static IBenzeneServiceContainer AddContractDocumentStartUpCheck(this IBenzeneServiceContainer services)
     {

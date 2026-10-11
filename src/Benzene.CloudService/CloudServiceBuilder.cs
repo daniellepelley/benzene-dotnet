@@ -116,6 +116,17 @@ public interface ICloudServiceBuilder
     /// </summary>
     ICloudServiceBuilder WithoutMesh();
 
+    /// <summary>
+    /// Opts out of the contract-document start-up check that <c>UseBenzeneCloudService</c> registers by
+    /// default (<c>AddContractDocumentStartUpCheck</c>). The check derives the contract document once at
+    /// start-up, so a component-name collision (contract-document.md §4.1 rule 4) or an event/send
+    /// conflict (§3.3) fails the host before the first message instead of on the first
+    /// <c>benzene:spec</c> request. Deriving every schema costs a cold start, which a short-lived host
+    /// such as an AWS Lambda function may not want to pay on every cold start: opt out there and catch
+    /// the same errors at build time instead (<c>benzene-descriptor --emit spec</c>,
+    /// <c>Benzene.CodeGen.Build</c>). This is not a profile deviation - the report is unchanged.
+    /// </summary>
+    ICloudServiceBuilder WithoutContractDocumentStartUpCheck();
 }
 
 internal sealed class CloudServiceBuilder : ICloudServiceBuilder
@@ -140,6 +151,7 @@ internal sealed class CloudServiceBuilder : ICloudServiceBuilder
     public string HealthPath { get; private set; } = CloudServicePaths.Health;
     public IMeshTraceExporter? TraceExporter { get; private set; }
     public bool MeshEnabled { get; private set; } = true;
+    public bool ContractDocumentStartUpCheckEnabled { get; private set; } = true;
     public Action<CloudServiceProfileReport>? ProfileReportCallback { get; private set; }
 
     public bool UsesDefaultPaths =>
@@ -234,6 +246,12 @@ internal sealed class CloudServiceBuilder : ICloudServiceBuilder
     public ICloudServiceBuilder WithoutMesh()
     {
         MeshEnabled = false;
+        return this;
+    }
+
+    public ICloudServiceBuilder WithoutContractDocumentStartUpCheck()
+    {
+        ContractDocumentStartUpCheckEnabled = false;
         return this;
     }
 

@@ -58,6 +58,12 @@ Core setup) remains the full-control path and this package must never be require
   gap is tracked separately in `work/audit-remaining-suggestions.md` item 1. Covered by
   `test/Benzene.Core.Test/CloudService/MeshDisposalTest.cs`.
 - `CloudServicePaths` — the `/benzene/*` default-standard path constants.
+- **Contract-document start-up check, on by default (spec-0.5.0).** `UseBenzeneCloudService` registers
+  `AddContractDocumentStartUpCheck()`, so a component-name collision (contract-document.md §4.1 rule 4)
+  or an event/send conflict fails the host before the first message. `WithoutContractDocumentStartUpCheck()`
+  opts out where the cold-start cost of deriving every schema matters (AWS Lambda); build-time
+  derivation (`benzene-descriptor`) catches the same errors. Covered by
+  `test/Benzene.Core.Test/CloudService/CloudServiceContractDocumentStartUpCheckTest.cs`.
 
 ## Important conventions
 - **The logical service name is the application name (2026-07-24).** `UseBenzeneCloudService` calls

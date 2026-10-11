@@ -32,6 +32,10 @@ namespace Benzene.CloudService;
 /// sends and published events alike, is each outbound route's <c>UseW3CTraceContext()</c>) - the
 /// meshed-service claim, reported apart from the profile</item>
 /// <item>message handlers via the registry, routed on both the HTTP and envelope pipelines (R1, R2)</item>
+/// <item>the contract-document start-up check (<c>AddContractDocumentStartUpCheck</c>), on by default:
+/// a component-name collision (contract-document.md §4.1 rule 4) fails the host before the first
+/// message. Opt out with <see cref="ICloudServiceBuilder.WithoutContractDocumentStartUpCheck"/> where the
+/// cold-start cost matters (e.g. AWS Lambda)</item>
 /// </list>
 ///
 /// This is syntactic sugar over the same pipeline builders Benzene Core setup uses - nothing here
@@ -115,6 +119,14 @@ public static class Extensions
                 x.AddSendDeclarations(builder.OutboundRegistry);
             }
             x.AddSingleton(_ => report);
+            if (builder.ContractDocumentStartUpCheckEnabled)
+            {
+                // On by default: derive the contract document once at start-up, so a component-name
+                // collision (contract-document.md §4.1 rule 4) or an event/send conflict (§3.3) fails the
+                // host before the first message, not on the first benzene:spec request. Opt out with
+                // WithoutContractDocumentStartUpCheck() where the cold start matters (e.g. Lambda).
+                x.AddContractDocumentStartUpCheck();
+            }
             x.AddSingleton<IHttpEndpointDefinition>(_ =>
                 new HttpEndpointDefinition("get", builder.SpecPath, Schema.OpenApi.Constants.DefaultSpecTopic));
             x.AddSingleton<IHttpEndpointDefinition>(_ =>

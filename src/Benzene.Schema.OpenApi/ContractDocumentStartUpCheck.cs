@@ -11,8 +11,10 @@ namespace Benzene.Schema.OpenApi;
 /// one is registered, so the work is not repeated.
 /// </summary>
 /// <remarks>
-/// Opt-in (<see cref="Extensions.AddContractDocumentStartUpCheck"/>): deriving every schema costs a
-/// cold start, which a short-lived host such as a Lambda function may not want to pay. Build-time
+/// Opt-in for manual composition (<see cref="Extensions.AddContractDocumentStartUpCheck"/>): deriving
+/// every schema costs a cold start, which a short-lived host such as a Lambda function may not want to
+/// pay. <c>UseBenzeneCloudService</c> registers it by default, with
+/// <c>WithoutContractDocumentStartUpCheck()</c> as the opt-out. Build-time
 /// derivation (<c>benzene-descriptor --emit spec</c>, <c>Benzene.CodeGen.Build</c>) catches the same
 /// errors without it.
 /// </remarks>

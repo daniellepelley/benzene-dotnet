@@ -136,8 +136,10 @@ for the `benzene` contract.
   `Derivation/ComponentNames` (declared `[SchemaName]` from `Benzene.Abstractions.Schema`, else the
   simple name, generic arguments first, invalid characters dropped) through the `SchemaIdSelector`; two
   different types claiming one name throw `ComponentNameCollisionException` (the builder re-throws it
-  naming the topics). `ContractDocumentStartUpCheck` (`AddContractDocumentStartUpCheck()`, opt-in) derives
-  the document at start-up so this fails before any message. `NullableReference.Unwrap` lets consumers
+  naming the topics). `ContractDocumentStartUpCheck` (`AddContractDocumentStartUpCheck()`; opt-in for manual
+  composition, **on by default** under `UseBenzeneCloudService`, which offers
+  `WithoutContractDocumentStartUpCheck()` for Lambda cold starts) derives the document at start-up so
+  this fails before any message. `NullableReference.Unwrap` lets consumers
   (examples, codegen, docs) see through the wrapper. **DI seam:** `SpecBuilder` try-resolves `ISchemaBuilder` from the container before
   falling back to `new SchemaBuilder(...)`, so a custom builder (e.g. `SuppliedSchemaBuilder`)
   can replace reflection generation in the live spec. Register custom builders transient/scoped -
