@@ -31,9 +31,9 @@ public static class DependencyInjectionExtensions
 
         // TryAdd: a user registration made earlier (ConfigureServices runs before Configure, where
         // UseKafka calls this) wins over these per-context defaults.
-        services.TryAddScoped<IMessageTopicGetter<KafkaContext>, KafkaMessageTopicGetter>();
+        services.TryAddScoped<IMessageTopicGetter<KafkaContext>>(_ => new KafkaMessageTopicGetter());
         services.TryAddHeaderMessageVersionGetter<KafkaContext>();
-        services.TryAddScoped<IMessageHeadersGetter<KafkaContext>, KafkaMessageHeadersGetter>();
+        services.TryAddScoped<IMessageHeadersGetter<KafkaContext>>(_ => new KafkaMessageHeadersGetter());
         services.TryAddScoped<IMessageBodyGetter<KafkaContext>, KafkaMessageBodyGetter>();
         services.TryAddScoped<IMessageHandlerResultSetter<KafkaContext>, KafkaMessageHandlerResultSetter>();
 

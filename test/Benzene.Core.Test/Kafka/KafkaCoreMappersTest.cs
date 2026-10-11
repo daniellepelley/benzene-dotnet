@@ -65,11 +65,39 @@ public class KafkaCoreMappersTest
     }
 
     [Fact]
-    public void KafkaMessageTopicGetter_ReturnsTheConsumeResultTopic()
+    public void KafkaMessageTopicGetter_WithNoTopicHeader_FallsBackToTheConsumeResultTopic()
     {
         var context = new KafkaRecordContext<string, string>(CreateConsumeResult("my-topic", "hello"));
 
         Assert.Equal("my-topic", new KafkaMessageTopicGetter<string, string>().GetTopic(context).Id);
+    }
+
+    [Fact]
+    public void KafkaMessageTopicGetter_TheTopicHeaderWins_OverTheConsumeResultTopic()
+    {
+        // transport-bindings, Kafka: the record's topic header routes; one Kafka topic can carry several
+        // Benzene topics.
+        var headers = new Headers { { "topic", Encoding.UTF8.GetBytes("order:create") } };
+        var context = new KafkaRecordContext<string, string>(CreateConsumeResult("orders", "hello", headers));
+
+        Assert.Equal("order:create", new KafkaMessageTopicGetter<string, string>().GetTopic(context).Id);
+        Assert.False(new KafkaMessageHeadersGetter<string, string>().GetHeaders(context).ContainsKey("topic"));
+    }
+
+    [Fact]
+    public void KafkaMessageTopicGetter_AnOverriddenHeaderKey_IsHonoured()
+    {
+        var headers = new Headers
+        {
+            { "x-my-topic", Encoding.UTF8.GetBytes("order:create") },
+            { "topic", Encoding.UTF8.GetBytes("not-the-topic") }
+        };
+        var context = new KafkaRecordContext<string, string>(CreateConsumeResult("orders", "hello", headers));
+
+        Assert.Equal("order:create", new KafkaMessageTopicGetter<string, string>("x-my-topic").GetTopic(context).Id);
+        var forwarded = new KafkaMessageHeadersGetter<string, string>("x-my-topic").GetHeaders(context);
+        Assert.False(forwarded.ContainsKey("x-my-topic"));
+        Assert.Equal("not-the-topic", forwarded["topic"]);
     }
 
     [Fact]

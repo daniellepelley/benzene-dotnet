@@ -12,14 +12,14 @@ namespace Benzene.Abstractions;
 /// <para>
 /// <strong>It IS a DI seam for the standalone (non-Lambda, non-Azure-Function) consumer
 /// packages</strong> — <c>AddSqsConsumer</c>, <c>AddServiceBusConsumer</c>, <c>AddEventHubConsumer</c>,
-/// and <c>AddRabbitMq</c>: each resolves a registered <see cref="IBenzeneWireNames"/> (falling back to
+/// <c>AddRabbitMq</c> and <c>AddKafka&lt;TKey, TValue&gt;</c> (<c>Benzene.Kafka.Core</c>): each resolves a registered <see cref="IBenzeneWireNames"/> (falling back to
 /// <see cref="Default"/>) to seed its topic getter's key, but only when the caller left that
 /// transport's own topic-attribute/-property/-header parameter at ITS default — an explicit
 /// non-default value passed to the transport's Add/Use extension, or set directly on its config
 /// (<c>SqsConsumerConfig.TopicAttributeKey</c>, <c>BenzeneServiceBusConfig.TopicPropertyKey</c>,
 /// <c>BenzeneEventHubConfig.TopicPropertyKey</c>, <c>RabbitMqConfig.TopicHeaderKey</c>), always wins
-/// over a registered <see cref="IBenzeneWireNames"/>. Kafka has no equivalent knob — for Kafka the
-/// topic is the Kafka topic itself (a routing concept), not a message attribute.
+/// over a registered <see cref="IBenzeneWireNames"/>. Kafka reads the topic header and falls back to
+/// the Kafka topic the record was consumed from when it is absent.
 /// </para>
 /// <para>
 /// <strong>It is NOT (yet) resolved by outbound clients</strong>, the Lambda-triggered consumer

@@ -1,6 +1,7 @@
 using System.Linq;
 using System.Text;
 using Benzene.Abstractions.Messages.Mappers;
+using Benzene.Core.Messages;
 
 namespace Benzene.Azure.Function.Kafka;
 
@@ -9,6 +10,27 @@ namespace Benzene.Azure.Function.Kafka;
 /// </summary>
 public class KafkaMessageHeadersGetter : IMessageHeadersGetter<KafkaContext>
 {
+    private readonly string _topicHeaderKey;
+
+    /// <summary>
+    /// Initializes a new instance that leaves out the default topic header (<c>topic</c>) - the key
+    /// <see cref="KafkaMessageTopicGetter"/> consumes.
+    /// </summary>
+    public KafkaMessageHeadersGetter()
+        : this(Benzene.Abstractions.BenzeneWireNames.DefaultTopic)
+    { }
+
+    /// <summary>
+    /// Initializes a new instance that leaves out <paramref name="topicHeaderKey"/>: the topic is routing
+    /// metadata, consumed by the topic getter, so it does not reappear in the header dictionary
+    /// (transport-metadata-cases.json <c>headersExclude</c>). Pass the same key the topic getter reads.
+    /// </summary>
+    /// <param name="topicHeaderKey">The record header the topic is carried on (matched case-insensitively).</param>
+    public KafkaMessageHeadersGetter(string topicHeaderKey)
+    {
+        _topicHeaderKey = topicHeaderKey;
+    }
+
     /// <summary>
     /// Gets the decoded headers from the Kafka record.
     /// </summary>
@@ -28,6 +50,11 @@ public class KafkaMessageHeadersGetter : IMessageHeadersGetter<KafkaContext>
         var dictionary = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var header in headers)
         {
+            if (MetadataKeys.Matches(header.Key, _topicHeaderKey))
+            {
+                continue;
+            }
+
             dictionary[header.Key] = Encoding.UTF8.GetString(header.Value ?? System.Array.Empty<byte>());
         }
 

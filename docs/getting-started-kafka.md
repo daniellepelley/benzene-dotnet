@@ -65,10 +65,11 @@ dotnet add package Benzene.SelfHost --prerelease
 
 ### 1.3 Define a message handler
 
-The Kafka consumer routes each record to a handler by matching the record's **literal Kafka topic
-name** against the handler's `[Message("...")]` value — there's no colon-separated topic-id
-convention here the way there is for HTTP/SQS/SNS; whatever you pass in `[Message(...)]` must be
-exactly the Kafka topic string:
+The Kafka consumer routes each record on its `topic` header when the producer wrote one (a Benzene
+producer, or any producer that sets it — so one Kafka topic can carry several Benzene topics), and
+otherwise on the record's **literal Kafka topic name**. A record with no `topic` header — the usual
+case for a non-Benzene producer, and for this quickstart — therefore routes to the handler whose
+`[Message("...")]` value is exactly the Kafka topic string:
 
 <!-- compile: quickstart sdk=worker -->
 ```csharp
@@ -259,8 +260,9 @@ public override void Configure(IBenzeneApplicationBuilder app, IConfiguration co
             .UseMessageHandlers(router => router.UseFluentValidation())));
 ```
 
-As with the worker path, the handler's `[Message("...")]` value must match the Kafka topic name
-literally (`KafkaMessageTopicGetter` reads it straight off the Lambda event record). Kafka record
+As with the worker path, the handler's `[Message("...")]` value must match the record's `topic` header,
+or the Kafka topic name literally when there is none (`KafkaMessageTopicGetter` reads both off the Lambda
+event record). Kafka record
 headers are mapped to Benzene headers, and partition/offset are available on `KafkaContext`. Kafka
 events are fire-and-forget — no response is written back, and a Lambda invocation carrying multiple
 records processes all of them (flattened across topic-partitions) through the pipeline before
@@ -324,8 +326,9 @@ public class KafkaFunction
 }
 ```
 
-As with the worker and AWS paths, `[Message("...")]` must match the Kafka topic name literally
-(`KafkaMessageTopicGetter.GetTopic` reads `KafkaEvent.Topic` directly). Kafka record headers **are**
+As with the worker and AWS paths, `[Message("...")]` must match the record's `topic` header, or the
+Kafka topic name literally when there is none (`KafkaMessageTopicGetter.GetTopic` falls back to
+`KafkaEvent.Topic`). Kafka record headers **are**
 mapped to Benzene headers on this path too (`KafkaMessageHeadersGetter` reads `KafkaRecord.Headers`,
 UTF-8 decoding each value) — header-based middleware (correlation IDs, W3C trace context via
 `.UseW3CTraceContext<KafkaContext>()`) works the same as on the worker and AWS paths above.
@@ -335,8 +338,8 @@ triggers in the same Function App.
 
 ## Troubleshooting
 
-- **Handler never fires** — the `[Message("...")]` value must equal the literal Kafka topic name on
-  all three paths (not a colon-separated topic id). Double-check `BenzeneKafkaConfig.Topics` (worker
+- **Handler never fires** — the `[Message("...")]` value must equal the record's `topic` header, or the
+  literal Kafka topic name when the record has no `topic` header, on all three paths. Double-check `BenzeneKafkaConfig.Topics` (worker
   path) actually includes that topic, and that the broker has it (`docker compose ... kafdrop` at
   `http://localhost:19000` lets you inspect topics/messages directly).
 - **`GroupId` collisions in tests** — the worker example generates a random `GroupId` per test run

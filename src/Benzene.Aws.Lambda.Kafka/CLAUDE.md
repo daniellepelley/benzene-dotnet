@@ -51,7 +51,7 @@ code changes needed for either fix.
 ### Message Handling
 - `KafkaMessageBodyGetter` - Extracts message body from Kafka record
 - `KafkaMessageHeadersGetter` - Extracts Kafka headers
-- `KafkaMessageTopicGetter` - Extracts Kafka topic
+- `KafkaMessageTopicGetter` - The record's `topic` header, falling back to the record's Kafka topic
 - `KafkaMessageHandlerResultSetter` - Sets result on context
 
 ### Other
@@ -75,9 +75,9 @@ code changes needed for either fix.
 - Processes Kafka records in batches, **per-partition-sequential in offset order, fan-out across
   partitions** (see the top-of-file section) — not a flat all-records fan-out.
 - Kafka headers mapped to Benzene headers. The **routing topic is NOT one of them**:
-  `KafkaMessageHeadersGetter` decodes only the record's actual headers; the topic is resolved
-  separately by `KafkaMessageTopicGetter` (from the record's `Topic`). Surfacing the topic as a
-  header (as this getter previously did) let it silently ride onto an outbound send when a handler
+  `KafkaMessageTopicGetter` resolves it from the record's `topic` header, falling back to the record's
+  `Topic` (spec ruling: header first, as RabbitMQ's routing-key fallback), and `KafkaMessageHeadersGetter`
+  leaves that header out. Surfacing the topic as a header (as this getter once did) let it silently ride onto an outbound send when a handler
   forwarded the message's headers — and if that send targets a topic the same service consumes, that
   is an infinite loop. An outbound topic is always set explicitly by the sender, never inherited from
   the message being handled. Mirrored in `Benzene.Kafka.Core`'s `KafkaMessageContextConverter`, which
@@ -105,7 +105,7 @@ code changes needed for either fix.
 
 ## Tests
 - `test/Benzene.Core.Test/Aws/Kafka/KafkaGettersTest.cs` — the three getters directly: body
-  (UTF-8 decode), topic (resolved by `KafkaMessageTopicGetter` from the record's `Topic`), and
+  (UTF-8 decode), topic (resolved by `KafkaMessageTopicGetter` from the `topic` header, else the record's `Topic`), and
   headers (empty-header-batch case returning `{}`, plus the multi-entry case decoding every header
   and asserting the routing topic is **not** surfaced as a `topic` header — see below).
 - `test/Benzene.Core.Test/Aws/Kafka/KafkaMessagePipelineTest.cs` — end-to-end sends (JSON, XML,

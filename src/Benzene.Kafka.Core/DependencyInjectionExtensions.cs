@@ -18,10 +18,14 @@ public static class DependencyInjectionExtensions
     {
         // TryAdd: a user registration made earlier (ConfigureServices runs before Configure, where
         // UseKafka calls this) wins over these per-context defaults - e.g. a custom topic getter that
-        // routes on a header instead of the broker topic.
-        services.TryAddScoped<IMessageTopicGetter<KafkaRecordContext<TKey, TValue>>, KafkaMessageTopicGetter<TKey, TValue>>();
+        // routes on a different header (the default reads the `topic` header, falling back to the broker topic).
+        // The topic header key follows a registered IBenzeneWireNames (as the other standalone consumers do), and
+        // the headers getter leaves out the same key the topic getter consumes (headersExclude).
+        services.TryAddScoped<IMessageTopicGetter<KafkaRecordContext<TKey, TValue>>>(resolver =>
+            new KafkaMessageTopicGetter<TKey, TValue>(ResolveTopicHeaderKey(resolver)));
         services.TryAddHeaderMessageVersionGetter<KafkaRecordContext<TKey, TValue>>();
-        services.TryAddScoped<IMessageHeadersGetter<KafkaRecordContext<TKey, TValue>>, KafkaMessageHeadersGetter<TKey, TValue>>();
+        services.TryAddScoped<IMessageHeadersGetter<KafkaRecordContext<TKey, TValue>>>(resolver =>
+            new KafkaMessageHeadersGetter<TKey, TValue>(ResolveTopicHeaderKey(resolver)));
         services.TryAddScoped<IMessageBodyGetter<KafkaRecordContext<TKey, TValue>>, KafkaMessageBodyGetter<TKey, TValue>>();
         services.TryAddScoped<IMessageHandlerResultSetter<KafkaRecordContext<TKey, TValue>>, KafkaMessageHandlerResultSetter<TKey, TValue>>();
 
@@ -30,5 +34,10 @@ public static class DependencyInjectionExtensions
         services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.Kafka));
 
         return services;
+    }
+
+    private static string ResolveTopicHeaderKey(Benzene.Abstractions.DI.IServiceResolver resolver)
+    {
+        return resolver.TryGetService<Benzene.Abstractions.IBenzeneWireNames>()?.Topic ?? Benzene.Abstractions.BenzeneWireNames.DefaultTopic;
     }
 }

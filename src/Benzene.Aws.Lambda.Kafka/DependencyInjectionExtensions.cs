@@ -31,7 +31,7 @@ public static class DependencyInjectionExtensions
         services.TryAddScoped<IMessageTopicGetter<KafkaContext>>(resolver =>
             new PresetTopicMessageTopicGetter<KafkaContext>(new KafkaMessageTopicGetter(), resolver.GetService<PresetTopicHolder>()));
         services.TryAddHeaderMessageVersionGetter<KafkaContext>();
-        services.TryAddScoped<IMessageHeadersGetter<KafkaContext>, KafkaMessageHeadersGetter>();
+        services.TryAddScoped<IMessageHeadersGetter<KafkaContext>>(_ => new KafkaMessageHeadersGetter());
         services.TryAddScoped<IMessageBodyGetter<KafkaContext>, KafkaMessageBodyGetter>();
         services.TryAddScoped<IMessageHandlerResultSetter<KafkaContext>, KafkaMessageHandlerResultSetter>();
 

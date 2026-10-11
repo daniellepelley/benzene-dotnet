@@ -136,9 +136,8 @@ public class TransportMetadataConformanceTest
     // Every metadataCases and overrideCases entry runs against every binding that resolves its topic from
     // native metadata (the fixture's topicSources with source "metadata"), each decoded the way the pipeline
     // decodes it: the binding's topic getter, its headers getter, and the one version getter over those
-    // headers. RabbitMQ's native fallback (its routing key) is given empty here, so an absent key stays
-    // unresolved. Kafka is listed there too, but this port's Kafka bindings route on the native Kafka topic,
-    // so they have no topic attribute to run these cases on.
+    // headers. A binding with a native fallback (RabbitMQ's routing key, Kafka's own topic) is given an
+    // empty one here, so an absent key stays unresolved; TopicSourceFallback_* below covers the fallback.
     public static TheoryData<string, string> MetadataCases()
     {
         using var document = LoadFixture();
@@ -200,6 +199,61 @@ public class TransportMetadataConformanceTest
                     $"{binding}/{caseName}: '{excludedKey}' was consumed as routing metadata but also surfaced as a header");
             }
         }
+    }
+
+    // The adapters that run a topicSources binding: the binding itself, and its other hostings ("kafka (lambda)").
+    private static IEnumerable<string> AdaptersFor(string binding) =>
+        MetadataBindings.Keys.Where(x => x == binding || x.StartsWith(binding + " (", StringComparison.Ordinal));
+
+    [Fact]
+    public void EveryMetadataTopicSource_HasABindingThatRunsTheCases()
+    {
+        using var document = LoadFixture();
+        var metadataBindings = document.RootElement.GetProperty("topicSources").EnumerateArray()
+            .Where(x => x.GetProperty("source").GetString() == "metadata")
+            .Select(x => x.GetProperty("binding").GetString()!);
+
+        Assert.All(metadataBindings, binding => Assert.NotEmpty(AdaptersFor(binding)));
+    }
+
+    // topicSources entries that name a fallback (RabbitMQ's routing key, Kafka's own topic): the fallback
+    // routes when the topic key is absent, and the key, when present, always wins.
+    public static TheoryData<string> FallbackBindings()
+    {
+        using var document = LoadFixture();
+        var data = new TheoryData<string>();
+        foreach (var source in document.RootElement.GetProperty("topicSources").EnumerateArray()
+                     .Where(x => x.GetProperty("source").GetString() == "metadata" && x.TryGetProperty("fallback", out _)))
+        {
+            foreach (var adapter in AdaptersFor(source.GetProperty("binding").GetString()!))
+            {
+                data.Add(adapter);
+            }
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(FallbackBindings))]
+    public void TopicSourceFallback_RoutesWhenTheTopicKeyIsAbsent(string binding)
+    {
+        var decoded = MetadataBindings[binding](
+            new[] { new KeyValuePair<string, string>("x-correlation-id", "abc-123") }, ExpectedTopicKey(), "native-topic");
+
+        Assert.Equal("native-topic", decoded.Topic);
+        Assert.Equal("abc-123", decoded.Headers["x-correlation-id"]);
+    }
+
+    [Theory]
+    [MemberData(nameof(FallbackBindings))]
+    public void TopicSourceFallback_TheTopicKeyWinsWhenPresent(string binding)
+    {
+        var decoded = MetadataBindings[binding](
+            new[] { new KeyValuePair<string, string>("Topic", "conformance:greet") }, ExpectedTopicKey(), "native-topic");
+
+        Assert.Equal("conformance:greet", decoded.Topic);
+        Assert.DoesNotContain(decoded.Headers.Keys, x => string.Equals(x, "topic", StringComparison.OrdinalIgnoreCase));
     }
 
     private sealed record Decoded(string Topic, string Version, IDictionary<string, string> Headers);
@@ -296,6 +350,47 @@ public class TransportMetadataConformanceTest
                     consumerTag: "tag", deliveryTag: 1, redelivered: false, exchange: "exchange",
                     routingKey: nativeTopic, properties: properties, body: Encoding.UTF8.GetBytes("{}")));
                 return Decode(context, new RabbitMqMessageTopicGetter(topicKey), new RabbitMqMessageHeadersGetter(topicKey));
+            },
+            ["kafka"] = (metadata, topicKey, nativeTopic) =>
+            {
+                var headers = new Confluent.Kafka.Headers();
+                foreach (var pair in metadata)
+                {
+                    headers.Add(pair.Key, Encoding.UTF8.GetBytes(pair.Value));
+                }
+                var context = new Benzene.Kafka.Core.KafkaMessage.KafkaRecordContext<string, string>(new Confluent.Kafka.ConsumeResult<string, string>
+                {
+                    Message = new Confluent.Kafka.Message<string, string> { Value = "{}", Headers = headers },
+                    TopicPartitionOffset = new Confluent.Kafka.TopicPartitionOffset(nativeTopic, new Confluent.Kafka.Partition(0), new Confluent.Kafka.Offset(1))
+                });
+                return Decode(context,
+                    new Benzene.Kafka.Core.KafkaMessage.KafkaMessageTopicGetter<string, string>(topicKey),
+                    new Benzene.Kafka.Core.KafkaMessage.KafkaMessageHeadersGetter<string, string>(topicKey));
+            },
+            ["kafka (lambda)"] = (metadata, topicKey, nativeTopic) =>
+            {
+                // The AWS Kafka event delivers each record header as its own single-entry element.
+                var record = new Amazon.Lambda.KafkaEvents.KafkaEvent.KafkaEventRecord
+                {
+                    Topic = nativeTopic,
+                    Headers = metadata.Select(x => (IDictionary<string, byte[]>)new Dictionary<string, byte[]> { [x.Key] = Encoding.UTF8.GetBytes(x.Value) }).ToList()
+                };
+                var context = new Benzene.Aws.Lambda.Kafka.KafkaContext(new Amazon.Lambda.KafkaEvents.KafkaEvent(), record);
+                return Decode(context,
+                    new Benzene.Aws.Lambda.Kafka.KafkaMessageTopicGetter(topicKey),
+                    new Benzene.Aws.Lambda.Kafka.KafkaMessageHeadersGetter(topicKey));
+            },
+            ["kafka (function)"] = (metadata, topicKey, nativeTopic) =>
+            {
+                var context = new Benzene.Azure.Function.Kafka.KafkaContext(new global::Microsoft.Azure.Functions.Worker.KafkaRecord
+                {
+                    Topic = nativeTopic,
+                    Value = Encoding.UTF8.GetBytes("{}"),
+                    Headers = metadata.Select(x => new global::Microsoft.Azure.Functions.Worker.KafkaHeader { Key = x.Key, Value = Encoding.UTF8.GetBytes(x.Value) }).ToArray()
+                });
+                return Decode(context,
+                    new Benzene.Azure.Function.Kafka.KafkaMessageTopicGetter(topicKey),
+                    new Benzene.Azure.Function.Kafka.KafkaMessageHeadersGetter(topicKey));
             },
         };
 

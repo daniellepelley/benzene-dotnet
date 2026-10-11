@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using Benzene.Abstractions.Messages.Mappers;
+using Benzene.Core.Messages;
 
 namespace Benzene.Aws.Lambda.Kafka;
 
@@ -9,15 +10,35 @@ namespace Benzene.Aws.Lambda.Kafka;
 /// Extracts every header from a Kafka record, UTF-8 decoding each value.
 /// </summary>
 /// <remarks>
-/// The Kafka topic is a <em>routing</em> concept resolved by <see cref="KafkaMessageTopicGetter"/>
-/// (from the record's own <c>Topic</c>) - it is deliberately NOT surfaced as a <c>topic</c> header.
-/// Fabricating one here meant the inbound topic silently rode along when a handler forwarded the
-/// message's headers onto an outbound send, which — if that send targets a topic the same service
-/// consumes — is an infinite-loop trap. An outbound topic must be set explicitly, never inherited
-/// from the message being handled.
+/// The topic header is <em>routing</em> metadata, consumed by <see cref="KafkaMessageTopicGetter"/> (which
+/// falls back to the record's own Kafka topic) - it is deliberately NOT surfaced as a header. Forwarding a
+/// handled message's headers onto an outbound send therefore never carries its inbound topic along, which -
+/// if that send targets a topic the same service consumes - would be an infinite-loop trap. An outbound
+/// topic must be set explicitly, never inherited from the message being handled.
 /// </remarks>
 public class KafkaMessageHeadersGetter : IMessageHeadersGetter<KafkaContext>
 {
+    private readonly string _topicHeaderKey;
+
+    /// <summary>
+    /// Initializes a new instance that leaves out the default topic header (<c>topic</c>) - the key
+    /// <see cref="KafkaMessageTopicGetter"/> consumes.
+    /// </summary>
+    public KafkaMessageHeadersGetter()
+        : this(Benzene.Abstractions.BenzeneWireNames.DefaultTopic)
+    { }
+
+    /// <summary>
+    /// Initializes a new instance that leaves out <paramref name="topicHeaderKey"/>: the topic is routing
+    /// metadata, consumed by the topic getter, so it does not reappear in the header dictionary
+    /// (transport-metadata-cases.json <c>headersExclude</c>). Pass the same key the topic getter reads.
+    /// </summary>
+    /// <param name="topicHeaderKey">The record header the topic is carried on (matched case-insensitively).</param>
+    public KafkaMessageHeadersGetter(string topicHeaderKey)
+    {
+        _topicHeaderKey = topicHeaderKey;
+    }
+
     /// <summary>
     /// Gets the decoded headers from the Kafka record.
     /// </summary>
@@ -46,6 +67,11 @@ public class KafkaMessageHeadersGetter : IMessageHeadersGetter<KafkaContext>
 
             foreach (var header in batch)
             {
+                if (MetadataKeys.Matches(header.Key, _topicHeaderKey))
+                {
+                    continue;
+                }
+
                 dictionary[header.Key] = Encoding.UTF8.GetString(header.Value ?? Array.Empty<byte>());
             }
         }

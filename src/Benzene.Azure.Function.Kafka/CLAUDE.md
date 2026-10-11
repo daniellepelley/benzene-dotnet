@@ -33,8 +33,9 @@ queue-shaped transports' policy fixes. Matches `Benzene.Aws.Lambda.Kafka`, `Benz
 ## Key types
 - `KafkaContext : IHasMessageResult` — wraps a single `KafkaRecord`; records the handler outcome on
   `MessageResult`.
-- Mappers: `KafkaMessageTopicGetter` (topic from `record.Topic` — a real Kafka topic, unlike Queue
-  Storage which has none), `KafkaMessageBodyGetter`, `KafkaMessageHeadersGetter`,
+- Mappers: `KafkaMessageTopicGetter` (topic from the record's `topic` header, falling back to
+  `record.Topic` — a real Kafka topic, unlike Queue Storage which has none; the header is consumed and
+  left out of `KafkaMessageHeadersGetter`'s dictionary), `KafkaMessageBodyGetter`, `KafkaMessageHeadersGetter`,
   `KafkaMessageHandlerResultSetter`.
 - `KafkaApplication : EntryPointMiddlewareApplication<KafkaRecord[]>` / `KafkaBatchApplication` —
   the entry point and its per-record batch loop, transport-tagged `"kafka"`.
