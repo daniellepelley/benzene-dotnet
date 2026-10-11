@@ -146,8 +146,12 @@ public class AsyncApiCompositorTest
         Assert.False(string.IsNullOrEmpty(doc["id"]!.GetValue<string>()));
     }
 
-    [Fact]
-    public void Merge_SkipsReservedTopicChannelsAndOperations()
+    [Theory]
+    // The contract document no longer lists benzene: topics, so the aggregator has no reserved list to
+    // pass; the compositor recognises them by the prefix (BenzeneTopic.IsReserved) either way.
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Merge_SkipsReservedTopicChannelsAndOperations(bool reservedListed)
     {
         // The reserved "benzene:spec" operation carries a reply on a "spec:response" channel. Dropping the
         // operation must also drop BOTH its request and its reply channel - and the compositor does
@@ -170,7 +174,10 @@ public class AsyncApiCompositorTest
         }
         """;
 
-        var merged = AsyncApiCompositor.Merge(new[] { Service("orders-api", doc, "benzene:spec") }, At);
+        var merged = AsyncApiCompositor.Merge(new[]
+        {
+            reservedListed ? Service("orders-api", doc, "benzene:spec") : Service("orders-api", doc)
+        }, At);
         var parsed = JsonNode.Parse(merged)!;
         var channels = parsed["channels"]!.AsObject();
         var operations = parsed["operations"]!.AsObject();

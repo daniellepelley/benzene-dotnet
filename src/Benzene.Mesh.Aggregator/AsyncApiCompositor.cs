@@ -27,7 +27,9 @@ public static class AsyncApiCompositor
     /// <summary>One service's fetched AsyncAPI doc plus what the merge needs to namespace/filter it.</summary>
     /// <param name="ServiceName">The service name — the namespace discriminator (channels/operations/schemas/tags).</param>
     /// <param name="AsyncApiJson">The service's raw AsyncAPI 3.0 JSON.</param>
-    /// <param name="ReservedTopics">The service's reserved (utility) topic ids, whose channels/operations are skipped.</param>
+    /// <param name="ReservedTopics">Further reserved (utility) topic ids whose channels/operations are skipped; every
+    /// <c>benzene:</c>-prefixed topic (<see cref="Benzene.Abstractions.BenzeneTopic.IsReserved"/>) is skipped regardless - the
+    /// contract document no longer lists reserved topics, so the prefix is the rule.</param>
     public readonly record struct ServiceDocument(string ServiceName, string AsyncApiJson, IReadOnlySet<string> ReservedTopics);
 
     private const string SchemaRefPrefix = "#/components/schemas/";
@@ -120,6 +122,7 @@ public static class AsyncApiCompositor
 
                     var primaryKey = ChannelKeyOf(operationObj["channel"]);
                     if (primaryKey == null || !channelKeyMap.ContainsKey(primaryKey)
+                        || Benzene.Abstractions.BenzeneTopic.IsReserved(channelAddress[primaryKey])
                         || service.ReservedTopics.Contains(channelAddress[primaryKey]))
                     {
                         continue; // no resolvable channel, or a reserved/utility operation - drop it

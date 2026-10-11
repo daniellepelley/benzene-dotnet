@@ -831,13 +831,17 @@ public class MeshAggregatorTest : IDisposable
         Assert.Equal(MeshTopicStatus.Gap, refund.Status);
     }
 
-    [Fact]
-    public async Task RunOnceAsync_DerivesStructuralTopology_FromSenderToHandler()
+    [Theory]
+    // contract-document.md §3: a send (a topic another party defines) and a published event both put
+    // the topic on the wire, so either makes orders a producer of it - the graph reads events ∪ sends.
+    [InlineData("sends", "request")]
+    [InlineData("events", "message")]
+    public async Task RunOnceAsync_DerivesStructuralTopology_FromSenderToHandler(string member, string schemaMember)
     {
         const string paymentsSpecUrl = "https://payments-api.example/spec?type=benzene";
         const string paymentsHealthUrl = "https://payments-api.example/healthcheck";
-        // orders declares it *sends* payments:capture (events); payments *handles* it (requests).
-        var ordersSpec = "{\"requests\":[{\"topic\":\"orders:create\"}],\"events\":[{\"topic\":\"payments:capture\"}]}";
+        // orders declares it puts payments:capture on the wire; payments *handles* it (requests).
+        var ordersSpec = $"{{\"requests\":[{{\"topic\":\"orders:create\"}}],\"{member}\":[{{\"topic\":\"payments:capture\",\"{schemaMember}\":{{}}}}]}}";
         var paymentsSpec = "{\"requests\":[{\"topic\":\"payments:capture\"}]}";
 
         var handler = new RoutingHttpMessageHandler()

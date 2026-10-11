@@ -1197,8 +1197,11 @@ public class MeshAggregator
                     ? versionElement.GetString() ?? ""
                     : "";
 
-                var reserved = request.TryGetProperty("reserved", out var reservedElement)
-                               && reservedElement.ValueKind == JsonValueKind.True;
+                // A current contract document lists no benzene: topic (contract-document.md §1); a
+                // legacy one did, flagged `reserved`. Either way the prefix is the rule.
+                var reserved = Benzene.Abstractions.BenzeneTopic.IsReserved(topicElement.GetString())
+                               || (request.TryGetProperty("reserved", out var reservedElement)
+                                   && reservedElement.ValueKind == JsonValueKind.True);
 
                 var mappings = new List<MeshTopicHttpMapping>();
                 if (request.TryGetProperty("httpMappings", out var httpMappings) && httpMappings.ValueKind == JsonValueKind.Array)
@@ -1224,9 +1227,11 @@ public class MeshAggregator
     }
 
     /// <summary>
-    /// Extracts the topics a service declares it <em>sends</em> from its <c>benzene</c> spec (the
-    /// <c>events</c> array — broadcast/sender declarations), for structural topology derivation and
-    /// the topic catalog's producer side. Best-effort, same posture as <see cref="ParseTopics"/>.
+    /// Extracts the topics a service declares it puts on the wire from its <c>benzene</c> spec - the
+    /// <c>events</c> it publishes (schema: <c>message</c>) <b>and</b> the <c>sends</c> it makes to
+    /// topics others define (schema: <c>request</c>), contract-document.md §3 - for structural topology
+    /// derivation and the topic catalog's producer side: a published event's publisher and a sender are
+    /// both producers of the topic. Best-effort, same posture as <see cref="ParseTopics"/>.
     /// </summary>
     private static IReadOnlyList<ServiceOutboundTopic> ParseOutboundTopics(string? specJson)
     {
@@ -1238,21 +1243,25 @@ public class MeshAggregator
         try
         {
             using var doc = JsonDocument.Parse(specJson);
-            if (!doc.RootElement.TryGetProperty("events", out var events) || events.ValueKind != JsonValueKind.Array)
-            {
-                return Array.Empty<ServiceOutboundTopic>();
-            }
-
             var components = ReadComponents(doc.RootElement);
             var topics = new List<ServiceOutboundTopic>();
-            foreach (var @event in events.EnumerateArray())
+            foreach (var (member, schemaMember) in new[] { ("events", "message"), ("sends", "request") })
             {
-                if (@event.TryGetProperty("topic", out var topic) && topic.ValueKind == JsonValueKind.String)
+                if (!doc.RootElement.TryGetProperty(member, out var entries) || entries.ValueKind != JsonValueKind.Array)
                 {
-                    var version = @event.TryGetProperty("version", out var versionElement) && versionElement.ValueKind == JsonValueKind.String
-                        ? versionElement.GetString() ?? ""
-                        : "";
-                    topics.Add(new ServiceOutboundTopic(topic.GetString()!, version, ExtractSchema(@event, "message", components)));
+                    continue;
+                }
+
+                foreach (var entry in entries.EnumerateArray())
+                {
+                    if (entry.TryGetProperty("topic", out var topic) && topic.ValueKind == JsonValueKind.String
+                        && !Benzene.Abstractions.BenzeneTopic.IsReserved(topic.GetString()))
+                    {
+                        var version = entry.TryGetProperty("version", out var versionElement) && versionElement.ValueKind == JsonValueKind.String
+                            ? versionElement.GetString() ?? ""
+                            : "";
+                        topics.Add(new ServiceOutboundTopic(topic.GetString()!, version, ExtractSchema(entry, schemaMember, components)));
+                    }
                 }
             }
 
@@ -1342,8 +1351,8 @@ public class MeshAggregator
     /// <c>$ref</c> with the referenced component (tagging it with a <c>title</c> of the ref name),
     /// recurses through <c>properties</c>/<c>items</c>/<c>additionalProperties</c>, and copies every
     /// other key (<c>type</c>/<c>required</c>/<c>enum</c>/<c>format</c>/<c>minimum</c>/<c>pattern</c>/…)
-    /// verbatim - so downstream (comparison + the UI renderer) never has to resolve a ref. Recursive
-    /// types are cut with a <c>title</c>-only marker.
+    /// verbatim - so downstream (comparison + the UI renderer) never has to resolve a ref. A recursive
+    /// reference is cut to <c>{}</c>, as the contract hash's projection cuts it (contract-document.md §6.2).
     /// </summary>
     private static JsonNode? InlineSchema(JsonElement node, IReadOnlyDictionary<string, JsonElement> components, HashSet<string> visiting, int depth)
     {
@@ -1367,7 +1376,9 @@ public class MeshAggregator
 
             if (!visiting.Add(name))
             {
-                return new JsonObject { ["type"] = "object", ["title"] = name + " (recursive)" };
+                // contract-document.md §6.2 step 3's cycle cut: a reference already being expanded on
+                // this path becomes {}.
+                return new JsonObject();
             }
 
             var resolved = InlineSchema(target, components, visiting, depth + 1);
