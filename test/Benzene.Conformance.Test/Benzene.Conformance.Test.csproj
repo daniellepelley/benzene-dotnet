@@ -32,6 +32,7 @@
     <ProjectReference Include="..\..\src\Benzene.CodeGen.Core\Benzene.CodeGen.Core.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Core.MessageHandlers\Benzene.Core.MessageHandlers.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Core.Messages\Benzene.Core.Messages.csproj" />
+    <ProjectReference Include="..\..\src\Benzene.FluentValidation\Benzene.FluentValidation.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Grpc\Benzene.Grpc.csproj" />
     <ProjectReference Include="..\..\src\Benzene.Grpc.Client\Benzene.Grpc.Client.csproj" />
     <ProjectReference Include="..\..\src\Benzene.HostedService\Benzene.HostedService.csproj" />
