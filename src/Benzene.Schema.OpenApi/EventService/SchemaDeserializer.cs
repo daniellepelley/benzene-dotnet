@@ -88,6 +88,18 @@ public class EventServiceDocumentDeserializer
         doc.ServiceVersion = NullIfEmpty(jObject["serviceVersion"]?.Value<string>() ?? info?["version"]?.Value<string>());
         doc.VersionScheme = NullIfEmpty(jObject["versionScheme"]?.Value<string>());
         doc.Description = NullIfEmpty(jObject["description"]?.Value<string>() ?? info?["description"]?.Value<string>());
+        doc.Runtime = NullIfEmpty(jObject["runtime"]?.Value<string>());
+        if (jObject["placement"] is JObject placement && !string.IsNullOrEmpty(placement["cloud"]?.Value<string>()))
+        {
+            doc.Placement = new ContractDocumentPlacement(placement["cloud"]!.Value<string>()!, placement["region"]?.Value<string>());
+        }
+        if (jObject["profile"] is JObject profile && !string.IsNullOrEmpty(profile["name"]?.Value<string>()))
+        {
+            doc.Profile = new ContractDocumentProfile(profile["name"]!.Value<string>()!,
+                (profile["missing"] as JArray)?.Select(x => x.Value<string>()).OfType<string>().ToArray());
+        }
+        doc.Degraded = (jObject["degraded"] as JArray)?.Select(x => x.Value<string>()).OfType<string>().ToArray()
+                       ?? Array.Empty<string>();
         doc.MessageEndpoint = jObject["messageEndpoint"]?.Value<string>();
         doc.Transports = GetTransports(jObject);
         doc.DeclaredContractHash = jObject["contractHash"]?.Value<string>();

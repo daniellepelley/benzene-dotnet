@@ -203,6 +203,23 @@ public class SpecBuilder
                 consumesTransportsInfo.AddTransportsInfo(transportsInfo);
             }
         }
+        if (builder is IConsumesDeployment<TBuilder> consumesDeployment)
+        {
+            // The deployment-side fields (contract-document.md §1) - registered by the cloud service, or
+            // SetContractDocumentDeployment - so the served document and the mesh register body, which are
+            // the same document (mesh.md §2), both carry them.
+            var deployment = resolver.TryGetService<ContractDocumentDeployment>();
+            if (deployment != null)
+            {
+                consumesDeployment.AddDeployment(deployment);
+            }
+
+            // No handler registry: requests could not be determined, which is not "serves nothing".
+            if (resolver.TryGetService<IMessageHandlersFinder>() == null)
+            {
+                consumesDeployment.AddDegraded(ContractDocumentMembers.Requests);
+            }
+        }
 
         return builder;
     }

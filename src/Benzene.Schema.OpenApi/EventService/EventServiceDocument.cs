@@ -14,12 +14,14 @@ namespace Benzene.Schema.OpenApi.EventService;
 /// (<see cref="Events"/>), the messages it sends to topics others define (<see cref="Sends"/>), their
 /// payload schemas (<see cref="Components"/>) and how its topics are reachable over HTTP. It is what
 /// the reserved <c>benzene:spec</c> topic answers with and what every language's client generator
-/// reads.
+/// reads, and - with its deployment-side fields - the body a mesh-enabled service registers with a
+/// collector (mesh.md §2).
 /// </summary>
 /// <remarks>
 /// Serialized, it carries <c>schemaDialect</c> (<see cref="SchemaDialectOpenApi30"/>), the service's
 /// identity (<c>service</c>, <c>serviceVersion</c>, <c>versionScheme</c>, <c>description</c>), the
-/// optional <c>messageEndpoint</c> and <c>transports</c>, both hashes (<c>contractHash</c> and
+/// optional deployment-side fields (<c>runtime</c>, <c>placement</c>, <c>profile</c>, <c>degraded</c>),
+/// the optional <c>messageEndpoint</c> and <c>transports</c>, both hashes (<c>contractHash</c> and
 /// <c>registrationHash</c>, always computed over the document as written - <see cref="ContractHash"/>),
 /// the three entry lists and <c>components</c>. It is not itself an OpenAPI document; its schemas are
 /// OpenAPI 3.0 Schema Objects.
@@ -58,6 +60,21 @@ public class EventServiceDocument : IOpenApiSerializable
 
     /// <summary>Free text, or null.</summary>
     public string? Description { get; set; }
+
+    /// <summary>The implementing port (<c>dotnet</c>), or null (contract-document.md §1). Outside both hashes.</summary>
+    public string? Runtime { get; set; }
+
+    /// <summary>Where the service runs, or null (contract-document.md §1). Outside both hashes.</summary>
+    public ContractDocumentPlacement? Placement { get; set; }
+
+    /// <summary>The service's conformance-profile self-assessment, or null (contract-document.md §1). Outside both hashes.</summary>
+    public ContractDocumentProfile? Profile { get; set; }
+
+    /// <summary>
+    /// The members (<see cref="ContractDocumentMembers"/>) the producer could not determine; empty, and
+    /// then omitted, when it determined all three (contract-document.md §1). Outside both hashes.
+    /// </summary>
+    public string[] Degraded { get; set; } = Array.Empty<string>();
 
     /// <summary>The topics this service serves.</summary>
     public RequestResponse[] Requests { get; set; }
@@ -125,6 +142,10 @@ public class EventServiceDocument : IOpenApiSerializable
             ServiceVersion = ServiceVersion,
             VersionScheme = VersionScheme,
             Description = Description,
+            Runtime = Runtime,
+            Placement = Placement,
+            Profile = Profile,
+            Degraded = Degraded,
             MessageEndpoint = MessageEndpoint,
             Transports = Transports,
         };
@@ -173,6 +194,24 @@ public class EventServiceDocument : IOpenApiSerializable
         WriteOptional(writer, "serviceVersion", ServiceVersion);
         WriteOptional(writer, "versionScheme", VersionScheme);
         WriteOptional(writer, "description", Description);
+        WriteOptional(writer, "runtime", Runtime);
+        if (Placement != null)
+        {
+            writer.WritePropertyName("placement");
+            writer.WriteStartObject();
+            writer.WriteProperty("cloud", Placement.Cloud);
+            WriteOptional(writer, "region", Placement.Region);
+            writer.WriteEndObject();
+        }
+        if (Profile != null)
+        {
+            writer.WritePropertyName("profile");
+            writer.WriteStartObject();
+            writer.WriteProperty("name", Profile.Name);
+            writer.WriteOptionalCollection("missing", Profile.Missing, (w, m) => w.WriteValue(m));
+            writer.WriteEndObject();
+        }
+        writer.WriteOptionalCollection("degraded", Degraded, (w, d) => w.WriteValue(d));
         WriteOptional(writer, "messageEndpoint", MessageEndpoint);
         writer.WriteOptionalCollection("transports", Transports, (w, t) => w.WriteValue(t));
         WriteOptional(writer, "contractHash", contractHash);

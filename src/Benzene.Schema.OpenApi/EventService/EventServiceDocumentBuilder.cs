@@ -37,6 +37,7 @@ namespace Benzene.Schema.OpenApi.EventService
         IConsumesHttpEndpointDefinitions<EventServiceDocumentBuilder>,
         IConsumesMessageEndpoint<EventServiceDocumentBuilder>,
         IConsumesTransportsInfo<EventServiceDocumentBuilder>,
+        IConsumesDeployment<EventServiceDocumentBuilder>,
         IProducesJson,
         IProducesYaml
     {
@@ -50,6 +51,8 @@ namespace Benzene.Schema.OpenApi.EventService
         private string? _description;
         private string? _messageEndpoint;
         private string[] _transports = Array.Empty<string>();
+        private ContractDocumentDeployment? _deployment;
+        private readonly List<string> _degraded = new();
 
         public EventServiceDocumentBuilder(ISchemaBuilder? schemaBuilder = null)
         {
@@ -92,8 +95,37 @@ namespace Benzene.Schema.OpenApi.EventService
                 VersionScheme = _versionScheme,
                 Description = _description,
                 MessageEndpoint = _messageEndpoint,
-                Transports = _transports
+                Transports = _transports,
+                Runtime = _deployment?.Runtime,
+                Placement = _deployment?.Placement,
+                Profile = _deployment?.Profile,
+                Degraded = _degraded.ToArray()
             };
+        }
+
+        /// <summary>
+        /// Stamps the deployment-side fields (contract-document.md §1: <c>runtime</c>, <c>placement</c>,
+        /// <c>profile</c>) - outside both hashes, so they never change them.
+        /// </summary>
+        public EventServiceDocumentBuilder AddDeployment(ContractDocumentDeployment deployment)
+        {
+            _deployment = deployment;
+            return this;
+        }
+
+        /// <summary>
+        /// Names a member (<see cref="ContractDocumentMembers"/>) this producer could not determine
+        /// (contract-document.md §1 <c>degraded</c>). The member's list is emitted empty: a degraded
+        /// member asserts nothing, where an empty list without <c>degraded</c> asserts "none".
+        /// </summary>
+        public EventServiceDocumentBuilder AddDegraded(string member)
+        {
+            if (!_degraded.Contains(member))
+            {
+                _degraded.Add(member);
+            }
+
+            return this;
         }
 
         /// <summary>

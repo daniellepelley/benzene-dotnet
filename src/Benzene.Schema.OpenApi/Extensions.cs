@@ -36,6 +36,22 @@ public static class Extensions
     }
 
     /// <summary>
+    /// Registers the deployment-side fields of this service's contract document (contract-document.md
+    /// §1: <c>runtime</c>, <c>placement</c>, <c>profile</c>). Every document <see cref="SpecBuilder"/>
+    /// derives - the one <c>benzene:spec</c> serves and the mesh register body alike - carries them.
+    /// <c>UseBenzeneCloudService</c> registers one itself.
+    /// </summary>
+    /// <param name="services">The container.</param>
+    /// <param name="deployment">The deployment-side fields.</param>
+    /// <returns>The container, for chaining.</returns>
+    public static IBenzeneServiceContainer SetContractDocumentDeployment(
+        this IBenzeneServiceContainer services, Benzene.Schema.OpenApi.EventService.ContractDocumentDeployment deployment)
+    {
+        services.AddSingleton(deployment);
+        return services;
+    }
+
+    /// <summary>
     /// Derives the contract document at start-up (<see cref="ContractDocumentStartUpCheck"/>), so a
     /// component-name collision or an event/send conflict fails the host before any message is handled
     /// rather than on the first <c>benzene:spec</c> request. Opt-in: it costs a cold start.

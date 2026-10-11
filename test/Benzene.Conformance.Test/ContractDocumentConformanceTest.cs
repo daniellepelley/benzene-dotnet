@@ -80,9 +80,25 @@ public class ContractDocumentConformanceTest
         public List<Registration> Sends { get; set; } = new();
     }
 
+    public class PlacementInfo
+    {
+        public string Cloud { get; set; } = string.Empty;
+        public string? Region { get; set; }
+    }
+
+    /// <summary>A derivation case's identity and placement (contract-document.md §1), which the document carries and neither hash covers.</summary>
+    public class ServiceInfo
+    {
+        public string? Service { get; set; }
+        public string? ServiceVersion { get; set; }
+        public string? VersionScheme { get; set; }
+        public PlacementInfo? Placement { get; set; }
+    }
+
     public class DerivationCase
     {
         public string Name { get; set; } = string.Empty;
+        public ServiceInfo? ServiceInfo { get; set; }
         public Registrations Registrations { get; set; } = new();
         public JsonElement Expected { get; set; }
 
@@ -237,14 +253,24 @@ public class ContractDocumentConformanceTest
     private static Registrations CanonicalService => FixtureData.Value.DerivationCases.Single(c => c.Name == "canonical-service").Registrations;
 
     /// <summary>Registers <paramref name="registrations"/> the way an application does and returns the container and the envelope pipeline.</summary>
-    private static (MicrosoftBenzeneServiceContainer Container, Benzene.Abstractions.Middleware.IMiddlewarePipeline<BenzeneMessageContext> Pipeline) BuildService(Registrations registrations)
+    private static (MicrosoftBenzeneServiceContainer Container, Benzene.Abstractions.Middleware.IMiddlewarePipeline<BenzeneMessageContext> Pipeline) BuildService(Registrations registrations, ServiceInfo? serviceInfo = null)
     {
         var services = new ServiceCollection();
         services.AddLogging();
 
         var container = new MicrosoftBenzeneServiceContainer(services);
         container.AddBenzene().AddBenzeneMessage();
-        container.SetApplicationInfo("conformance", string.Empty, string.Empty);
+        // The identity through IApplicationInfo and the placement through the deployment-side fields -
+        // how an application (and the cloud service) supplies them.
+        container.SetApplicationInfo(serviceInfo?.Service ?? "conformance", serviceInfo?.ServiceVersion ?? string.Empty,
+            string.Empty, serviceInfo?.VersionScheme);
+        if (serviceInfo?.Placement != null)
+        {
+            container.SetContractDocumentDeployment(new ContractDocumentDeployment
+            {
+                Placement = new ContractDocumentPlacement(serviceInfo.Placement.Cloud, serviceInfo.Placement.Region)
+            });
+        }
 
         if (registrations.Events.Count > 0)
         {
@@ -271,9 +297,10 @@ public class ContractDocumentConformanceTest
         return (container, pipelineBuilder.Build());
     }
 
-    private static async Task<IBenzeneMessageResponse> SendSpecAsync(Registrations registrations, string? body)
+    private static async Task<IBenzeneMessageResponse> SendSpecAsync(Registrations registrations, string? body,
+        ServiceInfo? serviceInfo = null)
     {
-        var (container, pipeline) = BuildService(registrations);
+        var (container, pipeline) = BuildService(registrations, serviceInfo);
         var application = new BenzeneMessageApplication(pipeline);
         return await application.HandleAsync(new BenzeneMessageRequest
         {
@@ -290,7 +317,7 @@ public class ContractDocumentConformanceTest
     [MemberData(nameof(DerivationCases))]
     public async Task DerivationCase_TheServedDocumentDerivesTheExpectedEntriesAndHashes(DerivationCase testCase)
     {
-        var response = await SendSpecAsync(testCase.Registrations, null);
+        var response = await SendSpecAsync(testCase.Registrations, null, testCase.ServiceInfo);
         Assert.Equal("ok", response.StatusCode);
 
         var document = JsonNode.Parse(response.Body!)!.AsObject();
@@ -298,7 +325,21 @@ public class ContractDocumentConformanceTest
         var expected = JsonNode.Parse(testCase.Expected.GetRawText())!.AsObject();
 
         Assert.Equal(EventServiceDocument.SchemaDialectOpenApi30, document["schemaDialect"]?.GetValue<string>());
-        Assert.Equal("conformance", document["service"]?.GetValue<string>());
+        Assert.Equal(testCase.ServiceInfo?.Service ?? "conformance", document["service"]?.GetValue<string>());
+
+        // The identity fields expected carries (service, serviceVersion, versionScheme, placement),
+        // subset-matched: the document carries them, and neither hash covers them (§1, §6.2).
+        using (var actualDocument = JsonDocument.Parse(response.Body!))
+        {
+            foreach (var property in testCase.Expected.EnumerateObject()
+                         .Where(x => x.Name is not ("requests" or "events" or "sends" or "contractHash" or "registrationHash")))
+            {
+                Assert.True(actualDocument.RootElement.TryGetProperty(property.Name, out var actual),
+                    $"{testCase.Name}: the document has no '{property.Name}'");
+                var mismatch = ConformanceFixtures.FindSubsetMismatch(property.Value, actual, "$." + property.Name);
+                Assert.True(mismatch == null, $"{testCase.Name}: {mismatch}");
+            }
+        }
 
         foreach (var (member, schemaMembers) in new[]
                  {
