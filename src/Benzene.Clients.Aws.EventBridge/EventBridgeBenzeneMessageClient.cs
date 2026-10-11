@@ -15,7 +15,7 @@ namespace Benzene.Clients.Aws.EventBridge;
 /// <summary>
 /// A Benzene message client that publishes messages as EventBridge events via <c>PutEvents</c>:
 /// topic → <c>detail-type</c>, message → <c>detail</c>, headers embedded per the
-/// <c>_benzeneHeaders</c> convention (see <see cref="EventBridgeContextConverter{T}"/>). Publishing
+/// <c>benzene-headers</c> convention (see <see cref="EventBridgeContextConverter{T}"/>). Publishing
 /// is fire-and-forget — a successful publish maps to <c>Accepted</c>.
 /// </summary>
 public class EventBridgeBenzeneMessageClient : IBenzeneMessageClient

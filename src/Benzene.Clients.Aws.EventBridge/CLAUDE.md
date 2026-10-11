@@ -37,7 +37,7 @@ Outbound EventBridge client for a Benzene app: put events on an EventBridge bus.
   outbound route (`OutboundRoutingBuilder.Route`) can publish to EventBridge the same way `.UseSqs(...)`/
   `.UseSns(...)` do (the EventBridge twin of `OutboundSns/SqsContextConverter`, added 2026-07-22). Maps the
   Benzene topic → `DetailType` and the configured `source` → `Source`; embeds wire headers into `Detail`
-  under `_benzeneHeaders` exactly as `EventBridgeContextConverter<T>` does (shares its `EmbeddedHeadersKey`).
+  under `benzene-headers` exactly as `EventBridgeContextConverter<T>` does (shares its `EmbeddedHeadersKey`).
   Fire-and-acknowledge, so the response is always `IBenzeneResult<Void>` — route a topic here and send it
   via `IBenzeneMessageSender.SendAsync<TRequest,Void>`. The `UseEventBridge(this
   IMiddlewarePipelineBuilder<OutboundContext>, string source, string? eventBusName = null, bool healthCheck

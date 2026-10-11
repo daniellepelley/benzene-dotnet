@@ -42,7 +42,7 @@ See `work/settlement-consistency-fix-plan.md`.
 - Getters: topic = `detail-type` (wrapped in `PresetTopicMessageTopicGetter`, so `.UsePresetTopic(...)`
   / `.UseTopicFrom(...)` can route a foreign bus event whose `detail-type` is not a Benzene topic);
   body = `detail` raw JSON; headers = `eventbridge-`-prefixed
-  envelope metadata plus Benzene wire headers lifted from the reserved `_benzeneHeaders` object
+  envelope metadata plus Benzene wire headers lifted from the reserved `benzene-headers` object
   inside `detail` (EventBridge has no native per-message attributes — the outbound client in
   `Benzene.Clients.Aws/EventBridge/` embeds them there).
 - `UseEventBridge(action)` / `AddEventBridge()` / `EventBridgeRegistrations` — standard adapter
@@ -62,7 +62,9 @@ See `work/settlement-consistency-fix-plan.md`.
 ## Important conventions
 - Topic matching is against `detail-type` verbatim; `source` is metadata
   (`eventbridge-source` header), not part of the topic.
-- Embedded `_benzeneHeaders` win over prefixed envelope keys on collision; string values only.
+- The embedded-headers key is `benzene-headers` (wire-contracts §2; `_benzeneHeaders` before spec-0.2.0,
+  no dual-accept). It is read into the header dictionary and left in the body, never stripped.
+- Embedded `benzene-headers` win over prefixed envelope keys on collision; string values only.
 - Transport name: `"eventbridge"`.
 - The `aws_cloudwatch_event_rule`/target/permission Terraform for a consuming Lambda can be
   generated from its `[Message]` topics — see `Benzene.CodeGen.Terraform`
@@ -70,8 +72,8 @@ See `work/settlement-consistency-fix-plan.md`.
 
 ## Tests
 - `test/Benzene.Core.Test/Aws/EventBridge/EventBridgeGettersTest.cs` — topic/body/headers getters,
-  including edge cases: undefined `detail` (`Body` returns null), a non-object `_benzeneHeaders`
-  value (ignored), and a non-string value inside `_benzeneHeaders` (skipped, only string-valued
+  including edge cases: undefined `detail` (`Body` returns null), a non-object `benzene-headers`
+  value (ignored), and a non-string value inside `benzene-headers` (skipped, only string-valued
   entries are lifted).
 - `test/Benzene.Core.Test/Aws/EventBridge/EventBridgeLambdaHandlerTest.cs` — `CanHandle` routing:
   both `detail-type`/`source` present (handled), neither present (falls through), and the two

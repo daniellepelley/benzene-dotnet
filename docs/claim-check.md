@@ -217,7 +217,7 @@ Shipped today:
 |---|---|---|
 | AWS Lambda SQS | `SqsMessageContext` | `Benzene.Aws.Lambda.Sqs` |
 | AWS Lambda SNS | `SnsRecordContext` | `Benzene.Aws.Lambda.Sns` |
-| AWS Lambda EventBridge | `EventBridgeContext` | `Benzene.Aws.Lambda.EventBridge` (also re-embeds the reserved `_benzeneHeaders` object into the hydrated body, mirroring the sender-side embed rule, so header reads later in the pipeline still see them) |
+| AWS Lambda EventBridge | `EventBridgeContext` | `Benzene.Aws.Lambda.EventBridge` (also re-embeds the reserved `benzene-headers` object into the hydrated body, mirroring the sender-side embed rule, so header reads later in the pipeline still see them) |
 | Standalone SQS consumer | the `Benzene.Aws.Sqs` consumer context | `Benzene.Aws.Sqs` |
 
 Offload has no such restriction — it only touches `OutboundContext`, which every outbound route

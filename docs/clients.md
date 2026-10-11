@@ -447,7 +447,7 @@ var client = new EventBridgeBenzeneMessageClient("com.mycompany.orders",
 
 `EventBridgeBenzeneMessageClient` publishes messages as EventBridge events via `PutEvents`: the request's topic becomes the event's `detail-type` (EventBridge's native routing key — this is what a receiving `Benzene.Aws.Lambda.EventBridge` service routes on), the serialized message becomes `detail`, and the client is configured with a fixed `source` and optional event bus name (default bus when omitted).
 
-EventBridge has no native per-message attributes, so headers are embedded into `detail` under the reserved `_benzeneHeaders` key (only when there are headers to send and the payload is a JSON object); the inbound EventBridge binding lifts them back out, so correlation/trace-context propagate end to end when set. Publishing is fire-and-forget: success maps to `accepted`. `PutEvents` can succeed at the HTTP level while individual entries fail, so the mapper also checks `FailedEntryCount` — a failed entry maps to `service-unavailable` carrying the entry's error code and message.
+EventBridge has no native per-message attributes, so headers are embedded into `detail` under the reserved `benzene-headers` key (only when there are headers to send and the payload is a JSON object); the inbound EventBridge binding lifts them back out, so correlation/trace-context propagate end to end when set. Publishing is fire-and-forget: success maps to `accepted`. `PutEvents` can succeed at the HTTP level while individual entries fail, so the mapper also checks `FailedEntryCount` — a failed entry maps to `service-unavailable` carrying the entry's error code and message.
 
 ### gRPC
 
@@ -494,7 +494,7 @@ Every transport puts `Headers` (from either `OutboundContext.Headers` on the out
 - **SQS** — copies `Headers` onto `SendMessageRequest.MessageAttributes` (alongside `topic`).
 - **SNS** — copies `Headers` onto `PublishRequest.MessageAttributes`.
 - **Kafka** — copies `Headers` onto `Message.Headers` (UTF-8 encoded).
-- **EventBridge** — embeds `Headers` into the event's `detail` under the reserved `_benzeneHeaders` key (EventBridge has no native per-message attributes); the inbound binding lifts them back out.
+- **EventBridge** — embeds `Headers` into the event's `detail` under the reserved `benzene-headers` key (EventBridge has no native per-message attributes); the inbound binding lifts them back out.
 - **gRPC** — copies `Headers` onto the outbound `CallOptions.Headers` (a `Metadata`).
 - **AWS Lambda** (`AwsLambdaBenzeneMessageClient`) — embeds `Headers` directly into its own `BenzeneMessageClientRequest` envelope, which is what actually gets invoked as the payload.
 - **HTTP (REST)** — `HttpContextConverter` copies `Headers` onto `HttpRequestMessage.Headers`.

@@ -6,7 +6,8 @@ namespace Benzene.Aws.Lambda.EventBridge;
 
 /// <summary>
 /// The message body is the raw JSON text of the event's <c>detail</c> — the domain payload
-/// (plan decision E3). The reserved <c>_benzeneHeaders</c> key, when present, is an extra field the
+/// (plan decision E3). The reserved <c>benzene-headers</c> key (wire-contracts §2), when present, is
+/// left in the body - it is read into the header dictionary, never stripped - and is an extra field the
 /// request mapper's deserialization simply ignores.
 /// </summary>
 public class EventBridgeMessageBodyGetter : IMessageBodyGetter<EventBridgeContext>

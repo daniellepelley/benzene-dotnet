@@ -222,6 +222,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `invokeUrl`, MCP client configuration, bookmarks — move to the new path, or the host pins the old one
   (`new BenzeneMessageHttpOptions { Path = "/benzene-message" }`, `UseSpecUi("/spec-ui", "/spec?type=benzene")`,
   `UseMeshUi("/mesh-ui")` + `UseMeshSpecUi("/mesh-spec-ui.html")`, `McpBuilder.AtPath("/mcp")`).
+- **BREAKING (spec-0.2.0, wire-contracts §2 / D14): the EventBridge embedded-headers key is
+  `benzene-headers` (was `_benzeneHeaders`).** `EventBridgeMessageHeadersGetter.EmbeddedHeadersKey` (inbound),
+  `EventBridgeContextConverter<T>.EmbeddedHeadersKey` and `OutboundEventBridgeContextConverter` (outbound) and
+  the `Benzene.Aws.Lambda.EventBridge.TestHelpers` builder all use the new key. A clean break, as the spec
+  requires: an event carrying only `_benzeneHeaders` has its headers ignored (the object stays in `detail` as
+  an ordinary field). The key is still read into the header dictionary and left in the body, never
+  stripped. *Migration*: upgrade producers and consumers of a bus together, or have a non-.NET producer
+  write `benzene-headers`.
 - **BREAKING (mesh.md's 2026-08 revision): the mesh producer/consumer graph is now declared, never
   trace-derived.** `MeshServiceDescriptor` gains a `Consumes` field (mesh.md §2), populated from a new
   explicit **outbound registration** concept (§2.3, mirroring core-concepts.md §9's inbound handler

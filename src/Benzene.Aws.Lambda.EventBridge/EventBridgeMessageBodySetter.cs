@@ -24,7 +24,7 @@ public class EventBridgeMessageBodySetter : IMessageBodySetter<EventBridgeContex
 {
     /// <summary>
     /// Sets the hydrated body as the event's <c>detail</c>, re-embedding the original
-    /// <c>_benzeneHeaders</c> object (if any) so header reads later in the pipeline still see it.
+    /// <c>benzene-headers</c> object (if any) so header reads later in the pipeline still see it.
     /// </summary>
     /// <param name="context">The EventBridge context to set the body on.</param>
     /// <param name="body">The hydrated body to replace the event's raw <c>detail</c> JSON with.</param>
@@ -43,7 +43,7 @@ public class EventBridgeMessageBodySetter : IMessageBodySetter<EventBridgeContex
         return Task.CompletedTask;
     }
 
-    // Reads the original _benzeneHeaders object (if any) off the pre-hydration detail, detached from
+    // Reads the original benzene-headers object (if any) off the pre-hydration detail, detached from
     // its backing JsonDocument (JsonNode.Parse takes an independent copy of the raw text) so it
     // survives past this call irrespective of what happens to the original document.
     private static JsonObject? ReadEmbeddedHeaders(JsonElement originalDetail)

@@ -10,8 +10,8 @@ namespace Benzene.ClaimCheck;
 /// </summary>
 /// <remarks>
 /// The property is deliberately named with the literal wire key - the underscore-reserved
-/// <c>_benzeneClaimCheck</c>, matching the <c>_benzeneHeaders</c> embedded-header key's naming
-/// rationale (<c>Benzene.Aws.Lambda.EventBridge.EventBridgeMessageHeadersGetter.EmbeddedHeadersKey</c>)
+/// <c>_benzeneClaimCheck</c> (the same rationale the EventBridge embedded-header key had while it was
+/// <c>_benzeneHeaders</c>; spec-0.2.0 renamed that key <c>benzene-headers</c>)
 /// - rather than a PascalCase property mapped via a serializer-specific attribute. An underscore has
 /// no upper/lower case, so it round-trips identically through every
 /// <see cref="Benzene.Abstractions.Serialization.ISerializer"/> implementation regardless of its

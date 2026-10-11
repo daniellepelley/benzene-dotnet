@@ -22,7 +22,7 @@ namespace Benzene.Clients.Aws.EventBridge;
 /// <c>DetailType</c> (what the inbound <c>Benzene.Aws.Lambda.EventBridge</c> binding reads back as the
 /// topic) and the configured <c>source</c> maps to <c>Source</c>. EventBridge has no native per-message
 /// attributes, so Benzene wire headers (correlation, <c>traceparent</c>, …) are embedded into
-/// <c>Detail</c> under the reserved <c>_benzeneHeaders</c> key, exactly as
+/// <c>Detail</c> under the reserved <c>benzene-headers</c> key, exactly as
 /// <see cref="EventBridgeContextConverter{T}"/> does — the inbound binding lifts them back out. Like every
 /// other AWS sender the outbound path is fire-and-acknowledge, so the response is always
 /// <see cref="IBenzeneResult{Void}"/> — a topic routed here must be sent via

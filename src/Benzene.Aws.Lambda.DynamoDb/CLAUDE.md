@@ -27,7 +27,7 @@ format into plain JSON, so handlers receive ordinary POCOs. See
   contains colons) + `:` + event name; body = `NewImage` → `OldImage` → `Keys` precedence
   ("most complete state available"); headers = `dynamodb-`-prefixed envelope metadata
   (event-name, event-id, table, sequence-number, stream-view-type, event-source-arn,
-  aws-region). No `_benzeneHeaders` convention — these events originate from table writes, not
+  aws-region). No `benzene-headers` convention — these events originate from table writes, not
   a Benzene publisher.
 - `UseDynamoDb(action)` / `AddDynamoDb()` / `DynamoDbRegistrations` — standard adapter wiring,
   mirrors `Benzene.Aws.Lambda.Sqs`. Now auto-wires `UseBenzeneInvocation()`

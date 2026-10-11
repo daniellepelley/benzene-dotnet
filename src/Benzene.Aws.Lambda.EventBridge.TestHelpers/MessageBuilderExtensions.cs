@@ -11,7 +11,7 @@ public static class MessageBuilderExtensions
     /// <summary>
     /// Builds a realistic EventBridge event from the message builder: the topic becomes
     /// <c>detail-type</c>, the message becomes <c>detail</c>, and any headers are embedded under the
-    /// reserved <c>_benzeneHeaders</c> key — the same shape the outbound
+    /// reserved <c>benzene-headers</c> key — the same shape the outbound
     /// <c>EventBridgeBenzeneMessageClient</c> publishes.
     /// </summary>
     public static EventBridgeEvent AsEventBridge<T>(this IMessageBuilder<T> source, string eventSource = "benzene.test")
@@ -31,7 +31,7 @@ public static class MessageBuilderExtensions
                 embedded[header.Key] = header.Value;
             }
 
-            detailObject["_benzeneHeaders"] = embedded;
+            detailObject["benzene-headers"] = embedded;
             json = detailObject.ToJsonString();
         }
 

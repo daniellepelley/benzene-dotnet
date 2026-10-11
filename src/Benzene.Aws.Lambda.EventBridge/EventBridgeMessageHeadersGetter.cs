@@ -9,13 +9,13 @@ namespace Benzene.Aws.Lambda.EventBridge;
 /// <summary>
 /// Maps the event onto Benzene headers (plan decision E4): envelope metadata under
 /// <c>eventbridge-</c>-prefixed keys, plus any Benzene wire headers (correlation, <c>traceparent</c>, ...)
-/// lifted verbatim from the reserved <c>_benzeneHeaders</c> object inside <c>detail</c> — EventBridge has
+/// lifted verbatim from the reserved <c>benzene-headers</c> object inside <c>detail</c> — EventBridge has
 /// no native per-message attributes, so that's where the outbound client embeds them.
 /// </summary>
 public class EventBridgeMessageHeadersGetter : IMessageHeadersGetter<EventBridgeContext>
 {
     /// <summary>The reserved key inside <c>detail</c> that carries embedded Benzene wire headers.</summary>
-    public const string EmbeddedHeadersKey = "_benzeneHeaders";
+    public const string EmbeddedHeadersKey = "benzene-headers";
 
     /// <summary>
     /// Gets the event's envelope metadata, plus any embedded Benzene wire headers, as headers.

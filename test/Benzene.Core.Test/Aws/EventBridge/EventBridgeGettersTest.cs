@@ -122,12 +122,31 @@ public class EventBridgeGettersTest
     public void Headers_LiftEmbeddedBenzeneHeadersFromDetail()
     {
         var context = CreateContext(
-            "{\"name\":\"some-name\",\"_benzeneHeaders\":{\"x-correlation-id\":\"abc-123\",\"traceparent\":\"00-trace-span-01\"}}");
+            "{\"name\":\"some-name\",\"benzene-headers\":{\"x-correlation-id\":\"abc-123\",\"traceparent\":\"00-trace-span-01\"}}");
 
         var headers = new EventBridgeMessageHeadersGetter().GetHeaders(context);
 
         Assert.Equal("abc-123", headers["x-correlation-id"]);
         Assert.Equal("00-trace-span-01", headers["traceparent"]);
+    }
+
+    [Fact]
+    public void Body_KeepsTheEmbeddedBenzeneHeadersKey()
+    {
+        // wire-contracts §2: the key is read into the header dictionary, never stripped from the body.
+        const string detail = "{\"name\":\"some-name\",\"benzene-headers\":{\"x-correlation-id\":\"abc-123\"}}";
+
+        var body = new EventBridgeMessageBodyGetter().GetBody(CreateContext(detail));
+
+        Assert.Equal("abc-123", JsonDocument.Parse(body!).RootElement
+            .GetProperty(EventBridgeMessageHeadersGetter.EmbeddedHeadersKey).GetProperty("x-correlation-id").GetString());
+    }
+
+    [Fact]
+    public void EmbeddedHeadersKey_IsTheSpecName()
+    {
+        Assert.Equal("benzene-headers", EventBridgeMessageHeadersGetter.EmbeddedHeadersKey);
+        Assert.Equal("benzene-headers", Benzene.Clients.Aws.EventBridge.EventBridgeContextConverter<object>.EmbeddedHeadersKey);
     }
 
     [Fact]
@@ -141,7 +160,7 @@ public class EventBridgeGettersTest
     [Fact]
     public void Headers_BenzeneHeadersKeyIsNotAnObject_IsIgnored()
     {
-        var context = CreateContext("{\"name\":\"some-name\",\"_benzeneHeaders\":\"not-an-object\"}");
+        var context = CreateContext("{\"name\":\"some-name\",\"benzene-headers\":\"not-an-object\"}");
 
         var headers = new EventBridgeMessageHeadersGetter().GetHeaders(context);
 
@@ -152,7 +171,7 @@ public class EventBridgeGettersTest
     public void Headers_EmbeddedNonStringValue_IsSkipped()
     {
         var context = CreateContext(
-            "{\"name\":\"some-name\",\"_benzeneHeaders\":{\"x-correlation-id\":\"abc-123\",\"x-retry-count\":3}}");
+            "{\"name\":\"some-name\",\"benzene-headers\":{\"x-correlation-id\":\"abc-123\",\"x-retry-count\":3}}");
 
         var headers = new EventBridgeMessageHeadersGetter().GetHeaders(context);
 
@@ -164,11 +183,11 @@ public class EventBridgeGettersTest
     public async System.Threading.Tasks.Task BodySetter_ReEmbedsOriginalBenzeneHeaders_SoTheyStillReadBackAfterHydration()
     {
         // The pre-hydration event carries the claim-check placeholder in detail, with the real wire
-        // headers (including _benzeneHeaders) embedded exactly as the outbound converter puts them -
+        // headers (including benzene-headers) embedded exactly as the outbound converter puts them -
         // see OutboundEventBridgeContextConverter.BuildDetail.
         var context = CreateContext(
             "{\"_benzeneClaimCheck\":\"memory://claim-check/abc\"," +
-            "\"_benzeneHeaders\":{\"x-correlation-id\":\"abc-123\",\"traceparent\":\"00-trace-span-01\"}}");
+            "\"benzene-headers\":{\"x-correlation-id\":\"abc-123\",\"traceparent\":\"00-trace-span-01\"}}");
 
         await new EventBridgeMessageBodySetter().SetBody(context, "{\"name\":\"some-name\"}");
 
@@ -176,7 +195,7 @@ public class EventBridgeGettersTest
         var body = new EventBridgeMessageBodyGetter().GetBody(context);
         Assert.Equal("some-name", JsonDocument.Parse(body).RootElement.GetProperty("name").GetString());
 
-        // ...and the headers getter still lifts the original _benzeneHeaders out of it.
+        // ...and the headers getter still lifts the original benzene-headers out of it.
         var headers = new EventBridgeMessageHeadersGetter().GetHeaders(context);
         Assert.Equal("abc-123", headers["x-correlation-id"]);
         Assert.Equal("00-trace-span-01", headers["traceparent"]);
@@ -198,7 +217,7 @@ public class EventBridgeGettersTest
     {
         var context = CreateContext(
             "{\"_benzeneClaimCheck\":\"memory://claim-check/abc\"," +
-            "\"_benzeneHeaders\":{\"x-correlation-id\":\"abc-123\"}}");
+            "\"benzene-headers\":{\"x-correlation-id\":\"abc-123\"}}");
 
         // A non-object hydrated body (e.g. a JSON array or scalar) can't have headers re-embedded into
         // it - the setter leaves it as-is rather than forcing it into an object.

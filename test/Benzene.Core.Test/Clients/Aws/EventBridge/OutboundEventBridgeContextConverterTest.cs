@@ -97,7 +97,7 @@ public class OutboundEventBridgeContextConverterTest
     public async Task SendAsync_WithHeaders_EmbedsThemIntoDetailUnderBenzeneHeadersKey()
     {
         // EventBridge has no per-message attributes, so Benzene headers ride inside Detail under the
-        // reserved _benzeneHeaders key - the inbound binding lifts them back out.
+        // reserved benzene-headers key - the inbound binding lifts them back out.
         var mock = MockEventBridge();
         var sender = SenderRoutedThrough(mock, routing => routing
             .Route(Defaults.Topic, pipeline => pipeline.UseEventBridge(Source)));

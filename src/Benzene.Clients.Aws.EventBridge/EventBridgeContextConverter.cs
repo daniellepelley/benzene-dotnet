@@ -17,7 +17,7 @@ namespace Benzene.Clients.Aws.EventBridge;
 /// Builds a single-entry <c>PutEvents</c> request from a Benzene client request: topic →
 /// <c>DetailType</c>, serialized message → <c>Detail</c>. EventBridge has no native per-message
 /// attributes, so Benzene wire headers (correlation, <c>traceparent</c>, ...) are embedded into
-/// <c>Detail</c> under the reserved <c>_benzeneHeaders</c> key — the inbound
+/// <c>Detail</c> under the reserved <c>benzene-headers</c> key — the inbound
 /// <c>Benzene.Aws.Lambda.EventBridge</c> binding lifts them back out. Embedding only happens when
 /// there are headers to send and the payload serializes to a JSON object; extra field is benign for
 /// non-Benzene consumers.
@@ -25,7 +25,7 @@ namespace Benzene.Clients.Aws.EventBridge;
 public class EventBridgeContextConverter<T> : IContextConverter<IBenzeneClientContext<T, Void>, EventBridgeSendMessageContext>
 {
     /// <summary>Must match the inbound binding's <c>EventBridgeMessageHeadersGetter.EmbeddedHeadersKey</c>.</summary>
-    public const string EmbeddedHeadersKey = "_benzeneHeaders";
+    public const string EmbeddedHeadersKey = "benzene-headers";
 
     private readonly ISerializer _serializer;
     private readonly string _source;

@@ -384,7 +384,7 @@ The event's `detail-type` is the message topic — EventBridge's native routing 
 `[Message("order.created")]` handles events published with that detail-type — and `detail` is
 the message body. Envelope metadata (`source`, `id`, `account`, `region`, `time`) is exposed as
 `eventbridge-`-prefixed headers, and Benzene wire headers embedded by the outbound EventBridge
-client (see [Clients](clients.md)) are lifted from the reserved `_benzeneHeaders` key inside
+client (see [Clients](clients.md)) are lifted from the reserved `benzene-headers` key inside
 `detail`. Like SNS, EventBridge invokes the function via a resource-based Lambda permission and
 delivery is fire-and-forget. The `aws_cloudwatch_event_rule`/target/permission wiring can be
 generated from your `[Message]` topics — see [Terraform Code Generation](terraform.md).

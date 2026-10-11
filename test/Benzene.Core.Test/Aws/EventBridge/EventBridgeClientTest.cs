@@ -41,7 +41,7 @@ public class EventBridgeClientTest
 
         using var detail = JsonDocument.Parse(entry.Detail);
         Assert.Equal("foo", detail.RootElement.GetProperty("name").GetString());
-        Assert.Equal("abc-123", detail.RootElement.GetProperty("_benzeneHeaders").GetProperty("x-correlation-id").GetString());
+        Assert.Equal("abc-123", detail.RootElement.GetProperty("benzene-headers").GetProperty("x-correlation-id").GetString());
     }
 
     [Fact]
@@ -55,7 +55,7 @@ public class EventBridgeClientTest
 
         var entry = Assert.Single(context.Request.Entries);
         using var detail = JsonDocument.Parse(entry.Detail);
-        Assert.False(detail.RootElement.TryGetProperty("_benzeneHeaders", out _));
+        Assert.False(detail.RootElement.TryGetProperty("benzene-headers", out _));
     }
 
     [Fact]
@@ -110,7 +110,7 @@ public class EventBridgeClientTest
         Assert.Equal(BenzeneResultStatus.Accepted, result.Status);
         Assert.NotNull(captured);
         Assert.Equal("order.created", captured.Entries.Single().DetailType);
-        Assert.Contains("_benzeneHeaders", captured.Entries.Single().Detail);
+        Assert.Contains("benzene-headers", captured.Entries.Single().Detail);
     }
 
     [Fact]
