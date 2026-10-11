@@ -83,13 +83,19 @@ pre-built builder).
 - `BenzeneMessageHttpMiddleware<TContext> where TContext : IHttpContext` - on POST to its path,
   deserializes a `BenzeneMessageRequest` envelope from the body (via `IMessageBodyGetter<TContext>`),
   runs it through a `BenzeneMessageApplication` (the `"benzene"` transport — routing, validation,
-  middleware, handler), and writes the response envelope as `application/json` with the HTTP status
-  mapped via `IHttpStatusCodeMapper`; anything else falls through to `next`. Same short-circuit
+  middleware, handler), and writes the response envelope as `application/json` with **HTTP 200 for every
+  envelope it processed**, whatever its status (spec transport-bindings §1, D17 - the envelope carries the
+  outcome; a not-found, a validation-error for a topic-less envelope, a deleted, a pipeline `unauthorized`
+  are all 200). Only a body that is not an envelope (empty, not JSON, not a JSON object) is a carrier
+  failure: 400 with an `application/problem+json` body carrying `status: 400`. The inner problem document
+  omits `status` (the envelope pipeline is never decorated with `UseHttpProblemDetailsStatus`). Anything
+  else falls through to `next`. Same short-circuit
   shape as `CorsMiddleware`/`SpecUiMiddleware`, so it works on every HTTP transport. The envelope
   is always read/written with Benzene's default JSON serialization, independent of the app's own
   negotiated payload formats.
 - `BenzeneMessageHttpOptions` - `Path` (default `/benzene-message`) and optional `TopicFilter`
-  allowlist predicate (rejected topic → `NotFound` envelope, 404).
+  allowlist predicate - spec D21's required topic restriction (rejected topic → a `not-found` envelope
+  carrying the router's problem document, HTTP 200, exactly as if no handler matched).
 - `IBenzeneMessageHttpEndpointInfo` - registered by `UseBenzeneMessage` so the `benzene` spec
   builder (`Benzene.Schema.OpenApi`) can advertise the endpoint as the top-level `messageEndpoint`
   field, which the Spec UI's try-it panel feature-detects.

@@ -44,7 +44,7 @@ public class AwsLambdaMeshServiceDispatcher : IMeshServiceDispatcher
             .SendMessageAsync<BenzeneMessageClientRequest, BenzeneMessageClientResponse>(request, functionName, InvocationType.RequestResponse)
             .WaitAsync(cancellationToken);
 
-        return new MeshDispatchResult(response.StatusCode, response.Body, response.Headers);
+        return new MeshDispatchResult(response.StatusCode, response.Body, response.Headers, response.IsSuccessful);
     }
 
     private static string ResolveFunctionName(MeshServiceRegistryEntry entry)

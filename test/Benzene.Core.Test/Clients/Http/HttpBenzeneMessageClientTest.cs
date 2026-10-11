@@ -27,7 +27,7 @@ public class HttpBenzeneMessageClientTest
     [Fact]
     public async Task SendMessageAsync_PostsTheEnvelope_ToTheConfiguredUrl_WithTopicHeadersAndSerializedBody()
     {
-        var handler = new CapturingHandler(HttpStatusCode.OK, """{"statusCode":"ok","headers":{},"body":"\"hello\""}""");
+        var handler = new CapturingHandler(HttpStatusCode.OK, """{"statusCode":"ok","isSuccessful":true,"headers":{},"body":"\"hello\""}""");
         var client = new HttpBenzeneMessageClient(new HttpClient(handler), Url);
 
         var request = new BenzeneClientRequest<string>("my-topic", "the-message",
@@ -48,7 +48,7 @@ public class HttpBenzeneMessageClientTest
     [Fact]
     public async Task SendMessageAsync_MapsASuccessEnvelope_ToAnOkResultWithThePayload()
     {
-        var handler = new CapturingHandler(HttpStatusCode.OK, """{"statusCode":"ok","headers":{},"body":"\"hello\""}""");
+        var handler = new CapturingHandler(HttpStatusCode.OK, """{"statusCode":"ok","isSuccessful":true,"headers":{},"body":"\"hello\""}""");
         var client = new HttpBenzeneMessageClient(new HttpClient(handler), Url);
 
         var result = await client.SendMessageAsync<string, string>(
@@ -59,11 +59,11 @@ public class HttpBenzeneMessageClientTest
     }
 
     [Fact]
-    public async Task SendMessageAsync_MapsTheEnvelopeStatus_EvenWhenTheHttpStatusIsNon2xx()
+    public async Task SendMessageAsync_MapsTheEnvelopeStatus_WhateverTheHttpStatus()
     {
-        // The target maps NotFound onto HTTP 404, but the authoritative status is in the envelope body -
-        // a mapped non-2xx is a normal result, not a transport failure, so we must not throw on it.
-        var handler = new CapturingHandler(HttpStatusCode.NotFound, """{"statusCode":"not-found","headers":{},"body":null}""");
+        // The envelope in the body is the outcome whatever the status line (transport-bindings §1): a
+        // conformant endpoint answers 200 for a processed not-found, an older one 404 - both read alike.
+        var handler = new CapturingHandler(HttpStatusCode.NotFound, """{"statusCode":"not-found","isSuccessful":false,"headers":{},"body":null}""");
         var client = new HttpBenzeneMessageClient(new HttpClient(handler), Url);
 
         var result = await client.SendMessageAsync<string, string>(
@@ -78,7 +78,7 @@ public class HttpBenzeneMessageClientTest
     {
         // A Void (send-acknowledgement) caller: the handler's body shape is undefined, so we map the status
         // only. A non-envelope-shaped body must not break the Void path.
-        var handler = new CapturingHandler(HttpStatusCode.OK, """{"statusCode":"ok","headers":{},"body":"anything at all"}""");
+        var handler = new CapturingHandler(HttpStatusCode.OK, """{"statusCode":"ok","isSuccessful":true,"headers":{},"body":"anything at all"}""");
         var client = new HttpBenzeneMessageClient(new HttpClient(handler), Url);
 
         var result = await client.SendMessageAsync<string, Void>(
@@ -115,15 +115,47 @@ public class HttpBenzeneMessageClientTest
     }
 
     [Fact]
-    public async Task SendMessageAsync_ReturnsServiceUnavailable_OnAnEmptyResponseBody()
+    public async Task SendMessageAsync_ProcessedFailureEnvelopeUnder200_IsTheEnvelopesFailure()
     {
-        var handler = new CapturingHandler(HttpStatusCode.OK, "");
+        var handler = new CapturingHandler(HttpStatusCode.OK, """{"statusCode":"conflict","isSuccessful":false,"headers":{},"body":null}""");
         var client = new HttpBenzeneMessageClient(new HttpClient(handler), Url);
 
         var result = await client.SendMessageAsync<string, string>(
             new BenzeneClientRequest<string>("t", "m", new Dictionary<string, string>()));
 
-        Assert.Equal(BenzeneResultStatus.ServiceUnavailable, result.Status);
+        Assert.Equal(BenzeneResultStatus.Conflict, result.Status);
+        Assert.False(result.IsSuccessful);
+    }
+
+    [Fact]
+    public async Task SendMessageAsync_AnEnvelopeWithoutIsSuccessful_IsUnsuccessful()
+    {
+        // wire-contracts §1.2: an envelope that omits isSuccessful is malformed - never classified from text.
+        var handler = new CapturingHandler(HttpStatusCode.OK, """{"statusCode":"ok","headers":{},"body":"\"hello\""}""");
+        var client = new HttpBenzeneMessageClient(new HttpClient(handler), Url);
+
+        var result = await client.SendMessageAsync<string, string>(
+            new BenzeneClientRequest<string>("t", "m", new Dictionary<string, string>()));
+
+        Assert.False(result.IsSuccessful);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized, "<html>sign in</html>", BenzeneResultStatus.Unauthorized, false)]
+    [InlineData(HttpStatusCode.BadGateway, "Bad Gateway", BenzeneResultStatus.ServiceUnavailable, false)]
+    [InlineData(HttpStatusCode.ServiceUnavailable, "", BenzeneResultStatus.ServiceUnavailable, false)]
+    [InlineData(HttpStatusCode.OK, "", BenzeneResultStatus.Ok, true)]
+    public async Task SendMessageAsync_ABodyThatIsNotAnEnvelope_FallsBackToTheReverseHttpTable(
+        HttpStatusCode httpStatus, string body, string expectedStatus, bool expectedSuccess)
+    {
+        var handler = new CapturingHandler(httpStatus, body);
+        var client = new HttpBenzeneMessageClient(new HttpClient(handler), Url);
+
+        var result = await client.SendMessageAsync<string, string>(
+            new BenzeneClientRequest<string>("t", "m", new Dictionary<string, string>()));
+
+        Assert.Equal(expectedStatus, result.Status);
+        Assert.Equal(expectedSuccess, result.IsSuccessful);
     }
 
     private sealed class CapturingHandler : HttpMessageHandler

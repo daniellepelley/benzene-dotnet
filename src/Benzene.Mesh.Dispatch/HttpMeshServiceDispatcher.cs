@@ -1,11 +1,14 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Benzene.Mesh.Contracts;
+using Benzene.Results;
 
 namespace Benzene.Mesh.Dispatch;
 
@@ -77,8 +80,61 @@ public class HttpMeshServiceDispatcher : IMeshServiceDispatcher
         using var response = await _httpClient.PostAsync(url, content, cancellationToken);
         var responseBody = await ReadCappedAsync(response.Content, MaxResponseBytes, cancellationToken);
 
-        // Pass back exactly what the service returned. A non-2xx HTTP status still carries a body.
-        return new MeshDispatchResult(((int)response.StatusCode).ToString(), responseBody);
+        // The envelope in the body is the outcome, whatever the HTTP status: the envelope endpoint answers
+        // 200 for every envelope it processed (transport-bindings §1). Report the service's own
+        // {statusCode, isSuccessful, headers, body} - the same shape the Lambda dispatcher reports. Only a
+        // body that is not an envelope (a proxy's error page, a host-enforced 401, a truncated response)
+        // falls back to the reverse HTTP table, with the raw body kept as the record of what came back.
+        if (TryReadEnvelope(responseBody, out var reply))
+        {
+            return reply;
+        }
+
+        var mapped = response.StatusCode.Convert();
+        return new MeshDispatchResult(mapped.Status, responseBody, isSuccessful: mapped.IsSuccessful);
+    }
+
+    private static bool TryReadEnvelope(string body, out MeshDispatchResult result)
+    {
+        result = null!;
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || !root.TryGetProperty("statusCode", out var statusCode)
+                || statusCode.ValueKind != JsonValueKind.String)
+            {
+                return false;
+            }
+
+            // wire-contracts §1.2: an envelope without isSuccessful is malformed and unsuccessful.
+            var isSuccessful = root.TryGetProperty("isSuccessful", out var successful)
+                && successful.ValueKind == JsonValueKind.True;
+
+            var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (root.TryGetProperty("headers", out var headerElement) && headerElement.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var header in headerElement.EnumerateObject())
+                {
+                    if (header.Value.ValueKind == JsonValueKind.String)
+                    {
+                        headers[header.Name] = header.Value.GetString()!;
+                    }
+                }
+            }
+
+            var envelopeBody = root.TryGetProperty("body", out var bodyElement)
+                ? bodyElement.ValueKind == JsonValueKind.String ? bodyElement.GetString() : null
+                : null;
+
+            result = new MeshDispatchResult(statusCode.GetString()!, envelopeBody, headers, isSuccessful);
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     /// <summary>

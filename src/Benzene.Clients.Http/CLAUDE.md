@@ -24,9 +24,11 @@ row for the `IHttpClientFactory`/lifetime story (yours to own on both paths).
 - Use the **envelope client** (`AddHttpBenzeneMessageClient(url)`) for **container-to-container Benzene
   messaging**: the receiving side routes on the envelope's topic exactly as it would for a queue or a Lambda
   invoke, so the same handlers serve it. The response envelope carries the authoritative Benzene status in its
-  body (the target also maps that onto the HTTP status), so a mapped non-2xx like a 404 for `NotFound` is a
-  normal result — the client reads and maps the envelope regardless of HTTP status and only surfaces a genuine
-  transport error (connection failure / non-envelope body) as `ServiceUnavailable`. A `Void` (send-ack) caller
+  body, and a conformant endpoint answers HTTP 200 for every envelope it processed — the client reads the
+  envelope regardless of HTTP status (`EnvelopeResponseReader`), falls back to the reverse HTTP table only when
+  the body is not an envelope (a proxy page, a host 401), treats an envelope without `isSuccessful` as
+  unsuccessful (wire-contracts §1.2), and only surfaces a genuine
+  connection failure as `ServiceUnavailable`. A `Void` (send-ack) caller
   maps the status only, without deserializing a payload body.
 
 ## Key types/interfaces
@@ -65,11 +67,14 @@ row for the `IHttpClientFactory`/lifetime story (yours to own on both paths).
   message clients - this class already guarded its calls with `?.`, but the fallback closes the gap for any
   future call site that forgets to).
 - `HttpBenzeneMessageHealthCheck` - `IHealthCheck`; non-destructive reachability that POSTs a
-  `healthcheck`-topic envelope and treats a 2xx envelope response as healthy. Follows the shared §3.9 policy
+  `healthcheck`-topic envelope and reads the **response envelope** (whatever the HTTP status): healthy when it
+  is `isSuccessful` and, when its body is the target's health report, that report's `isHealthy` is not false
+  (an unhealthy target answers `ok` + `isHealthy: false`; a target that routes no health topic answers a
+  `not-found` envelope under 200). An `unauthorized`/`forbidden` envelope counts as a permission response. Follows the shared §3.9 policy
   (reversed): a 401/403 permission response → a **persistent `Failed`** (surfaces as unhealthy even for the
   auto-wired dependency check rather than being softened to a Warning — a deterministic misconfiguration that
   won't self-heal), a transport exception → `Failed` via `HealthCheckError.Classify` (reports the exception
-  **type**, never its message), any other mapped non-2xx → unhealthy. Reports a
+  **type**, never its message), a non-envelope non-2xx → unhealthy. Reports a
   `HealthCheckDependency("Http", url)` with basic-auth userinfo stripped from the reported URL. `Type` =
   `"HttpBenzeneMessage"`.
 - `Extensions.AddHttpBenzeneMessageClient(services, url, healthCheck = true)` - registers a scoped

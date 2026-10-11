@@ -52,16 +52,21 @@ curl -X POST http://localhost:8080/benzene-message \
   -d '{ "topic": "order:create", "headers": {}, "body": "{\"customerId\":\"11111111-1111-1111-1111-111111111111\"}" }'
 ```
 
-The response is the response envelope, with the HTTP status mapped from the envelope's status
-(`ok` → 200, `validation-error` → 422, `not-found` → 404, …):
+The response is the response envelope, and the HTTP status is **200 for every envelope the endpoint
+processed**, whatever the outcome — `ok`, `validation-error`, `not-found`, `deleted` alike. The envelope
+carries the outcome (`statusCode`, `isSuccessful`); read it, not the status line:
 
 ```json
-{ "statusCode": "ok", "headers": { }, "body": "{\"orderId\":\"...\"}" }
+{ "statusCode": "ok", "isSuccessful": true, "headers": { }, "body": "{\"orderId\":\"...\"}" }
 ```
 
-The envelope itself is always plain JSON (camelCase), independent of whatever payload formats the
-app's own serializer negotiates. A malformed or topic-less envelope gets a `bad-request` envelope
-back with a 400.
+A failure's `body` is the problem document (RFC 9457), without the HTTP `status` member — it isn't an
+HTTP response itself. The envelope is always plain JSON (camelCase), independent of whatever payload
+formats the app's own serializer negotiates. An envelope with no topic is processed too (the router
+answers `validation-error`, still 200). Only a request body that isn't an envelope at all — empty, not
+JSON, not a JSON object — is a carrier failure: **400**, with an `application/problem+json` body.
+401/403 come only from authentication your host enforces before the envelope is read; an `unauthorized`
+from Benzene auth middleware in the pipeline is a processed envelope (200).
 
 ### Options
 
@@ -69,7 +74,7 @@ back with a 400.
 apiGateway.UseBenzeneMessage(new BenzeneMessageHttpOptions
 {
     Path = "/admin/benzene-message",              // default: /benzene-message
-    TopicFilter = topic => topic.StartsWith("order:")  // reject → not-found envelope, 404
+    TopicFilter = topic => topic.StartsWith("order:")  // reject → a not-found envelope (HTTP 200)
 }, messageApp => messageApp.UseMessageHandlers());
 ```
 
@@ -106,6 +111,8 @@ mapping and would otherwise only be reachable from a queue or an event bus. Trea
 
 - It is **opt-in only** — nothing registers it implicitly.
 - Intended for **local development** and protected/admin environments.
-- Restrict what it can reach with `TopicFilter`, and compose your authentication middleware
-  **before** it in the pipeline.
+- Restrict what it can reach with `TopicFilter` — the topic restriction the spec requires every envelope
+  endpoint to support (a rejected topic is answered `not-found`, exactly as if no handler matched) — and
+  compose your authentication middleware **before** it in the pipeline: the endpoint runs the same pipeline,
+  and so the same auth, as your other transports.
 - Do **not** expose it unauthenticated in production.

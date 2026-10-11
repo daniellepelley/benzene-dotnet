@@ -143,11 +143,41 @@ internal sealed class MeshAnnouncer : IAsyncDisposable, IDisposable
                 new { topic, headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase), body });
             using var content = new StringContent(envelope, Encoding.UTF8, "application/json");
             using var response = await _http.PostAsync(_collectorEnvelopeUrl, content, _stopping.Token);
-            return response.IsSuccessStatusCode;
+            if (!response.IsSuccessStatusCode)
+            {
+                return false; // the carrier failed: no envelope was processed
+            }
+
+            // The collector answers 200 for every envelope it processed (transport-bindings §1), so a
+            // rejected registration is a 200 whose envelope says isSuccessful: false - read it, or the
+            // retry loop would stop on a registration the collector refused.
+            var responseBody = await response.Content.ReadAsStringAsync(_stopping.Token);
+            return EnvelopeSucceeded(responseBody);
         }
         catch
         {
             return false; // collector down: reduced mesh, never a service failure (spec §6)
+        }
+    }
+
+    // The response envelope's isSuccessful (wire-contracts §1.2) - absent means a malformed envelope,
+    // which is unsuccessful. A body that is not an envelope at all leaves the HTTP success standing.
+    private static bool EnvelopeSucceeded(string body)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("statusCode", out _))
+            {
+                return true;
+            }
+
+            return root.TryGetProperty("isSuccessful", out var isSuccessful) && isSuccessful.ValueKind == JsonValueKind.True;
+        }
+        catch (JsonException)
+        {
+            return true;
         }
     }
 

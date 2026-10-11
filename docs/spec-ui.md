@@ -20,8 +20,8 @@ around message **topics** rather than URL paths.
 - **Try it** — when the spec advertises a message endpoint (`messageEndpoint`, exposed by
   `UseBenzeneMessage` — see [Payload Testing](payload-testing.md)), every topic and event card
   gains an editable payload (pre-filled from the example), a headers editor, and a
-  **Send**/**Dispatch** button. The response envelope renders inline: HTTP status and Benzene
-  status chips, response headers, pretty-printed body, and round-trip time. Without a
+  **Send**/**Dispatch** button. The response envelope renders inline: HTTP status (200 for every
+  processed envelope) and Benzene status chips, response headers, pretty-printed body, and round-trip time. Without a
   `messageEndpoint` in the spec the page stays a read-only viewer — capability is gated by the
   service, not the page.
 

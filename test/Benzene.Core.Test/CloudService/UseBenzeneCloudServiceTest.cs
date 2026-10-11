@@ -131,7 +131,9 @@ public class UseBenzeneCloudServiceTest
         var response = await host.SendApiGatewayAsync(
             HttpBuilder.Create("POST", CloudServicePaths.Invoke, CreateEnvelope("benzene:mesh", "{}")));
 
-        Assert.NotEqual(200, response.StatusCode);
+        // Processed (200), and not-found inside: nothing intercepted the topic.
+        Assert.Equal(200, response.StatusCode);
+        Assert.Contains("\"statusCode\":\"not-found\"", response.Body);
     }
 
     [Fact]

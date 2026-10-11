@@ -41,7 +41,7 @@ public class OutboundBenzeneMessageHttpTest
     [Fact]
     public async Task SendAsync_PostsTheEnvelope_ToTheConfiguredUrl_WithTopicHeadersAndSerializedBody()
     {
-        var handler = new CapturingHandler(HttpStatusCode.OK, """{"statusCode":"ok","headers":{},"body":"{\"id\":42,\"name\":\"foo\"}"}""");
+        var handler = new CapturingHandler(HttpStatusCode.OK, """{"statusCode":"ok","isSuccessful":true,"headers":{},"body":"{\"id\":42,\"name\":\"foo\"}"}""");
         var (sender, _) = Build(handler, routing => routing
             .Route(Defaults.Topic, pipeline => pipeline.UseBenzeneMessageOverHttp(Url)));
 
@@ -64,7 +64,7 @@ public class OutboundBenzeneMessageHttpTest
         // The point of the envelope shape over the fire-and-forget transports: the route can return a
         // typed response, because DefaultBenzeneMessageSender deserializes the raw envelope once it
         // knows TResponse.
-        var handler = new CapturingHandler(HttpStatusCode.OK, """{"statusCode":"ok","headers":{},"body":"{\"name\":\"bar\"}"}""");
+        var handler = new CapturingHandler(HttpStatusCode.OK, """{"statusCode":"ok","isSuccessful":true,"headers":{},"body":"{\"name\":\"bar\"}"}""");
         var (sender, _) = Build(handler, routing => routing
             .Route(Defaults.Topic, pipeline => pipeline.UseBenzeneMessageOverHttp(Url)));
 
@@ -78,7 +78,7 @@ public class OutboundBenzeneMessageHttpTest
     [Fact]
     public async Task SendAsync_MapsTheEnvelopeStatus_EvenWhenTheHttpStatusIsNon2xx()
     {
-        var handler = new CapturingHandler(HttpStatusCode.NotFound, """{"statusCode":"not-found","headers":{},"body":null}""");
+        var handler = new CapturingHandler(HttpStatusCode.NotFound, """{"statusCode":"not-found","isSuccessful":false,"headers":{},"body":null}""");
         var (sender, _) = Build(handler, routing => routing
             .Route(Defaults.Topic, pipeline => pipeline.UseBenzeneMessageOverHttp(Url)));
 
@@ -90,9 +90,10 @@ public class OutboundBenzeneMessageHttpTest
     }
 
     [Fact]
-    public async Task SendAsync_ReturnsServiceUnavailable_OnAnEmptyResponseBody()
+    public async Task SendAsync_ABodyThatIsNotAnEnvelope_FallsBackToTheReverseHttpTable()
     {
-        var handler = new CapturingHandler(HttpStatusCode.OK, "");
+        // transport-bindings §1: only a non-envelope body lets the HTTP status decide (503 -> service-unavailable).
+        var handler = new CapturingHandler(HttpStatusCode.ServiceUnavailable, "");
         var (sender, _) = Build(handler, routing => routing
             .Route(Defaults.Topic, pipeline => pipeline.UseBenzeneMessageOverHttp(Url)));
 
@@ -107,7 +108,7 @@ public class OutboundBenzeneMessageHttpTest
     {
         // The rung below the default: the caller configures the inner send pipeline and hands over the
         // HttpClient explicitly rather than having it resolved from the container.
-        var handler = new CapturingHandler(HttpStatusCode.OK, """{"statusCode":"ok","headers":{},"body":null}""");
+        var handler = new CapturingHandler(HttpStatusCode.OK, """{"statusCode":"ok","isSuccessful":true,"headers":{},"body":null}""");
         var services = new ServiceCollection();
         new MicrosoftBenzeneServiceContainer(services).AddOutboundRouting(routing => routing
             .Route(Defaults.Topic, pipeline => pipeline.UseBenzeneMessageOverHttp(Url,

@@ -27,10 +27,9 @@
         public string StatusCode { get; }
 
         /// <summary>
-        /// The sender's authoritative success/failure signal, when present. <c>null</c> means the sender
-        /// didn't write it — an older .NET service, or a language port that hasn't picked up
-        /// wire-contracts.md's <c>isSuccessful</c> field yet — in which case <c>AsBenzeneResult</c> falls
-        /// back to classifying <see cref="StatusCode"/> against the known status vocabulary.
+        /// The sender's authoritative success/failure signal (wire-contracts.md §1.2). <c>null</c> means the
+        /// envelope omitted it - a malformed envelope, which <c>AsBenzeneResult</c> treats as unsuccessful
+        /// rather than classifying <see cref="StatusCode"/> text.
         /// </summary>
         public bool? IsSuccessful { get; }
 

@@ -102,15 +102,46 @@ public class HttpBenzeneMessageHealthCheckTest
         Assert.Equal("https://service-b.internal/benzene-message", Assert.Single(result.Dependencies).Name);
     }
 
+    // The envelope endpoint answers 200 for every envelope it processed (transport-bindings §1): the
+    // verdict is the envelope, read whatever the status line.
+    [Theory]
+    [InlineData("""{"statusCode":"ok","isSuccessful":true,"headers":{},"body":"{\"isHealthy\":true,\"healthChecks\":{}}"}""", HealthCheckStatus.Ok)]
+    [InlineData("""{"statusCode":"ok","isSuccessful":true,"headers":{},"body":"{\"isHealthy\":false,\"healthChecks\":{}}"}""", HealthCheckStatus.Failed)]
+    [InlineData("""{"statusCode":"not-found","isSuccessful":false,"headers":{},"body":"{}"}""", HealthCheckStatus.Failed)]
+    [InlineData("""{"statusCode":"ok","headers":{},"body":"{\"isHealthy\":true}"}""", HealthCheckStatus.Failed)]
+    public async Task ExecuteAsync_ReadsTheEnvelopeAndTheTargetsVerdict_Under200(string envelope, string expected)
+    {
+        var check = new HttpBenzeneMessageHealthCheck(new HttpClient(new CapturingHandler(HttpStatusCode.OK, envelope)), Url);
+
+        var result = await check.ExecuteAsync(CancellationToken.None);
+
+        Assert.Equal(expected, result.Status);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AnUnauthorizedEnvelope_IsAPersistentFailure()
+    {
+        var check = new HttpBenzeneMessageHealthCheck(new HttpClient(new CapturingHandler(HttpStatusCode.OK,
+            """{"statusCode":"unauthorized","isSuccessful":false,"headers":{},"body":"{}"}""")), Url);
+
+        var result = await check.ExecuteAsync(CancellationToken.None);
+
+        Assert.Equal(HealthCheckStatus.Failed, result.Status);
+        Assert.True(result.IsPersistent);
+    }
+
     private sealed class CapturingHandler : HttpMessageHandler
     {
         private readonly HttpStatusCode _status;
         public HttpRequestMessage? LastRequest;
         public string? LastRequestBody;
 
-        public CapturingHandler(HttpStatusCode status)
+        private readonly string _body;
+
+        public CapturingHandler(HttpStatusCode status, string body = "{}")
         {
             _status = status;
+            _body = body;
         }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -118,7 +149,7 @@ public class HttpBenzeneMessageHealthCheckTest
             cancellationToken.ThrowIfCancellationRequested();
             LastRequest = request;
             LastRequestBody = request.Content == null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
-            return new HttpResponseMessage(_status) { Content = new StringContent("{}", Encoding.UTF8, "application/json") };
+            return new HttpResponseMessage(_status) { Content = new StringContent(_body, Encoding.UTF8, "application/json") };
         }
     }
 

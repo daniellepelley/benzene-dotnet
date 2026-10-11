@@ -161,6 +161,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Two declared defaults on one topic now fail start-up (`version-selection`).
   - `HttpVersioningOptions.KeepUnversionedRoute`'s unversioned route now reaches the topic's default
     handler, not "the latest".
+- **BREAKING (spec-0.2.0, transport-bindings §1 / D17, D21): the envelope endpoint answers HTTP 200 for
+  every envelope it processed.** `BenzeneMessageHttpMiddleware` used to map the envelope's status onto the
+  status line (404 for `not-found`, 422, 204 for `deleted`, …) and answered a topic-less envelope with
+  400. Now: every processed envelope is **200** with the response envelope as the body — a topic-less
+  envelope is processed (the router's `validation-error`), a `TopicFilter`-rejected topic is a `not-found`
+  envelope carrying the router's problem document (the filter is documented as the spec's required topic
+  restriction, D21), and an `unauthorized` from the pipeline's own auth middleware is 200 too. Only a body
+  that is not an envelope (empty, not JSON, not a JSON object) is a carrier failure: **400** with an
+  `application/problem+json` body whose `status` is 400. The inner problem document still omits `status`.
+  Every envelope-over-HTTP reader now reads the envelope from the body **whatever the HTTP status**, falling
+  back to the reverse HTTP table only when the body is not an envelope: `HttpBenzeneMessageClient`, the
+  outbound `UseBenzeneMessageOverHttp` converter, `HttpBenzeneMessageHealthCheck` (healthy = the envelope is
+  successful and the target's report, if any, says `isHealthy`), `HttpMeshServiceDispatcher` (now reports the
+  target's own `statusCode`/`isSuccessful`/`headers`/`body` instead of the HTTP status and the raw envelope
+  text — `MeshDispatchResult` gains an optional `IsSuccessful`), and `MeshAnnouncer` (a registration the
+  collector refused is retried). *Migration*: a client of the endpoint that read the HTTP status must read the
+  envelope's `isSuccessful`/`statusCode`.
+- **BREAKING (spec-0.2.0, wire-contracts §1.2): an envelope without `isSuccessful` is malformed and read as
+  unsuccessful.** `AsBenzeneResult` (every envelope client: HTTP, Lambda invoke, in-process) no longer
+  classifies a missing `isSuccessful` from the `statusCode` text — an application-defined status means
+  nothing to a receiver, and the spec forbids reclassifying. *Migration*: a hand-built
+  `BenzeneMessageClientResponse` (tests, custom transports) must pass `isSuccessful`.
 - **BREAKING (spec-0.2.0, wire-contracts §5 / D2): a health query answers `ok` whether or not the
   service is healthy; `isHealthy` carries the verdict.** `HealthCheckProcessor` used to answer an
   unhealthy service with `service-unavailable` marked *successful* — a failure status with

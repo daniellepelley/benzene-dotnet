@@ -20,7 +20,7 @@ namespace Benzene.Clients.Http;
 /// <summary>
 /// A Benzene message client that carries a lightweight BenzeneMessage envelope over HTTP: it POSTs
 /// <c>{ topic, headers, body }</c> to a target service's BenzeneMessage endpoint (the serving side's
-/// <c>BenzeneMessageHttpMiddleware</c>, path <c>/benzene-message</c> by default) and maps the returned
+/// <c>BenzeneMessageHttpMiddleware</c>, path <c>/benzene/invoke</c> by default) and maps the returned
 /// <c>{ statusCode, headers, body }</c> envelope to a typed <see cref="IBenzeneResult{T}"/>. This is the
 /// HTTP-transport counterpart of the direct AWS Lambda invoke path (<c>AwsLambdaBenzeneMessageClient</c>) —
 /// the topic travels <em>inside</em> the JSON body, so one endpoint serves every topic, letting two Benzene
@@ -34,11 +34,13 @@ namespace Benzene.Clients.Http;
 /// as it would for a queue or a Lambda invoke.
 /// </para>
 /// <para>
-/// The response envelope carries the authoritative Benzene status in its own body; the target maps that onto
-/// the HTTP status too, so a mapped non-2xx (e.g. 404 for <c>NotFound</c>) is a normal result, not a transport
-/// failure. The client therefore reads and maps the envelope regardless of the HTTP status code rather than
-/// throwing on non-success. Only a genuine transport error (connection failure, a non-envelope error page)
-/// surfaces as <see cref="BenzeneResult.ServiceUnavailable{T}"/>.
+/// The response envelope carries the outcome (<c>statusCode</c>, <c>isSuccessful</c>) in the body, and the
+/// endpoint answers 200 for every envelope it processed (transport-bindings.md §1), so the client reads the
+/// envelope from the body <b>whatever the HTTP status</b>. Only when the body is not an envelope - an empty
+/// body, a proxy's error page, a 401/403 the host answered before reading the envelope - does the HTTP
+/// status decide, through the reverse HTTP table (wire-contracts.md §4.1: 401 → <c>unauthorized</c>, 502/503
+/// → <c>service-unavailable</c>, …). A connection failure surfaces as
+/// <see cref="BenzeneResult.ServiceUnavailable{T}"/>.
 /// </para>
 /// <para>
 /// You supply the <see cref="HttpClient"/> (its lifetime and any <c>BaseAddress</c>/handler policy are yours
@@ -97,15 +99,13 @@ public class HttpBenzeneMessageClient : IBenzeneMessageClient
             using var httpResponse = await _httpClient.PostAsync(_url, content, token);
             var responseBody = await httpResponse.Content.ReadAsStringAsync(token);
 
-            var clientResponse = string.IsNullOrWhiteSpace(responseBody)
-                ? null
-                : _serializer.Deserialize<BenzeneMessageClientResponse>(responseBody);
-
-            if (clientResponse == null)
+            // The envelope in the body is the outcome, whatever the status line; the reverse HTTP table only
+            // when the body is not an envelope (transport-bindings §1).
+            var clientResponse = EnvelopeResponseReader.Read(httpResponse.StatusCode, responseBody, out var isEnvelope);
+            if (!isEnvelope)
             {
-                // An empty/blank body is not a BenzeneMessage envelope - the target returned nothing to map.
-                _logger.LogError("Message {receiverTopic} to {receiver} returned an empty response body", request.Topic, _url);
-                return BenzeneResult.ServiceUnavailable<TResponse>($"Empty response from {_url}");
+                _logger.LogError("Message {receiverTopic} to {receiver} returned HTTP {httpStatus} without a response envelope",
+                    request.Topic, _url, (int)httpResponse.StatusCode);
             }
 
             // For Void (send-acknowledgement) callers, map the status without deserializing a payload body:

@@ -26,13 +26,11 @@ namespace Benzene.Clients.Common
         /// not a synthesized document.
         /// </summary>
         /// <remarks>
-        /// Success/failure classification prefers <see cref="BenzeneMessageClientResponse.IsSuccessful"/>
-        /// (the wire's authoritative signal, wire-contracts.md §1.2) when the sender wrote it. A
-        /// <c>null</c> value means the sender is an older .NET service or a language port that hasn't
-        /// picked up the <c>isSuccessful</c> field yet, so classification falls back to
-        /// <see cref="BenzeneResultHttpMapper.IsSuccessStatus"/> - which only recognizes the framework's
-        /// own known statuses, so a custom status from such a sender still classifies as failure
-        /// (the historical behavior, since there is no other signal to trust it with).
+        /// Success/failure is <see cref="BenzeneMessageClientResponse.IsSuccessful"/> - the wire's one
+        /// success signal (wire-contracts.md §1.2), which a receiver takes as authoritative and never
+        /// re-derives from the status text. An envelope that omits it is malformed and is treated as
+        /// <b>unsuccessful</b> (spec-0.2.0): classifying it from <c>statusCode</c> text instead would
+        /// misread any application-defined status.
         /// </remarks>
         public static IBenzeneResult<T> AsBenzeneResult<T>(this BenzeneMessageClientResponse source, ISerializer serializer)
         {
@@ -42,7 +40,8 @@ namespace Benzene.Clients.Common
                 return BenzeneResult.UnexpectedError<T>($"Status code {source.StatusCode} not mapped");
             }
 
-            var isSuccessful = source.IsSuccessful ?? BenzeneResultHttpMapper.IsSuccessStatus(status);
+            // wire-contracts §1.2: no isSuccessful = a malformed envelope = unsuccessful.
+            var isSuccessful = source.IsSuccessful ?? false;
 
             if (source.Body == null)
             {

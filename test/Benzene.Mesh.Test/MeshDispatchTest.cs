@@ -554,13 +554,63 @@ public class HttpMeshServiceDispatcherTest
         Assert.Equal(MeshDispatchGuardOptions.DefaultMaxRequestBytes, HttpMeshServiceDispatcher.DefaultMaxResponseBytes);
     }
 
+    [Fact]
+    public async Task DispatchAsync_AnEnvelopeResponse_ReportsTheServicesOwnStatusAndIsSuccessful_WhateverTheHttpStatus()
+    {
+        // The envelope endpoint answers 200 for every envelope it processed (transport-bindings §1); the
+        // outcome is the envelope - relayed, isSuccessful included, so the mesh UI can classify it.
+        const string body = """{"statusCode":"not-found","isSuccessful":false,"headers":{"content-type":"application/problem+json"},"body":"{\"type\":\"x\"}"}""";
+        var dispatcher = new HttpMeshServiceDispatcher(new HttpClient(new FixedBodyHttpMessageHandler(body)));
+
+        var result = await dispatcher.DispatchAsync(HttpEntry(),
+            new MeshDispatchEnvelope("t", new Dictionary<string, string>(), "{}"), CancellationToken.None);
+
+        Assert.Equal("not-found", result.StatusCode);
+        Assert.False(result.IsSuccessful);
+        Assert.Equal("{\"type\":\"x\"}", result.Body);
+        Assert.Equal("application/problem+json", result.Headers["content-type"]);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_AnEnvelopeWithoutIsSuccessful_IsUnsuccessful()
+    {
+        const string body = """{"statusCode":"ok","headers":{},"body":"{}"}""";
+        var dispatcher = new HttpMeshServiceDispatcher(new HttpClient(new FixedBodyHttpMessageHandler(body)));
+
+        var result = await dispatcher.DispatchAsync(HttpEntry(),
+            new MeshDispatchEnvelope("t", new Dictionary<string, string>(), "{}"), CancellationToken.None);
+
+        Assert.Equal("ok", result.StatusCode);
+        Assert.False(result.IsSuccessful);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_ABodyThatIsNotAnEnvelope_FallsBackToTheReverseHttpTable()
+    {
+        var dispatcher = new HttpMeshServiceDispatcher(new HttpClient(
+            new FixedBodyHttpMessageHandler("<html>bad gateway</html>", HttpStatusCode.BadGateway)));
+
+        var result = await dispatcher.DispatchAsync(HttpEntry(),
+            new MeshDispatchEnvelope("t", new Dictionary<string, string>(), "{}"), CancellationToken.None);
+
+        Assert.Equal("service-unavailable", result.StatusCode);
+        Assert.False(result.IsSuccessful);
+        Assert.Equal("<html>bad gateway</html>", result.Body);
+    }
+
     private sealed class FixedBodyHttpMessageHandler : HttpMessageHandler
     {
         private readonly string _body;
-        public FixedBodyHttpMessageHandler(string body) => _body = body;
+        private readonly HttpStatusCode _status;
+
+        public FixedBodyHttpMessageHandler(string body, HttpStatusCode status = HttpStatusCode.OK)
+        {
+            _body = body;
+            _status = status;
+        }
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(_body) });
+            => Task.FromResult(new HttpResponseMessage(_status) { Content = new StringContent(_body) });
     }
 }
 

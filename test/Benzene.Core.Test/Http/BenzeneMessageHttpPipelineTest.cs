@@ -55,15 +55,18 @@ public class BenzeneMessageHttpPipelineTest
     }
 
     [Fact]
-    public async Task PostEnvelope_UnknownTopic_MapsEnvelopeStatusToHttpStatus()
+    public async Task PostEnvelope_UnknownTopic_IsAProcessedEnvelope_200()
     {
+        // transport-bindings §1: HTTP 200 for every envelope the endpoint processed, whatever its status -
+        // the envelope carries the outcome.
         var host = CreateHost();
 
         var response = await host.SendApiGatewayAsync(
             HttpBuilder.Create("POST", "/benzene-message", CreateEnvelope("no-such-topic")));
 
         Assert.NotNull(response);
-        Assert.NotEqual(200, response.StatusCode);
+        Assert.Equal(200, response.StatusCode);
+        Assert.Contains("\"statusCode\":\"not-found\"", response.Body);
     }
 
     [Fact]
@@ -82,7 +85,7 @@ public class BenzeneMessageHttpPipelineTest
             HttpBuilder.Create("POST", "/benzene-message", CreateEnvelope("no-such-topic")));
 
         Assert.NotNull(response);
-        Assert.NotEqual(200, response.StatusCode);
+        Assert.Equal(200, response.StatusCode);
         Assert.Equal("application/json; charset=utf-8", response.Headers["content-type"]);
 
         var envelope = new JsonSerializer().Deserialize<BenzeneMessageResponse>(response.Body);
@@ -92,7 +95,7 @@ public class BenzeneMessageHttpPipelineTest
     }
 
     [Fact]
-    public async Task PostEnvelope_TopicRejectedByFilter_RespondsNotFound()
+    public async Task PostEnvelope_TopicRejectedByFilter_RespondsNotFound_AsAProcessedEnvelope()
     {
         var host = CreateHost(new BenzeneMessageHttpOptions { TopicFilter = topic => topic != Defaults.Topic });
 
@@ -100,7 +103,11 @@ public class BenzeneMessageHttpPipelineTest
             HttpBuilder.Create("POST", "/benzene-message", CreateEnvelope(Defaults.Topic)));
 
         Assert.NotNull(response);
-        Assert.Equal(404, response.StatusCode);
+        Assert.Equal(200, response.StatusCode);
+        var envelope = new JsonSerializer().Deserialize<BenzeneMessageResponse>(response.Body);
+        Assert.Equal("not-found", envelope.StatusCode);
+        Assert.False(envelope.IsSuccessful);
+        Assert.Null(new JsonSerializer().Deserialize<ProblemDetails>(envelope.Body).Status);
     }
 
     [Fact]

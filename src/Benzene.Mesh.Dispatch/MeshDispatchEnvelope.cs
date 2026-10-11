@@ -27,15 +27,26 @@ public class MeshDispatchEnvelope
 public class MeshDispatchResult
 {
     /// <summary>Initializes a new instance of the <see cref="MeshDispatchResult"/> class.</summary>
-    public MeshDispatchResult(string statusCode, string? body, IDictionary<string, string>? headers = null)
+    public MeshDispatchResult(string statusCode, string? body, IDictionary<string, string>? headers = null, bool? isSuccessful = null)
     {
         StatusCode = statusCode;
         Body = body;
         Headers = headers ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        IsSuccessful = isSuccessful;
     }
 
-    /// <summary>The status the service returned (a Benzene result status, or an HTTP status for HTTP targets).</summary>
+    /// <summary>
+    /// The Benzene status the service returned - from its response envelope, on every transport. (An HTTP
+    /// target whose response was not an envelope reports the reverse-mapped HTTP status instead.)
+    /// </summary>
     public string StatusCode { get; }
+
+    /// <summary>
+    /// The service's own success signal (wire-contracts.md §1.2), when it sent one - authoritative over any
+    /// classification of <see cref="StatusCode"/>. Omitted from the JSON when absent.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsSuccessful { get; }
 
     /// <summary>Any response headers the service returned.</summary>
     public IDictionary<string, string> Headers { get; }

@@ -122,7 +122,7 @@ public class DefaultBenzeneMessageSenderTest
         var container = new MicrosoftBenzeneServiceContainer(services);
         container.AddOutboundRouting(routing => routing
             .Route("order:create", pipeline => pipeline.OnRequest(context =>
-                context.Response = new BenzeneMessageClientResponse("ok", "\"created\""))));
+                context.Response = new BenzeneMessageClientResponse("ok", "\"created\"", isSuccessful: true))));
 
         var resolver = new MicrosoftServiceResolverAdapter(services.BuildServiceProvider());
         var sender = resolver.GetService<IBenzeneMessageSender>();

@@ -94,19 +94,9 @@ public class OutboundBenzeneMessageHttpContextConverter : IContextConverter<Outb
         using var httpResponse = contextOut.Response;
         var body = await httpResponse.Content.ReadAsStringAsync();
 
-        // The envelope carries the authoritative Benzene status in its own body; the target maps that
-        // onto the HTTP status too, so a mapped non-2xx (e.g. 404 for not-found) is a normal result,
-        // not a transport failure. Map the envelope regardless of the HTTP status code.
-        var envelope = string.IsNullOrWhiteSpace(body)
-            ? null
-            : _serializer.Deserialize<BenzeneMessageClientResponse>(body);
-
-        // An empty/blank body is not a BenzeneMessage envelope - the target returned nothing to map.
-        // Surface it as a service-unavailable envelope rather than a null dereference downstream.
-        contextIn.Response = envelope ?? new BenzeneMessageClientResponse(
-            BenzeneResultStatus.ServiceUnavailable,
-            null!,
-            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
-            false);
+        // The envelope in the body is the outcome, whatever the HTTP status: the endpoint answers 200 for
+        // every envelope it processed (transport-bindings §1). Only a body that is not an envelope (empty,
+        // a proxy's error page, a host-enforced 401) falls back to the reverse HTTP table.
+        contextIn.Response = EnvelopeResponseReader.Read(httpResponse.StatusCode, body, out _);
     }
 }

@@ -32,7 +32,13 @@ own publishes). So it is off by two independent gates:
 - `IMeshServiceDispatcher { string Key; DispatchAsync(entry, envelope, ct) }` — reach ONE service over
   one transport, keyed by `MeshServiceRegistryEntry.Source` (the same keying `IMeshServiceSource` uses).
   - `HttpMeshServiceDispatcher` (`Key = "Http"`) — POSTs the `{ topic, headers, body }` envelope to the
-    service's invoke URL (`SourceOptions["invokeUrl"]`, else `<specUrl origin>/benzene-message`).
+    service's invoke URL (`SourceOptions["invokeUrl"]`, else `<specUrl origin>/benzene-message`) and reports the
+    service's **response envelope** - `{statusCode, isSuccessful, headers, body}`, the same shape the Lambda
+    dispatcher reports - whatever the HTTP status (the envelope endpoint answers 200 for every processed
+    envelope, transport-bindings §1). An envelope without `isSuccessful` is reported unsuccessful (wire §1.2).
+    Only a body that is not an envelope (a proxy page, a truncated response) falls back to the reverse HTTP
+    table, with the raw body kept. `MeshDispatchResult.IsSuccessful` (additive, omitted when null) carries the
+    target's verdict so the mesh UI can classify relayed results.
   - `AwsLambdaMeshServiceDispatcher` (`Key = "AwsLambdaInvoke"`) lives in **`Benzene.Mesh.Aws.Lambda`**
     (`AddMeshLambdaDispatcher()`), reusing that package's `IAwsLambdaClient` / `lambda:InvokeFunction`
     grant — the AWS SDK stays out of this core package.

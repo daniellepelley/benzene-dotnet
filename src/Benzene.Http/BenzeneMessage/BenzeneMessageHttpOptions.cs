@@ -16,9 +16,13 @@ public class BenzeneMessageHttpOptions
     public string Path { get; set; } = DefaultPath;
 
     /// <summary>
-    /// Gets or sets an optional topic allowlist predicate. When set, an envelope whose topic the
-    /// predicate rejects is answered with a <c>NotFound</c> envelope instead of being dispatched.
+    /// Gets or sets an optional topic allowlist predicate - the restriction the spec requires the envelope
+    /// endpoint to support (transport-bindings.md §1, D21), since the endpoint reaches every handler the
+    /// service registers, including topics with no HTTP route of their own. An envelope whose topic the
+    /// predicate rejects is answered <c>not-found</c> exactly as if no handler matched (HTTP 200, a
+    /// <c>not-found</c> envelope carrying the router's problem document) instead of being dispatched.
     /// When null (the default), every topic is dispatched.
     /// </summary>
+    /// <example><c>TopicFilter = topic =&gt; topic.StartsWith("orders:") || topic == BenzeneTopic.HealthCheck</c></example>
     public Func<string, bool>? TopicFilter { get; set; }
 }

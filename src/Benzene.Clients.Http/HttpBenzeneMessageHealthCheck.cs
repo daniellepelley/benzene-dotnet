@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Benzene.Abstractions.DI;
 using Benzene.Abstractions.Serialization;
 using Benzene.HealthChecks.Core;
+using Benzene.Results;
 
 namespace Benzene.Clients.Http;
 
@@ -87,21 +88,71 @@ public class HttpBenzeneMessageHealthCheck : IHealthCheck
             var statusCode = (int)response.StatusCode;
             var data = new Dictionary<string, object> { { "Url", reportedUrl }, { "StatusCode", statusCode } };
 
-            // A permission response probing the endpoint (401/403) is a persistent, deterministic fault
-            // (§3.9) - it surfaces as unhealthy even for the auto-wired dependency check, rather than being
-            // softened to a Warning that hides a real access break.
-            if (HealthCheckError.IsAuthorizationFailure(statusCode))
+            // The envelope endpoint answers 200 for every envelope it processed (transport-bindings §1), so
+            // the outcome is the envelope in the body - read it whatever the HTTP status; only a body that is
+            // not an envelope falls back to the reverse HTTP table.
+            var responseBody = await response.Content.ReadAsStringAsync(token);
+            var reply = EnvelopeResponseReader.Read(response.StatusCode, responseBody, out var isEnvelope);
+            if (isEnvelope)
+            {
+                data["BenzeneStatus"] = reply.StatusCode;
+            }
+
+            // A permission response probing the endpoint (401/403 from the host, or unauthorized/forbidden
+            // from the target's own auth middleware) is a persistent, deterministic fault (§3.9) - it
+            // surfaces as unhealthy even for the auto-wired dependency check, rather than being softened to
+            // a Warning that hides a real access break.
+            if (HealthCheckError.IsAuthorizationFailure(statusCode)
+                || reply.StatusCode is BenzeneResultStatus.Unauthorized or BenzeneResultStatus.Forbidden)
             {
                 return HealthCheckResult.CreatePersistentFailure(Type, data, dependencies);
             }
 
-            return HealthCheckResult.CreateInstance(response.IsSuccessStatusCode, Type, data, dependencies);
+            // Reachable and answered: healthy when the health query succeeded (any status but a failure -
+            // e.g. not-found from a target that routes no health topic is unhealthy) and, when the body is
+            // the target's health report, the report says healthy (wire-contracts §5: an unhealthy target
+            // answers ok with isHealthy false).
+            var succeeded = reply.IsSuccessful == true;
+            var healthy = succeeded && ReportedHealth(reply.Body) != false;
+            return HealthCheckResult.CreateInstance(healthy, Type, data, dependencies);
         }
         catch (Exception ex)
         {
             return HealthCheckError.Classify(Type, ex, dependencies,
                 data: new Dictionary<string, object> { { "Url", reportedUrl } });
         }
+    }
+
+    // The target's own isHealthy verdict, when the envelope body is its health report; null otherwise.
+    private static bool? ReportedHealth(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(body);
+            if (document.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                if (string.Equals(property.Name, "isHealthy", StringComparison.OrdinalIgnoreCase)
+                    && property.Value.ValueKind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False)
+                {
+                    return property.Value.GetBoolean();
+                }
+            }
+        }
+        catch (System.Text.Json.JsonException)
+        {
+        }
+
+        return null;
     }
 
     // Strip any userinfo (basic-auth credentials) from the reported URL - the report can flow out to whoever

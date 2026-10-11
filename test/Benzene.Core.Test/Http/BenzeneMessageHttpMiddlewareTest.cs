@@ -162,29 +162,49 @@ public class BenzeneMessageHttpMiddlewareTest
     [InlineData("not-json-at-all")]
     [InlineData(null)]
     [InlineData("")]
-    [InlineData("{\"headers\":{}}")]
-    public async Task HandleAsync_InvalidOrTopiclessEnvelope_RespondsBadRequest(string? requestBody)
+    [InlineData("[1,2,3]")]
+    [InlineData("\"a string\"")]
+    public async Task HandleAsync_ABodyThatIsNotAnEnvelope_IsACarrierFailure_400WithAProblemDocument(string? requestBody)
     {
+        // transport-bindings §1: non-2xx only when no envelope was processed. The 400 response is itself the
+        // problem document, so it carries the numeric status, equal to the status line (wire §1.3).
         var (middleware, responseAdapterMock, bodies) = CreateMiddleware("POST", "/benzene-message", requestBody);
 
         await middleware.HandleAsync(new FakeHttpContext(), () => Task.CompletedTask);
 
         responseAdapterMock.Verify(x => x.SetStatusCode(It.IsAny<FakeHttpContext>(), "400"), Times.Once);
+        responseAdapterMock.Verify(x => x.SetContentType(It.IsAny<FakeHttpContext>(), "application/problem+json; charset=utf-8"), Times.Once);
         var body = Assert.Single(bodies);
         Assert.Contains(BenzeneResultStatus.BadRequest, body);
+        Assert.Contains("\"status\":400", body);
     }
 
     [Fact]
-    public async Task HandleAsync_TopicRejectedByFilter_RespondsNotFound()
+    public async Task HandleAsync_AnEnvelopeWithNoTopic_IsProcessed_200()
     {
+        // A JSON object with no topic IS an envelope: the pipeline answers it (the router's
+        // validation-error, envelope-cases.json's empty-topic case), so it is 200 like any other.
+        var (middleware, responseAdapterMock, bodies) = CreateMiddleware("POST", "/benzene-message", "{\"headers\":{}}");
+
+        await middleware.HandleAsync(new FakeHttpContext(), () => Task.CompletedTask);
+
+        responseAdapterMock.Verify(x => x.SetStatusCode(It.IsAny<FakeHttpContext>(), "200"), Times.Once);
+        Assert.Contains("echoTopic", Assert.Single(bodies));
+    }
+
+    [Fact]
+    public async Task HandleAsync_TopicRejectedByFilter_IsAProcessedNotFound_200()
+    {
+        // The D21 restriction: a restricted topic is answered not-found exactly as if no handler matched.
         var options = new BenzeneMessageHttpOptions { TopicFilter = topic => topic != "example" };
         var (middleware, responseAdapterMock, bodies) = CreateMiddleware("POST", "/benzene-message", Envelope, options);
 
         await middleware.HandleAsync(new FakeHttpContext(), () => Task.CompletedTask);
 
-        responseAdapterMock.Verify(x => x.SetStatusCode(It.IsAny<FakeHttpContext>(), "404"), Times.Once);
+        responseAdapterMock.Verify(x => x.SetStatusCode(It.IsAny<FakeHttpContext>(), "200"), Times.Once);
         var body = Assert.Single(bodies);
-        Assert.Contains(BenzeneResultStatus.NotFound, body);
+        Assert.Contains("\"statusCode\":\"not-found\"", body);
+        Assert.Contains("\"isSuccessful\":false", body);
         Assert.DoesNotContain("echoTopic", body);
     }
 

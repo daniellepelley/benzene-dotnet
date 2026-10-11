@@ -275,7 +275,10 @@ public class AwsMeshRefreshEndpointTest
                 body = "{}",
             }));
 
-        Assert.Equal(404, response.StatusCode);
+        // A restricted topic is answered not-found as if no handler matched - a processed envelope, so
+        // HTTP 200 carrying the not-found envelope (transport-bindings §1).
+        Assert.Equal(200, response.StatusCode);
+        Assert.Contains("\"statusCode\":\"not-found\"", response.Body);
         Assert.Equal(0, SpyAggregateHandler.Invocations);
     }
 
