@@ -156,8 +156,13 @@ public class CreateOrderTest : InMemoryOrdersTestBase
         Assert.Equal(Defaults.Order.Status, orders[0].Status);
         Assert.Equal(Defaults.Order.Name, orders[0].Name);
 
-        Assert.Equal(201, response.StatusCode);
+        // The envelope endpoint answers 200 for every envelope it processed; the outcome is the
+        // response envelope's own status (transport-bindings §1, spec-0.2.0).
+        Assert.Equal(200, response.StatusCode);
         Assert.NotNull(response.Body);
+        var envelope = JsonConvert.DeserializeObject<Newtonsoft.Json.Linq.JObject>(response.Body)!;
+        Assert.Equal("created", (string?)envelope["statusCode"]);
+        Assert.True((bool?)envelope["isSuccessful"]);
     }
 
     [Fact]
