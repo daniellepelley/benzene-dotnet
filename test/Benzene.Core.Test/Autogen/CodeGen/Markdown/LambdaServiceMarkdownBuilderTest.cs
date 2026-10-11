@@ -115,10 +115,7 @@ public class LambdaServiceMarkdownBuilderTest
         };
         var responseSchema = new OpenApiSchema { Type = "object" };
 
-        var document = new EventServiceDocument(
-            new OpenApiInfo(),
-            Array.Empty<OpenApiTag>(),
-            new[] { new RequestResponse { Topic = "user:get", Request = requestSchema, Response = responseSchema } },
+        var document = new EventServiceDocument(new[] { new RequestResponse { Topic = "user:get", Request = requestSchema, Response = responseSchema } },
             Array.Empty<Event>(),
             new OpenApiComponents { Schemas = new Dictionary<string, OpenApiSchema>() });
 

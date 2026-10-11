@@ -26,18 +26,17 @@ public class AtomicClientSdkBuilder : ICodeBuilder<EventServiceDocument>
     private readonly ClientSdkOptions _options;
     private readonly IMethodName _clientNameFormatter;
 
-    /// <summary>Initializes an atomic client builder that skips reserved utility topics.</summary>
+    /// <summary>Initializes an atomic client builder.</summary>
     /// <param name="baseNamespace">The base namespace for the generated clients (each client lands in <c>{baseNamespace}.{ClientName}</c>).</param>
     public AtomicClientSdkBuilder(string baseNamespace)
-        : this(baseNamespace, new TopicMethodName(), false)
+        : this(baseNamespace, new TopicMethodName())
     { }
 
     /// <summary>Initializes an atomic client builder.</summary>
     /// <param name="baseNamespace">The base namespace for the generated clients.</param>
     /// <param name="clientNameFormatter">Derives each topic's client name from its topic id (defaults to <see cref="TopicMethodName"/>).</param>
-    /// <param name="includeReservedTopics">When false (the default), reserved Benzene utility topics (spec/health/mesh/…) are skipped so only domain topics get atomic clients.</param>
-    public AtomicClientSdkBuilder(string baseNamespace, IMethodName clientNameFormatter, bool includeReservedTopics)
-        : this(new ClientSdkOptions { Namespace = baseNamespace, IncludeReservedTopics = includeReservedTopics }, clientNameFormatter)
+    public AtomicClientSdkBuilder(string baseNamespace, IMethodName clientNameFormatter)
+        : this(new ClientSdkOptions { Namespace = baseNamespace }, clientNameFormatter)
     { }
 
     /// <summary>
@@ -124,36 +123,22 @@ public class AtomicClientSdkBuilder : ICodeBuilder<EventServiceDocument>
 
     private ICodeFile[] BuildForTopic(EventServiceDocument document, RequestResponse request, string clientName)
     {
-        var filtered = new EventServiceDocument(
-            document.Info,
-            document.Tags,
-            new[] { request },
-            Array.Empty<Event>(),
-            new OpenApiComponents { Schemas = ReachableSchemas(document, request) })
-        {
-            MessageEndpoint = document.MessageEndpoint,
-            Transports = document.Transports,
-        };
+        // contract-document.md §5.3's topic-scoped projection: exactly this request, no events or sends,
+        // components narrowed to what it reaches; its hashes are recomputed over the projection.
+        var filtered = TopicScope.ProjectTopic(document, request);
 
         // Each atomic client is fully self-contained in its own namespace ({options.Namespace}.{clientName}),
         // so its files go under a per-client folder. This keeps a DTO shared by two topics (generated
         // once per client, each in that client's namespace) from colliding on a flat filename, and lets
         // a consumer drop a single client folder in for the one topic it calls. The inner builder's
         // Topics is pinned to exactly this one topic (rather than re-deriving from _options) since
-        // `filtered` already carries only that one request - re-applying the outer include-list/
-        // reserved-topic policy here would be redundant at best and, for a reserved topic admitted by
-        // an explicit --topics entry, wrongly re-excluded at worst.
+        // `filtered` already carries only that one request - re-applying the outer include-list here
+        // would be redundant.
         var innerOptions = new ClientSdkOptions
         {
             ServiceName = clientName,
             Namespace = $"{_options.Namespace}.{clientName}",
             Topics = new[] { request.Topic },
-            IncludeReservedTopics = true,
-            // This is contract-document.md §5.3's topic-scoped shape: its contract hash (§6.2) does
-            // not strip a reserved entry entirely (only its flag, already reflected by `filtered`
-            // above being narrowed to this one request) - an atomic client explicitly built for one
-            // reserved topic hashes that topic's contract, not an empty one.
-            IsTopicScopedForHash = true,
         };
 
         return new MessageClientSdkBuilder(innerOptions)
@@ -162,10 +147,4 @@ public class AtomicClientSdkBuilder : ICodeBuilder<EventServiceDocument>
             .ToArray();
     }
 
-    // Collects only the component schemas reachable from this one topic's request/response, so the
-    // atomic client emits (and hashes) just that topic's DTOs rather than the whole service catalogue.
-    private static IDictionary<string, OpenApiSchema> ReachableSchemas(EventServiceDocument document, RequestResponse request)
-    {
-        return SchemaClosure.Reachable(document.Components.Schemas, request.Request, request.Response);
-    }
 }

@@ -37,12 +37,21 @@ public interface IMeshOutboundDefinitionLookUp
 /// build it once at startup, the same lifecycle as the inbound handler registry.
 /// </para>
 /// </summary>
-public class MeshOutboundRegistry : IMeshOutboundDefinitionLookUp
+/// <para>
+/// It is also this port's <b>send declaration</b> list (contract-document.md §3.2): registered in the
+/// container as <see cref="IMessageDefinitionFinder{TMessageDefinition}"/> of
+/// <see cref="IMessageSenderDefinition"/> (<see cref="Extensions.AddSendDeclarations"/>, or the cloud
+/// service's <c>WithSends</c>), its records become the contract document's <c>sends[]</c> - topics
+/// another party defines. Events this service publishes and defines are declared separately, with
+/// <c>AddResponseEventDeclarations</c>; a (topic, version) in both is a start-up error.
+/// </para>
+public class MeshOutboundRegistry : IMeshOutboundDefinitionLookUp, IMessageDefinitionFinder<IMessageSenderDefinition>
 {
     private readonly List<IMessageSenderDefinition> _definitions = new();
 
-    /// <summary>Registers an outbound (topic, request type) record with no declared response type -
-    /// spec §2.3's shape: <c>responseSchema</c> projects as <c>{}</c> (unconstrained) for it.</summary>
+    /// <summary>Registers a one-way send (topic, request type) with no reply: the contract document's
+    /// <c>sends[]</c> entry has no <c>response</c>; the descriptor's <c>responseSchema</c> projects as
+    /// <c>{}</c> (unconstrained) for it.</summary>
     public MeshOutboundRegistry Register<TRequest>(string topic, string? version = null)
         => Register(topic, version, typeof(TRequest), typeof(Void));
 
@@ -60,4 +69,7 @@ public class MeshOutboundRegistry : IMeshOutboundDefinitionLookUp
     }
 
     public IMessageSenderDefinition[] GetAllDefinitions() => _definitions.ToArray();
+
+    /// <inheritdoc />
+    public IMessageSenderDefinition[] FindDefinitions() => GetAllDefinitions();
 }

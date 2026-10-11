@@ -1,16 +1,34 @@
-﻿using Benzene.Abstractions.MessageHandlers;
+using Benzene.Abstractions;
+using Benzene.Abstractions.MessageHandlers;
 using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Abstractions.Messages;
 using Benzene.Http.Routing;
 using Benzene.Schema.OpenApi.Abstractions;
-using Benzene.Schema.OpenApi.Examples;
+using Benzene.Schema.OpenApi.Derivation;
 using Microsoft.OpenApi;
-using Microsoft.OpenApi.Any;
 using Microsoft.OpenApi.Extensions;
 using Microsoft.OpenApi.Models;
+using Void = Benzene.Abstractions.Results.Void;
 
 namespace Benzene.Schema.OpenApi.EventService
 {
+    /// <summary>
+    /// Derives the Contract Document (contract-document.md) from a service's registrations: handlers
+    /// become <c>requests</c>, event declarations (<c>ResponseEventCatalog</c>) become <c>events</c>,
+    /// send declarations (<c>MeshOutboundRegistry</c>) become <c>sends</c>, and every payload type's
+    /// schema is derived once, by the OpenAPI 3.0 dialect of §4.2, into <c>components</c>.
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item>Reserved <c>benzene:</c> topics are never listed (§1) - their shapes are wire-contracts §7's.</item>
+    /// <item>A handler or send whose response type is <see cref="Void"/> has no <c>response</c>: absent
+    /// means no payload (§2, §3.2).</item>
+    /// <item>No example is synthesized; only an author-supplied one is written.</item>
+    /// <item>A (topic, version) declared both as an event and as a send fails <see cref="Build"/> (§3.3),
+    /// and two different types claiming one component name fail derivation (§4.1 rule 4) - both before
+    /// any message is handled when the document is derived at start-up or build time.</item>
+    /// </list>
+    /// </remarks>
     public class EventServiceDocumentBuilder :
         IConsumesMessageHandlerDefinitions<EventServiceDocumentBuilder>,
         IConsumesBroadcastEventsDefinitions<EventServiceDocumentBuilder>,
@@ -23,10 +41,13 @@ namespace Benzene.Schema.OpenApi.EventService
         IProducesYaml
     {
         private readonly List<Event> _events = new();
+        private readonly List<Send> _sends = new();
         private readonly List<RequestResponse> _requests = new();
         private readonly ISchemaBuilder _schemaBuilder = new SchemaBuilder();
-        private OpenApiInfo _openApiInfo = new();
-        private readonly List<OpenApiTag> _tags = new();
+        private string _service = string.Empty;
+        private string? _serviceVersion;
+        private string? _versionScheme;
+        private string? _description;
         private string? _messageEndpoint;
         private string[] _transports = Array.Empty<string>();
 
@@ -38,23 +59,38 @@ namespace Benzene.Schema.OpenApi.EventService
             }
         }
 
+        /// <summary>Builds the document.</summary>
+        /// <exception cref="InvalidOperationException">A (topic, version) is declared both as an event and as a send.</exception>
         public EventServiceDocument Build()
         {
+            var both = _events
+                .Select(x => (x.Topic, x.Version))
+                .Intersect(_sends.Select(x => (x.Topic, x.Version)))
+                .ToArray();
+            if (both.Length > 0)
+            {
+                throw new InvalidOperationException(
+                    "A topic is declared both as an event this service publishes and as a send to a topic another party defines: " +
+                    string.Join(", ", both.Select(x => string.IsNullOrEmpty(x.Version) ? $"'{x.Topic}'" : $"'{x.Topic}' version '{x.Version}'")) +
+                    ". Declare each (topic, version) once - as an event when this service owns its contract, as a send when another party does (contract-document.md §3.3).");
+            }
+
             var components = new OpenApiComponents
             {
                 Schemas = _schemaBuilder.Build()
             };
 
-            AddGeneratedExamples(components.Schemas);
-
             return new EventServiceDocument(
-                _openApiInfo,
-                _tags.ToArray(),
                 _requests.ToArray(),
                 _events.ToArray(),
+                _sends.ToArray(),
                 components
             )
             {
+                Service = _service,
+                ServiceVersion = _serviceVersion,
+                VersionScheme = _versionScheme,
+                Description = _description,
                 MessageEndpoint = _messageEndpoint,
                 Transports = _transports
             };
@@ -81,67 +117,35 @@ namespace Benzene.Schema.OpenApi.EventService
             return this;
         }
 
-        /// <summary>
-        /// Populates each request/event with a deterministic example payload generated from its
-        /// schema (see <see cref="ExamplePayloadBuilder"/>), unless an example was already
-        /// supplied. Generation failures never fail the spec build — the example is simply
-        /// omitted for that topic.
-        /// </summary>
-        private void AddGeneratedExamples(IDictionary<string, OpenApiSchema> schemas)
-        {
-            var schemaGetter = new SchemaGetter(schemas);
-            var examplePayloadBuilder = new ExamplePayloadBuilder();
-
-            foreach (var request in _requests.Where(x => x.Example == null && x.Request != null))
-            {
-                request.Example = TryBuildExample(examplePayloadBuilder, request.Request, schemaGetter);
-            }
-
-            foreach (var @event in _events.Where(x => x.Example == null && x.Message != null))
-            {
-                @event.Example = TryBuildExample(examplePayloadBuilder, @event.Message, schemaGetter);
-            }
-        }
-
-        private static IOpenApiAny? TryBuildExample(IExamplePayloadBuilder examplePayloadBuilder,
-            OpenApiSchema schema, ISchemaGetter schemaGetter)
-        {
-            try
-            {
-                return OpenApiAnyConverter.ToOpenApiAny(examplePayloadBuilder.Build(schema, schemaGetter));
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
         public Dictionary<string, OpenApiSchema> GetSchemas()
         {
             return _schemaBuilder.Build();
         }
 
+        /// <summary>
+        /// The service's identity, from the single source <see cref="IApplicationInfo"/>:
+        /// <c>service</c> = <see cref="IApplicationInfo.Name"/>, <c>serviceVersion</c> =
+        /// <see cref="IApplicationInfo.Version"/>, <c>versionScheme</c> =
+        /// <see cref="IApplicationInfo.VersionScheme"/>, <c>description</c> =
+        /// <see cref="IApplicationInfo.Description"/> (empty values are omitted).
+        /// </summary>
         public EventServiceDocumentBuilder AddApplicationInfo(IApplicationInfo applicationInfo)
         {
-            return AddInfo(new OpenApiInfo
-            {
-                Title = applicationInfo.Name,
-                Description = applicationInfo.Description,
-                Version = applicationInfo.Version
-            });
+            return AddService(applicationInfo.Name, applicationInfo.Version, applicationInfo.Description,
+                applicationInfo.VersionScheme);
         }
 
-        public EventServiceDocumentBuilder AddInfo(OpenApiInfo openApiInfo)
+        /// <summary>Sets the service's identity fields.</summary>
+        public EventServiceDocumentBuilder AddService(string service, string? serviceVersion = null,
+            string? description = null, string? versionScheme = null)
         {
-            _openApiInfo = openApiInfo;
+            _service = service ?? string.Empty;
+            _serviceVersion = NullIfEmpty(serviceVersion);
+            _description = NullIfEmpty(description);
+            _versionScheme = NullIfEmpty(versionScheme);
             return this;
         }
 
-        public EventServiceDocumentBuilder AddTag(OpenApiTag openApiTag)
-        {
-            _tags.Add(openApiTag);
-            return this;
-        }
         public EventServiceDocumentBuilder AddMessageHandlerDefinitions(IMessageHandlerDefinition[] messageHandlerDefinitions)
         {
             foreach (var messageHandlerDefinition in messageHandlerDefinitions)
@@ -153,19 +157,29 @@ namespace Benzene.Schema.OpenApi.EventService
 
         public void AddMessageHandlerDefinition(IMessageHandlerDefinition messageHandlerDefinition)
         {
-            if (!_requests.Any(x => x.Topic == messageHandlerDefinition.Topic.Id && x.Version == messageHandlerDefinition.Topic.Version))
+            var topic = messageHandlerDefinition.Topic.Id;
+            if (BenzeneTopic.IsReserved(topic))
+            {
+                return;
+            }
+
+            if (!_requests.Any(x => x.Topic == topic && x.Version == messageHandlerDefinition.Topic.Version))
             {
                 _requests.Add(new RequestResponse
                 {
-                    Topic = messageHandlerDefinition.Topic.Id,
-                    Version = messageHandlerDefinition.Topic.Version,
-                    Reserved = ReservedTopics.IsReserved(messageHandlerDefinition.Topic.Id),
-                    Request = _schemaBuilder.AddSchema(messageHandlerDefinition.RequestType),
-                    Response = _schemaBuilder.AddSchema(messageHandlerDefinition.ResponseType)
+                    Topic = topic,
+                    Version = messageHandlerDefinition.Topic.Version ?? string.Empty,
+                    // A request is REQUIRED; a handler that takes no payload (Void) accepts any: {}.
+                    Request = AddSchema(topic, messageHandlerDefinition.RequestType) ?? new OpenApiSchema(),
+                    Response = AddSchema(topic, messageHandlerDefinition.ResponseType)
                 });
             }
         }
 
+        /// <summary>
+        /// Adds event declarations - topics this service publishes and defines (contract-document.md
+        /// §3.1), e.g. <c>ResponseEventCatalog</c>'s.
+        /// </summary>
         public EventServiceDocumentBuilder AddBroadcastEventDefinitions(IMessageDefinition[] messageDefinitions)
         {
             foreach (var messageDefinition in messageDefinitions)
@@ -175,18 +189,33 @@ namespace Benzene.Schema.OpenApi.EventService
             return this;
         }
 
+        /// <summary>Adds one event declaration (§3.1).</summary>
         public EventServiceDocumentBuilder AddBroadcastEventDefinition(IMessageDefinition messageDefinition)
         {
-            _events.Add(new Event
-            (
-                messageDefinition.Topic.Id,
-                _schemaBuilder.AddSchema(messageDefinition.RequestType)
-            )
+            var topic = messageDefinition.Topic.Id;
+            if (BenzeneTopic.IsReserved(topic))
             {
-                Version = messageDefinition.Topic.Version
+                return this;
+            }
+
+            var version = messageDefinition.Topic.Version ?? string.Empty;
+            if (_events.Any(x => x.Topic == topic && x.Version == version))
+            {
+                return this;
+            }
+
+            _events.Add(new Event(topic, AddSchema(topic, messageDefinition.RequestType) ?? new OpenApiSchema())
+            {
+                Version = version
             });
             return this;
         }
+
+        /// <summary>
+        /// Adds send declarations - messages this service sends to topics another party defines
+        /// (contract-document.md §3.2), e.g. <c>MeshOutboundRegistry</c>'s. A definition with a
+        /// <see cref="Void"/> (or no) response type is one-way: its <c>response</c> is absent.
+        /// </summary>
         public EventServiceDocumentBuilder AddMessageSenderDefinitions(IMessageDefinition[] messageDefinitions)
         {
             foreach (var messageDefinition in messageDefinitions)
@@ -197,15 +226,26 @@ namespace Benzene.Schema.OpenApi.EventService
             return this;
         }
 
+        /// <summary>Adds one send declaration (§3.2).</summary>
         public EventServiceDocumentBuilder AddMessageSenderDefinition(IMessageDefinition messageDefinition)
         {
-            _events.Add(new Event
-            (
-                messageDefinition.Topic.Id,
-                _schemaBuilder.AddSchema(messageDefinition.RequestType)
-            )
+            var topic = messageDefinition.Topic.Id;
+            if (BenzeneTopic.IsReserved(topic))
             {
-                Version = messageDefinition.Topic.Version
+                return this;
+            }
+
+            var version = messageDefinition.Topic.Version ?? string.Empty;
+            if (_sends.Any(x => x.Topic == topic && x.Version == version))
+            {
+                return this;
+            }
+
+            var responseType = (messageDefinition as IRequestResponseMessageDefinition)?.ResponseType;
+            _sends.Add(new Send(topic, AddSchema(topic, messageDefinition.RequestType) ?? new OpenApiSchema(),
+                AddSchema(topic, responseType))
+            {
+                Version = version
             });
             return this;
         }
@@ -215,7 +255,7 @@ namespace Benzene.Schema.OpenApi.EventService
             _events.Add(new Event
             (
                 topic,
-                _schemaBuilder.AddSchema(type)
+                AddSchema(topic, type) ?? new OpenApiSchema()
             ));
             return this;
         }
@@ -252,8 +292,7 @@ namespace Benzene.Schema.OpenApi.EventService
 
             foreach (var group in httpEndpointDefinitions.GroupBy(x => x.Topic))
             {
-                var request = _requests.FirstOrDefault(x => x.Topic == group.First().Topic);
-                if (request != null)
+                foreach (var request in _requests.Where(x => x.Topic == group.Key))
                 {
                     request.HttpMappings = group.Select(x =>
                         new HttpMapping
@@ -266,5 +305,39 @@ namespace Benzene.Schema.OpenApi.EventService
 
             return this;
         }
+
+        /// <summary>
+        /// The schema of <paramref name="type"/>, or null for no payload (<see cref="Void"/> or none).
+        /// A component-name collision is re-thrown naming the topics that reach either type.
+        /// </summary>
+        private OpenApiSchema? AddSchema(string topic, Type? type)
+        {
+            if (type == null || type == typeof(Void))
+            {
+                return null;
+            }
+
+            try
+            {
+                return _schemaBuilder.AddSchema(type);
+            }
+            catch (ComponentNameCollisionException collision)
+            {
+                throw collision.WithTopics(TopicsReaching(collision.Name).Append(topic).Distinct().ToArray());
+            }
+        }
+
+        private IEnumerable<string> TopicsReaching(string componentName)
+        {
+            var schemas = _schemaBuilder.Build();
+            bool Reaches(params OpenApiSchema?[] roots) =>
+                SchemaReach.Reachable(schemas, roots).Contains(componentName);
+
+            return _requests.Where(x => Reaches(x.Request, x.Response)).Select(x => x.Topic)
+                .Concat(_events.Where(x => Reaches(x.Message)).Select(x => x.Topic))
+                .Concat(_sends.Where(x => Reaches(x.Request, x.Response)).Select(x => x.Topic));
+        }
+
+        private static string? NullIfEmpty(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
     }
 }

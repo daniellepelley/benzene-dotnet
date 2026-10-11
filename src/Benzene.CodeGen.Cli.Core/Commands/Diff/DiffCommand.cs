@@ -36,7 +36,7 @@ public class DiffCommand : CommandBase<DiffPayload>
         var baselineJson = await File.ReadAllTextAsync(payload.Baseline);
         var currentJson = await File.ReadAllTextAsync(payload.Current);
 
-        var deserializer = new EventServiceDocumentDeserializer();
+        var deserializer = new EventServiceDocumentDeserializer(warning => Console.Error.WriteLine($"warning: {warning}"));
         var baseline = deserializer.Deserialize(baselineJson);
         var current = deserializer.Deserialize(currentJson);
 

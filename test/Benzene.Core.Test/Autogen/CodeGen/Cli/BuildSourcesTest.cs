@@ -32,7 +32,7 @@ public class BuildSourcesTest
         var document = definitions.ToEventServiceDocument();
         if (!string.IsNullOrEmpty(title))
         {
-            document.Info = new OpenApiInfo { Title = title };
+            document.Service = title;
         }
 
         var path = Path.Combine(Path.GetTempPath(), $"benzene-build-{Guid.NewGuid():N}.spec.json");

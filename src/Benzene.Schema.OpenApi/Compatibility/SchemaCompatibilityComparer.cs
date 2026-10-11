@@ -25,8 +25,20 @@ public class SchemaCompatibilityComparer
     /// Compares <paramref name="baseline"/> (what the client was generated against) with
     /// <paramref name="current"/> (the service's current schema).
     /// </summary>
+    /// <remarks>
+    /// Reserved <c>benzene:</c> entries are ignored on both sides (contract-document.md §1: they are
+    /// never part of a service's contract). A baseline read from a legacy-shape document (spec-0.2.0
+    /// and earlier) is refused with one <see cref="LegacyBaselineException"/> - its schemas were
+    /// derived by different rules, so diffing it would report dozens of false breaking changes.
+    /// </remarks>
+    /// <exception cref="LegacyBaselineException">The baseline has the legacy document shape.</exception>
     public SchemaCompatibilityReport Compare(EventServiceDocument baseline, EventServiceDocument current)
     {
+        if (baseline.IsLegacyShape)
+        {
+            throw new LegacyBaselineException();
+        }
+
         var changes = new List<SchemaChange>();
 
         CompareRequests(baseline, current, changes);
@@ -473,6 +485,7 @@ public class SchemaCompatibilityComparer
     private static Dictionary<string, T> Index<T>(IEnumerable<T>? items, Func<T, string> key)
     {
         return (items ?? Enumerable.Empty<T>())
+            .Where(item => !Benzene.Abstractions.BenzeneTopic.IsReserved(key(item)))
             .GroupBy(key)
             .ToDictionary(g => g.Key, g => g.First());
     }

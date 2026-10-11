@@ -214,7 +214,7 @@ public class ExamplePayloadBuilder : IExamplePayloadBuilder
 
     private static string? GetReferenceId(OpenApiSchema? schema)
     {
-        return schema?.Reference?.Id;
+        return schema == null ? null : NullableReference.Unwrap(schema).Reference?.Id;
     }
 
     private bool TryGetKnownValue(string key, string path, out object? value)

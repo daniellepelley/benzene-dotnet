@@ -111,7 +111,10 @@ public class SpecTest
         var response = await host.SendBenzeneMessageAsync(MessageBuilder.Create("benzene:spec", new SpecRequest("benzene", "json")));
         var document = new EventServiceDocumentDeserializer().Deserialize(response.Body);
 
-        Assert.Equal(6, document.Components.Schemas.Count);
+        // The domain payloads only: the contract document lists no benzene: topic (so no SpecRequest
+        // or RawStringMessage) and a no-payload handler has no response (so no Void) -
+        // contract-document.md §1, §2.
+        AssertDomainComponentsOnly(document);
     }
 
     [Fact]
@@ -141,7 +144,10 @@ public class SpecTest
         var response = await host.SendBenzeneMessageAsync(MessageBuilder.Create("benzene:spec", new SpecRequest("benzene", "json")));
         var document = new EventServiceDocumentDeserializer().Deserialize(response.Body);
 
-        Assert.Equal(6, document.Components.Schemas.Count);
+        // The domain payloads only: the contract document lists no benzene: topic (so no SpecRequest
+        // or RawStringMessage) and a no-payload handler has no response (so no Void) -
+        // contract-document.md §1, §2.
+        AssertDomainComponentsOnly(document);
     }
 
     [Theory]
@@ -191,7 +197,7 @@ public class SpecTest
         var document = new EventServiceDocumentDeserializer().Deserialize(response.Body);
 
         Assert.Equal(BenzeneResultStatus.Ok, response.StatusCode);
-        Assert.Equal(6, document.Components.Schemas.Count);
+        AssertDomainComponentsOnly(document);
     }
 
     [Fact]
@@ -211,9 +217,20 @@ public class SpecTest
 
         var result = await handler.HandleAsync(null);
 
-        // A benzene EventServiceDocument carries the app info; an asyncapi document would not
-        // round-trip through this deserializer with the app title populated.
+        // A benzene contract document carries the app info as its service identity; an asyncapi
+        // document would not round-trip through this deserializer with it populated.
         var document = new EventServiceDocumentDeserializer().Deserialize(result.Payload.Content);
-        Assert.Equal("Example App", document.Info.Title);
+        Assert.Equal("Example App", document.Service);
+        Assert.Equal("1.0", document.ServiceVersion);
+        Assert.Equal("Stuff", document.Description);
+    }
+
+    private static void AssertDomainComponentsOnly(EventServiceDocument document)
+    {
+        Assert.Equal(3, document.Components.Schemas.Count);
+        Assert.DoesNotContain("SpecRequest", document.Components.Schemas.Keys);
+        Assert.DoesNotContain("RawStringMessage", document.Components.Schemas.Keys);
+        Assert.DoesNotContain("Void", document.Components.Schemas.Keys);
+        Assert.DoesNotContain(document.Requests, r => r.Topic.StartsWith("benzene:"));
     }
 }

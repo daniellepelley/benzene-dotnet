@@ -1,4 +1,4 @@
-﻿using Benzene.Abstractions.DI;
+using Benzene.Abstractions.DI;
 using Benzene.Abstractions.MessageHandlers;
 using Benzene.Abstractions.Middleware;
 using Benzene.Core.MessageHandlers;
@@ -32,6 +32,17 @@ public static class Extensions
         this IBenzeneServiceContainer services, SchemaGenerationOptions options)
     {
         services.AddSingleton(options);
+        return services;
+    }
+
+    /// <summary>
+    /// Derives the contract document at start-up (<see cref="ContractDocumentStartUpCheck"/>), so a
+    /// component-name collision or an event/send conflict fails the host before any message is handled
+    /// rather than on the first <c>benzene:spec</c> request. Opt-in: it costs a cold start.
+    /// </summary>
+    public static IBenzeneServiceContainer AddContractDocumentStartUpCheck(this IBenzeneServiceContainer services)
+    {
+        services.TryAddSingletonImplementation<Benzene.Abstractions.StartUpChecks.IStartUpCheck, ContractDocumentStartUpCheck>();
         return services;
     }
 

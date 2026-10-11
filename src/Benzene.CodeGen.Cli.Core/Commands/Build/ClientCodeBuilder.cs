@@ -19,7 +19,7 @@ public class ClientCodeBuilder : ICliCodeBuilder
         {
             var json = await source.GetSpecJsonAsync(new SpecRequest("benzene", "json"));
 
-            var eventServiceDocument = new EventServiceDocumentDeserializer().Deserialize(json);
+            var eventServiceDocument = new EventServiceDocumentDeserializer(warning => Console.Error.WriteLine($"warning: {warning}")).Deserialize(json);
 
             payload.ServiceName = ServiceNameResolver.Resolve(payload, eventServiceDocument);
 

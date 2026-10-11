@@ -170,6 +170,17 @@ public class SpecBuilder
                 consumesBroadcastEventsDefinitions.AddBroadcastEventDefinitions(messageFinder.FindDefinitions());
             }
         }
+        if (builder is IConsumesMessageSenderDefinitions<TBuilder> consumesMessageSenderDefinitions)
+        {
+            // Send declarations (contract-document.md §3.2) - e.g. a MeshOutboundRegistry registered
+            // with AddSendDeclarations / the cloud service's WithSends.
+            var sendersFinder = resolver.TryGetService<IMessageDefinitionFinder<IMessageSenderDefinition>>();
+            if (sendersFinder != null)
+            {
+                consumesMessageSenderDefinitions.AddMessageSenderDefinitions(
+                    sendersFinder.FindDefinitions().Cast<IMessageDefinition>().ToArray());
+            }
+        }
         if (builder is IConsumesMessageEndpoint<TBuilder> consumesMessageEndpoint)
         {
             var messageEndpointInfo = resolver.TryGetService<IBenzeneMessageHttpEndpointInfo>();

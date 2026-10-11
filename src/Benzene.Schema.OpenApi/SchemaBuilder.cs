@@ -1,3 +1,4 @@
+using Benzene.Schema.OpenApi.Derivation;
 using Microsoft.OpenApi.Models;
 using Swashbuckle.AspNetCore.SwaggerGen;
 
@@ -7,6 +8,7 @@ public class SchemaBuilder : ISchemaBuilder
 {
     private readonly SchemaRepository _schemaRepository = new();
     private readonly SchemaGenerator _schemaGenerator;
+    private readonly Dictionary<string, Type> _componentTypes = new(StringComparer.Ordinal);
 
     /// <summary>Initializes a builder with default (flattening) schema generation.</summary>
     public SchemaBuilder() : this(null)
@@ -35,6 +37,15 @@ public class SchemaBuilder : ISchemaBuilder
                 PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
             }));
     }
+
+    /// <summary>
+    /// The CLR type a reflected component name was derived from, or null for a supplied schema or a
+    /// name not (yet) in the catalogue.
+    /// </summary>
+    /// <param name="componentName">The component name.</param>
+    /// <returns>The type, or null.</returns>
+    public Type? GetComponentType(string componentName)
+        => _componentTypes.TryGetValue(componentName, out var type) ? type : null;
 
     public Dictionary<string, OpenApiSchema> Build()
     {
@@ -65,9 +76,35 @@ public class SchemaBuilder : ISchemaBuilder
         };
     }
 
-    private static SchemaGeneratorOptions CreateGeneratorOptions(SchemaGenerationOptions? options)
+    /// <summary>
+    /// Component naming (contract-document.md §4.1): <see cref="ComponentNames.For"/>, and a name two
+    /// different types claim fails derivation (<see cref="ComponentNameCollisionException"/>) rather than
+    /// being suffixed or won by whichever registered first.
+    /// </summary>
+    private string SelectComponentName(Type type)
     {
-        var generatorOptions = new SchemaGeneratorOptions();
+        var name = ComponentNames.For(type);
+        if (_componentTypes.TryGetValue(name, out var existing) && existing != type)
+        {
+            throw new ComponentNameCollisionException(name, existing, type);
+        }
+
+        _componentTypes[name] = type;
+        return name;
+    }
+
+    private SchemaGeneratorOptions CreateGeneratorOptions(SchemaGenerationOptions? options)
+    {
+        // The derivation rule of contract-document.md §4.2 (the OpenAPI 3.0 dialect): non-nullable
+        // reference types are not nullable, a nullable reference to a named type keeps its $ref inside
+        // an allOf so it can carry nullable, and DerivationSchemaFilter does the rest.
+        var generatorOptions = new SchemaGeneratorOptions
+        {
+            SupportNonNullableReferenceTypes = true,
+            UseAllOfToExtendReferenceSchemas = true,
+            SchemaIdSelector = SelectComponentName,
+        };
+        generatorOptions.SchemaFilters.Add(new DerivationSchemaFilter(System.Text.Json.JsonNamingPolicy.CamelCase));
         if (options == null)
         {
             return generatorOptions;

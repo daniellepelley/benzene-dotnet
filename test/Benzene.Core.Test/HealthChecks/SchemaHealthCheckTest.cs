@@ -6,6 +6,9 @@ using Benzene.CodeGen.Core;
 using Benzene.Core.MessageHandlers;
 using Benzene.HealthChecks.Core;
 using Benzene.HealthChecks.Schema;
+using Benzene.Schema.OpenApi.EventService;
+using Microsoft.OpenApi;
+using Microsoft.OpenApi.Extensions;
 using Moq;
 using Xunit;
 using System.Threading;
@@ -14,7 +17,7 @@ namespace Benzene.Test.HealthChecks;
 
 public class SchemaHealthCheckTest
 {
-    // Simple request/response POCOs so GenerateHash has real schemas to hash.
+    // Simple request/response POCOs so the served document has real schemas to hash.
     public class CreateThing { public string Name { get; set; } = ""; }
     public class ThingCreated { public string Id { get; set; } = ""; }
 
@@ -23,35 +26,33 @@ public class SchemaHealthCheckTest
         MessageHandlerDefinition.CreateInstance("thing:create", typeof(CreateThing), typeof(ThingCreated)),
     ];
 
-    private static Mock<IMessageHandlerDefinitionLookUp> Lookup(IMessageHandlerDefinition[] handlers)
-    {
-        var lookup = new Mock<IMessageHandlerDefinitionLookUp>();
-        lookup.Setup(x => x.GetAllHandlers()).Returns(handlers);
-        return lookup;
-    }
+    // The document benzene:spec serves for these handlers.
+    private static string Served(IMessageHandlerDefinition[] handlers) =>
+        handlers.ToEventServiceDocument().SerializeAsJson(OpenApiSpecVersion.OpenApi3_0);
 
     [Fact]
-    public async Task ExecuteAsync_PublishesTheCanonicalContractHash()
+    public async Task ExecuteAsync_PublishesTheServedContractHash()
     {
-        var handlers = Handlers();
+        var served = Served(Handlers());
 
-        var result = await new SchemaHealthCheck(Lookup(handlers).Object).ExecuteAsync(CancellationToken.None);
+        var result = await new SchemaHealthCheck(() => served).ExecuteAsync(CancellationToken.None);
 
         Assert.Equal(SchemaHealthCheckConstants.Type, result.Type);
-        // The provider publishes exactly the spec-pinned contractHash (contract-document.md §6)
-        // CodeGen bakes into a generated client, so the two are directly comparable.
-        Assert.Equal(ContractHash.Compute(handlers),
+        // The provider publishes the contractHash its served document carries (contract-document.md
+        // §6) - the value a default generated client embeds - never a private hash of its own.
+        Assert.Equal(System.Text.Json.JsonDocument.Parse(served).RootElement.GetProperty("contractHash").GetString(),
             result.Data[SchemaHealthCheckConstants.HashCodeKey]?.ToString());
+        Assert.Equal(ContractHash.Compute(served), result.Data[SchemaHealthCheckConstants.HashCodeKey]?.ToString());
     }
 
     [Fact]
     public async Task EndToEnd_ProviderHashMatchesClientBakedHash_ReportsMatch()
     {
         var handlers = Handlers();
-        // A consumer's generated client bakes in ContractHash.Compute(...) at generation time.
-        var clientBakedHash = ContractHash.Compute(handlers);
+        // A consumer's generated client bakes in the served document's contractHash at generation time.
+        var clientBakedHash = ContractHash.Compute(Served(handlers));
 
-        var schemaResult = (HealthCheckResult)await new SchemaHealthCheck(Lookup(handlers).Object).ExecuteAsync(CancellationToken.None);
+        var schemaResult = (HealthCheckResult)await new SchemaHealthCheck(() => Served(handlers)).ExecuteAsync(CancellationToken.None);
         var providerResponse = new HealthCheckResponse(true,
             new Dictionary<string, HealthCheckResult> { [SchemaHealthCheckConstants.Type] = schemaResult });
 
@@ -66,7 +67,7 @@ public class SchemaHealthCheckTest
     public async Task EndToEnd_ProviderContractChanged_ReportsDrift()
     {
         // The client was generated against the original contract...
-        var clientBakedHash = ContractHash.Compute(Handlers());
+        var clientBakedHash = ContractHash.Compute(Served(Handlers()));
 
         // ...but the provider now exposes a different contract (an extra handler).
         var changedHandlers = new IMessageHandlerDefinition[]
@@ -74,7 +75,7 @@ public class SchemaHealthCheckTest
             MessageHandlerDefinition.CreateInstance("thing:create", typeof(CreateThing), typeof(ThingCreated)),
             MessageHandlerDefinition.CreateInstance("thing:delete", typeof(CreateThing), typeof(ThingCreated)),
         };
-        var schemaResult = (HealthCheckResult)await new SchemaHealthCheck(Lookup(changedHandlers).Object).ExecuteAsync(CancellationToken.None);
+        var schemaResult = (HealthCheckResult)await new SchemaHealthCheck(() => Served(changedHandlers)).ExecuteAsync(CancellationToken.None);
         var providerResponse = new HealthCheckResponse(true,
             new Dictionary<string, HealthCheckResult> { [SchemaHealthCheckConstants.Type] = schemaResult });
 

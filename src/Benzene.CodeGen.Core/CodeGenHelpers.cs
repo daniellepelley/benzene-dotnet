@@ -1,4 +1,4 @@
-﻿using System.Security.Cryptography;
+using System.Security.Cryptography;
 using System.Text;
 using Benzene.Abstractions.MessageHandlers;
 using Benzene.Schema.OpenApi;
@@ -68,49 +68,17 @@ namespace Benzene.CodeGen.Core
             return System.Globalization.CultureInfo.InvariantCulture.TextInfo.ToTitleCase(value);
         }
 
-        public static string GenerateHash(IMessageHandlerDefinition[] handlers)
-        {
-            var document = new EventServiceDocumentBuilder(new SchemaBuilder())
-                .AddMessageHandlerDefinitions(handlers)
-                .Build();
-
-            return GenerateHash(document);
-        }
-
-        /// <summary>
-        /// Computes the contract hash of a spec document: the hash of its serialized form with the
-        /// non-contract decoration stripped — generated <c>example</c> payloads and the
-        /// <c>messageEndpoint</c> advertisement. Examples are derived from the schemas and the
-        /// endpoint is transport plumbing, so neither changes what the service's message contract
-        /// *is* — and excluding them keeps this hash identical to the hashes baked into client SDKs
-        /// generated before examples existed, so upgrading a service doesn't trip the
-        /// client-vs-service contract-drift check (<c>Benzene.Clients.HealthChecks</c>) falsely.
-        /// </summary>
-        public static string GenerateHash(EventServiceDocument document)
-        {
-            var normalized = new EventServiceDocument(
-                document.Info,
-                document.Tags,
-                document.Requests.Select(x => new RequestResponse
-                {
-                    Topic = x.Topic,
-                    Version = x.Version,
-                    HttpMappings = x.HttpMappings,
-                    Request = x.Request,
-                    Response = x.Response
-                }).ToArray(),
-                document.Events.Select(x => new Event(x.Topic, x.Message)).ToArray(),
-                document.Components);
-
-            return GenerateHash(normalized.SerializeAsJson(OpenApiSpecVersion.OpenApi3_0));
-        }
-
         private static string GeneratorBase64(string json)
         {
             var plainTextBytes = Encoding.UTF8.GetBytes(json);
             return System.Convert.ToBase64String(plainTextBytes);
         }
 
+        /// <summary>
+        /// HMAC-SHA256 (empty key) of <paramref name="json"/> as lowercase hex - the mesh descriptor's
+        /// <c>descriptorHash</c> primitive (<c>Benzene.Mesh.Contracts.MeshHashing</c> mirrors it). Not a
+        /// contract hash: the contract document's two hashes are <see cref="ContractHash"/>'s.
+        /// </summary>
         public static string GenerateHash(string json)
         {
             var hash = new HMACSHA256(Array.Empty<byte>()).ComputeHash(Encoding.UTF8.GetBytes(json));

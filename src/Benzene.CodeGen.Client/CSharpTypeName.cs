@@ -1,4 +1,4 @@
-﻿using Benzene.CodeGen.Core;
+using Benzene.CodeGen.Core;
 using Microsoft.OpenApi.Models;
 
 namespace Benzene.CodeGen.Client
@@ -19,6 +19,9 @@ namespace Benzene.CodeGen.Client
             {
                 return "Void";
             }
+
+            // A nullable reference to a named type (contract-document.md §4.2) is that type.
+            openApiSchema = Benzene.Schema.OpenApi.NullableReference.Unwrap(openApiSchema);
 
             if (openApiSchema.Reference != null && !string.IsNullOrEmpty(openApiSchema.Reference.Id))
             {
@@ -100,7 +103,9 @@ namespace Benzene.CodeGen.Client
                 return "bool";
             }
 
-            return openApiSchema.Type;
+            // An unconstrained schema ({} - a payload of any shape, contract-document.md §2) has no
+            // type to name; object always compiles.
+            return string.IsNullOrEmpty(openApiSchema.Type) ? "object" : openApiSchema.Type;
         }
 
         private string GetArrayType(OpenApiSchema openApiSchema)

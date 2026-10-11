@@ -513,10 +513,7 @@ public class SchemaCompatibilityComparerTest
         DocOf(new OpenApiComponents { Schemas = new Dictionary<string, OpenApiSchema>() }, requests);
 
     private static EventServiceDocument DocOf(OpenApiComponents components, params RequestResponse[] requests) =>
-        new EventServiceDocument(
-            new OpenApiInfo(),
-            Array.Empty<OpenApiTag>(),
-            requests,
+        new EventServiceDocument(requests,
             Array.Empty<Event>(),
             components);
 

@@ -1,3 +1,4 @@
+using System.Linq;
 using Benzene.Abstractions.MessageHandlers;
 using Benzene.Core.MessageHandlers;
 using Benzene.Schema.OpenApi.Compatibility;
@@ -79,5 +80,45 @@ public class SchemaCompatibilityGateTest
         // Breaking current spec against the JSON baseline throws.
         Assert.Throws<SchemaCompatibilityException>(
             () => SchemaCompatibility.EnsureBackwardCompatible(baselineJson, Contract(typeof(OrderV2))));
+    }
+
+    // A spec-0.2.0 (legacy) document: openapi/info, no schemaDialect, a reserved entry, a Void component.
+    private const string LegacyBaseline = """
+    {
+      "openapi": "3.0.1",
+      "info": { "title": "orders", "version": "1.0" },
+      "requests": [
+        { "topic": "order:create", "request": { "$ref": "#/components/schemas/CreateOrder" }, "response": { "$ref": "#/components/schemas/Void" } },
+        { "topic": "benzene:spec", "reserved": true, "request": {}, "response": {} }
+      ],
+      "events": [],
+      "components": { "schemas": {
+        "CreateOrder": { "type": "object", "properties": { "id": { "type": "string", "nullable": true } }, "additionalProperties": false },
+        "Void": { "type": "object", "additionalProperties": false }
+      } }
+    }
+    """;
+
+    [Fact]
+    public void EnsureBackwardCompatible_LegacyBaseline_IsOneReBaselineError_NotFalseBreakingChanges()
+    {
+        var error = Assert.Throws<LegacyBaselineException>(() =>
+            SchemaCompatibility.EnsureBackwardCompatible(LegacyBaseline, Contract(typeof(OrderV1))));
+
+        Assert.Contains("Re-baseline", error.Message);
+    }
+
+    [Fact]
+    public void Compare_IgnoresBenzeneEntriesOnEitherSide()
+    {
+        var baseline = Contract(typeof(OrderV1));
+        baseline.Requests = baseline.Requests
+            .Append(new RequestResponse { Topic = "benzene:spec", Request = new global::Microsoft.OpenApi.Models.OpenApiSchema() })
+            .ToArray();
+
+        var report = SchemaCompatibility.Compare(baseline, Contract(typeof(OrderV1)));
+
+        Assert.DoesNotContain(report.Changes, change => change.Topic.StartsWith("benzene:"));
+        Assert.False(report.HasBreakingChanges);
     }
 }

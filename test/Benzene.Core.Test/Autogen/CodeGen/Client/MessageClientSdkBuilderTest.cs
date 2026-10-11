@@ -233,7 +233,7 @@ public class MessageClientSdkBuilderTest
     }
 
     [Fact]
-    public void ReservedTopics_ExcludedByDefault_IncludeReservedTopicsRestoresThem()
+    public void ReservedTopics_AreNeverGenerated()
     {
         var dictionary = new Dictionary<string, (Type, Type, Type)>
         {
@@ -245,10 +245,7 @@ public class MessageClientSdkBuilderTest
         var excluded = new MessageClientSdkBuilder(new ClientSdkOptions { ServiceName = UserServiceName, Namespace = BaseNameSpace })
             .Build(document);
         Assert.DoesNotContain("benzene:mesh", excluded["UserServiceClient.cs"]);
-
-        var included = new MessageClientSdkBuilder(new ClientSdkOptions { ServiceName = UserServiceName, Namespace = BaseNameSpace, IncludeReservedTopics = true })
-            .Build(document);
-        Assert.Contains(@"""benzene:mesh""", included["UserServiceClient.cs"]);
+        Assert.DoesNotContain(document.Requests, r => r.Topic == "benzene:mesh");
     }
 
     [Fact]

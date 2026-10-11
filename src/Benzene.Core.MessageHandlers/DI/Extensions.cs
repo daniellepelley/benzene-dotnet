@@ -91,6 +91,23 @@ public static class Extensions
     }
 
     /// <summary>
+    /// Registers an <see cref="IApplicationInfo"/> with the given metadata and the comparison scheme of
+    /// its version (<c>integer</c>, <c>semver</c> or <c>lexicographic</c>; service-versions.md §2).
+    /// </summary>
+    /// <param name="services">The service container to register into.</param>
+    /// <param name="name">The application's name.</param>
+    /// <param name="version">The application's version.</param>
+    /// <param name="description">The application's description.</param>
+    /// <param name="versionScheme">The comparison scheme of <paramref name="version"/>.</param>
+    /// <returns>The same container, for chaining.</returns>
+    public static IBenzeneServiceContainer SetApplicationInfo(this IBenzeneServiceContainer services,
+        string name, string version, string description, string? versionScheme)
+    {
+        services.AddSingleton<IApplicationInfo>(_ => new ApplicationInfo(name, version, description, versionScheme));
+        return services;
+    }
+
+    /// <summary>
     /// Registers the baseline services every Benzene application needs regardless of transport:
     /// default statuses, transport info tracking, a blank <see cref="IApplicationInfo"/> (if none is
     /// set), version selection, the default JSON <see cref="ISerializer"/>, the service resolver, and

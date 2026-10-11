@@ -1,3 +1,6 @@
+using System;
+using System.Linq;
+using System.Text.Json.Nodes;
 using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Core.MessageHandlers;
 using Benzene.Core.MessageHandlers.Info;
@@ -31,20 +34,7 @@ public class EventServiceDocumentBuilderTest
 
         var eventServiceDocumentBuilder = new EventServiceDocumentBuilder(new SchemaBuilder());
         var doc = eventServiceDocumentBuilder
-            .AddInfo(new OpenApiInfo
-            {
-                Title = "benzene-tenant-core-func",
-                Version = "1.0",
-                Description = "Core Tenant Data"
-            })
-            .AddTag(new OpenApiTag
-            {
-                Name = "Core Service"
-            })
-            .AddTag(new OpenApiTag
-            {
-                Name = "benzene"
-            })
+            .AddService("benzene-tenant-core-func", "1.0", "Core Tenant Data", "semver")
             .AddMessageHandlerDefinitions(new[] { messageHandlerDefinition })
             .AddBroadcastEventDefinitions(new[] { responseEventDefinition })
             .AddMessageSenderDefinitions(new[] { messageSenderDefinition })
@@ -61,7 +51,32 @@ public class EventServiceDocumentBuilderTest
     }
 
     [Fact]
-    public void Build_FlagsReservedUtilityTopics_ButNotDomainTopics()
+    public void Build_WritesTheDocumentFields_IdentityAndBothHashes()
+    {
+        var doc = new EventServiceDocumentBuilder(new SchemaBuilder())
+            .AddService("tenants", "1.4.2", "Tenant data", "semver")
+            .AddMessageHandlerDefinitions(new[] { MessageHandlerDefinition.CreateInstance("tenant:create", typeof(Example), typeof(Inner)) })
+            .Build();
+
+        var json = JsonNode.Parse(doc.SerializeAsJson(OpenApiSpecVersion.OpenApi3_0))!.AsObject();
+
+        Assert.Equal("openapi-3.0", json["schemaDialect"]!.GetValue<string>());
+        Assert.Equal("tenants", json["service"]!.GetValue<string>());
+        Assert.Equal("1.4.2", json["serviceVersion"]!.GetValue<string>());
+        Assert.Equal("semver", json["versionScheme"]!.GetValue<string>());
+        Assert.Equal("Tenant data", json["description"]!.GetValue<string>());
+        Assert.Equal(doc.ContractHash, json["contractHash"]!.GetValue<string>());
+        Assert.Equal(doc.RegistrationHash, json["registrationHash"]!.GetValue<string>());
+        Assert.StartsWith("sha256:", doc.ContractHash);
+        Assert.NotNull(json["sends"]);
+        foreach (var gone in new[] { "openapi", "info", "tags" })
+        {
+            Assert.False(json.ContainsKey(gone), $"'{gone}' is no longer a document field");
+        }
+    }
+
+    [Fact]
+    public void Build_NeverListsReservedTopics()
     {
         var domain = MessageHandlerDefinition.CreateInstance("tenant:create", typeof(Example), typeof(Inner));
         var spec = MessageHandlerDefinition.CreateInstance("benzene:spec", typeof(Example), typeof(Inner));
@@ -69,46 +84,61 @@ public class EventServiceDocumentBuilderTest
 
         var doc = new EventServiceDocumentBuilder(new SchemaBuilder())
             .AddMessageHandlerDefinitions(new[] { domain, spec, health })
+            .AddBroadcastEventDefinitions(new[] { new ResponseEventDefinition("benzene:mesh:register", typeof(Inner)) })
             .Build();
 
-        Assert.False(Assert.Single(doc.Requests, x => x.Topic == "tenant:create").Reserved);
-        Assert.True(Assert.Single(doc.Requests, x => x.Topic == "benzene:spec").Reserved);
-        Assert.True(Assert.Single(doc.Requests, x => x.Topic == "benzene:healthcheck").Reserved);
-
-        var json = doc.SerializeAsJson(OpenApiSpecVersion.OpenApi3_0);
-        Assert.Contains("\"reserved\": true", json);
-
-        // Round-trips through the deserializer (JsonProperty("reserved")).
-        var roundTripped = new EventServiceDocumentDeserializer().Deserialize(json);
-        Assert.True(Assert.Single(roundTripped.Requests, x => x.Topic == "benzene:spec").Reserved);
-        Assert.False(Assert.Single(roundTripped.Requests, x => x.Topic == "tenant:create").Reserved);
+        Assert.Equal(new[] { "tenant:create" }, doc.Requests.Select(x => x.Topic));
+        Assert.Empty(doc.Events);
+        Assert.DoesNotContain("reserved", doc.SerializeAsJson(OpenApiSpecVersion.OpenApi3_0));
     }
 
     [Fact]
-    public void Build_GeneratesExamplesForRequestsAndEvents()
+    public void Build_ANoPayloadHandlerHasNoResponse_AndAOneWaySendHasNoResponse()
     {
-        var messageHandlerDefinition = MessageHandlerDefinition.CreateInstance("tenant:create",
-            typeof(Example),
-            typeof(Inner));
-
-        var responseEventDefinition = new ResponseEventDefinition("tenant:created", typeof(Inner));
+        var noPayload = MessageHandlerDefinition.CreateInstance("tenant:delete", typeof(Example), typeof(Benzene.Abstractions.Results.Void));
+        var oneWay = MessageSenderDefinition.CreateInstance("audit:log", typeof(Inner));
+        var withReply = MessageSenderDefinition.CreateInstance("billing:quote", typeof(Inner), typeof(Example));
 
         var doc = new EventServiceDocumentBuilder(new SchemaBuilder())
-            .AddMessageHandlerDefinitions(new[] { messageHandlerDefinition })
-            .AddBroadcastEventDefinitions(new[] { responseEventDefinition })
+            .AddMessageHandlerDefinitions(new[] { noPayload })
+            .AddMessageSenderDefinitions(new[] { oneWay, withReply })
             .Build();
 
-        var requestExample = Assert.IsType<OpenApiObject>(doc.Requests[0].Example);
-        Assert.Equal("value", Assert.IsType<OpenApiString>(requestExample["title"]).Value);
-        var innerArray = Assert.IsType<OpenApiArray>(requestExample["inner"]);
-        var innerExample = Assert.IsType<OpenApiObject>(innerArray[0]);
-        Assert.Equal("2023-01-01T12:00:00.000Z", Assert.IsType<OpenApiString>(innerExample["date"]).Value);
+        Assert.Null(Assert.Single(doc.Requests).Response);
+        Assert.Null(Assert.Single(doc.Sends, x => x.Topic == "audit:log").Response);
+        Assert.NotNull(Assert.Single(doc.Sends, x => x.Topic == "billing:quote").Response);
+        Assert.DoesNotContain("Void", doc.SerializeAsJson(OpenApiSpecVersion.OpenApi3_0));
 
-        var eventExample = Assert.IsType<OpenApiObject>(doc.Events[0].Example);
-        Assert.Equal("value", Assert.IsType<OpenApiString>(eventExample["title"]).Value);
+        var json = JsonNode.Parse(doc.SerializeAsJson(OpenApiSpecVersion.OpenApi3_0))!;
+        Assert.False(json["requests"]![0]!.AsObject().ContainsKey("response"));
 
-        var json = doc.SerializeAsJson(OpenApiSpecVersion.OpenApi3_0);
-        Assert.Contains("\"example\"", json);
+        var roundTripped = new EventServiceDocumentDeserializer().Deserialize(json.ToJsonString());
+        Assert.Null(Assert.Single(roundTripped.Requests).Response);
+        Assert.Null(Assert.Single(roundTripped.Sends, x => x.Topic == "audit:log").Response);
+    }
+
+    [Fact]
+    public void Build_ATopicDeclaredAsBothAnEventAndASend_Fails()
+    {
+        var builder = new EventServiceDocumentBuilder(new SchemaBuilder())
+            .AddBroadcastEventDefinitions(new[] { new ResponseEventDefinition("order:placed", typeof(Inner)) })
+            .AddMessageSenderDefinitions(new[] { MessageSenderDefinition.CreateInstance("order:placed", typeof(Inner)) });
+
+        var error = Assert.Throws<InvalidOperationException>(() => builder.Build());
+        Assert.Contains("order:placed", error.Message);
+    }
+
+    [Fact]
+    public void Build_SynthesizesNoExamples()
+    {
+        var doc = new EventServiceDocumentBuilder(new SchemaBuilder())
+            .AddMessageHandlerDefinitions(new[] { MessageHandlerDefinition.CreateInstance("tenant:create", typeof(Example), typeof(Inner)) })
+            .AddBroadcastEventDefinitions(new[] { new ResponseEventDefinition("tenant:created", typeof(Inner)) })
+            .Build();
+
+        Assert.Null(doc.Requests[0].Example);
+        Assert.Null(doc.Events[0].Example);
+        Assert.DoesNotContain("\"example\"", doc.SerializeAsJson(OpenApiSpecVersion.OpenApi3_0));
     }
 
     [Fact]

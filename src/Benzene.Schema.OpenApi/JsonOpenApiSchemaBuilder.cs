@@ -130,11 +130,14 @@ public class JsonOpenApiSchemaBuilder
         // no other builder in this codebase would ever emit.
         var schemaId = char.ToUpperInvariant(key[0]) + key.Substring(1);
         var properties = ((JObject)jToken).Properties();
+        // The derivation rule of contract-document.md §4.2, as SchemaBuilder's reflection path applies
+        // it: a record carries no additionalProperties, and every property the sample carries was
+        // emitted, so every one is required.
         var schema = new OpenApiSchema
         {
             Type = "object",
             Properties = properties.ToDictionary(x => x.Name, x => Create(x.Name, x.Value)),
-            AdditionalPropertiesAllowed = false
+            Required = new SortedSet<string>(properties.Select(x => x.Name), StringComparer.Ordinal)
         };
         _schemaRepository.AddDefinition(schemaId, schema);
         return new OpenApiSchema

@@ -17,6 +17,23 @@ namespace Benzene.Mesh.Wire;
 public static class Extensions
 {
     /// <summary>
+    /// Registers <paramref name="sends"/> as this service's send declarations (contract-document.md
+    /// §3.2): the contract document's <c>sends[]</c> - messages to topics another party defines. Also
+    /// makes the registry resolvable as <see cref="MeshOutboundRegistry"/> and
+    /// <see cref="IMeshOutboundDefinitionLookUp"/>.
+    /// </summary>
+    /// <param name="services">The container.</param>
+    /// <param name="sends">The send declarations.</param>
+    /// <returns>The container, for chaining.</returns>
+    public static IBenzeneServiceContainer AddSendDeclarations(this IBenzeneServiceContainer services, MeshOutboundRegistry sends)
+    {
+        services.AddSingleton(sends);
+        services.AddSingleton<IMeshOutboundDefinitionLookUp>(sends);
+        services.AddSingleton<Benzene.Abstractions.Messages.IMessageDefinitionFinder<Benzene.Abstractions.Messages.IMessageSenderDefinition>>(sends);
+        return services;
+    }
+
+    /// <summary>
     /// Intercepts the reserved <c>mesh</c> topic (plus any <paramref name="aliases"/>) and
     /// short-circuits with <paramref name="descriptor"/>, exactly as health-check interception
     /// works - by topic id alone, ignoring version. Not wiring this in is the "descriptor endpoint

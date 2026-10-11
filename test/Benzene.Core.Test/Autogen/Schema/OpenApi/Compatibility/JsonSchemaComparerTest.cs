@@ -656,7 +656,7 @@ public class JsonSchemaComparerTest
         DocWithComponents(new OpenApiComponents { Schemas = new Dictionary<string, OpenApiSchema>() }, requests);
 
     private static EventServiceDocument DocWithComponents(OpenApiComponents components, params RequestResponse[] requests) =>
-        new(new OpenApiInfo(), [], requests, [], components);
+        new(requests, [], components);
 
     // ---- oneOf / anyOf / allOf helpers (WP-9) ----
     // "Dog" and "Cat" are the fixed pair used throughout: each carries one distinguishing property

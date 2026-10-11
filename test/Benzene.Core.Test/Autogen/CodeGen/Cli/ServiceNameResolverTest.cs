@@ -8,8 +8,7 @@ namespace Benzene.Test.Autogen.CodeGen.Cli;
 public class ServiceNameResolverTest
 {
     private static EventServiceDocument EmptyDocument(string title = null) =>
-        new(new OpenApiInfo { Title = title }, System.Array.Empty<OpenApiTag>(),
-            System.Array.Empty<RequestResponse>(), System.Array.Empty<Event>(), new OpenApiComponents());
+        new(System.Array.Empty<RequestResponse>(), System.Array.Empty<Event>(), new OpenApiComponents()) { Service = title };
 
     [Fact]
     public void Resolve_ExplicitServiceNameOverride_AlwaysWins()

@@ -3,6 +3,7 @@ using System.IO;
 using System.Collections.Generic;
 using System.Linq;
 using Benzene.CodeGen.Client;
+using Benzene.Schema.OpenApi.EventService;
 using Benzene.Test.Autogen.CodeGen.Helpers;
 using Benzene.Test.Autogen.CodeGen.Model;
 using Xunit;
@@ -83,17 +84,22 @@ public class AtomicClientSdkBuilderTest
     }
 
     [Fact]
-    public void SkipsReservedTopics_ByDefault()
+    public void IgnoresABenzeneEntryInADocumentFromElsewhere()
     {
+        // A producer never lists a benzene: topic (contract-document.md §1); a document that does - a
+        // legacy one, or another producer's - has the entry ignored, not generated.
         var document = new Dictionary<string, (Type, Type, Type)>
         {
             { "user:get", (typeof(GetUserMessage), typeof(GetUserMessage), typeof(UserDto)) },
         }.ToEventServiceDocument();
-        document.Requests.First(x => x.Topic == "user:get").Reserved = true;
+        document.Requests = document.Requests
+            .Append(new RequestResponse { Topic = "benzene:mesh", Request = document.Requests[0].Request })
+            .ToArray();
 
         var result = new AtomicClientSdkBuilder(BaseNameSpace).Build(document);
 
-        Assert.DoesNotContain("UserGet/UserGetServiceClient.cs", result.Keys);
+        Assert.Contains("UserGet/UserGetServiceClient.cs", result.Keys);
+        Assert.DoesNotContain(result.Keys, key => key.StartsWith("BenzeneMesh/"));
     }
 
     // Phase 3b: ClientSdkOptions-driven topic scoping/namespace configuration. See
@@ -146,18 +152,15 @@ public class AtomicClientSdkBuilderTest
     }
 
     [Fact]
-    public void IncludeReservedTopics_RestoresReservedClients()
+    public void ReservedTopics_AreNeverDerivedSoNeverGenerated()
     {
         var document = new Dictionary<string, (Type, Type, Type)>
         {
             { "benzene:mesh", (typeof(GetUserMessage), typeof(GetUserMessage), typeof(UserDto)) },
         }.ToEventServiceDocument();
 
-        var excluded = new AtomicClientSdkBuilder(new ClientSdkOptions { Namespace = BaseNameSpace }).Build(document);
-        Assert.Empty(excluded);
-
-        var included = new AtomicClientSdkBuilder(new ClientSdkOptions { Namespace = BaseNameSpace, IncludeReservedTopics = true }).Build(document);
-        Assert.Contains("BenzeneMesh/BenzeneMeshServiceClient.cs", included.Keys);
+        Assert.Empty(document.Requests);
+        Assert.Empty(new AtomicClientSdkBuilder(new ClientSdkOptions { Namespace = BaseNameSpace }).Build(document));
     }
 
     [Fact]

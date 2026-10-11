@@ -1,4 +1,4 @@
-﻿using Microsoft.OpenApi.Models;
+using Microsoft.OpenApi.Models;
 
 namespace Benzene.Schema.OpenApi.Examples;
 
@@ -22,6 +22,8 @@ public class SchemaGetter : ISchemaGetter
     /// <inheritdoc />
     public OpenApiSchema GetOpenApiSchema(OpenApiSchema openApiSchema)
     {
+        // A nullable reference (contract-document.md §4.2) resolves to the type it wraps.
+        openApiSchema = NullableReference.Unwrap(openApiSchema);
         return openApiSchema.Reference != null
             ? GetOpenApiSchema(openApiSchema.Reference.Id)
             : openApiSchema;

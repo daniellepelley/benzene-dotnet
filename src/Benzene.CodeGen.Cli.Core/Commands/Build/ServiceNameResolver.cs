@@ -6,7 +6,7 @@ namespace Benzene.CodeGen.Cli.Core.Commands.Build;
 /// Resolves the service name <see cref="CodeBuilderFactory"/> derives the generated namespace/type
 /// names from, for a <c>build</c> invocation that may not have a <c>--lambda-name</c> to derive it
 /// from. An explicit <c>--service-name</c> always wins; otherwise the default follows the source:
-/// <c>--mesh</c> uses the mesh service name, <c>--file</c> uses the spec document's own title (else
+/// <c>--mesh</c> uses the mesh service name, <c>--file</c> uses the spec document's own <c>service</c> (else
 /// the file's stem), <c>--url</c> uses the host's first label, and <c>--lambda-name</c> returns
 /// null so <see cref="CodeBuilderFactory"/> keeps its original, unchanged <see cref="LambdaNameParser"/>
 /// derivation.
@@ -27,7 +27,7 @@ public static class ServiceNameResolver
 
         if (!string.IsNullOrWhiteSpace(payload.File))
         {
-            var title = document.Info?.Title;
+            var title = document.Service;
             return !string.IsNullOrWhiteSpace(title) ? title : FileStem(payload.File);
         }
 

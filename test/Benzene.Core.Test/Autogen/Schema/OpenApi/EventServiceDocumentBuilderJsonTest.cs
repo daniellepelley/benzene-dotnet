@@ -88,20 +88,7 @@ public class EventServiceDocumentBuilderJsonTest
     {
         _schemaBuilder = new SchemaBuilder();
         return new EventServiceDocumentBuilder(_schemaBuilder)
-            .AddInfo(new OpenApiInfo
-            {
-                Title = "benzene-tenant-core-func",
-                Version = "1.0",
-                Description = "Core Tenant Data"
-            })
-            .AddTag(new OpenApiTag
-            {
-                Name = "Core Service"
-            })
-            .AddTag(new OpenApiTag
-            {
-                Name = "benzene"
-            });
+            .AddService("benzene-tenant-core-func", "1.0", "Core Tenant Data");
     }
 }
 

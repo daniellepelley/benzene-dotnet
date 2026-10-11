@@ -141,4 +141,56 @@ public class EventServiceDocumentDeserializerTest
         Assert.True(exception.Report.HasBreakingChanges);
         Assert.Contains(exception.Report.BreakingChanges, x => x.Kind == SchemaChangeKind.PropertyRemoved);
     }
+
+    [Fact]
+    public void Deserialize_LegacyShape_IsReadWithAWarning_IdentityFromInfo_ReservedEntriesIgnored()
+    {
+        const string legacy = """
+        {
+          "openapi": "3.0.1",
+          "info": { "title": "orders", "version": "1.2", "description": "Order intake" },
+          "requests": [
+            { "topic": "order:create", "request": { "type": "object" }, "response": { "type": "object" } },
+            { "topic": "benzene:spec", "reserved": true, "request": {}, "response": {} }
+          ],
+          "events": [],
+          "components": { "schemas": {} }
+        }
+        """;
+        var warnings = new System.Collections.Generic.List<string>();
+
+        var document = new EventServiceDocumentDeserializer(warnings.Add).Deserialize(legacy);
+
+        Assert.Equal(EventServiceDocumentDeserializer.LegacyShapeWarning, Assert.Single(warnings));
+        Assert.True(document.IsLegacyShape);
+        Assert.Equal("orders", document.Service);
+        Assert.Equal("1.2", document.ServiceVersion);
+        Assert.Equal("Order intake", document.Description);
+        Assert.Equal("order:create", Assert.Single(document.Requests).Topic);
+        Assert.Empty(document.Sends);
+    }
+
+    [Fact]
+    public void Deserialize_UnknownSchemaDialect_IsRejected()
+    {
+        const string json = """{ "schemaDialect": "json-schema-2020-12", "service": "x", "requests": [], "events": [], "sends": [], "components": { "schemas": {} } }""";
+
+        var error = Assert.Throws<UnknownSchemaDialectException>(() => new EventServiceDocumentDeserializer().Deserialize(json));
+
+        Assert.Equal("json-schema-2020-12", error.SchemaDialect);
+    }
+
+    [Fact]
+    public void Deserialize_CurrentShape_RaisesNoWarning_AndKeepsTheServedHashes()
+    {
+        var json = CurrentJson();
+        var deserializer = new EventServiceDocumentDeserializer();
+
+        var document = deserializer.Deserialize(json);
+
+        Assert.Empty(deserializer.Warnings);
+        Assert.False(document.IsLegacyShape);
+        Assert.Equal(document.ContractHash, document.DeclaredContractHash);
+        Assert.Equal(document.RegistrationHash, document.DeclaredRegistrationHash);
+    }
 }

@@ -20,7 +20,7 @@ public class LambdaTestToolCommand : CommandBase<LambdaTestToolPayload>
         // No try/catch: same reasoning as ClientCodeBuilder.Build (Phase 2) - swallowing here meant
         // this command always exited 0, even on a bad --file/--lambda-name or a malformed spec.
         var json = await GetSpecJsonAsync(payload);
-        var eventServiceDocument = new EventServiceDocumentDeserializer().Deserialize(json);
+        var eventServiceDocument = new EventServiceDocumentDeserializer(warning => Console.Error.WriteLine($"warning: {warning}")).Deserialize(json);
 
         var codeFiles = new LambdaTestFilesBuilder().BuildCodeFiles(eventServiceDocument);
         Console.WriteLine("{0} test payload files created", codeFiles.Length);

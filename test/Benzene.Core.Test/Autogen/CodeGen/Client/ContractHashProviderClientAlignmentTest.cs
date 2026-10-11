@@ -11,13 +11,9 @@ namespace Benzene.Test.Autogen.CodeGen.Client;
 
 /// <summary>
 /// Regression test for the projection-comparability bug fixed alongside the migration to the
-/// spec-pinned contractHash (contract-document.md §6; work/archive/cross-language-clients-plan-2026-08.md Phase 2 step
-/// 3): before this fix, a default-generated client's embedded hash (already domain-scoped by
-/// <see cref="TopicScope"/> before <see cref="MessageClientSdkBuilder"/> ever hashes it) could never
-/// equal <see cref="Benzene.HealthChecks.Schema.SchemaHealthCheck"/>'s provider-side hash (computed
-/// over every registered handler, reserved topics included) for the very same service - the two
-/// were, silently, always-mismatching different projections. Both now hash the same domain
-/// projection via <see cref="ContractHash"/>, so they agree.
+/// spec-pinned contractHash (contract-document.md §6): a default-generated client's embedded hash must
+/// equal the contractHash the provider serves (and <see cref="Benzene.HealthChecks.Schema.SchemaHealthCheck"/>
+/// publishes) for the very same service - the same projection, §6.4.
 /// </summary>
 public class ContractHashProviderClientAlignmentTest
 {
@@ -45,8 +41,9 @@ public class ContractHashProviderClientAlignmentTest
             .ToFilesDictionary();
         var clientHash = ExtractHashCode(result["UserServiceClient.cs"]);
 
-        // Provider side: exactly what SchemaHealthCheck.ExecuteAsync publishes.
-        var providerHash = ContractHash.Compute(handlers);
+        // Provider side: the contractHash the served document carries - what SchemaHealthCheck
+        // publishes. Reserved handlers never reach the document (contract-document.md §1).
+        var providerHash = handlers.ToEventServiceDocument().ContractHash;
 
         Assert.StartsWith("sha256:", clientHash);
         Assert.Equal(providerHash, clientHash);

@@ -1,4 +1,4 @@
-﻿using Microsoft.OpenApi.Any;
+using Microsoft.OpenApi.Any;
 using Microsoft.OpenApi.Interfaces;
 using Microsoft.OpenApi.Models;
 using Microsoft.OpenApi.Writers;
@@ -25,8 +25,7 @@ public class Event : IOpenApiSerializable
     public string Version { get; set; } = string.Empty;
 
     /// <summary>
-    /// An example message payload for this event. Generated from the message schema during
-    /// <see cref="EventServiceDocumentBuilder.Build"/> unless one was supplied. Ignored by
+    /// An author-supplied example message payload for this event, or null (none is synthesized). Ignored by
     /// Newtonsoft deserialization (an <see cref="IOpenApiAny"/> can't be materialized from JSON
     /// directly); <see cref="EventServiceDocumentDeserializer"/> reads it back explicitly.
     /// </summary>

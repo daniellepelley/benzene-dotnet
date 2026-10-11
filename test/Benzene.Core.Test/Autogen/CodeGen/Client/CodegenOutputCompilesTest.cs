@@ -73,10 +73,7 @@ public class CodegenOutputCompilesTest
             }
         };
 
-        return new EventServiceDocument(
-            new OpenApiInfo { Title = "Payments", Version = "1.0" },
-            Array.Empty<OpenApiTag>(),
-            new[] { requestResponse },
+        return new EventServiceDocument(new[] { requestResponse },
             Array.Empty<Event>(),
             new OpenApiComponents { Schemas = schemas });
     }
@@ -169,10 +166,7 @@ public class CodegenOutputCompilesTest
             Response = Ref("Order")
         };
 
-        return new EventServiceDocument(
-            new OpenApiInfo { Title = "Orders", Version = "1.0" },
-            Array.Empty<OpenApiTag>(),
-            new[] { requestResponse },
+        return new EventServiceDocument(new[] { requestResponse },
             Array.Empty<Event>(),
             new OpenApiComponents { Schemas = schemas });
     }

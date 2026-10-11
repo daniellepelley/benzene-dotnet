@@ -57,7 +57,7 @@ public class MessageClientSdkBuilder : ICodeBuilder<EventServiceDocument>
 
     public ICodeFile[] BuildCodeFiles(EventServiceDocument eventServiceDocument)
     {
-        var scopedDocument = NarrowToReachableSchemas(TopicScope.Apply(eventServiceDocument, _options));
+        var scopedDocument = TopicScope.Apply(eventServiceDocument, _options);
 
         var output = new List<ICodeFile>();
 
@@ -68,7 +68,7 @@ public class MessageClientSdkBuilder : ICodeBuilder<EventServiceDocument>
         output.Add(new CodeFile($"I{_serviceName}ServiceClient.cs", interfaceString));
         output.Add(new CodeFile($"{_serviceName}ServiceClientRegistration.cs", BuildRegistration()));
 
-        foreach (var codeFile in _typeBuilder.BuildCodeFiles(scopedDocument.Components.Schemas))
+        foreach (var codeFile in _typeBuilder.BuildCodeFiles(ReachableSchemas(scopedDocument)))
         {
             output.Add(codeFile);
         }
@@ -192,10 +192,10 @@ public class MessageClientSdkBuilder : ICodeBuilder<EventServiceDocument>
 
     private void AddHashCode(EventServiceDocument eventServiceDocument, LineWriter lineWriter)
     {
-        // The spec-pinned contractHash (contract-document.md §6) - see ContractHash for why this is
-        // a distinct algorithm from CodeGenHelpers.GenerateHash. _options.IsTopicScopedForHash is set
-        // only by AtomicClientSdkBuilder's inner options, for its single-topic (§5.3) document.
-        var hashCode = ContractHash.Compute(eventServiceDocument, _options.IsTopicScopedForHash);
+        // The spec-pinned contractHash (contract-document.md §6) of the projection this client was
+        // generated from (§6.4): with no include-list it equals the served contractHash, so a drift
+        // check compares it directly with what the provider serves.
+        var hashCode = ContractHash.Compute(eventServiceDocument);
         lineWriter.WriteLine($@"public string HashCode => ""{hashCode}"";", 2);
         lineWriter.WriteLine();
     }
@@ -273,24 +273,16 @@ public class MessageClientSdkBuilder : ICodeBuilder<EventServiceDocument>
 
     // #170: TopicScope.Apply narrows Requests but leaves Components.Schemas untouched, so a
     // topic-scoped client (e.g. `benzene build -output client -topics user:get`) used to still emit
-    // (and hash - see AddHashCode) DTOs for the *entire* service catalogue rather than just the
-    // surviving requests' own schemas. AtomicClientSdkBuilder already narrows correctly via
-    // SchemaClosure.Reachable (see its ReachableSchemas) - mirror that here so both builders agree,
-    // and so the contract hash for a topic-scoped client varies only with what that client can
-    // actually reach, not with unrelated schemas elsewhere in the same service.
-    private static EventServiceDocument NarrowToReachableSchemas(EventServiceDocument document)
+    // DTOs for the *entire* service catalogue rather than just the surviving requests' own schemas.
+    // Narrow the generated DTOs to what the requests reach. The hash (AddHashCode) is taken over the
+    // un-narrowed include-list projection (contract-document.md §6.4) - it dereferences, so the
+    // components never reach it anyway.
+    private static IDictionary<string, OpenApiSchema> ReachableSchemas(EventServiceDocument document)
     {
         var roots = document.Requests
             .SelectMany(request => new[] { request.Request, request.Response })
             .ToArray();
 
-        var reachable = SchemaClosure.Reachable(document.Components.Schemas, roots);
-
-        return new EventServiceDocument(document.Info, document.Tags, document.Requests, document.Events,
-            new OpenApiComponents { Schemas = reachable })
-        {
-            MessageEndpoint = document.MessageEndpoint,
-            Transports = document.Transports,
-        };
+        return SchemaClosure.Reachable(document.Components.Schemas, roots);
     }
 }

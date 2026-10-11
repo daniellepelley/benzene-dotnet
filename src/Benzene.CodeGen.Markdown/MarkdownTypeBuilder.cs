@@ -68,7 +68,9 @@ public class MarkdownTypeBuilder
 
     private void MapProperty(string name, string? reference, OpenApiSchema openApiSchema, ILineWriter lineWriter)
     {
-        if (openApiSchema.Type == "object")
+        // A nullable reference to a named type (contract-document.md §4.2) renders as that type.
+        openApiSchema = Benzene.Schema.OpenApi.NullableReference.Unwrap(openApiSchema);
+        if (openApiSchema.Type == "object" && openApiSchema.Reference == null)
         {
             if (openApiSchema.Properties.Any())
             {

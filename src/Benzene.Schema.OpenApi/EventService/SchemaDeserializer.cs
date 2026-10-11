@@ -1,4 +1,4 @@
-﻿using Microsoft.OpenApi;
+using Microsoft.OpenApi;
 using Microsoft.OpenApi.Any;
 using Microsoft.OpenApi.Models;
 using Microsoft.OpenApi.Readers;
@@ -7,10 +7,50 @@ using Newtonsoft.Json.Linq;
 
 namespace Benzene.Schema.OpenApi.EventService;
 
+/// <summary>
+/// Reads a Contract Document (contract-document.md) from JSON.
+/// </summary>
+/// <remarks>
+/// <list type="bullet">
+/// <item>A <c>schemaDialect</c> other than <c>openapi-3.0</c> is rejected
+/// (<see cref="UnknownSchemaDialectException"/>, contract-document.md §1).</item>
+/// <item>Any <c>benzene:</c>-prefixed entry is ignored (§1).</item>
+/// <item>An absent <c>response</c> reads as null - no payload (§2, §3.2).</item>
+/// <item>A <b>legacy</b> document (spec-0.2.0 and earlier: <c>openapi</c> and <c>info</c>, no
+/// <c>schemaDialect</c>) is still accepted, with a warning in <see cref="Warnings"/>: <c>service</c>,
+/// <c>serviceVersion</c> and <c>description</c> come from <c>info</c>, and its reserved entries are
+/// ignored like any other <c>benzene:</c> entry.</item>
+/// </list>
+/// </remarks>
 public class EventServiceDocumentDeserializer
 {
-    private readonly OpenApiStringReader _openApiStringReader = new();
+    /// <summary>The warning a legacy-shape document produces.</summary>
+    public const string LegacyShapeWarning =
+        "The contract document has the legacy (spec-0.2.0) shape - 'openapi'/'info' and no 'schemaDialect'. " +
+        "It was read, but regenerate it with the current producer (contract-document.md §1).";
 
+    private readonly OpenApiStringReader _openApiStringReader = new();
+    private readonly List<string> _warnings = new();
+    private readonly Action<string>? _onWarning;
+
+    /// <summary>Initializes a deserializer.</summary>
+    /// <param name="onWarning">Called with each warning as it is raised (e.g. a legacy-shape document); optional.</param>
+    public EventServiceDocumentDeserializer(Action<string>? onWarning = null)
+    {
+        _onWarning = onWarning;
+    }
+
+    /// <summary>The warnings raised by every <see cref="Deserialize"/> call so far.</summary>
+    public IReadOnlyList<string> Warnings => _warnings;
+
+    /// <summary>Whether <paramref name="jObject"/> is a legacy-shape document: one with no <c>schemaDialect</c> (spec-0.2.0 and earlier wrote <c>openapi</c> and <c>info</c> instead).</summary>
+    public static bool IsLegacyShape(JObject jObject) => jObject["schemaDialect"] == null;
+
+    /// <summary>Whether <paramref name="json"/> is a legacy-shape document (see <see cref="IsLegacyShape(JObject)"/>).</summary>
+    public static bool IsLegacyShape(string json) => IsLegacyShape(JObject.Parse(json));
+
+    /// <summary>Reads a document.</summary>
+    /// <exception cref="UnknownSchemaDialectException">The document declares a dialect this port does not know.</exception>
     public EventServiceDocument Deserialize(string json)
     {
         // A fresh builder (hence a fresh SchemaBuilder/SchemaRepository) per call keeps this
@@ -26,21 +66,54 @@ public class EventServiceDocumentDeserializer
         using var jsonReader = new JsonTextReader(stringReader) { DateParseHandling = DateParseHandling.None };
         var jObject = JObject.Load(jsonReader);
 
+        var dialect = jObject["schemaDialect"]?.Value<string>();
+        var legacy = IsLegacyShape(jObject);
+        if (!legacy && dialect != EventServiceDocument.SchemaDialectOpenApi30)
+        {
+            throw new UnknownSchemaDialectException(dialect);
+        }
+
+        if (legacy)
+        {
+            Warn(LegacyShapeWarning);
+        }
+
         AddSchema(jObject, eventServiceDocumentBuilder);
 
         var doc = eventServiceDocumentBuilder.Build();
-        doc.Info = GetInfo(jObject);
-        doc.Tags = GetTags(jObject);
+        var info = jObject["info"] as JObject;
+        doc.SchemaDialect = EventServiceDocument.SchemaDialectOpenApi30;
+        doc.IsLegacyShape = legacy;
+        doc.Service = jObject["service"]?.Value<string>() ?? info?["title"]?.Value<string>() ?? string.Empty;
+        doc.ServiceVersion = NullIfEmpty(jObject["serviceVersion"]?.Value<string>() ?? info?["version"]?.Value<string>());
+        doc.VersionScheme = NullIfEmpty(jObject["versionScheme"]?.Value<string>());
+        doc.Description = NullIfEmpty(jObject["description"]?.Value<string>() ?? info?["description"]?.Value<string>());
         doc.MessageEndpoint = jObject["messageEndpoint"]?.Value<string>();
         doc.Transports = GetTransports(jObject);
-        doc.Events = GetEvents(jObject);
-        doc.Requests = GetRequests(jObject);
+        doc.DeclaredContractHash = jObject["contractHash"]?.Value<string>();
+        doc.DeclaredRegistrationHash = jObject["registrationHash"]?.Value<string>();
+        doc.Events = GetEntries(jObject, "events").Select(GetEvent).ToArray();
+        doc.Requests = GetEntries(jObject, "requests").Select(GetRequest).ToArray();
+        doc.Sends = GetEntries(jObject, "sends").Select(GetSend).ToArray();
         return doc;
     }
 
+    private void Warn(string warning)
+    {
+        _warnings.Add(warning);
+        _onWarning?.Invoke(warning);
+    }
+
+    private static string? NullIfEmpty(string? value) => string.IsNullOrEmpty(value) ? null : value;
+
+    // §1: a consumer ignores any benzene:-prefixed entry. #243: a missing list reads as empty.
+    private static IEnumerable<JToken> GetEntries(JObject jObject, string name)
+        => (jObject.GetValue(name) as JArray ?? new JArray())
+            .Where(x => !Benzene.Abstractions.BenzeneTopic.IsReserved(x["topic"]?.Value<string>()));
+
     private void AddSchema(JObject jObject, EventServiceDocumentBuilder eventServiceDocumentBuilder)
     {
-        var schemaJToken = jObject[OpenApiConstants.Components][OpenApiConstants.Schemas];
+        var schemaJToken = jObject[OpenApiConstants.Components]?[OpenApiConstants.Schemas];
 
         if (schemaJToken == null)
         {
@@ -58,56 +131,19 @@ public class EventServiceDocumentDeserializer
         }
     }
 
-    private OpenApiInfo GetInfo(JObject jObject)
-    {
-        var jToken = jObject[OpenApiConstants.Info];
-        return _openApiStringReader.ReadFragment<OpenApiInfo>(jToken.ToString(), OpenApiSpecVersion.OpenApi3_0, out _);
-    }
-
-    private OpenApiTag[] GetTags(JObject jObject)
-    {
-        var reader = new OpenApiStringReader();
-        var jArray = jObject[OpenApiConstants.Tags] as JArray;
-
-        if (jArray == null)
-        {
-            return Array.Empty<OpenApiTag>();
-        }
-        
-        return jArray!
-            .Select(x => reader.ReadFragment<OpenApiTag>(x.ToString(), OpenApiSpecVersion.OpenApi3_0, out _))
-            .ToArray();
-    }
-
     private static string[] GetTransports(JObject jObject)
     {
         var transportsJArray = jObject.GetValue("transports") as JArray;
         return transportsJArray?.Select(x => x.Value<string>()!).ToArray() ?? Array.Empty<string>();
     }
 
-    private Event[] GetEvents(JObject jObject)
-    {
-        // #243: a document missing "events" entirely (an externally-sourced or older-shape baseline
-        // passed to SchemaCompatibility.EnsureBackwardCompatible - Benzene's own emitted documents
-        // always include this array) used to throw ArgumentNullException from the null-forgiving `!`
-        // below, unlike the adjacent GetTransports/GetTags, which both null-coalesce to empty.
-        var eventsJArray = jObject.GetValue("events") as JArray;
-        return eventsJArray?.Select(GetEvent).ToArray() ?? Array.Empty<Event>();
-    }
-
-    private RequestResponse[] GetRequests(JObject jObject)
-    {
-        var requestsJArray = jObject.GetValue("requests") as JArray;
-        return requestsJArray?.Select(GetRequest).ToArray() ?? Array.Empty<RequestResponse>();
-    }
-
     private Event GetEvent(JToken jToken)
     {
         var @event = JsonConvert.DeserializeObject<Event>(jToken.ToString(Formatting.Indented));
 
-        return new Event(@event.Topic, GetSchema(jToken, "message"))
+        return new Event(@event!.Topic, GetSchema(jToken, "message") ?? new OpenApiSchema())
         {
-            Version = @event.Version,
+            Version = @event.Version ?? string.Empty,
             Example = GetExample(jToken)
         };
     }
@@ -116,17 +152,32 @@ public class EventServiceDocumentDeserializer
     {
         var request = JsonConvert.DeserializeObject<RequestResponse>(jToken.ToString(Formatting.Indented));
 
-        request!.Request = GetSchema(jToken, "request");
+        request!.Version ??= string.Empty;
+        request.Request = GetSchema(jToken, "request") ?? new OpenApiSchema();
         request.Response = GetSchema(jToken, "response");
         request.Example = GetExample(jToken);
 
         return request;
     }
 
-    private OpenApiSchema GetSchema(JToken jToken, string path)
+    private Send GetSend(JToken jToken)
     {
-        var json = jToken[path].ToString();
-        return _openApiStringReader.ReadFragment<OpenApiSchema>(json, OpenApiSpecVersion.OpenApi3_0, out _);
+        return new Send(jToken["topic"]?.Value<string>() ?? string.Empty,
+            GetSchema(jToken, "request") ?? new OpenApiSchema(), GetSchema(jToken, "response"))
+        {
+            Version = jToken["version"]?.Value<string>() ?? string.Empty,
+        };
+    }
+
+    private OpenApiSchema? GetSchema(JToken jToken, string path)
+    {
+        var token = jToken[path];
+        if (token == null || token.Type == JTokenType.Null)
+        {
+            return null;
+        }
+
+        return _openApiStringReader.ReadFragment<OpenApiSchema>(token.ToString(), OpenApiSpecVersion.OpenApi3_0, out _);
     }
 
     private static IOpenApiAny? GetExample(JToken jToken)

@@ -1,4 +1,5 @@
 using Benzene.Abstractions.MessageHandlers;
+using Benzene.Abstractions.Schema;
 using Benzene.Abstractions.Results;
 using Benzene.Core.MessageHandlers;
 using Benzene.Results;
@@ -10,6 +11,9 @@ public class GreetRequest
     public string Name { get; set; } = string.Empty;
 }
 
+// The canonical payload type is named GreetResponse (conformance/README.md); this runner keeps its
+// CLR name and declares the schema name instead - contract-document.md §4.1 rule 5's mechanism.
+[SchemaName("GreetResponse")]
 public class GreetReply
 {
     public string Greeting { get; set; } = string.Empty;

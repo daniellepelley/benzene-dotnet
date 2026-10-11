@@ -1,4 +1,4 @@
-using Benzene.Schema.OpenApi;
+using Benzene.Abstractions;
 using Benzene.Schema.OpenApi.EventService;
 
 namespace Benzene.CodeGen.Client;
@@ -15,16 +15,12 @@ namespace Benzene.CodeGen.Client;
 internal static class TopicScope
 {
     /// <summary>
-    /// Projects <paramref name="document"/>'s <see cref="EventServiceDocument.Requests"/> down to
-    /// the topics in scope per <paramref name="options"/>, returning a new document with everything
-    /// else (info, tags, events, components, message endpoint, transports) unchanged.
-    /// <c>benzene:healthcheck</c> has no special case here: like every other <c>benzene:*</c> reserved
-    /// endpoint it is excluded by default and admitted only by the ordinary rules
-    /// (<see cref="ClientSdkOptions.IncludeReservedTopics"/>, or naming it in
-    /// <see cref="ClientSdkOptions.Topics"/>). Generated clients are for a service's <i>domain</i>
-    /// surface; Benzene's reserved endpoints are framework plumbing, deliberately kept separate, and
-    /// emitting one into a client's <c>RequiredTopics</c> forced every consumer to register an
-    /// outbound route it never asked for or fail the outbound-routing start-up check.
+    /// Projects <paramref name="document"/>'s <see cref="EventServiceDocument.Requests"/> down to the
+    /// include-list in <paramref name="options"/> (contract-document.md §5.2), returning a new document
+    /// with everything else (identity, events, sends, components, message endpoint, transports)
+    /// unchanged; its hashes are recomputed over the projection. With no include-list every request is
+    /// in scope. A document never lists a <c>benzene:</c> topic (§1), and any such entry in a document
+    /// from elsewhere is dropped here too (§5.1): a generated client covers a service's own topics only.
     /// </summary>
     /// <exception cref="ArgumentException">
     /// <see cref="ClientSdkOptions.Topics"/> names a topic the document does not have.
@@ -32,10 +28,11 @@ internal static class TopicScope
     public static EventServiceDocument Apply(EventServiceDocument document, ClientSdkOptions options)
     {
         var requestedTopics = options.Topics is { Count: > 0 } ? options.Topics : null;
+        var ownRequests = document.Requests.Where(r => !BenzeneTopic.IsReserved(r.Topic)).ToArray();
 
         if (requestedTopics != null)
         {
-            var known = new HashSet<string>(document.Requests.Select(r => r.Topic), StringComparer.Ordinal);
+            var known = new HashSet<string>(ownRequests.Select(r => r.Topic), StringComparer.Ordinal);
             var unknown = requestedTopics.Where(t => !known.Contains(t)).ToArray();
             if (unknown.Length > 0)
             {
@@ -46,24 +43,27 @@ internal static class TopicScope
         }
 
         var included = requestedTopics != null ? new HashSet<string>(requestedTopics, StringComparer.Ordinal) : null;
+        var filteredRequests = ownRequests.Where(r => included == null || included.Contains(r.Topic)).ToArray();
 
-        // contract-document.md §5.1: a request is reserved when EITHER its `reserved` flag is true OR
-        // its topic starts with `benzene:` - the OR matters because a document from an older producer
-        // build (or one deserialized from a committed .spec.json rather than built fresh from
-        // handlers) may carry a reserved topic with no `reserved` flag at all.
-        bool IsReserved(RequestResponse request) => request.Reserved || ReservedTopics.IsReserved(request.Topic);
+        return document.With(requests: filteredRequests,
+            events: document.Events.Where(e => !BenzeneTopic.IsReserved(e.Topic)).ToArray(),
+            sends: document.Sends.Where(e => !BenzeneTopic.IsReserved(e.Topic)).ToArray());
+    }
 
-        bool InScope(RequestResponse request)
-            => included != null
-                ? included.Contains(request.Topic)
-                : options.IncludeReservedTopics || !IsReserved(request);
-
-        var filteredRequests = document.Requests.Where(InScope).ToArray();
-
-        return new EventServiceDocument(document.Info, document.Tags, filteredRequests, document.Events, document.Components)
-        {
-            MessageEndpoint = document.MessageEndpoint,
-            Transports = document.Transports,
-        };
+    /// <summary>
+    /// contract-document.md §5.3's topic-scoped projection: <c>requests</c> with exactly
+    /// <paramref name="request"/>, <c>events</c> and <c>sends</c> empty, <c>components.schemas</c>
+    /// exactly the schemas it reaches, every other field unchanged; the hashes follow the projection.
+    /// </summary>
+    public static EventServiceDocument ProjectTopic(EventServiceDocument document, RequestResponse request)
+    {
+        return document.With(
+            requests: new[] { request },
+            events: Array.Empty<Event>(),
+            sends: Array.Empty<Send>(),
+            components: new Microsoft.OpenApi.Models.OpenApiComponents
+            {
+                Schemas = SchemaClosure.Reachable(document.Components.Schemas, request.Request, request.Response)
+            });
     }
 }

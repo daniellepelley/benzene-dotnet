@@ -1,4 +1,4 @@
-﻿using Microsoft.OpenApi.Any;
+using Microsoft.OpenApi.Any;
 using Microsoft.OpenApi.Interfaces;
 using Microsoft.OpenApi.Models;
 using Microsoft.OpenApi.Writers;
@@ -19,21 +19,18 @@ public class RequestResponse : IOpenApiSerializable
     /// </summary>
     public string Version { get; set; } = string.Empty;
 
-    /// <summary>
-    /// True when this is a reserved Benzene utility topic (spec, health, mesh, …) rather than a
-    /// domain topic — see <see cref="ReservedTopics"/>. Serialized as <c>reserved</c> only when true,
-    /// so spec/mesh tooling can group or hide utility topics separately from the service's domain.
-    /// </summary>
-    [JsonProperty("reserved")]
-    public bool Reserved { get; set; }
-
     public HttpMapping[] HttpMappings { get; set; } = Array.Empty<HttpMapping>();
     public OpenApiSchema Request { get; set; }
-    public OpenApiSchema Response { get; set; }
 
     /// <summary>
-    /// An example request payload for this topic. Generated from the request schema during
-    /// <see cref="EventServiceDocumentBuilder.Build"/> unless one was supplied. Ignored by
+    /// The response payload's schema. <b>Null (absent on the wire) means the handler returns no
+    /// payload</b> (contract-document.md §2); <c>{}</c> means a payload of unconstrained shape.
+    /// </summary>
+    public OpenApiSchema? Response { get; set; }
+
+    /// <summary>
+    /// An author-supplied example request payload for this topic, or null. A producer emits only
+    /// examples an author supplied - none are synthesized from the schema. Ignored by
     /// Newtonsoft deserialization (an <see cref="IOpenApiAny"/> can't be materialized from JSON
     /// directly); <see cref="EventServiceDocumentDeserializer"/> reads it back explicitly.
     /// </summary>
@@ -49,13 +46,12 @@ public class RequestResponse : IOpenApiSerializable
         {
             writer.WriteProperty("version", Version);
         }
-        if (Reserved)
-        {
-            writer.WriteProperty("reserved", true);
-        }
         writer.WriteOptionalCollection("httpMappings", HttpMappings, (w, o) => o.SerializeAsV3(w));
         writer.WriteRequiredObject("request", Request, (w, o) => o.SerializeAsV3(w));
-        writer.WriteRequiredObject("response", Response, (w, o) => o.SerializeAsV3(w));
+        if (Response != null)
+        {
+            writer.WriteRequiredObject("response", Response, (w, o) => o.SerializeAsV3(w));
+        }
 
         if (Example != null)
         {
