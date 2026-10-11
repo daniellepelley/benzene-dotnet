@@ -317,7 +317,7 @@ public class MessageClientSdkBuilderTest
         var registration = result["UserServiceClientRegistration.cs"];
 
         Assert.Contains("AddScoped<IUserServiceClient, UserServiceClient>()", registration);
-        Assert.DoesNotContain("AddSingleton", registration);
+        Assert.DoesNotContain("AddSingleton<IUserServiceClient", registration);
         Assert.DoesNotContain("AddTransient", registration);
         Assert.Contains("captive dependency", registration);
     }
@@ -337,7 +337,8 @@ public class MessageClientSdkBuilderTest
     [Fact]
     public void DiRegistration_AddsNoNewPackageDependency_OnlyBenzeneAbstractions()
     {
-        // Benzene.Abstractions is already referenced by the generated client (IBenzeneResult), so the
+        // Benzene.Abstractions (IBenzeneResult) and Benzene.Abstractions.Messages (under the generated
+        // client's IBenzeneMessageSender) are already referenced by the generated client, so the
         // registration must not reach for anything the generated output doesn't already need.
         var result = new MessageClientSdkBuilder(UserServiceName, BaseNameSpace).Build(TwoTopics.ToEventServiceDocument());
 
@@ -345,7 +346,24 @@ public class MessageClientSdkBuilderTest
             .Where(line => line.StartsWith("using "))
             .ToArray();
 
-        Assert.Equal(new[] { "using System.Diagnostics.CodeAnalysis;", "using Benzene.Abstractions.DI;" }, usings);
+        Assert.Equal(new[]
+        {
+            "using System.Diagnostics.CodeAnalysis;",
+            "using Benzene.Abstractions.DI;", "using Benzene.Abstractions.Messages;",
+        }, usings);
+    }
+
+    [Fact]
+    public void DiRegistration_DeclaresTheTopicsTheClientCalls_AsTheConsumersSends()
+    {
+        // contract-document.md §3.2: a generated client's topics belong to another service, so the
+        // consuming service sends to them - registering the client registers them as send declarations.
+        var result = new MessageClientSdkBuilder(UserServiceName, BaseNameSpace).Build(TwoTopics.ToEventServiceDocument());
+        var registration = result["UserServiceClientRegistration.cs"];
+
+        Assert.Contains("AddSingleton<IMessageDefinitionFinder<IMessageSenderDefinition>>(_ => new UserServiceClientSends())", registration);
+        Assert.Contains(@"new SendDeclaration(""user:get"", """", typeof(GetUserMessage), typeof(UserDto))", registration);
+        Assert.Contains(@"new SendDeclaration(""user:create"", """", typeof(CreateUserMessage), typeof(string))", registration);
     }
 
     // #263: topic is user-authored (a [Message] attribute value) and interpolated into two generated

@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using Benzene.Abstractions.DI;
+using Benzene.Abstractions.Messages;
 
 namespace Benzene.Service.Clients.User
 {
@@ -11,7 +12,38 @@ namespace Benzene.Service.Clients.User
         {
             // Scoped, not singleton: AddOutboundRouting registers IBenzeneMessageSender
             // scoped, so a singleton client would be a captive dependency.
-            return container.AddScoped<IUserServiceClient, UserServiceClient>();
+            container.AddScoped<IUserServiceClient, UserServiceClient>();
+            // The topics this client calls are this service's send declarations
+            // (contract-document.md §3.2): they appear in its own contract document's sends.
+            return container.AddSingleton<IMessageDefinitionFinder<IMessageSenderDefinition>>(_ => new UserServiceClientSends());
+        }
+    }
+
+    [ExcludeFromCodeCoverage]
+    public sealed class UserServiceClientSends : IMessageDefinitionFinder<IMessageSenderDefinition>
+    {
+        public IMessageSenderDefinition[] FindDefinitions() => new IMessageSenderDefinition[]
+        {
+            new SendDeclaration("user:get", "", typeof(GetUserMessage), typeof(UserDto)),
+            new SendDeclaration("user:create", "", typeof(CreateUserMessage), typeof(string)),
+        };
+
+        private sealed class SendDeclaration : IMessageSenderDefinition, ITopic
+        {
+            public SendDeclaration(string id, string version, System.Type requestType, System.Type responseType)
+            {
+                Id = id;
+                Version = version;
+                RequestType = requestType;
+                ResponseType = responseType;
+            }
+
+            public string Id { get; }
+            public string Version { get; }
+            public ITopic Topic => this;
+            public System.Type RequestType { get; }
+            public System.Type ResponseType { get; }
+            public System.Type SenderType => typeof(Benzene.Abstractions.Results.Void);
         }
     }
 }

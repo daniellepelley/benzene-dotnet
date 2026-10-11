@@ -172,13 +172,19 @@ public class SpecBuilder
         }
         if (builder is IConsumesMessageSenderDefinitions<TBuilder> consumesMessageSenderDefinitions)
         {
-            // Send declarations (contract-document.md §3.2) - e.g. a MeshOutboundRegistry registered
-            // with AddSendDeclarations / the cloud service's WithSends.
-            var sendersFinder = resolver.TryGetService<IMessageDefinitionFinder<IMessageSenderDefinition>>();
-            if (sendersFinder != null)
+            // Send declarations (contract-document.md §3.2) - a MeshOutboundRegistry registered
+            // with AddSendDeclarations / the cloud service's WithSends, and each generated client's own
+            // (its Add{Service}ServiceClient registers the topics it calls). Every registered finder
+            // contributes, not only the last one registered; a (topic, version) declared by more than
+            // one finder is listed once - the document builder keeps the first declaration and skips
+            // the rest (EventServiceDocumentBuilder.AddMessageSenderDefinition).
+            var sends = resolver.GetServices<IMessageDefinitionFinder<IMessageSenderDefinition>>()
+                .SelectMany(finder => finder.FindDefinitions())
+                .Cast<IMessageDefinition>()
+                .ToArray();
+            if (sends.Length > 0)
             {
-                consumesMessageSenderDefinitions.AddMessageSenderDefinitions(
-                    sendersFinder.FindDefinitions().Cast<IMessageDefinition>().ToArray());
+                consumesMessageSenderDefinitions.AddMessageSenderDefinitions(sends);
             }
         }
         if (builder is IConsumesMessageEndpoint<TBuilder> consumesMessageEndpoint)

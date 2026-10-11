@@ -66,7 +66,7 @@ public class MessageClientSdkBuilder : ICodeBuilder<EventServiceDocument>
 
         output.Add(new CodeFile($"{_serviceName}ServiceClient.cs", classString));
         output.Add(new CodeFile($"I{_serviceName}ServiceClient.cs", interfaceString));
-        output.Add(new CodeFile($"{_serviceName}ServiceClientRegistration.cs", BuildRegistration()));
+        output.Add(new CodeFile($"{_serviceName}ServiceClientRegistration.cs", BuildRegistration(scopedDocument)));
 
         foreach (var codeFile in _typeBuilder.BuildCodeFiles(ReachableSchemas(scopedDocument)))
         {
@@ -160,12 +160,26 @@ public class MessageClientSdkBuilder : ICodeBuilder<EventServiceDocument>
     /// of DI usings, exactly as the routing contract stays free of them.
     /// </para>
     /// </remarks>
-    public string[] BuildRegistration()
+    public string[] BuildRegistration() => BuildRegistration(null);
+
+    /// <summary>
+    /// Builds the client's DI registration extension, and - for <paramref name="document"/>'s topics -
+    /// the consuming service's <b>send declarations</b> (contract-document.md §3.2): every topic this
+    /// client calls is a message to a topic another service defines, so registering the client also
+    /// registers an <c>IMessageDefinitionFinder&lt;IMessageSenderDefinition&gt;</c> listing them, and the
+    /// consuming service's own contract document carries them in <c>sends[]</c>.
+    /// </summary>
+    public string[] BuildRegistration(EventServiceDocument? document)
     {
+        var sends = document?.Requests ?? Array.Empty<RequestResponse>();
         var lineWriter = new LineWriter();
 
         lineWriter.WriteLine("using System.Diagnostics.CodeAnalysis;");
         lineWriter.WriteLine("using Benzene.Abstractions.DI;");
+        if (sends.Length > 0)
+        {
+            lineWriter.WriteLine("using Benzene.Abstractions.Messages;");
+        }
         lineWriter.WriteLine("");
 
         lineWriter.WriteLine($"namespace {_options.Namespace}");
@@ -182,12 +196,94 @@ public class MessageClientSdkBuilder : ICodeBuilder<EventServiceDocument>
         // visible where the registration is read.
         lineWriter.WriteLine("// Scoped, not singleton: AddOutboundRouting registers IBenzeneMessageSender", 3);
         lineWriter.WriteLine("// scoped, so a singleton client would be a captive dependency.", 3);
-        lineWriter.WriteLine($"return container.AddScoped<I{_serviceName}ServiceClient, {_serviceName}ServiceClient>();", 3);
+        if (sends.Length == 0)
+        {
+            lineWriter.WriteLine($"return container.AddScoped<I{_serviceName}ServiceClient, {_serviceName}ServiceClient>();", 3);
+        }
+        else
+        {
+            lineWriter.WriteLine($"container.AddScoped<I{_serviceName}ServiceClient, {_serviceName}ServiceClient>();", 3);
+            lineWriter.WriteLine("// The topics this client calls are this service's send declarations", 3);
+            lineWriter.WriteLine("// (contract-document.md §3.2): they appear in its own contract document's sends.", 3);
+            lineWriter.WriteLine($"return container.AddSingleton<IMessageDefinitionFinder<IMessageSenderDefinition>>(_ => new {_serviceName}ServiceClientSends());", 3);
+        }
         lineWriter.WriteLine("}", 2);
         lineWriter.WriteLine("}", 1);
+
+        if (sends.Length > 0)
+        {
+            lineWriter.WriteLine();
+            lineWriter.WriteLine("[ExcludeFromCodeCoverage]", 1);
+            lineWriter.WriteLine($"public sealed class {_serviceName}ServiceClientSends : IMessageDefinitionFinder<IMessageSenderDefinition>", 1);
+            lineWriter.WriteLine("{", 1);
+            lineWriter.WriteLine("public IMessageSenderDefinition[] FindDefinitions() => new IMessageSenderDefinition[]", 2);
+            lineWriter.WriteLine("{", 2);
+            // Requests are unique by (topic, version) in a document (§2), so each is declared once here;
+            // a send another finder also declares is listed once in the consumer's document (the
+            // document builder keeps the first declaration of a (topic, version)).
+            foreach (var send in sends)
+            {
+                var version = string.IsNullOrEmpty(send.Version) ? "\"\"" : CodeGenHelpers.ToCSharpStringLiteral(send.Version);
+                lineWriter.WriteLine(
+                    $"new SendDeclaration({CodeGenHelpers.ToCSharpStringLiteral(send.Topic)}, {version}, typeof({TypeOfName(send.Request)}), typeof({TypeOfName(send.Response)})),", 3);
+            }
+            lineWriter.WriteLine("};", 2);
+            lineWriter.WriteLine();
+            lineWriter.WriteLine("private sealed class SendDeclaration : IMessageSenderDefinition, ITopic", 2);
+            lineWriter.WriteLine("{", 2);
+            lineWriter.WriteLine("public SendDeclaration(string id, string version, System.Type requestType, System.Type responseType)", 3);
+            lineWriter.WriteLine("{", 3);
+            lineWriter.WriteLine("Id = id;", 4);
+            lineWriter.WriteLine("Version = version;", 4);
+            lineWriter.WriteLine("RequestType = requestType;", 4);
+            lineWriter.WriteLine("ResponseType = responseType;", 4);
+            lineWriter.WriteLine("}", 3);
+            lineWriter.WriteLine();
+            lineWriter.WriteLine("public string Id { get; }", 3);
+            lineWriter.WriteLine("public string Version { get; }", 3);
+            lineWriter.WriteLine("public ITopic Topic => this;", 3);
+            lineWriter.WriteLine("public System.Type RequestType { get; }", 3);
+            lineWriter.WriteLine("public System.Type ResponseType { get; }", 3);
+            lineWriter.WriteLine("public System.Type SenderType => typeof(Benzene.Abstractions.Results.Void);", 3);
+            lineWriter.WriteLine("}", 2);
+            lineWriter.WriteLine("}", 1);
+        }
+
         lineWriter.WriteLine("}");
 
         return lineWriter.GetLines();
+    }
+
+    // A type name usable in typeof(...) in the registration file, which imports neither System,
+    // System.Collections.Generic nor Benzene.Abstractions.Results (importing System would make Void
+    // System.Void): the no-payload Void, and the framework types a schema can name, are written fully
+    // qualified. Everything else is a keyword or a DTO generated into this file's own namespace.
+    private string TypeOfName(OpenApiSchema? schema)
+    {
+        var name = _typeName.GetName(schema!);
+        if (name == "Void")
+        {
+            return "Benzene.Abstractions.Results.Void";
+        }
+
+        name = FrameworkTypeName.Replace(name, match => match.Value switch
+        {
+            "Dictionary<" => "System.Collections.Generic.Dictionary<",
+            var type => "System." + type,
+        });
+        return name;
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex FrameworkTypeName =
+        new(@"\b(?:DateTime|Guid)\b|\bDictionary<", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    // A type name for the client and interface files. They import both System and
+    // Benzene.Abstractions.Results, so the no-payload Void (an absent response, contract-document.md §2)
+    // would be ambiguous with System.Void: it is written fully qualified.
+    private string ClientTypeName(OpenApiSchema? schema)
+    {
+        var name = _typeName.GetName(schema!);
+        return name == "Void" ? "Benzene.Abstractions.Results.Void" : name;
     }
 
     private void AddHashCode(EventServiceDocument eventServiceDocument, LineWriter lineWriter)
@@ -202,8 +298,8 @@ public class MessageClientSdkBuilder : ICodeBuilder<EventServiceDocument>
 
     private string[] AddMethod(string topic, OpenApiSchema requestType, OpenApiSchema responseType)
     {
-        var requestTypeName = _typeName.GetName(requestType);
-        var responseTypeName = _typeName.GetName(responseType);
+        var requestTypeName = ClientTypeName(requestType);
+        var responseTypeName = ClientTypeName(responseType);
         var methodName = _methodName.Create(topic, requestType);
 
         var lineWriter = new LineWriter();
@@ -248,8 +344,8 @@ public class MessageClientSdkBuilder : ICodeBuilder<EventServiceDocument>
         foreach (var definition in eventServiceDocument.Requests)
         {
             var topicFunction = GetTopicFunction(definition.Topic);
-            var requestTypeName = _typeName.GetName(definition.Request);
-            var responseTypeName = _typeName.GetName(definition.Response);
+            var requestTypeName = ClientTypeName(definition.Request);
+            var responseTypeName = ClientTypeName(definition.Response);
             var methodName = _methodName.Create(definition.Topic, definition.Request);
     
             lineWriter.WriteLine(

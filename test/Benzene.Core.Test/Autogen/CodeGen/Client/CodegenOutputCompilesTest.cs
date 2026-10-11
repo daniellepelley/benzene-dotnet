@@ -258,6 +258,53 @@ public class CodegenOutputCompilesTest
             string.Join(Environment.NewLine + "-----" + Environment.NewLine, files.Select(Text)));
     }
 
+    // The registration file declares the client's topics as the consumer's sends (contract-document.md
+    // §3.2) with typeof(...) of each request and response type. It imports neither System,
+    // System.Collections.Generic nor Benzene.Abstractions.Results, so a framework-typed payload
+    // (Dictionary, DateTime, Guid) and a no-payload response (Void) must be written fully qualified.
+    [Fact]
+    public void GeneratedRegistration_WithFrameworkTypedAndNoPayloadSends_Compiles()
+    {
+        var requests = new[]
+        {
+            new RequestResponse
+            {
+                Topic = "order:tag",
+                Request = new OpenApiSchema { Type = "object", AdditionalProperties = new OpenApiSchema { Type = "string" } },
+                Response = new OpenApiSchema { Type = "string", Format = "date-time" }
+            },
+            new RequestResponse
+            {
+                Topic = "order:lookup",
+                Version = "v2",
+                Request = new OpenApiSchema { Type = "string", Format = "uuid" },
+                Response = null
+            }
+        };
+        var document = new EventServiceDocument(requests, Array.Empty<Event>(),
+            new OpenApiComponents { Schemas = new Dictionary<string, OpenApiSchema>() });
+
+        var files = BuildFilesFor(document);
+        var registration = Text(files.Single(x => x.Name == "OrdersServiceClientRegistration.cs"));
+
+        Assert.Contains("typeof(System.Collections.Generic.Dictionary<string, string>), typeof(System.DateTime?)", registration);
+        Assert.Contains(@"new SendDeclaration(""order:lookup"", ""v2"", typeof(System.Guid?), typeof(Benzene.Abstractions.Results.Void))", registration);
+        Assert.DoesNotContain("using System;", registration);
+        Assert.DoesNotContain("using System.Collections.Generic;", registration);
+
+        var compilation = CSharpCompilation.Create(
+            "WpR_CodegenCompileCheck_" + Guid.NewGuid().ToString("N"),
+            files.Select(f => CSharpSyntaxTree.ParseText(Text(f), path: f.Name)).ToArray(),
+            ReferenceAssemblies(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        var errors = compilation.GetDiagnostics().Where(x => x.Severity == DiagnosticSeverity.Error).ToArray();
+        Assert.True(errors.Length == 0,
+            "Generated code failed to compile:" + Environment.NewLine +
+            string.Join(Environment.NewLine, errors.Select(x => x.ToString())) + Environment.NewLine +
+            string.Join(Environment.NewLine + "-----" + Environment.NewLine, files.Select(Text)));
+    }
+
     // Same approach as Benzene.Test.Docs.DocSnippetCompiler: TRUSTED_PLATFORM_ASSEMBLIES rather than
     // AppDomain.CurrentDomain.GetAssemblies(), since a project reference the test process hasn't
     // touched yet (e.g. Benzene.Abstractions.Results, Benzene.Clients) may not be loaded.
