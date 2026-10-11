@@ -191,10 +191,30 @@ public class ServiceView
 
     public List<InstanceView> Instances { get; set; } = new();
 
+    /// <summary>
+    /// The service's live versions (mesh.md §2.4, D26): one entry per <c>(service, serviceVersion)</c>
+    /// the collector holds a descriptor for, in registration order - oldest first, so a re-registered
+    /// version moves to the end and the last entry is the one the scalar fields above headline. The
+    /// fleet query keeps one row per service; this is where the per-version breakdown lives. Empty when
+    /// no descriptor has registered (the service is known only from traffic).
+    /// </summary>
+    public List<ServiceVersionSummary> Versions { get; set; } = new();
+
     /// <summary>The time window this view answers, when the query carried one; absent otherwise. See
     /// <see cref="MeshWindow"/>.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public MeshWindow? Window { get; set; }
+}
+
+/// <summary>One live version of a service on <see cref="ServiceView.Versions"/>.</summary>
+public class ServiceVersionSummary
+{
+    /// <summary>The declared <c>serviceVersion</c>; omitted for a descriptor that declared none.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ServiceVersion { get; set; }
+
+    /// <summary>How many topics this version's descriptor declares it handles.</summary>
+    public int Topics { get; set; }
 }
 
 /// <summary>One instance's latest heartbeat state.</summary>

@@ -198,6 +198,38 @@ public class MeshCollectorStoreTest
         Assert.Equal("2.0.0", summary.ServiceVersion);
     }
 
+    [Fact]
+    public void ServiceView_ListsEveryLiveVersion_OldestRegistrationFirst()
+    {
+        // D26: one fleet row per service; the per-version breakdown lives on the service view.
+        var store = new MeshCollectorStore();
+        store.Register(Descriptor("payments", topics: new[] { "payment:take" }, serviceVersion: "1"));
+        store.Register(Descriptor("payments", topics: new[] { "payment:take", "payment:refund" }, serviceVersion: "2"));
+
+        var view = store.Service("payments", null)!;
+
+        Assert.Single(store.Fleet().Services, s => s.Service == "payments");
+        Assert.Equal(new[] { "1", "2" }, view.Versions.Select(v => v.ServiceVersion));
+        Assert.Equal(new[] { 1, 2 }, view.Versions.Select(v => v.Topics));
+
+        // Re-registering v1 makes it the most recent registration - and the headline.
+        store.Register(Descriptor("payments", topics: new[] { "payment:take" }, serviceVersion: "1"));
+        view = store.Service("payments", null)!;
+        Assert.Equal(new[] { "2", "1" }, view.Versions.Select(v => v.ServiceVersion));
+        Assert.Equal("1", view.ServiceVersion);
+    }
+
+    [Fact]
+    public void ServiceView_Versions_AnUnversionedDescriptorIsOneEntryWithNoServiceVersion()
+    {
+        var store = new MeshCollectorStore();
+        store.Register(Descriptor("orders", topics: new[] { "order:create" }));
+
+        var version = Assert.Single(store.Service("orders", null)!.Versions);
+        Assert.Null(version.ServiceVersion);
+        Assert.Equal(1, version.Topics);
+    }
+
     // ---- §4.2 declared vs. observed: liveness ("Unobserved") ----
 
     [Fact]

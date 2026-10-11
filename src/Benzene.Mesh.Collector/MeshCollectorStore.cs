@@ -528,6 +528,15 @@ public class MeshCollectorStore : IMeshFleetReadModel
                         HashMatches = HashMatches(state, pair.Value.DescriptorHash)
                     })
                     .ToList(),
+                // D26: the per-version breakdown, oldest registration first (the headline is last).
+                Versions = state.Descriptors
+                    .OrderBy(x => state.DescriptorRegisteredAt.GetValueOrDefault(x.Key, 0))
+                    .Select(x => new ServiceVersionSummary
+                    {
+                        ServiceVersion = x.Value.ServiceVersion,
+                        Topics = x.Value.Topics.Count
+                    })
+                    .ToList(),
                 // The service's counts are cumulative-since-start; a requested window is reported (with
                 // CountsWindowed=false) so the page can badge them honestly. The service's live flows are
                 // windowed on the fleet poll, not carried here.

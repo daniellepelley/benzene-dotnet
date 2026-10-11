@@ -164,6 +164,12 @@ hosted a live cross-language fleet (Go and C# services in one view - see the roa
   spec change. Query surface is not yet conformance-pinned across languages (no Go-reference case
   yet); shipped .NET-side, a fixture case + Go collector are the fast-follow. Covered by
   `MeshCollectorStoreTest`'s correlation cases.
+- `ServiceView.Versions` (D26, spec-0.2.0) - the per-version breakdown: one `ServiceVersionSummary
+  { ServiceVersion, Topics }` per live `(service, serviceVersion)` descriptor, ordered by
+  `DescriptorRegisteredAt` (oldest registration first; a re-registration moves a version to the end, so
+  the last entry is the headline the scalar fields report). The fleet query stays one row per service.
+  Pinned by `mesh-service-version-cases.json` (`MeshServiceVersionConformanceTest`, which compares
+  `versions` as a set keyed by `serviceVersion`).
 - View shapes (`FleetView`, `ServiceSummary`, `TopicSummary`, `ServiceView`, `InstanceView`,
   `TraceView`, `TraceSummary`, `CorrelationView`, `Ack`, `MeshEdgeActivity`) -
   `TopicSummary.ProviderActivity`/`ConsumerActivity` (spec §4.2, additive) map each declared

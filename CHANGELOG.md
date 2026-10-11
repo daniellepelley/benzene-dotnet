@@ -50,6 +50,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   side writes, and is built on the new public `InboundCorrelationIdMiddleware<TContext>`. Both
   dependencies resolve at pipeline-build time, so a misconfigured pipeline is named by the start-up
   checks rather than failing on the message path.
+- **`benzene:mesh:query:service` lists a service's live versions (spec-0.2.0, mesh.md §2.4 / D26).**
+  `ServiceView` gains `Versions` — `[{ serviceVersion, topics }]`, one entry per live
+  `(service, serviceVersion)`, oldest registration first (the scalar fields headline the last). The fleet
+  query keeps one row per service. `Benzene.Conformance.Test` now claims `mesh-service-version-cases.json`.
 
 ### Fixed
 - **`Benzene.Saga`: a state-store failure no longer aborts a run, skips rollback, or discards a real
