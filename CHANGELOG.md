@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Error fidelity in every client (core-concepts §12).** `Benzene.Clients.Common.ProblemDocuments`
+  rebuilds a failed result's `errors` (`message`, `field`, `code`, in order) from a received problem
+  document and attaches it for `result.GetProblem()`. The plain REST client (`UseHttp` /
+  `HttpContextConverter`) now reads a non-success `application/problem+json` response (status still from
+  the reverse HTTP table); `HttpBenzeneMessageClient` and `UseBenzeneMessageOverHttp` read a non-envelope
+  `application/problem+json` failure the same way, and a `Void` caller of `HttpBenzeneMessageClient` now
+  gets a failure envelope's errors (previously only its status). `Benzene.Core.Messages.MetadataKeys`
+  is the shared case-insensitive reader for native metadata keys.
 - **Generated clients declare their sends.** A generated client's `Add{Service}ServiceClient()` also
   registers `{Service}ServiceClientSends`, an `IMessageDefinitionFinder<IMessageSenderDefinition>` of
   the topics it calls, so the consuming service's contract document lists them in `sends[]` (and its
@@ -93,6 +101,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   query keeps one row per service. `Benzene.Conformance.Test` now claims `mesh-service-version-cases.json`.
 
 ### Fixed
+- **Metadata bindings: the consumed topic key is no longer a header, and is read case-insensitively
+  (wire-contracts §2, `transport-metadata-cases.json`).** The headers getters of SQS (Lambda and
+  `Benzene.Aws.Sqs`), SNS, Service Bus (Function and consumer), Event Hubs (Function and consumer),
+  Pub/Sub, RabbitMQ and Kafka (all three) leave out the configured topic key (each gains a
+  `(string topicKey)` constructor; the parameterless one keeps the default `topic`, and DI passes the same
+  key the topic getter reads), and every topic getter matches the key ignoring case (`Topic` routes like
+  `topic`). **Behaviour change:** code that read the topic out of `IMessageHeadersGetter` must use the
+  topic getter; a pipeline that forwards a handled message's headers onto an outbound send no longer
+  carries the inbound `topic` along (the rule the Kafka binding already followed).
+- **Kafka routes on the `topic` header, falling back to the Kafka topic (spec ruling, transport-bindings
+  Kafka).** `KafkaMessageTopicGetter` in `Benzene.Kafka.Core`, `Benzene.Aws.Lambda.Kafka` and
+  `Benzene.Azure.Function.Kafka` reads the record's `topic` header when present and the consumed Kafka
+  topic otherwise; `Benzene.Kafka.Core`'s `AddKafka` honours a registered `IBenzeneWireNames.Topic`.
+  **Behaviour change:** a record whose `topic` header differs from its Kafka topic now routes on the header.
+- **A failure body that is not a problem document no longer throws in `AsBenzeneResult`.** The envelope's
+  failed status stands with no errors, instead of the parse exception surfacing as `service-unavailable`.
 - **A generated client for a no-response topic did not compile.** The client and interface files
   import both `System` and `Benzene.Abstractions.Results`, so the no-payload `Void` was ambiguous with
   `System.Void` (CS0104); it is now written fully qualified.
