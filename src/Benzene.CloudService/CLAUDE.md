@@ -3,10 +3,11 @@
 ## What this package does
 The batteries-included setup for a **Benzene Cloud Service** — the code-level counterpart of
 `docs/specification/cloud-service-profile.md`. One call, `UseBenzeneCloudService("name", ...)`,
-on a hosted HTTP pipeline wires every operational surface the profile requires (R1–R8) at the
-default service standard paths: the `/benzene/invoke` envelope endpoint, `/benzene/spec`,
-`/benzene/health` + reserved `healthcheck` topic, the trace feed, and collector registration +
-heartbeats - the registration's body being the contract document `benzene:spec` serves (mesh.md §2,
+on a hosted HTTP pipeline wires every operational surface the profile requires (R1–R5, R7) at the
+default service standard paths - the `/benzene/invoke` envelope endpoint, `benzene:spec` +
+`/benzene/spec`, `/benzene/health` + reserved `healthcheck` topic - and, given a collector, the
+meshed-service claim's feeds (mesh.md §7.1: M1 the trace feed, collector registration +
+heartbeats; M2 the inbound trace join) - the registration's body being the contract document `benzene:spec` serves (mesh.md §2,
 spec-0.4.0; the `benzene:mesh` descriptor topic is gone). It is deliberately **syntactic sugar** over the
 same pipeline builders Benzene Core setup uses — no new capability lives here, only the profile's
 steers pre-wired in the right order. Manual composition of the underlying `Use*` calls (Benzene
@@ -20,11 +21,19 @@ Core setup) remains the full-control path and this package must never be require
   profile-conformant default; overrides are always honored and honestly reflected in the report
   (`WithoutMesh()`, relocated paths → flagged, never refused).
 - `CloudServiceProfileReport` / `CloudServiceRequirement` — the wiring-time self-assessment
-  against R1–R8. Registered in DI, and stamped on the contract document as contract-document.md
-  §1's `profile` field (`ToProfile()` → `ContractDocumentProfile`, outside both hashes) through the
-  `ContractDocumentDeployment` the builder registers (`runtime: dotnet`, `placement` - default
-  `self-hosted` - and `profile`). R6 is "answers `benzene:spec` + the three feeds (registration,
-  heartbeats, traces)". It reports *provisioning*, not runtime state — runtime degradation is not a
+  against the profile's R1–R5 and R7 (spec-0.5.0; R6 and R8 left the profile and their ids are not
+  reused) - `Requirements`/`Missing`/`IsConformant` - and, apart, the meshed-service claim's M1 (feeds:
+  registration, heartbeats, traces - formerly R6) and M2 (trace join and propagation - formerly R8,
+  keeping #167's resolved-trace-exporter rule) - `MeshRequirements`/`MeshMissing`/`IsMeshed`, where
+  `IsMeshed` requires `IsConformant` (a meshed service is a Cloud Service first). Registered in DI, and
+  stamped on the contract document as contract-document.md §1's `profile` field (`ToProfile()` →
+  `ContractDocumentProfile`, outside both hashes; `missing` from R1–R5/R7 only, M1/M2 **never**)
+  through the `ContractDocumentDeployment` the builder registers (`runtime: dotnet`, `placement` -
+  default `self-hosted` - and `profile`). R5 is "answers `benzene:spec` wherever the transport carries
+  a reply, and `/benzene/spec`". M2's note records the known .NET gap: the self-check sees the inbound
+  join only; outbound forwarding (sends and published events alike - one `IBenzeneMessageSender` route
+  mechanism) is each route's `UseW3CTraceContext()`, which stamps `Activity.Current`, not
+  `MeshSpan.Current`. It reports *provisioning*, not runtime state — runtime degradation is not a
   conformance failure (profile §4).
 - `CloudServiceDocumentSource` — the registration body. `Get(resolver)` derives the complete
   contract document through `SpecBuilder` and the same `SpecCache` entry `benzene:spec` serves from, so

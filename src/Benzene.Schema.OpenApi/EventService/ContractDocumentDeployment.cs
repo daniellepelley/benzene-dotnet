@@ -27,8 +27,9 @@ public sealed class ContractDocumentPlacement
 /// <summary>
 /// A conformance-profile self-assessment - the contract document's optional <c>profile</c>
 /// (contract-document.md §1): <see cref="Name"/> (<c>cloud-service</c> for the Cloud Service Profile)
-/// and <see cref="Missing"/>, the requirement ids the service's own wiring knows it does not meet. It
-/// reflects wiring, not runtime health.
+/// and <see cref="Missing"/>, the requirement ids the service's own wiring knows it does not meet - for
+/// the Cloud Service Profile, ids from R1–R5 and R7 only (cloud-service-profile.md §5; the meshed-service
+/// claim's M1/M2 never appear here). It reflects wiring, not runtime health, and sits outside both hashes.
 /// </summary>
 public sealed class ContractDocumentProfile
 {

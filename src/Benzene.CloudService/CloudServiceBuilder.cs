@@ -33,11 +33,12 @@ public interface ICloudServiceBuilder
     ICloudServiceBuilder WithPlacement(string cloud, string? region = null);
 
     /// <summary>
-    /// Sets the collector's envelope URL, enabling the outbound mesh feeds (profile R6):
-    /// <c>benzene:mesh:register</c> (its body the contract document <c>benzene:spec</c> serves),
-    /// <c>benzene:mesh:heartbeat</c> and the <c>benzene:mesh:traces</c> feed. Without a collector the
-    /// service still answers <c>benzene:spec</c>, but the outbound feeds have nowhere to go and R6 is
-    /// reported as missing.
+    /// Sets the collector's envelope URL, enabling the outbound mesh feeds (the meshed-service claim's
+    /// M1, mesh.md §7.1): <c>benzene:mesh:register</c> (its body the contract document
+    /// <c>benzene:spec</c> serves), <c>benzene:mesh:heartbeat</c> and the <c>benzene:mesh:traces</c>
+    /// feed. Without a collector the service is still a full Cloud Service (the profile needs no
+    /// collector) and still answers <c>benzene:spec</c>, but the outbound feeds have nowhere to go and
+    /// the report's meshed-service claim lists M1 (and, with no trace exporter either, M2) as missing.
     /// </summary>
     ICloudServiceBuilder WithCollector(string collectorEnvelopeUrl);
 
@@ -109,11 +110,12 @@ public interface ICloudServiceBuilder
 
     /// <summary>
     /// Declines the mesh feeds entirely: no trace middleware, no registration or heartbeats
-    /// (<c>benzene:spec</c> still answers). The service remains a working Benzene Core service and the
-    /// profile report marks R6 and R8 as missing - use this for a deliberate opt-out, not as a
-    /// substitute for simply not configuring a collector.
+    /// (<c>benzene:spec</c> still answers). The service remains a Cloud Service - the profile needs no
+    /// collector - but not a meshed one: the report's meshed-service claim marks M1 and M2 as missing.
+    /// Use this for a deliberate opt-out, not as a substitute for simply not configuring a collector.
     /// </summary>
     ICloudServiceBuilder WithoutMesh();
+
 }
 
 internal sealed class CloudServiceBuilder : ICloudServiceBuilder

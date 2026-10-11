@@ -19,15 +19,18 @@ namespace Benzene.CloudService;
 /// <summary>
 /// The batteries-included setup for a <b>Benzene Cloud Service</b>
 /// (docs/specification/cloud-service-profile.md). One call wires every operational surface the
-/// profile requires, at the default service standard paths, so the service works with the mesh,
-/// the Spec UI, and fleet tooling out of the box:
+/// profile requires (R1–R5, R7), at the default service standard paths, and - given a collector -
+/// the mesh feeds of the meshed-service claim (mesh.md §7.1: M1, M2), so the service works with the
+/// Spec UI, fleet tooling and the mesh out of the box:
 ///
 /// <list type="bullet">
 /// <item>the wire-envelope endpoint at <c>/benzene/invoke</c> (R4)</item>
-/// <item>the derived spec at <c>/benzene/spec</c> (R5)</item>
+/// <item>the derived spec on the reserved <c>benzene:spec</c> topic and at <c>/benzene/spec</c> (R5)</item>
 /// <item>health checks on the reserved topic and at <c>/benzene/health</c> (R3)</item>
 /// <item>the trace feed, registration (its body the contract document <c>benzene:spec</c> serves) and
-/// heartbeats (R6, R8)</item>
+/// heartbeats (M1), and the inbound W3C trace context join (M2's inbound half - outbound forwarding, on
+/// sends and published events alike, is each outbound route's <c>UseW3CTraceContext()</c>) - the
+/// meshed-service claim, reported apart from the profile</item>
 /// <item>message handlers via the registry, routed on both the HTTP and envelope pipelines (R1, R2)</item>
 /// </list>
 ///
@@ -67,10 +70,10 @@ public static class Extensions
 
         var info = builder.BuildServiceInfo();
 
-        // Resolved once, here, and reused both to wire UseMeshTrace below and to evaluate the R8
-        // self-report - a single source of truth for "is trace propagation actually wired", so the
-        // two can never disagree (#167: the report used to claim R8 satisfied whenever mesh was
-        // enabled, even with no collector/exporter, while UseMeshTrace itself requires one).
+        // Resolved once, here, and reused both to wire UseMeshTrace below and to evaluate the M2
+        // self-report (formerly the profile's R8) - a single source of truth for "is trace propagation
+        // actually wired", so the two can never disagree (#167: the report used to claim it satisfied
+        // whenever mesh was enabled, even with no collector/exporter, while UseMeshTrace requires one).
         var traceExporter = builder.MeshEnabled
             ? builder.TraceExporter ?? (builder.CollectorEnvelopeUrl == null
                 ? null
@@ -171,9 +174,9 @@ public static class Extensions
         // platform health probe) derives the complete document and registers it.
         announcer?.EnsureStarted(null);
 
-        // The wire-envelope surface (R4) and, inside it, the mesh feeds (R6/R8): trace outermost so
+        // The wire-envelope surface (R4) and, inside it, the mesh feeds (M1/M2): trace outermost so
         // it sees every invocation, then health interception, then the app's own middleware, then the
-        // router - which answers benzene:spec (R5, R6's self-description) like any other topic.
+        // router - which answers benzene:spec (R5) like any other topic.
         app.UseBenzeneMessage(new BenzeneMessageHttpOptions { Path = builder.InvokePath }, envelope =>
         {
             RealizeMeshDisposables(envelope);

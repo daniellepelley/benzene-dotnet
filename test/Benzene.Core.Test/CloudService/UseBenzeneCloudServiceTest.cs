@@ -141,10 +141,24 @@ public class UseBenzeneCloudServiceTest
         Assert.Equal("aws", document["placement"]!["cloud"]!.GetValue<string>());
         Assert.Equal("eu-west-1", document["placement"]!["region"]!.GetValue<string>());
         Assert.Equal(CloudServiceProfileReport.ProfileName, document["profile"]!["name"]!.GetValue<string>());
-        // No collector configured: the outbound feeds have no destination, so the service honestly
-        // reports R6 (and R8) as missing rather than claiming full conformance.
-        var missing = document["profile"]!["missing"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
-        Assert.Equal(new[] { "R6", "R8" }, missing);
+        // No collector configured: the profile (R1–R5, R7) needs none, so the service is a full Cloud
+        // Service and profile.missing is omitted. The mesh feeds it lacks are the meshed-service claim's
+        // M1/M2 (mesh.md §7.1), which never appear in profile.missing.
+        Assert.False(document["profile"]!.AsObject().ContainsKey("missing"));
+    }
+
+    [Fact]
+    public async Task SpecTopic_RelocatedPath_ProfileMissingListsR7Only()
+    {
+        var host = CreateHost(cloud => cloud.WithoutMesh().WithHealthPath("/health"));
+
+        var response = await host.SendApiGatewayAsync(
+            HttpBuilder.Create("POST", CloudServicePaths.Invoke, CreateEnvelope("benzene:spec", "{}")));
+
+        Assert.Equal(200, response.StatusCode);
+        var missing = EnvelopeBody(response.Body)["profile"]!["missing"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
+        // WithoutMesh withdraws M1 and M2 - but those are the meshed-service claim, never profile ids.
+        Assert.Equal(new[] { "R7" }, missing);
     }
 
     [Fact]
@@ -370,49 +384,81 @@ public class UseBenzeneCloudServiceTest
         var report = BuildReport(cloud => cloud.WithCollector("http://collector/benzene/invoke"));
         Assert.True(report.IsConformant);
         Assert.Empty(report.Missing);
+        Assert.True(report.IsMeshed);
+        Assert.Empty(report.MeshMissing);
 
+        // The profile is R1–R5 and R7, in order; the meshed-service claim is M1 and M2, apart.
+        Assert.Equal(new[] { "R1", "R2", "R3", "R4", "R5", "R7" }, report.Requirements.Select(x => x.Id));
+        Assert.Equal(new[] { "M1", "M2" }, report.MeshRequirements.Select(x => x.Id));
+
+        // No collector: still a Cloud Service (the profile needs none), but not meshed.
         var noCollector = BuildReport(null);
-        Assert.False(noCollector.IsConformant);
+        Assert.True(noCollector.IsConformant);
+        Assert.Empty(noCollector.Missing);
+        Assert.False(noCollector.IsMeshed);
         // #167: mesh is on by default but UseMeshTrace is only wired when a collector/exporter is
-        // also configured - R8 must be Missing here too, not just R6. Before the fix this asserted
-        // `{ "R6" }` only, which is exactly the false "R8 satisfied" claim the round-11 finding caught
-        // (MeshSpan.Current was genuinely null with this wiring).
-        Assert.Equal(new[] { "R6", "R8" }, noCollector.Missing);
+        // also configured - M2 (formerly R8) must be missing here too, not just M1.
+        Assert.Equal(new[] { "M1", "M2" }, noCollector.MeshMissing);
 
         var withoutMesh = BuildReport(cloud => cloud.WithoutMesh());
-        Assert.Equal(new[] { "R6", "R8" }, withoutMesh.Missing);
+        Assert.True(withoutMesh.IsConformant);
+        Assert.Equal(new[] { "M1", "M2" }, withoutMesh.MeshMissing);
 
         var relocated = BuildReport(cloud => cloud
             .WithCollector("http://collector/benzene/invoke")
             .WithSpecPath("/spec"));
         Assert.Equal(new[] { "R7" }, relocated.Missing);
+        Assert.Empty(relocated.MeshMissing);
+        // A meshed service must be a Cloud Service first (mesh.md §7.1).
+        Assert.False(relocated.IsMeshed);
     }
 
     [Fact]
-    public void ProfileReport_MeshEnabledWithNoCollectorOrExporter_R8IsNotSatisfied()
+    public void ProfileReport_MeshIdsNeverAppearInProfileMissing()
     {
-        // #167: the default wiring (mesh on, no collector/exporter configured) used to have R8
-        // report satisfied just because MeshEnabled was true - but Extensions.cs only wires
-        // UseMeshTrace when a traceExporter/CollectorEnvelopeUrl is also configured, so
-        // MeshSpan.Current is genuinely null under this exact wiring. R8 must say so.
+        foreach (var report in new[]
+                 {
+                     BuildReport(null),
+                     BuildReport(cloud => cloud.WithoutMesh()),
+                     BuildReport(cloud => cloud.WithoutMesh().WithInvokePath("/invoke"))
+                 })
+        {
+            Assert.All(report.Missing, id => Assert.Matches("^R[1-57]$", id));
+            Assert.All(report.ToProfile().Missing, id => Assert.Matches("^R[1-57]$", id));
+        }
+    }
+
+    [Fact]
+    public void ProfileReport_MeshEnabledWithNoCollectorOrExporter_M2IsNotSatisfied()
+    {
+        // #167: the default wiring (mesh on, no collector/exporter configured) used to report trace
+        // propagation (then R8, now M2) satisfied just because MeshEnabled was true - but Extensions.cs
+        // only wires UseMeshTrace when a traceExporter/CollectorEnvelopeUrl is also configured, so
+        // MeshSpan.Current is genuinely null under this exact wiring. M2 must say so.
         var report = BuildReport(null);
 
-        var r8 = report.Requirements.Single(x => x.Id == "R8");
-        Assert.False(r8.Satisfied);
-        Assert.Contains(r8.Id, report.Missing);
+        var m2 = report.MeshRequirements.Single(x => x.Id == "M2");
+        Assert.False(m2.Satisfied);
+        Assert.Contains(m2.Id, report.MeshMissing);
+        Assert.DoesNotContain(m2.Id, report.Missing);
     }
 
     [Fact]
-    public void ProfileReport_MeshEnabledWithAnExplicitTraceExporter_R8IsSatisfied_EvenWithNoCollector()
+    public void ProfileReport_MeshEnabledWithAnExplicitTraceExporter_M2IsSatisfied_EvenWithNoCollector()
     {
         // The other half of the same condition Extensions.cs wires UseMeshTrace with:
         // WithTraceExporter alone (no collector URL) is enough to actually wire trace propagation,
-        // so R8 must be satisfied here - it must track the resolved exporter, not CollectorEnvelopeUrl.
+        // so M2 must be satisfied here - it must track the resolved exporter, not CollectorEnvelopeUrl.
+        // M1 still needs the collector (registration and heartbeats have no destination).
         var report = BuildReport(cloud => cloud.WithTraceExporter(new NoOpMeshTraceExporter()));
 
-        var r8 = report.Requirements.Single(x => x.Id == "R8");
-        Assert.True(r8.Satisfied);
-        Assert.DoesNotContain(r8.Id, report.Missing);
+        var m2 = report.MeshRequirements.Single(x => x.Id == "M2");
+        Assert.True(m2.Satisfied);
+        Assert.Equal(new[] { "M1" }, report.MeshMissing);
+        // The self-check sees the inbound join only: M2's note names the outbound half (sends and
+        // published events, one route mechanism) it cannot see - the recorded .NET M2 gap.
+        Assert.Equal(CloudServiceProfileReport.OutboundPropagationGap, m2.Note);
+        Assert.Contains("published events", m2.Note);
     }
 
     private sealed class NoOpMeshTraceExporter : IMeshTraceExporter
