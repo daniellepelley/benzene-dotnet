@@ -1,5 +1,27 @@
 # Benzene.Mesh.Collector
 
+> **spec-0.4.0 (Phase 3b): the register body is the contract document.** `RegisterMessageHandler` takes a
+> `MeshRegistration` (`Benzene.Mesh.Wire`) - the document the service's `benzene:spec` serves, plus
+> `runtime`/`placement`/`profile`/`degraded`. **Only `service` is required** (→ `bad-request`): no
+> dialect check, no other member required, unmodelled members kept in `Extra` so the service view's
+> `registration` reads back whole. The graph: **consumers from `requests`, providers from `events` ∪
+> `sends`** (a published event makes its publisher a provider), `benzene:` entries ignored
+> (`MeshRegistration.KnownEntries`). A member that is absent or named in `degraded` is **unknown**: no
+> edges, and no `contract-drift` for a trace on it (`CanBeUndeclared` requires every live registration
+> to know the side's members: `requests`, or both `events` and `sends`). A trace of a reserved
+> `benzene:` topic is never drift (mesh.md §4.2). The carried `registrationHash` is trusted - never
+> recomputed, never a reason to reject. **Heartbeats** carry `serviceVersion` and `registrationHash`;
+> `HashMatches` compares with the registration for the SAME `(service, serviceVersion)` (before, with no
+> version on the heartbeat, it matched ANY registered version), null for an unregistered version. The
+> eviction preference (#290) counts an instance as live for the version its heartbeat names. Read-model
+> renames (Provisional): `ServiceView.Descriptor` → `Registration`, `InstanceView.DescriptorHash` →
+> `RegistrationHash` (+ `ServiceVersion`); `topics` on the fleet row is the count of known, non-reserved
+> `requests`; `binding` is the registration's first `transports` entry; `missingFeeds`' `"descriptor"`
+> now means "never registered". No legacy `topics`/`produces` body is read. Pinned by the re-cut
+> `mesh-collector-cases.json` and `mesh-service-version-cases.json` (`MeshServiceDescriptor` and
+> `mesh-descriptor-cases.json` are gone). Everything below predates this and speaks of descriptors,
+> `topics` and `produces`; read them as registrations, `requests` and `events` ∪ `sends`.
+
 > **2026-08 (mesh.md revision): the producer/consumer graph is declared, never trace-derived.**
 > Earlier drafts derived consumer edges solely from trace parentage - unknowable before deployment,
 > which defeated the mesh's own stated purpose. `ServiceDescriptor` gained `consumes` (§2, `Benzene.Mesh.Wire`'s

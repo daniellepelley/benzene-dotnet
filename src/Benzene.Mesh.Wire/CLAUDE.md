@@ -2,54 +2,39 @@
 
 ## What this package does
 The spec-conformant mesh **wire layer** of `docs/specification/mesh.md` - what makes a .NET
-Benzene service a citizen of a cross-language mesh fleet: the derived ServiceDescriptor (§2,
-topics + CLR-derived payload schemas + `descriptorHash`), the reserved `mesh` topic middleware
-(§1), the trace middleware emitting semantic TraceEvents (§3), W3C traceparent join and
-`MeshSpan.Current` propagation, and the batching HTTP trace exporter with the §4 sender rules.
-Verified against the language-neutral fixtures by `test/Benzene.Conformance.Test`'s
-`MeshDescriptorConformanceTest`/`MeshTraceConformanceTest`, and cross-language against the Go
-reference collector (see `work/service-mesh-roadmap-1.0.md`'s 2026-07-16 updates).
+Benzene service a citizen of a cross-language mesh fleet: the trace middleware emitting semantic
+TraceEvents (§3), W3C traceparent join and `MeshSpan.Current` propagation, the batching HTTP trace
+exporter with the §4 sender rules, the issue feed (§4.1), the heartbeat shape (§5), the collector's
+view of a registration (§2), and send declarations (`MeshOutboundRegistry`). Verified against the
+language-neutral fixtures by `test/Benzene.Conformance.Test`'s `MeshTraceConformanceTest` (and,
+through `Benzene.Mesh.Collector`, the collector fixtures).
+
+**spec-0.4.0 (Phase 3b): there is no mesh self-description.** A service describes itself once, with
+its contract document at `benzene:spec` (`Benzene.Schema.OpenApi`), and registers that same document
+with a collector (`Benzene.CloudService`'s announcer). `MeshServiceDescriptor`, `MeshTopicDescriptor`,
+`MeshDescriptorFactory`, `MeshDescriptorHashing` (`descriptorHash`), `MeshSchemaGenerator`,
+`UseMeshDescriptor`, `MeshTopics.Descriptor`/`BenzeneTopic.Mesh` (`benzene:mesh`) and
+`IMeshOutboundDefinitionLookUp` were deleted; `MeshServiceInfo` lost `binding`/`placement` (they live
+on the document).
 
 Distinct from the pre-existing `Benzene.Mesh.Contracts`/`Aggregator`/`Reporting` visibility
-pipeline (spec §9 maps the two): this package is the *wire contract*; the aggregator remains the
-pull-based collector idiom and can adopt these shapes as ingest sources (roadmap, still open).
+pipeline: this package is the *wire contract*; the aggregator remains the pull-based collector idiom.
 
 ## Key types/interfaces
-- `MeshServiceDescriptor`/`MeshTopicDescriptor`/`MeshPlacement` + `MeshDescriptorFactory.Create(
-  IMessageHandlerDefinitionLookUp?, MeshServiceInfo, IMeshOutboundDefinitionLookUp?)` - the §2
-  descriptor derived from the live handler registry (`topics`, what the service **provides**,
-  sorted by id then version) and, since the 2026-08 revision, the outbound registry (`consumes`,
-  what it **consumes** - §2.3, same sort/schema-derivation rules). A null `lookUp` degrades to a
-  topic-less descriptor with `degraded` including `"registry"`; a null `outboundLookUp` degrades
-  `consumes` the same way with `"outbound-registry"` - both independently, per §6, never an error
-  and never a silent empty-array claim.
-- `MeshOutboundRegistry`/`IMeshOutboundDefinitionLookUp` (2026-08, spec §2.3) - the explicit
-  outbound-registration path every port MUST support, mirroring core-concepts.md §9's inbound
-  handler discovery exactly, minus the handler: `new MeshOutboundRegistry().Register<TRequest>(topic,
-  version?)` / `.Register<TRequest, TResponse>(topic, version?)`. Reuses the existing
-  `IMessageSenderDefinition`/`MessageSenderDefinition` shape (`Benzene.Abstractions.Messages`/
-  `Benzene.Core.Messages` - already the sender-side counterpart of `IMessageHandlerDefinition`,
-  previously only consumed by `Benzene.Schema.OpenApi`'s AsyncAPI/EventService document builders)
-  rather than inventing a parallel one; `SenderType` is left `Void` here since this registry only
-  ever answers "what would we send", never constructs a sender. No handler, no destination/transport
-  info - a registered outbound record is contract only (spec §2.3). A declared record with no
-  response type (`Register<TRequest>`) projects `responseSchema: {}` (unconstrained) in `consumes`,
-  per §2. `Benzene.CloudService`'s `ICloudServiceBuilder.WithSends(MeshOutboundRegistry)` (formerly `WithConsumes`) is the
-  batteries-included wiring point (`CloudServiceBuilder.OutboundRegistry` → `CloudServiceDescriptorSource`).
-- `MeshSchemaGenerator.Derive(Type)` - the §2.1 CLR→JSON Schema mapping (startup-only
-  reflection). "required" = properties the marshaler always emits: nullable-annotated (NRT or
-  `Nullable<T>`) and ignore-when-null properties are optional. Recursion cut with `{}`.
-- `MeshDescriptorHashing` - §2.2: SHA-256 over canonical camelCase JSON with `instanceId`/
-  `degraded`/`profile`/`descriptorHash` blanked; `consumes` participates in the hash (sensitive to
-  the consumed-topic set, same as `topics`). NOT the same thing as
-  `Benzene.Mesh.Contracts.MeshHashing` (HMAC over raw OpenAPI text for the aggregator's artifact
-  drift) - do not merge them.
-- `MeshServiceDescriptor.Profile` (`MeshProfile`: `Name` + `Missing`) - the optional §2 `profile`
-  field, a named conformance-profile self-assessment (e.g. `Benzene.CloudService`'s Cloud Service
-  Profile report). Self-description like `Degraded`, so excluded from the hash above; this
-  package only carries the shape; `Benzene.CloudService` is what stamps it.
-- `Extensions.UseMeshDescriptor(descriptor, aliases...)` - reserved-topic interception, same
-  pattern as `UseHealthCheck`. `Extensions.UseMeshTrace(info, exporter, statusReader)` - wire it
+- `MeshRegistration` / `MeshRegisteredEntry` / `MeshPlacement` / `MeshProfile` - the body of
+  `benzene:mesh:register` **as a collector reads it** (mesh.md §2): the contract document. Only
+  `service` is required; `requests`/`events`/`sends` are null when absent; `IsKnown(member)` is false
+  for an absent member or one `degraded` names (unknown: no edges, no drift); `KnownEntries(member)`
+  drops `benzene:` entries; unmodelled members round-trip through `[JsonExtensionData] Extra`. A
+  service never builds one - it serializes its `EventServiceDocument`.
+- `MeshOutboundRegistry` - the service's **send declarations** (contract-document.md §3.2): explicit
+  `(topic, version, request, response)` records it may send to topics others define, registered as an
+  `IMessageDefinitionFinder<IMessageSenderDefinition>` by `Extensions.AddSendDeclarations` (or the cloud
+  service's `WithSends`). `Register<TRequest>` is one-way (no `response`). Generated clients register
+  their own finder; `SpecBuilder` reads every one.
+- `MeshServiceInfo(service, serviceVersion?, instanceId?)` - the identity stamped on traces, issues and
+  heartbeats.
+- `Extensions.UseMeshTrace(info, exporter, statusReader)` - wire it
   **outermost**; per-invocation TraceEvent with traceparent join, `MeshSpan.Current` set across
   `next()`, status read back via `IMeshStatusReader<TContext>` (BenzeneMessage reader ships here;
   other transports add their own, following the `IMessageGetter<TContext>` mapper idiom).
@@ -61,7 +46,9 @@ pull-based collector idiom and can adopt these shapes as ingest sources (roadmap
   lossy by design, so an abandoned overlong tail-flush is fine). See
   `test/Benzene.Core.Test/CloudService/MeshDisposalTest.cs`.
 - `MeshTopics` / `MeshTraceEvent` / `MeshTraceBatch` / `MeshHeartbeat` - the wire shapes.
-  `MeshHeartbeat.Health` reuses `HealthChecks.Core.HealthCheckResponse` as-is.
+  `MeshHeartbeat` is `{service, serviceVersion?, instanceId, registrationHash, sentAt, health}`
+  (mesh.md §5; `registrationHash` is the registered document's, `serviceVersion` scopes the
+  collector's comparison); `Health` reuses `HealthChecks.Core.HealthCheckResponse` as-is.
   `MeshTraceEvent.ExceptionType` (2026-07-25, spec §3 **optional/additive**, null-omitted): the thrown
   exception's type name when the failure was exception-originated — type only, never message/stack.
   The .NET *span* pipeline stamps it as `benzene.exception.type` (see `Benzene.Diagnostics`) and the
@@ -89,13 +76,11 @@ pull-based collector idiom and can adopt these shapes as ingest sources (roadmap
 
 ## Important conventions
 - **The spec wins.** These shapes are pinned by `docs/specification/conformance/mesh-*.json`;
-  changing them means changing the spec + fixtures first (and the Go reference implementation
-  alongside).
+  changing them means changing the spec + fixtures first.
 - **Degradation is normative (spec §6)**: no mesh feed may ever fail, slow, or block the
   invocation it observes. The trace middleware swallows exporter exceptions; the exporter drops
   on full buffer and failed sends; a missing status reader yields an empty status.
-- Wire JSON is camelCase with nulls omitted - always serialize through `MeshJson.Options` so the
-  descriptor hash and the wire bytes can't drift apart.
+- Wire JSON is camelCase with nulls omitted - always serialize through `MeshJson.Options`.
 
 ## Dependencies on other Benzene packages
 Abstractions.MessageHandlers (definitions lookup, mappers), Core.MessageHandlers /
@@ -103,27 +88,18 @@ Core.Middleware (interception idiom), Core.Messages (BenzeneMessage status reade
 HealthChecks.Core (heartbeat health shape), Results.
 
 ## Tests
-- `test/Benzene.Conformance.Test/MeshDescriptorConformanceTest.cs` /
-  `MeshTraceConformanceTest.cs` - the language-neutral fixture-driven conformance suite (wire
-  shapes, hash invariants).
-- `test/Benzene.Mesh.Test/Wire/MeshSchemaGeneratorTest.cs` - direct unit coverage of every
-  `MeshSchemaGenerator.Derive` branch: each primitive/date/byte-array mapping, the unconstrained
-  `{}` cases (object/JsonElement/enum), `Nullable<T>`'s added `"null"` type, dictionary/enumerable
-  mapping (any dictionary key type - int/enum/Guid-keyed included - maps to `additionalProperties`,
-  matching System.Text.Json's actual any-key-as-string-object wire behavior, not just `string`-keyed),
-  `JsonPropertyName`/`JsonIgnore` (`Always` and `WhenWritingDefault`) handling, the
-  nullable-annotated-property → optional "required" rule, lexicographic property ordering, and
-  cycle-cutting on a self-referencing type. None of this had a test before (the conformance suite
-  only exercises it indirectly through the canonical conformance handlers' payload shapes).
+- `test/Benzene.Conformance.Test/MeshTraceConformanceTest.cs` - the language-neutral fixture-driven
+  conformance suite for the trace feed; the collector fixtures exercise `MeshRegistration` /
+  `MeshHeartbeat` through `Benzene.Mesh.Collector`.
 - `test/Benzene.Mesh.Test/Wire/ExtensionsTest.cs` - end-to-end pipeline tests for
-  `UseMeshDescriptor`/`UseMeshTrace`, built on a real `BenzeneMessageContext`/
+  `UseMeshTrace`, built on a real `BenzeneMessageContext`/
   `BenzeneMessageApplication` pipeline (mirrors `HealthCheckPipelineTest`'s pattern) since
   `Benzene.Mesh.Test` didn't previously reference this package or `Core.MessageHandlers`/
-  `Core.Messages`/`Microsoft.Dependencies` (now added as `ProjectReference`s). Covers: descriptor
-  topic + alias matching vs. fall-through, `UseMeshTrace`'s null-exporter pass-through, a
+  `Core.Messages`/`Microsoft.Dependencies` (now added as `ProjectReference`s). Covers: `UseMeshTrace`'s null-exporter pass-through, a
   successful export's topic/service/status/duration/ids, W3C traceparent join vs. missing/
   malformed-header fresh-trace fallback, a throwing exporter not affecting the response,
   no-status-reader → empty status, the `x-correlation-id` header capture, and `MeshSpan.Current`
   being set during `next()` and restored afterward. Setting up these tests requires
   `.AddContextItems()` explicitly (not part of `AddBenzeneMessage()` - only `AddMessageHandlers()`
-  pulls it in) since none of these tests route through `.UseMessageHandlers()`.
+  pulls it in) since none of these tests route through `.UseMessageHandlers()`. (Its
+  `UseMeshDescriptor` cases went with the descriptor in spec-0.4.0.)

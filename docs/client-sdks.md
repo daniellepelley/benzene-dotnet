@@ -232,7 +232,7 @@ asked for.
 
 ### Generated clients cover domain topics only
 
-Benzene's reserved endpoints (`benzene:spec`, `benzene:mesh`, `benzene:healthcheck`, …) are
+Benzene's reserved endpoints (`benzene:spec`, `benzene:healthcheck`, `benzene:mesh:register`, …) are
 deliberately kept separate from a service's domain surface: they are framework plumbing, answered by
 framework middleware, and a consumer calls them — if at all — through the mesh or its monitoring, not
 through a typed domain client. So **no `benzene:*` topic is ever generated into a client**: no

@@ -1,9 +1,10 @@
 # Benzene.Descriptor
 
-A `dotnet` tool (`benzene-descriptor`) that emits a service's contract artifacts —
-`{name}.spec.json` (the `EventServiceDocument`) and `{name}.service.json` (the mesh §2
-`ServiceDescriptor` wire shape) — from a **built, non-running, non-deployed** Benzene service, by
-constructing it in-process and reading the descriptors it already computes. No deploy, no socket.
+A `dotnet` tool (`benzene-descriptor`) that emits a service's contract document —
+`{name}.spec.json`, the `EventServiceDocument`: what `benzene:spec` serves and, since spec-0.4.0, the
+mesh register body — from a **built, non-running, non-deployed** Benzene service, by constructing it
+in-process and deriving the document it already computes. No deploy, no socket. The mesh
+`ServiceDescriptor` (`{name}.service.json`) it used to emit too is retired.
 
 ## Shape
 
@@ -12,9 +13,10 @@ constructing it in-process and reading the descriptors it already computes. No d
 - `EmitOptions` — parsed CLI options, `public` (not `internal`) so tests can drive
   `DescriptorEmitter` in-process without spawning this executable.
 - `DescriptorEmitter.Emit(EmitOptions)` — the core: loads the assembly, selects a host adapter, runs
-  the service's own registration, and returns `DescriptorEmitResult` (either/both JSON strings).
-  `ResolveOutputPaths` is the pure path-derivation logic (`--output`, `--emit`, and the "next to the
-  assembly" default), kept separate so it's independently testable.
+  the service's own registration, and returns `DescriptorEmitResult(SpecJson)`: `SpecBuilder`'s
+  document with `--service`/`--service-version`/`--version-scheme` (#171: the scheme now reaches
+  `versionScheme`), `runtime: dotnet` and, with `--cloud`, `placement` stamped on it.
+  `ResolveOutputPath` is the pure path logic (`--output`, else next to the assembly).
 - `HostAdapters` (+`NeutralHostAdapter`/`AwsLambdaHostAdapter`) — runs `ConfigureServices` (+
   host-specific `Configure` for AWS) against the built container, never the run/listen step. A new
   cloud is a new adapter of the same shape.
@@ -28,8 +30,8 @@ constructing it in-process and reading the descriptors it already computes. No d
 
 ## Notes
 
-- `--emit spec|descriptor|both` (default `both`). `descriptor` is the mesh §2 wire shape exactly as
-  `benzene:mesh:register` sends it — not a bespoke projection. See `README.md` for real output.
+- `--emit spec` is the default and only value; `descriptor`/`both` fail with a message pointing at
+  the contract document (`EmitOptions.ValidateArtifacts`). See `README.md` for real output.
 - A `Benzene.Core` version mismatch between the tool and the service (detected by comparing the
   service assembly's own `AssemblyRef` metadata to the tool's loaded copy) fails loudly rather than
   silently running against an API surface the service wasn't built for — the ALC's `Load` always

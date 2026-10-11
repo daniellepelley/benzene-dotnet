@@ -2529,6 +2529,8 @@ top-of-file summary blockquote).
   fixed the misleading `Program.cs` comment ("after here the value travels", which was false for the
   scheme specifically) to record this explicitly as a `[DECISION]` in place, rather than leaving it
   silently misleading. Left for a future round to decide whether/how to carry the scheme onto the wire.
+  **Resolved 2026-10-11 (spec 3b):** the descriptor is retired and the tool emits the contract
+  document, whose `versionScheme` field carries the flag beside `serviceVersion`.
 
 > **Merge note (2026-08-31).** The two sections immediately below (rounds 12–13's WP-2 Fleet
 > trace-source fetch isolation, then rounds 12–17's broader per-package findings) were developed on
@@ -3905,7 +3907,10 @@ regression tests: `test/Benzene.Core.Test/Azure/TimerFailureHandlingTest.cs`,
   actually running, and only a hash matching none of the service's live descriptors reads as drift
   (including the case where the SAME version re-registers with a genuinely different hash — a real
   contract drift without a version bump — which still correctly flags, because the old hash is no
-  longer present anywhere in the live set). **[RESOLVED] view-shape choice:**
+  longer present anywhere in the live set). **Superseded 2026-10-11 (spec 3b):** heartbeats now carry
+  `serviceVersion`, and `HashMatches` compares a heartbeat's `registrationHash` with the registration
+  for its OWN `(service, serviceVersion)` only - the any-live-version match let a v1 instance running
+  v2's contract read as a match (mesh.md §5). **[RESOLVED] view-shape choice:**
   `MeshCollectorStore.Service(name)`/`Fleet().Services` still return exactly ONE row per service
   NAME — the most-recently-registered version's scalar Runtime/Binding/Placement/Topics/
   ServiceVersion/Descriptor fields — preserving today's shape for every existing caller/test keying

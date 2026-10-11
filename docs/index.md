@@ -77,7 +77,7 @@ Benzene is a hexagonal framework designed for services running in serverless env
   - [Claim Check](claim-check.md) — offload an oversized payload past a transport's size limit (SQS/SNS/EventBridge, Service Bus, Queue Storage, Kafka) via a middleware pair, backed by `Benzene.ClaimCheck.Aws.S3` / `Benzene.ClaimCheck.Azure.Blob`
 
 - **Code Generation**
-  - [Contract Artifacts](contract-artifacts.md) — the `benzene-descriptor` build tool: emit `spec.json` / `service.json` from a built, non-deployed service, no network required
+  - [Contract Artifacts](contract-artifacts.md) — the `benzene-descriptor` build tool: emit the contract document `spec.json` (what `benzene:spec` serves and the mesh register body) from a built, non-deployed service, no network required
   - **CLI Reference** — a dedicated page for the `benzene` CLI (`build`, `spec`, `diff`, `healthcheck`, `lambda-test-tool`, `profile-check`) isn't written yet. Until it is, [Client SDKs](client-sdks.md) covers the generation commands and their flags (`--namespace`, `--topics`, spec sources), and [Contract Artifacts](contract-artifacts.md) covers producing `spec.json` offline and gating CI with `benzene diff`.
   - [Terraform](terraform.md)
   - [Client SDKs](client-sdks.md)

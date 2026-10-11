@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Generated clients declare their sends.** A generated client's `Add{Service}ServiceClient()` also
+  registers `{Service}ServiceClientSends`, an `IMessageDefinitionFinder<IMessageSenderDefinition>` of
+  the topics it calls, so the consuming service's contract document lists them in `sends[]` (and its
+  mesh registration makes it their provider). `SpecBuilder` now reads every registered sender finder,
+  not only the last one; a (topic, version) declared twice is listed once.
+- **Contract document deployment-side fields (spec 3b, contract-document.md §1).** `runtime`,
+  `placement`, `profile` and `degraded` on `EventServiceDocument`, outside both hashes:
+  `ContractDocumentDeployment` registered with `SetContractDocumentDeployment(...)` (the cloud service
+  registers one: `runtime: dotnet`, `placement` - default `self-hosted` -, and the profile
+  self-check) stamps every derived document; `degraded` names `requests` when no handler registry is
+  wired. `ICloudServiceBuilder.WithServiceVersion(version, versionScheme?)` carries a `versionScheme`.
+  `EventServiceDocumentDeserializer` reads the four fields.
 - **Contract document (spec 3a): `sends[]`, both hashes, declared schema names.** The served `benzene`
   document gains `sends[]` (messages to topics another party defines) from send declarations - a
   `MeshOutboundRegistry` registered with `AddSendDeclarations` (`Benzene.Mesh.Wire`) or the cloud
@@ -81,6 +93,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   query keeps one row per service. `Benzene.Conformance.Test` now claims `mesh-service-version-cases.json`.
 
 ### Fixed
+- **A generated client for a no-response topic did not compile.** The client and interface files
+  import both `System` and `Benzene.Abstractions.Results`, so the no-payload `Void` was ambiguous with
+  `System.Void` (CS0104); it is now written fully qualified.
+- **`benzene-descriptor --version-scheme` reaches the emitted document (#171).** It was validated and
+  then dropped; `serviceVersion` and `versionScheme` are now both written.
+- **Examples: the Mesh example's collector host (`EnvelopeHost`) wrote envelopes without
+  `isSuccessful`** (wire-contracts §1.2), so the cloud service's announcer read every accepted
+  registration as refused, re-registered every 2 seconds and never heartbeated; the Mesh example's
+  orders-api declared `payments:get@1` both as an event and as a send, which fails its contract
+  document (contract-document.md §3.3) - it is now a send only, as is K8sMesh orders-api's
+  `payment:take@1`; the AzureMesh and AzureFunctionsMesh mesh hosts defaulted their blob container to
+  `benzene:mesh`, an invalid container name, instead of `mesh`.
 - **`Benzene.Saga`: a state-store failure no longer aborts a run, skips rollback, or discards a real
   outcome.** Every `ISagaStateStore` call inside `RunOnceAsync` is now caught rather than left to
   propagate raw: a throw right after an effect-producing stage completes still runs compensation for
@@ -163,6 +187,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stale data" warning downstream on every no-op invalidate.
 
 ### Changed
+- **BREAKING - the mesh register body is the contract document (spec 3b, spec-0.4.0; mesh.md §1–§2).**
+  A service's only self-description is its contract document at `benzene:spec`; `Benzene.CloudService`
+  registers that same document (byte-identical, through the same `SpecCache` entry) on
+  `benzene:mesh:register`, and its heartbeats carry `serviceVersion` and the document's
+  `registrationHash` (`MeshHeartbeat.DescriptorHash` → `RegistrationHash`, + `ServiceVersion`). With
+  `WithHandlers`, a reduced document (`events`/`sends` named in `degraded`) registers at wire-up and the
+  first invocation re-registers the complete one. **Removed:** `MeshServiceDescriptor`,
+  `MeshTopicDescriptor`, `MeshDescriptorFactory`, `MeshDescriptorHashing` (`descriptorHash`),
+  `MeshSchemaGenerator`, `UseMeshDescriptor`, `IMeshOutboundDefinitionLookUp`,
+  `MeshTopics.Descriptor` and `BenzeneTopic.Mesh` (the reserved `benzene:mesh` topic is no longer
+  served), `CloudServiceProfileReport.ToMeshProfile()` (→ `ToProfile()`, a `ContractDocumentProfile`);
+  `MeshServiceInfo` loses `binding` and `placement` (they live on the document); `MeshProfile` and
+  `MeshPlacement` remain as the collector's view.
+- **BREAKING - the collector reads contract documents (`Benzene.Mesh.Collector`).**
+  `RegisterMessageHandler` takes a `MeshRegistration`: only `service` is required (no dialect check);
+  consumers from `requests`, providers from `events` ∪ `sends`; `benzene:` entries ignored; an absent
+  or `degraded` member is unknown (no edges, never undeclared); a trace of a reserved topic is never
+  contract drift; the carried `registrationHash` is trusted. **Behavior fix:** a heartbeat's hash is
+  compared with the registration for the same `(service, serviceVersion)` - `HashMatches` used to
+  accept a match with any registered version, so a v1 instance running v2's contract read as healthy -
+  and is null for an unregistered version. Read models (Provisional): `ServiceView.Descriptor` →
+  `Registration`, `InstanceView.DescriptorHash` → `RegistrationHash` (+ `ServiceVersion`); the fleet
+  row's `binding` is the registration's first `transports` entry. A legacy `topics`/`produces` body is
+  not read.
+- **BREAKING - Cloud Service Profile R6 is "answers `benzene:spec` + three feeds"** (registration,
+  heartbeats, traces). `Benzene.CloudService.Probe` evidences R6 (and R2's topic count, from
+  `requests`) by posting `benzene:spec` over the envelope instead of `benzene:mesh`.
+- **BREAKING - `benzene-descriptor` emits the contract document only.** `{name}.service.json` is gone;
+  `--emit descriptor`/`both` fail with a message (`--emit spec` remains the default); `--output` is the
+  exact path; `--service` overrides the document's `service` (default: the service's own
+  `IApplicationInfo` name); `--cloud`/`--region` write `placement` (now no default: omitted unless
+  given); `runtime` is `dotnet`. `DescriptorEmitResult` has only `SpecJson`;
+  `ResolveOutputPaths` → `ResolveOutputPath`. The MSBuild targets drop `BenzeneDescriptorEmit` and pass
+  `--service` only when `BenzeneDescriptorServiceName` is set.
+- **Conformance:** the spec-0.4.0 fixtures are vendored (`mesh-descriptor-cases.json` and
+  `MeshDescriptorConformanceTest` deleted; `derivationCases` assert `serviceInfo`); `SPEC_VERSION` still
+  names `spec-0.3.0` until the tag.
 - **BREAKING - the `benzene` contract document is the spec-3a shape** (contract-document.md). `openapi`
   and `info` are replaced by `schemaDialect: "openapi-3.0"` and `service`/`serviceVersion`/
   `versionScheme`/`description` (from `IApplicationInfo`, the single source - `UseBenzeneCloudService`

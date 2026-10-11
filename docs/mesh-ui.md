@@ -170,7 +170,7 @@ var html = MeshUiPage.GetHtml("https://cdn.example.com/mesh/manifest.json");
 ## The live Fleet plane
 
 When you point the page at a live [`Benzene.Mesh.Collector`](https://benzene.app/docs/specification/mesh.html), the catalog is
-enriched with *derived* fleet data — from registered descriptors, heartbeats, and trace events the
+enriched with *derived* fleet data — from registrations (each service's contract document), heartbeats, and trace events the
 collector has actually ingested, never hand-declared, per [mesh.md §2–§4](https://benzene.app/docs/specification/mesh.html):
 
 - a **Fleet landing view** (five summary tiles — services, topics, invocations, errors, unhealthy —

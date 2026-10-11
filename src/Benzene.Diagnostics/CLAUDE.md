@@ -66,7 +66,7 @@ calling both (or either twice) never double-wraps a middleware; `AddDiagnostics(
   which was the `orders-api → ApiGatewayLambdaHandler` mislabel. **Unlike `benzene.correlation-id` it is
   read on drill-in and never filtered on, so it needs NO X-Ray annotation-indexing step — plain metadata
   is fine.** The canonical feed is `UseBenzeneCloudService`, which now calls `SetApplicationInfo` from the
-  same `CloudServiceBuilder.ServiceName` that feeds the mesh descriptor + the log scope, so one string
+  same `CloudServiceBuilder.ServiceName` that feeds the contract document (and so the mesh registration) + the log scope, so one string
   drives all three and can never disagree; a hand-composed host sets its own `SetApplicationInfo(...)`.
   Covered by `ActivityMiddlewareTest` (`...TagsBenzeneServiceOnTheTopicBearingSpan_FromApplicationInfo`
   and the blank-name omission case).

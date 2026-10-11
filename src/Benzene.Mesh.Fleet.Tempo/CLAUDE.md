@@ -81,7 +81,7 @@ Per `IMeshTraceSource`, it carries **no** per-topic/service counts and **no** se
 sampled and Tempo has no heartbeat feed. Topic stats compose from an `IMeshUsageSource` (a
 Prometheus/Tempo-metrics usage adapter would be the Tempo-native fit, not yet built); with none wired the
 composite serves traces/correlation/recent-flows/services and reports honest-empty topic stats.
-Per-service and single-topic pages stay omitted on this plane (no descriptor feed).
+Per-service and single-topic pages stay omitted on this plane (no registration feed).
 
 ## Prerequisites it relies on
 The pipeline must stamp `benzene.topic`/`benzene.version`/`benzene.status`/`benzene.correlation-id` on the

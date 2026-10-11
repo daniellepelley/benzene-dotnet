@@ -302,7 +302,7 @@ project's `README.md` for exactly how to start it and mint a test token.
 - **Don't log the `Authorization` header.** It carries a bearer token or Basic credentials in the
   clear (base64 isn't encryption) — make sure any request-logging middleware you add redacts it.
 - **Protect the framework's own surfaces if you have no gateway.** `/benzene/spec` (the derived
-  spec) and the reserved `mesh` topic (the service descriptor) can leak schema/topology to an
+  spec) and the reserved `benzene:spec` topic (the same contract document) can leak schema/topology to an
   unauthenticated caller. If your service has no gateway in front of it, compose the same
   authentication middleware in front of those paths — they're ordinary HTTP routes/topics like any
   other, so `UseOAuth2Bearer`/`UseBasicAuth` apply the same way.

@@ -74,7 +74,18 @@ derived from the service's registrations:
 - **`sends`** are messages to topics *another party* defines - declared with a `MeshOutboundRegistry`
   through `AddSendDeclarations` (`Benzene.Mesh.Wire`) or the cloud service's `WithSends`.
   `Register<TRequest>` is one-way (no `response`); `Register<TRequest, TResponse>` expects a reply. A
+  generated client's `Add{Service}ServiceClient()` declares the topics it calls as sends too; every
+  registered declaration reaches the document, and a (topic, version) declared twice is listed once. A
   (topic, version) declared both as an event and as a send fails the build of the document.
+- **Deployment-side fields** - `runtime` (`dotnet`), `placement` (`cloud`, and `region` only where
+  known), `profile` (the Cloud Service Profile self-check) - come from a registered
+  `ContractDocumentDeployment` (`SetContractDocumentDeployment(...)`; `UseBenzeneCloudService` registers
+  one). `degraded` names a member the producer could not determine (`requests` when no handler registry
+  is wired). None of them is in either hash.
+- **The mesh register body is this document.** A meshed service registers exactly the document
+  `benzene:spec` serves with its collector (`benzene:mesh:register`), and its heartbeats carry the
+  document's `registrationHash` and the `serviceVersion` (mesh.md §2, §5). There is no separate mesh
+  descriptor or `benzene:mesh` topic.
 - **Reserved `benzene:` topics** (`benzene:spec`, `benzene:healthcheck`, …) are never listed.
 - **`contractHash`** (requests + events: what a client depends on) and **`registrationHash`**
   (+ sends: what a mesh collector's graph depends on) are always present - see

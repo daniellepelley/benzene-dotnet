@@ -37,9 +37,13 @@ job auditing an arbitrary service, .NET or not.
 - R1/R2/R7 are inferential (derived from whether R3-R6 succeeded), not probed directly - there's no
   standalone HTTP surface for "is there a hosted pipeline" or "are handlers registry-backed"; see
   `CloudServiceProbe`'s per-requirement comments for exactly what evidence each verdict rests on.
-- Wire shapes checked against are the same ones `Benzene.Mesh.Wire`/`Benzene.CloudService` produce
-  (wire-contracts.md §1.2/§5, mesh.md §2), but parsed independently here with `System.Text.Json`
-  rather than shared model types, to keep the no-dependency guarantee above.
+- Wire shapes checked against are the same ones `Benzene.Schema.OpenApi`/`Benzene.CloudService` produce
+  (wire-contracts.md §1.2/§5, contract-document.md §1), but parsed independently here with
+  `System.Text.Json` rather than shared model types, to keep the no-dependency guarantee above.
+- R6's observable half (spec-0.4.0) is the self-description: `benzene:spec` posted over the envelope
+  must answer a contract document with a non-empty `service` (its `requests` also feed R2). The
+  registration/heartbeat/trace half is never observable from the service alone, and the reason says
+  so. (Until spec-0.4.0 this probed the retired `benzene:mesh` descriptor topic.)
 
 ## Dependencies on other Benzene packages
 None. BCL only (`System.Net.Http`, `System.Text.Json`).
