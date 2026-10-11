@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Contract document (spec 3a): `sends[]`, both hashes, declared schema names.** The served `benzene`
+  document gains `sends[]` (messages to topics another party defines) from send declarations - a
+  `MeshOutboundRegistry` registered with `AddSendDeclarations` (`Benzene.Mesh.Wire`) or the cloud
+  service's new `WithSends` - and always carries `contractHash` and `registrationHash`.
+  `[SchemaName("…")]` (`Benzene.Abstractions.Schema`) declares a payload type's component name;
+  `AddContractDocumentStartUpCheck()` (opt-in) derives the document at start-up so a component-name
+  collision or an event/send conflict fails before the first message. `IApplicationInfo.VersionScheme`
+  (defaulted) and `SetApplicationInfo(name, version, description, versionScheme)` feed `versionScheme`.
+  `EventServiceDocumentDeserializer` reads a legacy (spec-0.2.0) document with a warning;
+  `LegacyBaselineException` makes the compatibility gate refuse a legacy baseline with one re-baseline
+  error. Conformance: every `contract-document-cases.json` and `contract-hash-cases.json` case passes.
 - **Settlement (spec 0.2, transport-bindings §1 obligation 8 / D16): an at-most-once override on every
   one-way binding, and unmatched-topic-as-ignored.** Additive; no default changes. Where a binding's
   knobs did not already compose to "acknowledge whatever the outcome", it gains one:
@@ -152,6 +163,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stale data" warning downstream on every no-op invalidate.
 
 ### Changed
+- **BREAKING - the `benzene` contract document is the spec-3a shape** (contract-document.md). `openapi`
+  and `info` are replaced by `schemaDialect: "openapi-3.0"` and `service`/`serviceVersion`/
+  `versionScheme`/`description` (from `IApplicationInfo`, the single source - `UseBenzeneCloudService`
+  now passes `WithServiceVersion` through it); `tags` is gone; no `benzene:` topic is listed (the
+  `reserved` flag and `RequestResponse.Reserved` are gone); a handler with no payload has **no**
+  `response` (no `Void` component); `example` is written only when an author supplied one (none is
+  synthesized - `ExamplePayloadBuilder` still serves `benzene:test-payloads`). Schemas follow §4.2:
+  every always-emitted property is `required`, records carry no `additionalProperties: false`, a nullable
+  named type is `{"type":…,"nullable":true,"allOf":[{"$ref":…}]}`. Two different types with one simple
+  name now fail derivation (`ComponentNameCollisionException`) instead of Swashbuckle's bare error.
+  `EventServiceDocument`'s constructor drops `OpenApiInfo`/`OpenApiTag[]` (use `With(...)` to copy) and
+  `EventServiceDocumentBuilder.AddInfo`/`AddTag` are replaced by `AddService`. A deserializer now
+  rejects an unknown `schemaDialect`.
+- **BREAKING - one contract hash, moved into the runtime.** `ContractHash` and `JsonCanonicalizer`
+  live in `Benzene.Schema.OpenApi` (same `Benzene.CodeGen.Core` namespace, type-forwarded) and compute
+  contract-document §6's `contractHash` (requests + events) and `registrationHash` (+ sends) over a
+  dereferenced, normalized projection - so component names, hoisting and entry order no longer change
+  a hash, and every embedded/served hash value changes once: regenerate clients.
+  `ContractHash.Compute(IMessageHandlerDefinition[], bool)` and the `isTopicScoped` parameter are gone.
+  `SchemaHealthCheck` now publishes the **served** document's `contractHash` (its constructor takes an
+  `IServiceResolver` or the served JSON) and `Benzene.HealthChecks.Schema` no longer depends on the code
+  generator. `CodeGenHelpers.GenerateHash(EventServiceDocument)`/`(IMessageHandlerDefinition[])` are
+  removed (`GenerateHash(string)`, the descriptor-hash primitive, stays).
+- **BREAKING - codegen.** `ClientSdkOptions.IncludeReservedTopics` and the
+  `AtomicClientSdkBuilder(baseNamespace, formatter, includeReservedTopics)` overload are removed (a
+  document lists no reserved topics); an include-list client's `HashCode` is the hash of its include-list
+  projection and a topic client's of its topic projection (§6.4). An unconstrained `{}` schema generates
+  `object`.
+- **`ICloudServiceBuilder.WithConsumes` is renamed `WithSends`** (`WithConsumes` stays as an
+  `[Obsolete]` alias): the registry is the service's send declarations, now in the contract document's
+  `sends[]` as well as the descriptor's `produces`.
+- **Mesh aggregator** reads producers from `events` ∪ `sends`, recognises reserved topics by the
+  `benzene:` prefix (catalog and AsyncAPI compositor), and cuts a recursive schema reference to `{}`.
+- **examples/AwsMesh** declares each outbound topic as an event it defines or a send to a topic another
+  service defines (`OutboundKind`), instead of folding sends into `events`.
 - **BREAKING (spec-0.2.0, core-concepts §2 / D1): version selection is exact, else cast-reachable, else
   `not-found` — never "the highest available".** The default `VersionSelector` now picks the handler
   registered for exactly the message's version; else the handler its payload can be **cast** to (a

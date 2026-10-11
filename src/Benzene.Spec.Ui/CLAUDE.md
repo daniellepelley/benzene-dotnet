@@ -69,8 +69,9 @@ change any of it, change `benzene-ui` and re-vendor (see above).
   advertisement" section) as a chip row under the title/description (`#lede-transports`) when
   present - every transport the service is wired to receive messages over, HTTP included as just
   one chip among several rather than the implicit default.
-- Renders the per-topic/per-event `example` payload the `benzene` spec carries (generated
-  server-side by `Benzene.Schema.OpenApi.Examples.ExamplePayloadBuilder` during spec build),
+- Renders the per-topic/per-event `example` payload the `benzene` spec carries. **Since spec 3a the
+  document carries only author-supplied examples** (none is generated server-side any more); the page
+  needs benzene-ui's own schema-derived fallback for the rest (a benzene-ui change, then a re-vendor),
   pretty-printed with a copy button (`navigator.clipboard` with an `execCommand` fallback).
 - "Try it" panel per topic/event card — shown only when the loaded spec advertises a top-level
   `messageEndpoint` (written by `UseSpec` when `Benzene.Http.BenzeneMessage`'s `UseBenzeneMessage`
@@ -83,8 +84,9 @@ change any of it, change `benzene-ui` and re-vendor (see above).
   server-side: no `messageEndpoint`, no panel — the page degrades to the read-only viewer.
 - Loads a spec from, in precedence order: `?url=` query param → `data-spec-url` on the document root
   → embedded sample. Theme-aware (light/dark), with a search filter and a "Load spec" dialog.
-- **Reserved utility topics** (`reserved: true` in the `benzene` spec — see `Benzene.Schema.OpenApi`'s
-  `ReservedTopics`) are split out of the main "Message topics" list into a collapsed, labelled
+- **Reserved utility topics** (`reserved: true` in a pre-3a `benzene` spec — a 3a document lists no
+  `benzene:` topic at all, so this panel stays empty against a current service until benzene-ui reads the
+  new shape: `service`/`serviceVersion`/`description` instead of `info`, `sends`, no `reserved`) are split out of the main "Message topics" list into a collapsed, labelled
   "Benzene utilities" panel (with a Utilities stat), so the service's domain contract stays the
   focus while its Cloud Service Profile endpoints stay one click away.
 

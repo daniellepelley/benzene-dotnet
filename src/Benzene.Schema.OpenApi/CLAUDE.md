@@ -4,9 +4,9 @@
 Generates a machine-readable spec of a Benzene service's message contract from its registered
 handlers, HTTP endpoints, and broadcast/sender message definitions, and serves it from a `spec`
 topic. Despite the package name it produces **three** spec formats, selected per request:
-- `benzene` - a Benzene-native "EventService" document (topics, request/response payloads, broadcast
-  events, HTTP mappings, validation rules, generated example payloads). This is the **default** and
-  the format `Benzene.Spec.Ui` renders.
+- `benzene` - the language-neutral **Contract Document** (contract-document.md in the Benzene repo;
+  the `EventServiceDocument` type): `schemaDialect`, the service's identity, `requests`, `events`,
+  `sends`, `components`, both hashes. This is the **default** and the format `Benzene.Spec.Ui` renders.
 - `openapi` - OpenAPI 3.0 (via `Microsoft.OpenApi`), for HTTP endpoints.
 - `asyncapi` - AsyncAPI 3.0 (via `ByteBard.AsyncAPI.NET`), for topic/event channels.
 
@@ -87,8 +87,28 @@ for the `benzene` contract.
   be a subset of the referenced channel's messages" validation is a false positive that also rejects the
   spec's own request/reply example — Benzene's output parses and resolves fully; that one validation rule
   is not a signal.
-- `EventService/EventServiceDocumentBuilder` - the `benzene` `EventServiceDocument`; requests, events,
-  HTTP mappings, an optional top-level `messageEndpoint`, and deterministic generated example payloads.
+- `EventService/EventServiceDocumentBuilder` - derives the `benzene` `EventServiceDocument` (spec 3a):
+  `schemaDialect: "openapi-3.0"`; `service`/`serviceVersion`/`versionScheme`/`description` from
+  `IApplicationInfo` (the single source - `AddApplicationInfo`, or `AddService(...)`); `requests` from
+  handlers (never a `benzene:` topic; a `Void` response is **absent** = no payload; a `Void` request is
+  `{}`), `events` from event declarations (`IConsumesBroadcastEventsDefinitions`, fed from
+  `IMessageDefinitionFinder<IMessageDefinition>` = `ResponseEventCatalog`), `sends` from send
+  declarations (`IConsumesMessageSenderDefinitions`, fed from
+  `IMessageDefinitionFinder<IMessageSenderDefinition>` = a `MeshOutboundRegistry` registered by
+  `AddSendDeclarations`); a (topic, version) in both events and sends throws from `Build()`. No example
+  is synthesized any more - only an author-supplied `Example` is written (`ExamplePayloadBuilder` still
+  serves `benzene:test-payloads`). HTTP mappings attach to every version of a topic.
+- `EventService/EventServiceDocument` - the model. Serialization always writes `contractHash` and
+  `registrationHash` computed over the document as written (`ContractHash`), so a projection
+  (`With(...)`) carries its own; `DeclaredContractHash`/`DeclaredRegistrationHash` keep what a reader
+  saw. `Send` is the `sends[]` entry (`Response == null` = one-way).
+- `EventService/ContractHash` + `JsonCanonicalizer` (namespace `Benzene.CodeGen.Core`, type-forwarded
+  from that assembly where they used to live) - contract-document.md §6's two hashes over the
+  allow-listed, dereferenced, annotation-stripped projection; RFC 8785 + SHA-256. `NormalizeSchema` is
+  the §6.2 steps 3-4 comparison form. Proven by `conformance/contract-hash-cases.json`.
+- `EventService/EventServiceDocumentDeserializer` - reads a document; rejects an unknown
+  `schemaDialect` (`UnknownSchemaDialectException`), ignores `benzene:` entries, reads a legacy
+  (spec-0.2.0, `openapi`/`info`) document with a warning (`Warnings`, `onWarning`, `IsLegacyShape`).
 - Builders implement the "consumer" seam interfaces in `Abstractions/` -
   `IConsumesApplicationInfo`, `IConsumesMessageHandlerDefinitions`, `IConsumesHttpEndpointDefinitions`,
   `IConsumesBroadcastEventsDefinitions`, `IConsumesMessageSenderDefinitions`,
@@ -109,7 +129,16 @@ for the `benzene` contract.
 ### Schema building
 - `ISchemaBuilder` / `SchemaBuilder` - generates `OpenApiSchema`s from CLR types using Swashbuckle's
   `SchemaGenerator` + a `System.Text.Json` contract resolver, and collects them into a components
-  catalogue. **DI seam:** `SpecBuilder` try-resolves `ISchemaBuilder` from the container before
+  catalogue. The derivation rule of contract-document.md §4.2 is applied by
+  `SupportNonNullableReferenceTypes` + `UseAllOfToExtendReferenceSchemas` + `Derivation/DerivationSchemaFilter`
+  (nullable named type → `{type, nullable: true, allOf: [$ref]}`; no `additionalProperties` on records;
+  `required` = every always-emitted property; enums typed; `format` kept). Component names come from
+  `Derivation/ComponentNames` (declared `[SchemaName]` from `Benzene.Abstractions.Schema`, else the
+  simple name, generic arguments first, invalid characters dropped) through the `SchemaIdSelector`; two
+  different types claiming one name throw `ComponentNameCollisionException` (the builder re-throws it
+  naming the topics). `ContractDocumentStartUpCheck` (`AddContractDocumentStartUpCheck()`, opt-in) derives
+  the document at start-up so this fails before any message. `NullableReference.Unwrap` lets consumers
+  (examples, codegen, docs) see through the wrapper. **DI seam:** `SpecBuilder` try-resolves `ISchemaBuilder` from the container before
   falling back to `new SchemaBuilder(...)`, so a custom builder (e.g. `SuppliedSchemaBuilder`)
   can replace reflection generation in the live spec. Register custom builders transient/scoped -
   a builder accumulates one document's components, so a singleton would leak across spec builds.
@@ -142,7 +171,8 @@ for the `benzene` contract.
 ### Backward-compatibility gate (`Compatibility/`)
 - `SchemaCompatibility` - `Compare(baseline, current)` and `EnsureBackwardCompatible(...)` (throws
   `SchemaCompatibilityException` on breaking changes; JSON-string overloads deserialize a committed
-  baseline). Supporting types: `SchemaCompatibilityComparer`, `SchemaCompatibilityReport`,
+  baseline). `benzene:` entries are ignored; a legacy-shape baseline throws one
+  `LegacyBaselineException` (re-baseline) instead of being diffed. Supporting types: `SchemaCompatibilityComparer`, `SchemaCompatibilityReport`,
   `SchemaCompatibilityRules`, `SchemaChange`/`SchemaChangeKind`, `ChangeCompatibility`,
   `SchemaDirection`. Drop `EnsureBackwardCompatible` into a test to fail CI when the `benzene`
   contract stops being backward compatible with a baseline `spec.json`.
@@ -159,7 +189,7 @@ for the `benzene` contract.
   output and golden-file tests stay stable.
 - `ISchemaGetter` / `SchemaGetter` — resolves `$ref` schemas against a schema catalogue.
 - `OpenApiAnyConverter` — converts between plain .NET values and `IOpenApiAny` trees (used to
-  honour schema examples and to embed generated examples into spec documents).
+  honour schema examples and to build `benzene:test-payloads`; spec documents no longer embed generated examples).
 - These types moved here from `Benzene.CodeGen.Core` (which now consumes them) so examples can be
   generated at runtime during spec builds, not just at codegen time. Tests:
   `test/Benzene.Core.Test/Autogen/Schema/OpenApi/Examples/ExamplePayloadBuilderTest.cs`
@@ -186,12 +216,9 @@ for the `benzene` contract.
 ## Important conventions
 - The `spec` topic is served like any other message handler; the default format is `benzene`, output
   is JSON unless `Format` is `yaml`.
-- **Reserved utility topics** (`ReservedTopics`): the Cloud Service Profile's operational topics
-  (`spec`/`healthcheck`/`liveness`/`readiness`/`mesh`/`invoke`/`report`) are flagged on each
-  `benzene`-spec `RequestResponse` as `reserved: true` (emitted only when true, read back via
-  `JsonProperty`). Consumers (`Benzene.Spec.Ui`, `Benzene.Mesh.Aggregator`) use it to separate a
-  service's domain topics from its Benzene utility endpoints. Matched by default topic id — a
-  renamed reserved topic isn't auto-flagged (it's a presentation aid, not a security boundary).
+- **Reserved utility topics** (`ReservedTopics`, i.e. `BenzeneTopic.IsReserved`): never listed in the
+  `benzene` document (contract-document.md §1) - their shapes are wire-contracts §7's. The OpenAPI and
+  AsyncAPI exports still include them.
 - Schemas are generated from handler request/response types and keyed by type name; validation
   constraints are merged in only when an `IValidationSchemaBuilder` is registered.
 - OpenAPI output is version 3.0; AsyncAPI output is 3.0.

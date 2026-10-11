@@ -108,6 +108,12 @@ public void Contract_IsBackwardCompatibleWithBaseline()
 throws with a message listing every breaking change when not. Overloads accept two
 `EventServiceDocument`s, `(baselineJson, current)`, or `(baselineJson, currentJson)`.
 
+Reserved `benzene:` entries are ignored on both sides. A baseline committed by an earlier Benzene - a
+legacy (spec 0.2) document with `openapi`/`info` and no `schemaDialect` - is refused with a single
+`LegacyBaselineException` telling you to re-baseline, rather than diffed into dozens of false
+breaking changes (its schemas were derived by the old rules). Regenerate the baseline from the last
+released version of the service with the current Benzene and commit it.
+
 ### 3. What counts as breaking
 
 The default rules are direction-aware (see `SchemaCompatibilityRules.DefaultFor`):

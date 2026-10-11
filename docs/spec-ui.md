@@ -14,8 +14,9 @@ around message **topics** rather than URL paths.
 - **Validation rules** — required fields, `format` (e.g. `uuid`, `email`), `enum` values, string
   length and numeric range, `pattern`, and `nullable` — shown as inline constraint chips, sourced
   from the same validation metadata the `benzene` spec projects onto each schema.
-- **Example payloads** — the generated `example` the `benzene` spec carries per topic and event
-  (see [Spec](spec.md)), pretty-printed with a one-click **copy** button, ready to paste into a
+- **Example payloads** — the `example` the `benzene` spec carries per topic and event (since spec
+  0.3 only an author-supplied one - the document no longer synthesizes examples; see [Spec](spec.md)),
+  pretty-printed with a one-click **copy** button, ready to paste into a
   test invocation.
 - **Try it** — when the spec advertises a message endpoint (`messageEndpoint`, exposed by
   `UseBenzeneMessage` — see [Payload Testing](payload-testing.md)), every topic and event card

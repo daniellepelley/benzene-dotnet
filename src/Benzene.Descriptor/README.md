@@ -76,8 +76,12 @@ Against the real `examples/AwsMesh/Payments` service (a compiled `.dll`, never d
 
 ```jsonc
 {
-  "openapi": "3.0.1",
+  "schemaDialect": "openapi-3.0",
+  "service": "payments-api",
+  "serviceVersion": "1.0.0",
   "transports": [ "api-gateway", "benzene", "sqs", "sns", "eventbridge" ],
+  "contractHash": "sha256:…",
+  "registrationHash": "sha256:…",
   "requests": [
     { "topic": "payments:capture", "httpMappings": [ { "method": "POST", "path": "/payments" } ],
       "request": { "$ref": "#/components/schemas/CapturePayment" },
@@ -85,12 +89,18 @@ Against the real `examples/AwsMesh/Payments` service (a compiled `.dll`, never d
     { "topic": "payments:get-all", "httpMappings": [ { "method": "GET", "path": "/payments" } ], ... }
   ],
   "events": [
-    { "topic": "shipping:book",    "message": { "$ref": "#/components/schemas/OutboundShipmentBook" } },
     { "topic": "payment:captured", "message": { "$ref": "#/components/schemas/OutboundPaymentCaptured" } }
+  ],
+  "sends": [
+    { "topic": "shipping:book", "request": { "$ref": "#/components/schemas/OutboundShipmentBook" } }
   ],
   "components": { "schemas": { "...": "..." } }
 }
 ```
+
+`payment:captured` is an event payments-api defines; `shipping:book` is a one-way send to a topic
+shipping-api defines (contract-document.md §3). A component-name collision or a topic declared both
+ways fails `--emit spec`, and so the build that runs it.
 
 Note the mesh descriptor's `topics[]` covers what the service **consumes** (request/response
 topics); produced events live in `spec.json`'s `events[]` — the two artifacts are complementary, not

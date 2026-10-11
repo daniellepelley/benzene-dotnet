@@ -32,27 +32,80 @@ case-insensitively (`YAML` is `yaml`). A `type` or `format` the service does not
 `not-implemented` — never with a different document — so a tool can tell "not offered" from "here it is".
 `SpecBuilder.IsSupported(request)` answers the same question in code.
 
-## Example payloads
+## The contract document
 
-The `benzene` format includes a generated `example` on every request topic and broadcast event —
-a ready-made payload derived from the request/message schema. Examples are deterministic (the
-same schema always produces the same example) and respect the validation metadata the spec
-carries: schema `example`/`default`/`enum` values win when present, string `format`s
-(`uuid`, `date-time`, `date`, `email`, `uri`) produce format-shaped values, strings are sized
-within `minLength`/`maxLength`, and numbers are clamped into `minimum`/`maximum`.
+The `benzene` format is the language-neutral Contract Document
+([contract-document.md](https://github.com/daniellepelley/Benzene/blob/main/docs/specification/contract-document.md)),
+derived from the service's registrations:
 
 ```json
 {
-  "topic": "tenant:create",
-  "request": { "$ref": "#/components/schemas/CreateTenantMessage" },
-  "response": { "$ref": "#/components/schemas/TenantDto" },
-  "example": { "name": "value", "crn": "value" }
+  "schemaDialect": "openapi-3.0",
+  "service": "orders",
+  "serviceVersion": "1.4.2",
+  "versionScheme": "semver",
+  "description": "Order intake",
+  "messageEndpoint": "/benzene/invoke",
+  "transports": ["http", "sqs"],
+  "contractHash": "sha256:…",
+  "registrationHash": "sha256:…",
+  "requests": [
+    { "topic": "order:create",
+      "request": { "$ref": "#/components/schemas/CreateOrder" },
+      "response": { "$ref": "#/components/schemas/OrderDto" } }
+  ],
+  "events": [
+    { "topic": "order:placed", "message": { "$ref": "#/components/schemas/OrderPlaced" } }
+  ],
+  "sends": [
+    { "topic": "payments:capture", "request": { "$ref": "#/components/schemas/CapturePayment" } }
+  ],
+  "components": { "schemas": { } }
 }
 ```
 
-Consumers — the [Spec UI](spec-ui.md), code generators, or anyone with `curl` — can use the
-example as-is to send a test message to the service. Generation lives in
-`Benzene.Schema.OpenApi.Examples.ExamplePayloadBuilder`.
+- **Identity** comes from `IApplicationInfo` (`SetApplicationInfo(name, version, description[, versionScheme])`;
+  `UseBenzeneCloudService` sets the name and `WithServiceVersion`'s version): `service`, `serviceVersion`,
+  `versionScheme`, `description`.
+- **`requests`** are the handlers. A handler that returns no payload (`IMessageHandler<TRequest>`, or a
+  `Void` response) has no `response` at all; `{}` would mean "a payload of any shape".
+- **`events`** are the topics this service publishes and *defines* - declared with
+  `AddResponseEventDeclarations` (`Benzene.ResponseEvents`).
+- **`sends`** are messages to topics *another party* defines - declared with a `MeshOutboundRegistry`
+  through `AddSendDeclarations` (`Benzene.Mesh.Wire`) or the cloud service's `WithSends`.
+  `Register<TRequest>` is one-way (no `response`); `Register<TRequest, TResponse>` expects a reply. A
+  (topic, version) declared both as an event and as a send fails the build of the document.
+- **Reserved `benzene:` topics** (`benzene:spec`, `benzene:healthcheck`, …) are never listed.
+- **`contractHash`** (requests + events: what a client depends on) and **`registrationHash`**
+  (+ sends: what a mesh collector's graph depends on) are always present - see
+  [Client SDKs](client-sdks.md#contract-hash) for how a generated client and `SchemaHealthCheck` use them.
+- **`example`** appears only when an author supplied one; none is synthesized from the schema any
+  more. The [Spec UI](spec-ui.md) and `benzene:test-payloads` (`ExamplePayloadBuilder`) still build
+  ready-to-send payloads from the schemas.
+
+### Schemas
+
+Payload schemas are OpenAPI 3.0 Schema Objects derived from the CLR types by Swashbuckle, with the
+dialect rules of contract-document.md §4.2: a property the serializer always writes is `required`
+(Benzene's System.Text.Json serializer writes nulls, so every property is, unless it carries
+`[JsonIgnore(Condition = WhenWritingNull)]`); a nullable reference to a named type is
+`{"type":"object","nullable":true,"allOf":[{"$ref":…}]}`; records carry no `additionalProperties`;
+enums keep their values; `format` (`int64`, `uuid`, …) is written where known.
+
+### Component names
+
+A named type's component name is its simple name (`Page<Order>` → `OrderPage`). Two different types
+that would share a name fail derivation, naming both types, the topics that use them, and the fix -
+declare a distinct name with `[SchemaName("…")]` (`Benzene.Abstractions.Schema`):
+
+```csharp
+[SchemaName("PaymentItem")]
+public record Item(string PaymentId);
+```
+
+Derivation happens on the first `benzene:spec` request. To fail at start-up instead - before any
+message is handled - opt in with `services.AddContractDocumentStartUpCheck()`; `benzene-descriptor
+--emit spec` fails the build the same way.
 
 ## Message endpoint advertisement
 
@@ -61,7 +114,7 @@ When the service exposes a BenzeneMessage-over-HTTP endpoint (`UseBenzeneMessage
 top-level `messageEndpoint` field:
 
 ```json
-{ "openapi": "3.0.1", "info": { }, "messageEndpoint": "/benzene/invoke", "requests": [ ] }
+{ "schemaDialect": "openapi-3.0", "service": "orders", "messageEndpoint": "/benzene/invoke", "requests": [ ], "…": "…" }
 ```
 
 Consumers feature-detect send capability on this field — no field means the service accepts
@@ -75,7 +128,7 @@ over as an optional top-level `transports` field — sourced from every register
 `"kafka"`, `"http"`), written only when at least one is registered:
 
 ```json
-{ "openapi": "3.0.1", "info": { }, "transports": ["http", "sqs"], "requests": [ ] }
+{ "schemaDialect": "openapi-3.0", "service": "orders", "transports": ["http", "sqs"], "requests": [ ], "…": "…" }
 ```
 
 This is document-level, not per-topic: any wired non-HTTP transport can reach any registered

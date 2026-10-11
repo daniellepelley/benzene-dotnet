@@ -99,7 +99,7 @@ already runs, not a bespoke standalone tool.
 Each run also derives a **structural** ("designed to call") topology and publishes it as
 `topology.json` (`MeshTopology`/`TopologyEdge` in `Benzene.Mesh.Contracts`, `Source =
 TopologyEdgeSource.Structural`): an edge from each service that declares it **sends** a domain topic
-(the spec's `events`) to each service that **handles** it (the spec's `requests`). No tracing backend
+(the spec's `events` ∪ `sends`) to each service that **handles** it (the spec's `requests`). No tracing backend
 needed — it's read straight from the specs the aggregator already fetches. This fills the gap
 `TopologyEdgeSource.Structural`'s doc-comment described as "not currently produced by any package".
 Note: `Benzene.Mesh.Tracing.Tempo` publishes *observed* edges to the same `topology.json`; a
@@ -142,9 +142,11 @@ lower bound. `AttributeTopicToEdge`/`AttributeEdge` implement it:
 ## Aggregated topic catalog (`topics.json`)
 Alongside `manifest.json`/`services/{name}.json`, each run also publishes `topics.json`
 (`MeshTopicCatalog` in `Benzene.Mesh.Contracts`): every distinct **(topic, version)** pair across
-the mesh, who **produces** it (`MeshTopicEntry.Producers`, from each service's spec `events`) and
-who **consumes** it (`MeshTopicEntry.Consumers`, from `requests`, with HTTP mappings preserved),
-plus a `reserved` (domain-vs-utility) flag lifted from `requests[].reserved`. Parsing is
+the mesh, who **produces** it (`MeshTopicEntry.Producers`, from each service's spec `events` ∪
+`sends` - contract-document.md §3: an event's publisher and a sender both put the topic on the wire)
+and who **consumes** it (`MeshTopicEntry.Consumers`, from `requests`, with HTTP mappings preserved),
+plus a `reserved` (domain-vs-utility) flag computed from the `benzene:` prefix (a current contract
+document never lists reserved topics; a legacy one's `requests[].reserved` flag is still honoured). Parsing is
 best-effort per service — a missing/unparseable spec contributes no topics and never fails the
 run. `Benzene.Mesh.Ui` renders it as a cross-service topic table with a "show utilities" toggle.
 
@@ -155,10 +157,10 @@ once can answer that, which is exactly what this file is for.
 
 ### Per-topic payload schema + cross-consumer mismatch
 `ParseTopics`/`ParseOutboundTopics` also lift each topic's payload schema out of the spec they
-already fetch: the `request`/`response` of a `requests` entry and the `message` of an `events`
-entry. Each is **inlined** by `InlineSchema` — every `$ref` into the spec's `components.schemas` is
-replaced by the referenced schema (tagged with a `title` of the ref name; recursion cut with a
-`title`-only marker, bounded by `MaxSchemaDepth`; recursion covers `properties`/`items`/
+already fetch: the `request`/`response` of a `requests` entry, the `message` of an `events` entry and
+the `request` of a `sends` entry. Each is **inlined** by `InlineSchema` — every `$ref` into the spec's
+`components.schemas` is replaced by the referenced schema (tagged with a `title` of the ref name; a
+recursive reference cut to `{}`, as contract-document.md §6.2 cuts it, bounded by `MaxSchemaDepth`; recursion covers `properties`/`items`/
 `additionalProperties` **and the composition arrays `oneOf`/`allOf`/`anyOf`**, so polymorphic
 contracts inline fully too) — producing a self-contained `JsonObject` on the
 `MeshTopicEntry` (`RequestSchema`/`ResponseSchema`/`MessageSchema`), so a consumer (the UI) never
@@ -326,8 +328,8 @@ operation keys → `‹service›_‹operation›`, schema keys → `‹Service�
 guarding any residual dup), and **every `$ref` is rewritten to match** — schema refs
 (`#/components/schemas/…`), operation channel refs (`#/channels/…`), and channel-scoped message refs
 (`#/channels/…/messages/…`). Reserved/utility topics — and the operations that reference them — are
-dropped (using the `reserved` flag already parsed from each benzene spec; matched on the channel's
-`address`), and each operation is tagged with the owning service. Two services sharing a topic stay
+dropped (by the `benzene:` prefix, `BenzeneTopic.IsReserved`, plus any reserved ids passed in;
+matched on the channel's `address`), and each operation is tagged with the owning service. Two services sharing a topic stay
 as two attributed channels+operations rather than being forced into one. Because dropping
 reserved-topic channels can orphan the schemas only their messages referenced, component schemas not
 reachable from a retained channel (following `$ref`s transitively) are pruned, so the doc carries no

@@ -249,7 +249,10 @@ the send/publish IAM. Most sends are best-effort — a downstream hiccup never f
 (`payments:capture`, `order:placed`), which are **outboxed**: see "The outbox" below for why those two
 specifically no longer follow this best-effort posture.
 
-Because each service also **declares** what it sends (in its spec's `events`), the mesh aggregator
+Because each service also **declares** what it puts on the wire - an event it defines (`order:placed`,
+`payment:captured`, `shipping:dispatched`) in its contract document's `events`, a message to a topic
+another service defines (`payments:capture`, `shipping:book`) in its `sends` (`OutboundKind` on each
+`OutboundSend`) - the mesh aggregator
 derives a **structural topology** — an edge from each sender to each consuming handler — and publishes
 `topology.json`, **transport-agnostically** (an SQS command, an SNS event and an EventBridge event all
 surface as edges the same way). After a refresh the Mesh UI's **Topology** table shows the whole graph
