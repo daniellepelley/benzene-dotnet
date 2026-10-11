@@ -17,7 +17,7 @@ comment here refers to `docs/specification/...`, that path is in the `benzene` r
   - `test/conformance-fixtures/` — a **vendored snapshot** of the language-neutral conformance
     fixtures from `benzene` (`docs/specification/conformance/*.json`). Do **not** edit these here;
     the canonical copy lives in `benzene` and the `conformance-drift-check` workflow fails if this
-    snapshot drifts. `SPEC_VERSION` records the source commit.
+    snapshot differs from the spec release `SPEC_VERSION` pins (a `spec-x.y.z` tag of `benzene`).
 - `benchmarks/` — BenchmarkDotNet micro-benchmarks (compile-checked via `Benzene.sln`, not run in CI)
 - `templates/` — `dotnet new` starter-project templates, packaged as one NuGet template pack
   (`Benzene.Templates`); own `templates/Benzene.Templates.sln`, verified by `build-templates.yml`
