@@ -20,10 +20,15 @@ for the `benzene` contract.
   on the `spec` topic (`Constants.DefaultSpecTopic`).
 - `SpecMessageHandler : IMessageHandler<SpecRequest, RawStringMessage>` - builds the spec and returns
   it as a raw string.
-- `SpecRequest { string Type; string Format }` - `Type` selects `benzene`/`openapi`/`asyncapi`
-  (unknown/empty ⇒ `benzene`); `Format` selects `yaml` vs `json` (default `json`).
-- `SpecBuilder` - dispatches a `SpecRequest` to the right document builder and calls
-  `GenerateJson()`/`GenerateYaml()`.
+- `SpecRequest { string Type; string Format }` - `Type` selects `benzene`/`openapi`/`asyncapi`;
+  `Format` selects `json`/`yaml`. Per wire-contracts §7 (spec-0.2.0): absent/empty body, `null` and `{}`
+  mean `benzene`/`json`; both values compare case-insensitively; an **unsupported** type or format is
+  answered `not-implemented` by `SpecMessageHandler`, never with a different document (it used to fall
+  back to `benzene`/JSON).
+- `SpecBuilder` - `Normalize(request)` (defaults + lower-casing), `IsSupported(request)` (the type is
+  known and its builder implements `IProducesJson`/`IProducesYaml` for the format), `TryCreateSpec`, and
+  `CreateSpec`/`CreateBuilder`, which now throw `NotSupportedException` for an unsupported type/format
+  rather than silently building the contract document.
 - `SpecCache` - process-lifetime memoization of the generated document, keyed by (type, format), so
   a spec request re-runs the full build (Swashbuckle schema generation over every request/response
   CLR type + example-payload generation + serialization) only on the first request for each
@@ -32,9 +37,8 @@ for the `benzene` contract.
   registrations (handlers/endpoints/transports/validation), so it's stable for the process lifetime -
   the same assumption the handler/endpoint finder caches already make. This is the fix for repeated
   polling of the `spec` endpoint (the mesh aggregator) rebuilding the whole document each time.
-  **Key nuance:** `Type` is keyed case-insensitively (the builder lower-cases it) but `Format` is
-  keyed verbatim (the builder matches `== "yaml"` exactly, so `"YAML"` → JSON must not share a key
-  with `"yaml"`). The finders (`IMessageHandlersFinder`/`IHttpEndpointFinder`) were already cached;
+  Keyed on `SpecBuilder.Normalize(request)`, so every spelling of one document (`{}`, `benzene`/`json`,
+  `YAML`/`yaml`) shares an entry. The finders (`IMessageHandlersFinder`/`IHttpEndpointFinder`) were already cached;
   this closes the remaining per-request rebuild one level up at the finished document.
 
 ### Test payloads (runtime, opt-in)

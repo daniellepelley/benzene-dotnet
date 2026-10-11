@@ -12,32 +12,127 @@ using Benzene.Schema.OpenApi.OpenApi;
 
 namespace Benzene.Schema.OpenApi;
 
+/// <summary>
+/// Builds the document a <c>benzene:spec</c> request names (wire-contracts §7): <c>type</c> is
+/// <see cref="BenzeneType"/> (the contract document, the default), <see cref="OpenApiType"/> or
+/// <see cref="AsyncApiType"/>; <c>format</c> is <see cref="JsonFormat"/> (the default) or
+/// <see cref="YamlFormat"/> where the type's builder produces it. Values are compared case-insensitively;
+/// an absent or empty value takes the default. A type or format this service does not support is never
+/// answered with a different document - <see cref="IsSupported"/> is false and the handler answers
+/// <c>not-implemented</c>.
+/// </summary>
 public class SpecBuilder
 {
+    /// <summary>The contract document's type, and the default.</summary>
+    public const string BenzeneType = "benzene";
+
+    /// <summary>OpenAPI 3.0, a port extension.</summary>
+    public const string OpenApiType = "openapi";
+
+    /// <summary>AsyncAPI 3.0, a port extension.</summary>
+    public const string AsyncApiType = "asyncapi";
+
+    /// <summary>JSON, the default format.</summary>
+    public const string JsonFormat = "json";
+
+    /// <summary>YAML, a port extension, for the builders that produce it.</summary>
+    public const string YamlFormat = "yaml";
+
+    private static readonly IReadOnlyDictionary<string, Type> BuilderTypes = new Dictionary<string, Type>
+    {
+        [BenzeneType] = typeof(EventServiceDocumentBuilder),
+        [OpenApiType] = typeof(OpenApiDocumentBuilder),
+        [AsyncApiType] = typeof(AsyncApiDocumentBuilder),
+    };
+
+    /// <summary>
+    /// The request with its defaults applied and its values lower-cased: an absent request, an empty
+    /// one, and <c>{}</c> all mean <c>benzene</c>/<c>json</c>.
+    /// </summary>
+    /// <param name="request">The request as received; null for an absent or <c>null</c> body.</param>
+    /// <returns>A new, normalized request.</returns>
+    public static SpecRequest Normalize(SpecRequest? request)
+        => new(Normalize(request?.Type, BenzeneType), Normalize(request?.Format, JsonFormat));
+
+    /// <summary>Whether this service can answer <paramref name="request"/> (after <see cref="Normalize(SpecRequest?)"/>).</summary>
+    /// <param name="request">The request.</param>
+    /// <returns>True when the type is known and its builder produces the format.</returns>
+    public static bool IsSupported(SpecRequest? request)
+    {
+        var normalized = Normalize(request);
+        if (!BuilderTypes.TryGetValue(normalized.Type, out var builderType))
+        {
+            return false;
+        }
+
+        return normalized.Format switch
+        {
+            JsonFormat => typeof(IProducesJson).IsAssignableFrom(builderType),
+            YamlFormat => typeof(IProducesYaml).IsAssignableFrom(builderType),
+            _ => false,
+        };
+    }
+
+    /// <summary>Builds the document <paramref name="specRequest"/> names.</summary>
+    /// <param name="resolver">Resolves the registrations the document is derived from.</param>
+    /// <param name="specRequest">The request; normalized first.</param>
+    /// <returns>The document.</returns>
+    /// <exception cref="NotSupportedException">The type or format is not supported (see <see cref="IsSupported"/>).</exception>
     public string CreateSpec(IServiceResolver resolver, SpecRequest specRequest)
     {
-        var type = specRequest.Type?.ToLowerInvariant();
-        var builder = CreateBuilder(resolver, type);
-
-        return builder switch
+        if (!TryCreateSpec(resolver, specRequest, out var document))
         {
-            IProducesYaml producesYaml when specRequest.Format == "yaml" => producesYaml.GenerateYaml(),
-            IProducesJson producesJson => producesJson.GenerateJson(),
-            _ => string.Empty
-        };
+            var normalized = Normalize(specRequest);
+            throw new NotSupportedException(
+                $"Spec type '{normalized.Type}' in format '{normalized.Format}' is not supported.");
+        }
+
+        return document;
     }
-    
+
+    /// <summary>Builds the document <paramref name="specRequest"/> names, when it is supported.</summary>
+    /// <param name="resolver">Resolves the registrations the document is derived from.</param>
+    /// <param name="specRequest">The request; normalized first.</param>
+    /// <param name="document">The document, or empty when unsupported.</param>
+    /// <returns>False when the type or format is not supported.</returns>
+    public bool TryCreateSpec(IServiceResolver resolver, SpecRequest? specRequest, out string document)
+    {
+        document = string.Empty;
+        var normalized = Normalize(specRequest);
+        if (!IsSupported(normalized))
+        {
+            return false;
+        }
+
+        var builder = CreateBuilder(resolver, normalized.Type);
+        document = normalized.Format == YamlFormat
+            ? ((IProducesYaml)builder).GenerateYaml()
+            : ((IProducesJson)builder).GenerateJson();
+        return true;
+    }
+
+    /// <summary>
+    /// Creates the document builder for <paramref name="type"/> (case-insensitive; null or empty is
+    /// <see cref="BenzeneType"/>), fed with this service's registrations.
+    /// </summary>
+    /// <param name="resolver">Resolves the registrations the document is derived from.</param>
+    /// <param name="type">The spec type.</param>
+    /// <returns>The builder.</returns>
+    /// <exception cref="NotSupportedException">The type is not one this service builds.</exception>
     public object CreateBuilder(IServiceResolver resolver, string? type)
     {
-        return type switch
+        return Normalize(type, BenzeneType) switch
         {
-            "openapi" => CreateSpec(resolver, new OpenApiDocumentBuilder(CreateSchemaBuilder(resolver))),
-            "asyncapi" => CreateSpec(resolver, new AsyncApiDocumentBuilder(CreateSchemaBuilder(resolver),
+            OpenApiType => CreateSpec(resolver, new OpenApiDocumentBuilder(CreateSchemaBuilder(resolver))),
+            AsyncApiType => CreateSpec(resolver, new AsyncApiDocumentBuilder(CreateSchemaBuilder(resolver),
                 resolver.TryGetService<AsyncApiSpecOptions>()?.ResponseTopicSuffix)),
-            "benzene" => CreateSpec(resolver, new EventServiceDocumentBuilder(CreateSchemaBuilder(resolver))),
-            _ => CreateSpec(resolver, new EventServiceDocumentBuilder(CreateSchemaBuilder(resolver)))
+            BenzeneType => CreateSpec(resolver, new EventServiceDocumentBuilder(CreateSchemaBuilder(resolver))),
+            var other => throw new NotSupportedException($"Spec type '{other}' is not supported.")
         };
     }
+
+    private static string Normalize(string? value, string defaultValue)
+        => string.IsNullOrWhiteSpace(value) ? defaultValue : value.Trim().ToLowerInvariant();
 
     
     public TBuilder CreateSpec<TBuilder>(IServiceResolver resolver, TBuilder builder)

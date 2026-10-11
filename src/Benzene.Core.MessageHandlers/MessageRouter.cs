@@ -1,3 +1,4 @@
+using Benzene.Abstractions;
 using Benzene.Abstractions.MessageHandlers;
 using Benzene.Abstractions.MessageHandlers.Mappers;
 using Benzene.Abstractions.MessageHandlers.Request;
@@ -20,6 +21,11 @@ namespace Benzene.Core.MessageHandlers;
 /// not-found, per <see cref="IDefaultStatuses"/>) instead of calling <c>next</c> in
 /// <see cref="HandleAsync"/> — in all of these cases <c>next</c> is never invoked, so this middleware
 /// is always the terminal step for message-handler dispatch.
+/// <para>
+/// The reserved <see cref="BenzeneTopic.Ping"/> topic is answered here, before handler lookup and version
+/// selection, with <c>ok</c> and no payload (wire-contracts §7) - unless <see cref="PingOptions.Enabled"/>
+/// is turned off (<see cref="PingOptionsExtensions.DisablePing"/>).
+/// </para>
 /// </remarks>
 public class MessageRouter<TContext> : IMiddleware<TContext>, ITerminalMiddleware
 {
@@ -30,6 +36,7 @@ public class MessageRouter<TContext> : IMiddleware<TContext>, ITerminalMiddlewar
     private readonly IRequestMapper<TContext> _requestMapper;
     private readonly IDefaultStatuses _defaultStatuses;
     private readonly IMessageHandlerResultSetter<TContext> _messageHandlerResultSetter;
+    private readonly bool _servePing;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="MessageRouter{TContext}"/> class.
@@ -49,14 +56,17 @@ public class MessageRouter<TContext> : IMiddleware<TContext>, ITerminalMiddlewar
     /// <param name="messageHandlerResultSetter">Writes the outcome of dispatch back onto the context.</param>
     /// <param name="defaultStatuses">Supplies the status codes used for routing failures (missing topic, no handler found).</param>
     /// <param name="logger">Logger used to record routing decisions and failures.</param>
+    /// <param name="pingOptions">Whether to answer <see cref="BenzeneTopic.Ping"/>; null (none registered) serves it.</param>
     public MessageRouter(IMessageHandlerFactory messageHandlerFactory,
         IMessageGetter<TContext> messageGetter,
         IMessageHandlerDefinitionLookUp messageHandlerDefinitionLookUpUp,
         IRequestMapper<TContext> requestMapper,
         IMessageHandlerResultSetter<TContext> messageHandlerResultSetter,
         IDefaultStatuses defaultStatuses,
-        ILogger<MessageRouter<TContext>> logger)
+        ILogger<MessageRouter<TContext>> logger,
+        PingOptions? pingOptions = null)
     {
+        _servePing = pingOptions?.Enabled ?? true;
         _messageHandlerResultSetter = messageHandlerResultSetter;
         _defaultStatuses = defaultStatuses;
         _requestMapper = requestMapper;
@@ -95,6 +105,18 @@ public class MessageRouter<TContext> : IMiddleware<TContext>, ITerminalMiddlewar
                 "for this pipeline to route every message to a fixed topic.";
             _logger.LogWarning(topicMissing);
             await _messageHandlerResultSetter.SetResultAsync(context, new MessageHandlerResult(topic, MessageHandlerDefinition.Empty(), BenzeneResult.Set( _defaultStatuses.ValidationError, topicMissing)));
+            return;
+        }
+
+        if (_servePing && string.Equals(topic.Id, BenzeneTopic.Ping, StringComparison.Ordinal))
+        {
+            // wire-contracts §7: a reachability probe, intercepted by topic id alone (ignoring version),
+            // answered ok with no payload - so a probe sent into a queue settles instead of being a
+            // not-found the transport redelivers until it dead-letters it. An empty raw payload, so the
+            // response carries no body at all (a Void result would serialize as "{}").
+            await _messageHandlerResultSetter.SetResultAsync(context,
+                new MessageHandlerResult(topic, MessageHandlerDefinition.Empty(),
+                    BenzeneResult.Ok(new Benzene.Core.Messages.RawStringMessage(string.Empty))));
             return;
         }
 

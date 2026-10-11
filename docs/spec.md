@@ -1,30 +1,36 @@
 # Spec
 
-The spec topic lets a Benzene service serve its own schema — as OpenAPI, AsyncAPI, or the
-`benzene` format code generators consume. Add it to a message pipeline with the `UseSpec`
-middleware extension (`Benzene.Schema.OpenApi`), reserving a topic — conventionally `"spec"` —
-for it:
+The reserved [`benzene:spec`](https://github.com/daniellepelley/Benzene/blob/main/docs/specification/wire-contracts.md)
+topic lets a Benzene service serve its own contract document — and, as .NET extensions, OpenAPI and
+AsyncAPI. Add it to a message pipeline with the `UseSpec` middleware extension (`Benzene.Schema.OpenApi`):
 
 ```csharp
 app.UseBenzeneMessage(benzeneMessageApp => benzeneMessageApp
-    .UseSpec("spec")
+    .UseSpec()
     .UseMessageHandlers());
 ```
 
-## Making a Spec Request
+Over HTTP the default route is `GET /benzene/spec` (`UseBenzeneCloudService` maps it; otherwise map it
+yourself), with `type`/`format` as query parameters.
 
+## Making a Spec Request
 
 ```json
 {
-  "topic": "spec",
-  "message" : "{\"type\":\"asyncapi\",\"format\":\"json\"}"
+  "topic": "benzene:spec",
+  "body": "{\"type\":\"asyncapi\",\"format\":\"json\"}"
 }
 ```
- 
+
 | Field | Options |
 | ----- | ------- |
-| Type  | “asyncapi”, ”openapi”, ”benzene” |
-| Format | “json”, ”yaml” |
+| `type`  | `benzene` (the contract document, the default), `openapi`, `asyncapi` |
+| `format` | `json` (the default), `yaml` |
+
+An absent body, an empty body, `null` and `{}` all ask for `benzene`/`json`. Values are compared
+case-insensitively (`YAML` is `yaml`). A `type` or `format` the service does not support is answered
+`not-implemented` — never with a different document — so a tool can tell "not offered" from "here it is".
+`SpecBuilder.IsSupported(request)` answers the same question in code.
 
 ## Example payloads
 

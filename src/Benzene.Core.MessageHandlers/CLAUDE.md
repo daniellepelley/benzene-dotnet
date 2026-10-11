@@ -119,7 +119,11 @@ Provides complete implementation of message handler infrastructure for command/q
   context itself is defined in **Benzene.Core.Messages**, not this package.
 
 ### Routing
-- `MessageRouter<TContext>` - Routes messages to handlers
+- `MessageRouter<TContext>` - Routes messages to handlers. Answers the reserved `benzene:ping` topic
+  itself (wire-contracts §7, spec-0.2.0): `ok`, no payload, by topic id alone (any version), before
+  handler lookup - so the queue/function reachability probes (`SqsHealthCheck`, `AwsLambdaHealthCheck`)
+  settle instead of being redelivered as `not-found`. On by default; `DisablePing()` (`PingOptions`)
+  opts out, after which the topic routes like any other.
 - `MessageRouterBuilder` - Builds message routing
 - `HandlerPipelineBuilder` - Builds handler pipelines. The pipeline *structure* (which
   `IHandlerMiddlewareBuilder`s, in what order) is fixed once the builder set is known at startup, so

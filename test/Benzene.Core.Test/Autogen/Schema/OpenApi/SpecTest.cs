@@ -7,6 +7,7 @@ using Benzene.Core.MessageHandlers.TestHelpers;
 using Benzene.Core.MessageHandlers.DI;
 using Benzene.Http;
 using Benzene.Microsoft.Dependencies;
+using Benzene.Results;
 using Benzene.Schema.OpenApi;
 using Benzene.Schema.OpenApi.EventService;
 using Benzene.Test.Examples;
@@ -143,23 +144,53 @@ public class SpecTest
         Assert.Equal(6, document.Components.Schemas.Count);
     }
 
-    [Fact]
-    public async Task BenzeneApi_InvalidFormatDefaultsToJson()
+    [Theory]
+    [InlineData("benzene", "foo")]
+    [InlineData("foo", "json")]
+    [InlineData("graphql", "")]
+    [InlineData("openapi", "xml")]
+    public async Task UnsupportedTypeOrFormat_IsNotImplemented_NeverADifferentDocument(string type, string format)
     {
+        // wire-contracts §7: an unsupported type or format is answered not-implemented.
         var host = CreateIncompleteHost();
-        var response = await host.SendBenzeneMessageAsync(MessageBuilder.Create("benzene:spec", new SpecRequest("benzene", "foo")));
-        var document = new EventServiceDocumentDeserializer().Deserialize(response.Body);
+        var response = await host.SendBenzeneMessageAsync(MessageBuilder.Create("benzene:spec", new SpecRequest(type, format)));
 
-        Assert.Equal(6, document.Components.Schemas.Count);
+        Assert.Equal(BenzeneResultStatus.NotImplemented, response.StatusCode);
+        Assert.False(response.IsSuccessful);
+    }
+
+    [Theory]
+    [InlineData("OpenAPI", "JSON")]
+    [InlineData("openapi", "")]
+    [InlineData(" openapi ", null)]
+    public async Task TypeAndFormat_AreCaseInsensitive_AndEmptyFormatIsJson(string type, string? format)
+    {
+        var host = CreateStandardHost();
+        var response = await host.SendBenzeneMessageAsync(MessageBuilder.Create("benzene:spec", new SpecRequest { Type = type, Format = format! }));
+        var document = new OpenApiStringReader().Read(response.Body, out _);
+
+        Assert.Equal(BenzeneResultStatus.Ok, response.StatusCode);
+        Assert.Equal(3, document.Components.Schemas.Count);
     }
 
     [Fact]
-    public async Task BenzeneApi_InvalidTypeDefaultsToBenzene()
+    public async Task UppercaseYaml_IsTheYamlDocument()
     {
-        var host = CreateIncompleteHost();
-        var response = await host.SendBenzeneMessageAsync(MessageBuilder.Create("benzene:spec", new SpecRequest("benzene", "foo")));
+        var host = CreateStandardHost();
+        var response = await host.SendBenzeneMessageAsync(MessageBuilder.Create("benzene:spec", new SpecRequest("openapi", "YAML")));
+
+        Assert.Equal(BenzeneResultStatus.Ok, response.StatusCode);
+        Assert.StartsWith("openapi:", response.Body.TrimStart());
+    }
+
+    [Fact]
+    public async Task EmptyObjectRequest_IsTheContractDocument()
+    {
+        var host = CreateStandardHost();
+        var response = await host.SendBenzeneMessageAsync(MessageBuilder.Create("benzene:spec", new { }));
         var document = new EventServiceDocumentDeserializer().Deserialize(response.Body);
 
+        Assert.Equal(BenzeneResultStatus.Ok, response.StatusCode);
         Assert.Equal(6, document.Components.Schemas.Count);
     }
 

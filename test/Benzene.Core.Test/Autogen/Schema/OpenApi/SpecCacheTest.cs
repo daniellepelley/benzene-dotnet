@@ -54,17 +54,29 @@ public class SpecCacheTest
     }
 
     [Fact]
-    public void GetOrBuild_FormatIsCaseSensitive_SoYamlAndUppercaseDoNotCollide()
+    public void GetOrBuild_FormatIsCaseInsensitive_MatchingTheBuilder()
     {
-        // SpecBuilder compares Format with `== "yaml"` exactly: "YAML" is treated as JSON, so it must
-        // NOT share a cache entry with the real "yaml" document.
+        // wire-contracts §7: values compare case-insensitively, so "YAML" is the yaml document.
         var cache = new SpecCache();
         var builds = 0;
 
         cache.GetOrBuild(new SpecRequest("benzene", "yaml"), _ => { builds++; return "yaml-doc"; });
-        var upper = cache.GetOrBuild(new SpecRequest("benzene", "YAML"), _ => { builds++; return "json-doc"; });
+        var upper = cache.GetOrBuild(new SpecRequest("benzene", "YAML"), _ => { builds++; return "other-doc"; });
 
-        Assert.Equal(2, builds);
-        Assert.Equal("json-doc", upper);
+        Assert.Equal(1, builds);
+        Assert.Equal("yaml-doc", upper);
+    }
+
+    [Fact]
+    public void GetOrBuild_DefaultsShareTheContractDocumentsEntry()
+    {
+        // An empty request ({}) is benzene/json, the same document as asking for it by name.
+        var cache = new SpecCache();
+        var builds = 0;
+
+        cache.GetOrBuild(new SpecRequest(), _ => { builds++; return "doc"; });
+        cache.GetOrBuild(new SpecRequest("benzene", "json"), _ => { builds++; return "doc"; });
+
+        Assert.Equal(1, builds);
     }
 }

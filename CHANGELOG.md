@@ -234,6 +234,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `benzene-mcp-session` (were `mcp-tool`/`mcp-session`).** `McpMessageDispatcher.ToolHeader` and
   `.SessionHeader` take the reserved `benzene-` names. *Migration*: middleware or handlers that read the
   tool name or session id from the old header names must read the new ones (or the constants).
+- **BREAKING (spec-0.2.0, wire-contracts §7 / D13): `benzene:spec` answers an unsupported `type` or
+  `format` with `not-implemented`, never a different document.** It used to fall back to the `benzene`
+  document for an unknown type and to JSON for an unknown format. An absent body, an empty body, `null`
+  and `{}` still mean `benzene`/`json`; both values now compare case-insensitively (`YAML` used to be
+  served as JSON). `SpecBuilder` gains `Normalize`, `IsSupported` and `TryCreateSpec`; `CreateSpec` and
+  `CreateBuilder` now throw `NotSupportedException` for an unsupported type/format instead of building
+  the contract document. *Migration*: a caller that relied on the fallback asks for a supported type
+  (`benzene`, `openapi`, `asyncapi`) and format (`json`, `yaml`).
+- **`benzene:ping` is answered by the router (spec-0.2.0, wire-contracts §7 / D13).** `MessageRouter`
+  intercepts the reachability probe by topic id alone (any version), before handler lookup, and answers
+  `ok` with no payload — so the probes `SqsHealthCheck`/`AwsLambdaHealthCheck`/the envelope-over-HTTP check
+  send into a queue or function settle instead of being a `not-found` the transport redelivers until it
+  dead-letters it. On by default; `DisablePing()` (new `PingOptions`) opts out, after which the topic
+  routes like any other.
 - **BREAKING (mesh.md's 2026-08 revision): the mesh producer/consumer graph is now declared, never
   trace-derived.** `MeshServiceDescriptor` gains a `Consumes` field (mesh.md §2), populated from a new
   explicit **outbound registration** concept (§2.3, mirroring core-concepts.md §9's inbound handler

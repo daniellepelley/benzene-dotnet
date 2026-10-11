@@ -29,12 +29,11 @@ public class SpecCache
     /// </summary>
     public string GetOrBuild(SpecRequest request, Func<SpecRequest, string> build)
     {
-        // Mirror how SpecBuilder discriminates the request so the key never conflates two requests
-        // that produce different documents: Type is matched case-insensitively (the builder lower-
-        // cases it), but Format is matched exactly (`Format == "yaml"`), so "YAML" (which the builder
-        // treats as JSON) must NOT share a key with "yaml". Type is lower-cased here; Format is kept
-        // verbatim.
-        var key = $"{request.Type?.ToLowerInvariant() ?? string.Empty}|{request.Format ?? string.Empty}";
+        // Key on the request exactly as SpecBuilder reads it - defaults applied, both values lower-cased
+        // (wire-contracts §7 compares them case-insensitively) - so two spellings of one document share
+        // an entry and two different documents never do.
+        var normalized = SpecBuilder.Normalize(request);
+        var key = $"{normalized.Type}|{normalized.Format}";
         return _cache.GetOrAdd(key, _ => new Lazy<string>(() => build(request))).Value;
     }
 }
