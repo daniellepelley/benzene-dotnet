@@ -142,7 +142,7 @@ Core, or the self-host server, though **the primary path is a plain static file 
 using Benzene.Mesh.Ui; // UseMeshUi
 
 app.UseApiGateway(http => http
-    .UseMeshUi()                                   // serves GET /mesh-ui, fetching ./manifest.json
+    .UseMeshUi()                                   // serves GET /benzene/mesh-ui, fetching ../manifest.json
     .UseMessageHandlers()
 );
 
@@ -153,7 +153,10 @@ app.UseApiGateway(http => http
 );
 ```
 
-Browse to `/mesh-ui`. With no manifest reachable it falls back to `?url=` on the query string, a
+Browse to `/benzene/mesh-ui` (the default path; its companion per-service spec page is
+`/benzene/mesh-spec-ui.html`). The default manifest URL is resolved against the page's depth, so it
+still names the root-level `manifest.json` the artifact middleware serves; a manifest URL you pass is
+used as given. With no manifest reachable it falls back to `?url=` on the query string, a
 `data-manifest-url` attribute, or (if none of those resolve) a built-in sample so the layout is
 visible standalone.
 
@@ -189,7 +192,7 @@ using Benzene.Mesh.Ui; // UseMeshUi
 
 app.UseApiGateway(http => http
     // The catalog page, enriched with the live Fleet plane polling /benzene/invoke:
-    .UseMeshUi("/mesh-ui", "manifest.json", "/benzene/invoke")
+    .UseMeshUi(envelopeUrl: "/benzene/invoke")
     // The collector behind that endpoint (queries only, or queries + ingestion):
     .UseBenzeneMessage(new BenzeneMessageHttpOptions { Path = "/benzene/invoke" },
         collector => collector.UseMessageHandlers(MeshCollectorHandlers.All))

@@ -15,7 +15,7 @@ the Mesh UI on the public internet (see "Deploy to AWS (EKS)" below).
   ┌──────────┐   ┌───────────┐   ┌────────────┐
   │ orders   │──▶│ payments  │──▶│ shipping   │   3 Deployments (one image, MESH_SERVICE selects domain)
   │ Service  │   │ Service   │   │ Service    │   each Service labelled  benzene: "true"
-  └────┬─────┘   └─────┬─────┘   └─────┬──────┘   ──▶ POST /benzene-message  (a { topic, headers, body }
+  └────┬─────┘   └─────┬─────┘   └─────┬──────┘   ──▶ POST /benzene/invoke  (a { topic, headers, body }
        │  ▲            │  ▲            │  ▲             envelope, addressed by in-cluster DNS — the chain)
        │  │  3. each service PUSHES register + heartbeat + traces to the mesh's collector
        │  │     (http://mesh/benzene/invoke) — the live feed
@@ -31,7 +31,7 @@ the Mesh UI on the public internet (see "Deploy to AWS (EKS)" below).
 
 Beyond discovery, each service **chains to the next** over its neighbour's BenzeneMessage endpoint:
 
-- **Ingress** — every service exposes `POST /benzene-message` (`asp.UseBenzeneMessage(...)` in
+- **Ingress** — every service exposes `POST /benzene/invoke` (`asp.UseBenzeneMessage(...)` in
   `Service/Startup.cs`). A `{ topic, headers, body }` envelope POSTed there is routed to the service's
   handlers **by the envelope's topic**, exactly as a queue or a Lambda invoke would — one endpoint serves
   every topic, no per-route REST contract. It's the same server endpoint the AWS Lambda invoke path
@@ -39,7 +39,7 @@ Beyond discovery, each service **chains to the next** over its neighbour's Benze
 - **Egress** — `orders`' `order:create` handler asks `payments` to `payment:take`, and `payments`'
   `payment:take` handler asks `shipping` to `shipment:book`, each via **`HttpBenzeneMessageClient`**
   (`src/Benzene.Clients.Http`). The downstream URL is the neighbour's in-cluster DNS name, injected as
-  `DOWNSTREAM_MSG_URL` (e.g. `http://payments/benzene-message`); the terminal `shipping` service has none.
+  `DOWNSTREAM_MSG_URL` (e.g. `http://payments/benzene/invoke`); the terminal `shipping` service has none.
   Registration is one line — `x.AddHttpBenzeneMessageClient(downstreamUrl)` — which also auto-wires a
   non-destructive reachability check (a `healthcheck`-topic POST) onto the deep `healthcheck` layer.
 
@@ -53,7 +53,7 @@ curl -XPOST localhost:8081/orders -H 'content-type: application/json' \
 #    ... payments logs: shipment:book -> Created
 
 # Or hit any service's envelope endpoint directly, addressing a topic it owns:
-curl -XPOST localhost:8081/benzene-message -H 'content-type: application/json' \
+curl -XPOST localhost:8081/benzene/invoke -H 'content-type: application/json' \
      -d '{"topic":"payment:take","headers":{},"body":"{\"orderId\":\"o-9\",\"amount\":30,\"currency\":\"GBP\"}"}'
 # => {"statusCode":"Created", ... ,"body":"{\"paymentId\":\"pay-1\",\"status\":\"captured\"}"}
 ```
@@ -79,7 +79,7 @@ Run the two-hop chain locally (no cluster) and watch the upcast in the payments 
 ```bash
 # from examples/K8sMesh/Service, after `dotnet build`
 MESH_SERVICE=payments PORT=8091 dotnet bin/Debug/net10.0/Benzene.Examples.K8sMesh.Service.dll &
-MESH_SERVICE=orders  PORT=8090 DOWNSTREAM_MSG_URL=http://localhost:8091/benzene-message \
+MESH_SERVICE=orders  PORT=8090 DOWNSTREAM_MSG_URL=http://localhost:8091/benzene/invoke \
   dotnet bin/Debug/net10.0/Benzene.Examples.K8sMesh.Service.dll &
 curl -XPOST localhost:8090/orders -H 'content-type: application/json' \
      -d '{"customerId":"c1","sku":"espresso","quantity":2}'

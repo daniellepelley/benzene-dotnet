@@ -55,6 +55,6 @@ public static class DependenciesBuilder
         services.AddSingleton<IMessageHandlerDefinition>(_ =>
             MessageHandlerDefinition.CreateInstance("benzene:spec", "", typeof(SpecRequest), typeof(RawStringMessage), typeof(SpecMessageHandler)));
         services.AddScoped<SpecMessageHandler>();
-        services.AddSingleton<IHttpEndpointDefinition>(_ => new HttpEndpointDefinition("get", "/spec", "benzene:spec"));
+        services.AddSingleton<IHttpEndpointDefinition>(_ => new HttpEndpointDefinition("get", "/benzene/spec", "benzene:spec"));
     }
 }

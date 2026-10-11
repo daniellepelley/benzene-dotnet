@@ -3,7 +3,7 @@
 ## What this package does
 Generates per-topic test payload JSON files from a benzene spec (`EventServiceDocument`) — one
 file per topic per transport — for firing at a locally running service, e.g. via the AWS Lambda
-Test Tool or the `/benzene-message` HTTP endpoint. Part of the payload-testing story documented
+Test Tool or the `/benzene/invoke` HTTP endpoint. Part of the payload-testing story documented
 in `docs/payload-testing.md`.
 
 Formerly named `Benzene.CodeGen.MockLambdaTool` (the directory/package name was out of sync with

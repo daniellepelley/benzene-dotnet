@@ -103,7 +103,7 @@ public class StartUp : BenzeneStartUp
         app.UseAwsLambda(aws =>
         {
             // The BenzeneMessage envelope pipeline, reused directly and mounted on API Gateway as the
-            // /benzene-message endpoint.
+            // /benzene/invoke endpoint.
             var benzeneMessagePipeline = aws.Create<BenzeneMessageContext>()
                 .UseMessageHandlers(_ => { });
 

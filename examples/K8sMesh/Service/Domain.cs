@@ -17,7 +17,7 @@ namespace Benzene.Examples.K8sMesh.Service;
 // cross-service ownership).
 //
 // The services also CHAIN to each other over HTTP: orders → payments → shipping, each hop carried as a
-// lightweight BenzeneMessage envelope POSTed to the next service's /benzene-message endpoint via
+// lightweight BenzeneMessage envelope POSTed to the next service's /benzene/invoke endpoint via
 // HttpBenzeneMessageClient (Startup wires it from the DOWNSTREAM_MSG_URL env var). This turns the mesh
 // from a discovery-only demo into one with real service-to-service traffic to observe.
 

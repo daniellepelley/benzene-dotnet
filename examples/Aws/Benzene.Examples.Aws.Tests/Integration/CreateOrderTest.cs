@@ -137,10 +137,10 @@ public class CreateOrderTest : InMemoryOrdersTestBase
     public async Task CreateOrder_ApiGateway_BenzeneMessage()
     {
         // The example wires the BenzeneMessage-over-HTTP endpoint at its default path
-        // (BenzeneMessageHttpOptions.DefaultPath = "/benzene-message"), not a custom "admin/..." path
+        // (BenzeneMessageHttpOptions.DefaultPath = "/benzene/invoke"), not a custom "admin/..." path
         // - the old path here never matched, so the request fell through to normal HTTP routing,
         // found no [HttpEndpoint("POST","admin/benzene-message")], and persisted nothing.
-        var apiGatewayProxyRequest = new ApiGatewayProxyRequestBuilder("POST", "/benzene-message")
+        var apiGatewayProxyRequest = new ApiGatewayProxyRequestBuilder("POST", "/benzene/invoke")
             .WithBody(new BenzeneMessageRequest
             {
                 Topic = CreateOrder,

@@ -32,7 +32,7 @@ own publishes). So it is off by two independent gates:
 - `IMeshServiceDispatcher { string Key; DispatchAsync(entry, envelope, ct) }` — reach ONE service over
   one transport, keyed by `MeshServiceRegistryEntry.Source` (the same keying `IMeshServiceSource` uses).
   - `HttpMeshServiceDispatcher` (`Key = "Http"`) — POSTs the `{ topic, headers, body }` envelope to the
-    service's invoke URL (`SourceOptions["invokeUrl"]`, else `<specUrl origin>/benzene-message`) and reports the
+    service's invoke URL (`SourceOptions["invokeUrl"]`, else `<specUrl origin>/benzene/invoke`) and reports the
     service's **response envelope** - `{statusCode, isSuccessful, headers, body}`, the same shape the Lambda
     dispatcher reports - whatever the HTTP status (the envelope endpoint answers 200 for every processed
     envelope, transport-bindings §1). An envelope without `isSuccessful` is reported unsuccessful (wire §1.2).

@@ -73,7 +73,7 @@ public class Startup
             MessageHandlerDefinition.CreateInstance("benzene:spec", "", typeof(SpecRequest), typeof(RawStringMessage),
                 typeof(SpecMessageHandler)));
         services.AddScoped<SpecMessageHandler>();
-        services.AddSingleton<IHttpEndpointDefinition>(_ => new HttpEndpointDefinition("get", "/spec", "benzene:spec"));
+        services.AddSingleton<IHttpEndpointDefinition>(_ => new HttpEndpointDefinition("get", "/benzene/spec", "benzene:spec"));
 
         // Demo-only fake identity provider (docs/cookbooks/auth-patterns.md) - see DemoAuth/.
         // A real service points OAuth2BearerOptions at a real identity provider instead.
@@ -103,7 +103,7 @@ public class Startup
         app.UseBenzene(benzene => benzene
             .UseHttp(asp => asp
                 .UseSpec()
-                .UseSpecUi()          // browse the spec at GET /spec-ui (fetches /spec?type=benzene)
+                .UseSpecUi()          // browse the spec at GET /benzene/spec-ui (fetches /benzene/spec?type=benzene)
                 .UseMessageHandlers(x => x.UseFluentValidation())
             )
         );

@@ -13,7 +13,7 @@ namespace Benzene.Spec.Ui;
 /// The page loads a spec from, in order of precedence: a <c>?url=</c> query-string parameter, the
 /// <c>data-spec-url</c> attribute on the document root (see <see cref="GetHtml(string)"/>), or an
 /// embedded sample. Point it at a running service's spec endpoint — for example
-/// <c>/spec?type=benzene</c> (the <c>benzene</c> format produced by <c>UseSpec</c>).
+/// <c>/benzene/spec?type=benzene</c> (the <c>benzene</c> format produced by <c>UseSpec</c>).
 /// </remarks>
 public static class SpecUiPage
 {
@@ -34,7 +34,7 @@ public static class SpecUiPage
     /// </summary>
     /// <param name="specUrl">
     /// The URL the page should fetch the Benzene spec JSON from (for example
-    /// <c>/spec?type=benzene</c>). If null or whitespace, this behaves like <see cref="GetHtml()"/>.
+    /// <c>/benzene/spec?type=benzene</c>). If null or whitespace, this behaves like <see cref="GetHtml()"/>.
     /// </param>
     /// <returns>The complete, self-contained HTML document.</returns>
     public static string GetHtml(string specUrl)

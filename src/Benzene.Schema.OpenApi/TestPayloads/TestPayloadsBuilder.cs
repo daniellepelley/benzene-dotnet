@@ -9,7 +9,7 @@ namespace Benzene.Schema.OpenApi.TestPayloads;
 /// Builds a manifest of ready-to-fire example payloads for a service's domain topics from its own
 /// <see cref="EventServiceDocument"/>. For each topic it emits the deterministic, validation-aware
 /// example body (the same generator the spec uses) wrapped in the transport-agnostic BenzeneMessage
-/// envelope - the exact shape a caller POSTs to the service's <c>/benzene-message</c> endpoint - so a
+/// envelope - the exact shape a caller POSTs to the service's <c>/benzene/invoke</c> endpoint - so a
 /// deployed service can self-serve "here is how you call me, and here is a valid example".
 /// </summary>
 /// <remarks>
@@ -99,7 +99,7 @@ public class TestPayloadsBuilder
 
         var payloads = new Dictionary<string, object>
         {
-            // The portable BenzeneMessage envelope - POST this to the service's /benzene-message
+            // The portable BenzeneMessage envelope - POST this to the service's /benzene/invoke
             // endpoint to invoke the topic. Matches the "benzene-message" Lambda-test-tool dressing.
             [BenzeneMessageTransport] = new BenzeneMessagePayload
             {

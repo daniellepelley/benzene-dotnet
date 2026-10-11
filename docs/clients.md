@@ -270,7 +270,7 @@ Package: `Benzene.Clients.Http`.
 
 ```csharp
 services.UsingBenzene(x => x.AddOutboundRouting(routing => routing
-    .Route("order:create", pipeline => pipeline.UseBenzeneMessageOverHttp("https://orders.internal/benzene-message"))));
+    .Route("order:create", pipeline => pipeline.UseBenzeneMessageOverHttp("https://orders.internal/benzene/invoke"))));
 ```
 
 `.UseBenzeneMessageOverHttp(url)` POSTs a BenzeneMessage envelope (`{ topic, headers, body }`) to another Benzene service's BenzeneMessage endpoint and maps the returned `{ statusCode, headers, body }` envelope back — the HTTP counterpart of `.UseInProcess()` and of the AWS Lambda invoke path, and the shape service-to-service calls take when both ends run on a laptop or in one cluster. Unlike the queue transports it **can return a typed response**: `SendAsync<TRequest, TResponse>` deserializes the envelope body once it knows `TResponse`. It resolves `HttpClient` from the container, and auto-registers a non-destructive reachability check for `url` on the deep `healthcheck` layer (`healthCheck: false` opts out).

@@ -33,7 +33,7 @@ public class MeshUiMiddleware<TContext> : IMiddleware<TContext>, ITerminalMiddle
     /// <summary>
     /// Initializes a new instance of the <see cref="MeshUiMiddleware{TContext}"/> class.
     /// </summary>
-    /// <param name="path">The path the UI is served from (for example <c>/mesh-ui</c>).</param>
+    /// <param name="path">The path the UI is served from (for example <c>/benzene/mesh-ui</c>).</param>
     /// <param name="manifestUrl">The URL the page fetches <c>manifest.json</c> from.</param>
     /// <param name="httpRequestAdapter">Adapter used to read the request method and path.</param>
     /// <param name="responseAdapter">Adapter used to write the HTML response.</param>
@@ -48,7 +48,7 @@ public class MeshUiMiddleware<TContext> : IMiddleware<TContext>, ITerminalMiddle
     /// Initializes a new instance of the <see cref="MeshUiMiddleware{TContext}"/> class, optionally
     /// wiring the live Fleet plane to a wire-envelope endpoint.
     /// </summary>
-    /// <param name="path">The path the UI is served from (for example <c>/mesh-ui</c>).</param>
+    /// <param name="path">The path the UI is served from (for example <c>/benzene/mesh-ui</c>).</param>
     /// <param name="manifestUrl">The URL the page fetches <c>manifest.json</c> from.</param>
     /// <param name="envelopeUrl">
     /// The wire-envelope endpoint the Fleet plane polls for live <c>mesh:query:*</c> data (same-origin
@@ -68,7 +68,7 @@ public class MeshUiMiddleware<TContext> : IMiddleware<TContext>, ITerminalMiddle
     /// wiring the live Fleet plane and/or the Test Console's send capability to wire-envelope
     /// endpoints.
     /// </summary>
-    /// <param name="path">The path the UI is served from (for example <c>/mesh-ui</c>).</param>
+    /// <param name="path">The path the UI is served from (for example <c>/benzene/mesh-ui</c>).</param>
     /// <param name="manifestUrl">The URL the page fetches <c>manifest.json</c> from.</param>
     /// <param name="envelopeUrl">
     /// The wire-envelope endpoint the Fleet plane polls for live <c>mesh:query:*</c> data (same-origin
@@ -94,7 +94,7 @@ public class MeshUiMiddleware<TContext> : IMiddleware<TContext>, ITerminalMiddle
     /// wiring the live Fleet plane, the Test Console's send capability, a Sign-out control, and a
     /// Refresh control.
     /// </summary>
-    /// <param name="path">The path the UI is served from (for example <c>/mesh-ui</c>).</param>
+    /// <param name="path">The path the UI is served from (for example <c>/benzene/mesh-ui</c>).</param>
     /// <param name="manifestUrl">The URL the page fetches <c>manifest.json</c> from.</param>
     /// <param name="envelopeUrl">
     /// The wire-envelope endpoint the Fleet plane polls for live <c>mesh:query:*</c> data (same-origin

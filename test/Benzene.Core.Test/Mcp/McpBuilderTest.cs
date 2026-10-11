@@ -12,7 +12,7 @@ public class McpBuilderTest
     {
         var options = new McpBuilder().Tool("a", "A tool.", "topic:a").Build();
 
-        Assert.Equal("/mcp", options.Path);
+        Assert.Equal("/benzene/mcp", options.Path);
         Assert.Equal("topic:a", Assert.Single(options.Tools).Topic);
     }
 

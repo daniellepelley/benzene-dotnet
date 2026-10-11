@@ -16,7 +16,7 @@ namespace Benzene.Mesh.Dispatch;
 /// Dispatches to an HTTP-reachable service by POSTing the Benzene message envelope
 /// (<c>{ topic, headers, body }</c>) to its wire-envelope endpoint. The endpoint URL comes from the
 /// entry's <c>SourceOptions["invokeUrl"]</c> when present, otherwise it's derived from the entry's
-/// <see cref="MeshServiceRegistryEntry.SpecUrl"/> origin as <c>&lt;origin&gt;/benzene-message</c>
+/// <see cref="MeshServiceRegistryEntry.SpecUrl"/> origin as <c>&lt;origin&gt;/benzene/invoke</c>
 /// (Benzene's default receiving path).
 /// </summary>
 public class HttpMeshServiceDispatcher : IMeshServiceDispatcher
@@ -34,7 +34,7 @@ public class HttpMeshServiceDispatcher : IMeshServiceDispatcher
     /// <summary>Appended to a response body that was cut off at <see cref="MaxResponseBytes"/>.</summary>
     public const string TruncatedMarker = "…[benzene.mesh.dispatch: response truncated]";
 
-    private const string DefaultInvokePath = "/benzene-message";
+    private const string DefaultInvokePath = "/benzene/invoke";
     private const int ReadBufferSize = 8_192;
 
     private readonly HttpClient _httpClient;

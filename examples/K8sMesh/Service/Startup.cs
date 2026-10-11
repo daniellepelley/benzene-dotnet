@@ -76,7 +76,7 @@ public class Startup : BenzeneStartUp
                 .AddHttpMessageHandlers();
 
             // Outbound: chain to the next service over the BenzeneMessage envelope endpoint. The target is
-            // the downstream service's in-cluster URL (e.g. http://payments/benzene-message), supplied by the
+            // the downstream service's in-cluster URL (e.g. http://payments/benzene/invoke), supplied by the
             // DOWNSTREAM_MSG_URL env var — see k8s/services.yaml. HttpBenzeneMessageClient POSTs the
             // { topic, headers, body } envelope there and also auto-wires a non-destructive reachability check
             // (a healthcheck-topic POST) onto the deep healthcheck layer. When no downstream is wired (the
@@ -145,7 +145,7 @@ public class Startup : BenzeneStartUp
             .UseBenzeneEnrichment()
             .UseBenzeneMetrics()
             // Receive lightweight BenzeneMessages from other services: a POST of a { topic, headers, body }
-            // envelope to /benzene-message is routed to this service's handlers by the envelope's topic — the
+            // envelope to /benzene/invoke is routed to this service's handlers by the envelope's topic — the
             // ingress half of the orders → payments → shipping chain (HttpBenzeneMessageClient is the egress
             // half). The healthcheck topic is routed too, so the callers' auto-wired reachability probe gets a
             // 200. This is the same server endpoint the AWS Lambda invoke path exposes, over HTTP.

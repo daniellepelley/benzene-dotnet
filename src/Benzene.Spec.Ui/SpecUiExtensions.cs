@@ -13,15 +13,15 @@ namespace Benzene.Spec.Ui;
 public static class SpecUiExtensions
 {
     /// <summary>The default path the spec UI is served from.</summary>
-    public const string DefaultPath = "/spec-ui";
+    public const string DefaultPath = "/benzene/spec-ui";
 
     /// <summary>The default URL the UI fetches the Benzene spec JSON from.</summary>
-    public const string DefaultSpecUrl = "/spec?type=benzene";
+    public const string DefaultSpecUrl = "/benzene/spec?type=benzene";
 
     /// <summary>
     /// Serves the Benzene Spec Explorer page at <paramref name="path"/> on any HTTP pipeline. The page
     /// fetches the spec JSON from <paramref name="specUrl"/> on load, so expose a Benzene <c>spec</c>
-    /// endpoint (for example <c>UseSpec()</c> mapped to <c>GET /spec</c>) alongside it. Add this before
+    /// endpoint (for example <c>UseSpec()</c> mapped to <c>GET /benzene/spec</c>, the spec's default route) alongside it. Add this before
     /// the message-handler middleware.
     /// </summary>
     /// <typeparam name="TContext">The HTTP context type.</typeparam>

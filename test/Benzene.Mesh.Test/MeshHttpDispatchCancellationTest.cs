@@ -108,7 +108,7 @@ public class MeshHttpDispatchCancellationTest
         // DispatchAsync reads to resolve IServiceResolverFactory (and, per the fix, ICancellationTokenAccessor).
         var requestAdapterMock = new Mock<IHttpRequestAdapter<FakeHttpContext>>();
         requestAdapterMock.Setup(x => x.Map(It.IsAny<FakeHttpContext>()))
-            .Returns(new HttpRequest { Method = "POST", Path = "/benzene-message" });
+            .Returns(new HttpRequest { Method = "POST", Path = "/benzene/invoke" });
 
         var bodyGetterMock = new Mock<IMessageBodyGetter<FakeHttpContext>>();
         bodyGetterMock.Setup(x => x.GetBody(It.IsAny<FakeHttpContext>())).Returns(FleetQueryEnvelope);
@@ -160,7 +160,7 @@ public class MeshHttpDispatchCancellationTest
 
         var requestAdapterMock = new Mock<IHttpRequestAdapter<FakeHttpContext>>();
         requestAdapterMock.Setup(x => x.Map(It.IsAny<FakeHttpContext>()))
-            .Returns(new HttpRequest { Method = "POST", Path = "/benzene-message" });
+            .Returns(new HttpRequest { Method = "POST", Path = "/benzene/invoke" });
 
         var bodyGetterMock = new Mock<IMessageBodyGetter<FakeHttpContext>>();
         bodyGetterMock.Setup(x => x.GetBody(It.IsAny<FakeHttpContext>())).Returns(FleetQueryEnvelope);

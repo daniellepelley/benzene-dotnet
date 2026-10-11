@@ -44,7 +44,7 @@ public class McpHttpTest
             .BuildHost();
     }
 
-    private static APIGatewayProxyRequest Post(string body, string path = "/mcp", string? sessionId = null)
+    private static APIGatewayProxyRequest Post(string body, string path = "/benzene/mcp", string? sessionId = null)
     {
         var headers = new Dictionary<string, string> { ["content-type"] = "application/json" };
         if (sessionId is not null) headers["Mcp-Session-Id"] = sessionId;
@@ -115,7 +115,7 @@ public class McpHttpTest
     {
         var host = CreateHost();
 
-        var response = await host.SendApiGatewayAsync(new APIGatewayProxyRequest { HttpMethod = "GET", Path = "/mcp" });
+        var response = await host.SendApiGatewayAsync(new APIGatewayProxyRequest { HttpMethod = "GET", Path = "/benzene/mcp" });
 
         Assert.Equal(405, response.StatusCode);
         Assert.Equal("POST", Header(response, "Allow"));

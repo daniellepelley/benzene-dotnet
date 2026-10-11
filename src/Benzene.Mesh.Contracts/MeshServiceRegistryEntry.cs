@@ -12,7 +12,7 @@ public class MeshServiceRegistryEntry
     /// HTTP (<see cref="MeshServiceSource.Http"/>).
     /// </summary>
     /// <param name="name">The service's name, used as its key across all generated mesh artifacts.</param>
-    /// <param name="specUrl">The URL to fetch the service's spec document from (e.g. <c>https://.../spec?type=benzene</c>).</param>
+    /// <param name="specUrl">The URL to fetch the service's spec document from (e.g. <c>https://.../benzene/spec?type=benzene</c>).</param>
     /// <param name="healthUrl">The URL to fetch the service's aggregated health check response from.</param>
     public MeshServiceRegistryEntry(string name, string specUrl, string healthUrl)
         : this(name, specUrl, healthUrl, MeshServiceSource.Http, null)
@@ -25,7 +25,7 @@ public class MeshServiceRegistryEntry
     /// </summary>
     /// <param name="name">The service's name, used as its key across all generated mesh artifacts.</param>
     /// <param name="specUrl">
-    /// The URL to fetch the service's spec document from (e.g. <c>https://.../spec?type=benzene</c>).
+    /// The URL to fetch the service's spec document from (e.g. <c>https://.../benzene/spec?type=benzene</c>).
     /// Only meaningful for HTTP-fetched sources - other sources may still carry a human-readable
     /// value here purely for the manifest/UI to link out to, even when the fetch itself doesn't use it.
     /// </param>
@@ -58,7 +58,7 @@ public class MeshServiceRegistryEntry
     /// <summary>The service's name, used as its key across all generated mesh artifacts.</summary>
     public string Name { get; }
 
-    /// <summary>The URL to fetch the service's spec document from (e.g. <c>https://.../spec?type=benzene</c>).</summary>
+    /// <summary>The URL to fetch the service's spec document from (e.g. <c>https://.../benzene/spec?type=benzene</c>).</summary>
     public string SpecUrl { get; }
 
     /// <summary>The URL to fetch the service's aggregated health check response from.</summary>

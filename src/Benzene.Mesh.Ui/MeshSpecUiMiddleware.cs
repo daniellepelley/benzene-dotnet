@@ -16,8 +16,9 @@ namespace Benzene.Mesh.Ui;
 /// The default served path (<see cref="MeshUiExtensions.DefaultSpecUiPath"/>) ends in <c>.html</c> on
 /// purpose: <c>mesh-ui.html</c>'s per-service <em>spec</em> link is the single relative link
 /// <c>mesh-spec-ui.html?service=…</c>, which must resolve the same whether the mesh UI is served as a
-/// static file (sitting next to the artifacts) or from this pipeline (e.g. at <c>/mesh-ui</c>). Serving
-/// the page at <c>/mesh-spec-ui.html</c> makes that one link work in both worlds. On a matching
+/// static file (sitting next to the artifacts) or from this pipeline (e.g. at <c>/benzene/mesh-ui</c>). Serving
+/// the page beside the mesh UI (<c>/benzene/mesh-spec-ui.html</c> by default, <c>/mesh-spec-ui.html</c> for a
+/// mesh UI at <c>/mesh-ui</c>) makes that one link work in both worlds. On a matching
 /// GET/HEAD this writes the page as <c>text/html</c> and short-circuits; any other request is passed
 /// to <c>next</c>.
 /// </remarks>

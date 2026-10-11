@@ -53,7 +53,7 @@ public class MeshOidcOptions
     /// </summary>
     /// <remarks>
     /// Set this whenever the thing being protected is NOT at the root - e.g. a mesh serving its UI at
-    /// <c>/mesh-ui</c>. Leaving it at <c>/</c> there produces a confusing loop rather than an obvious
+    /// <c>/benzene/mesh-ui</c>. Leaving it at <c>/</c> there produces a confusing loop rather than an obvious
     /// error: logout clears the session and redirects to <c>/</c>, the gate bounces that to login, the
     /// provider silently re-authenticates an already-signed-in user, and the callback returns them to
     /// <c>/</c> - which resolves no route and renders a bare <c>not-found</c> problem document. The user
@@ -251,7 +251,7 @@ public class MeshOidcOptions
         if (!ReturnToValidator.IsSafe(HomePath))
         {
             throw new System.ArgumentException(
-                $"{nameof(HomePath)} must be a same-origin, path-absolute URL (e.g. \"/mesh-ui\") - never " +
+                $"{nameof(HomePath)} must be a same-origin, path-absolute URL (e.g. \"/benzene/mesh-ui\") - never " +
                 "an absolute or protocol-relative URL, which would turn logout into an open redirect.",
                 nameof(HomePath));
         }

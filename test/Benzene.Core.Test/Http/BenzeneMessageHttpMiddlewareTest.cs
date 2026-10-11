@@ -121,7 +121,7 @@ public class BenzeneMessageHttpMiddlewareTest
     [Fact]
     public async Task HandleAsync_PostToMatchingPath_DispatchesAndShortCircuits()
     {
-        var (middleware, responseAdapterMock, bodies) = CreateMiddleware("POST", "/benzene-message", Envelope);
+        var (middleware, responseAdapterMock, bodies) = CreateMiddleware("POST", "/benzene/invoke", Envelope);
         var nextCalled = false;
 
         await middleware.HandleAsync(new FakeHttpContext(), () =>
@@ -140,8 +140,8 @@ public class BenzeneMessageHttpMiddlewareTest
     }
 
     [Theory]
-    [InlineData("GET", "/benzene-message")]
-    [InlineData("PUT", "/benzene-message")]
+    [InlineData("GET", "/benzene/invoke")]
+    [InlineData("PUT", "/benzene/invoke")]
     [InlineData("POST", "/something-else")]
     public async Task HandleAsync_NonMatchingRequest_CallsNextInstead(string method, string path)
     {
@@ -168,7 +168,7 @@ public class BenzeneMessageHttpMiddlewareTest
     {
         // transport-bindings §1: non-2xx only when no envelope was processed. The 400 response is itself the
         // problem document, so it carries the numeric status, equal to the status line (wire §1.3).
-        var (middleware, responseAdapterMock, bodies) = CreateMiddleware("POST", "/benzene-message", requestBody);
+        var (middleware, responseAdapterMock, bodies) = CreateMiddleware("POST", "/benzene/invoke", requestBody);
 
         await middleware.HandleAsync(new FakeHttpContext(), () => Task.CompletedTask);
 
@@ -184,7 +184,7 @@ public class BenzeneMessageHttpMiddlewareTest
     {
         // A JSON object with no topic IS an envelope: the pipeline answers it (the router's
         // validation-error, envelope-cases.json's empty-topic case), so it is 200 like any other.
-        var (middleware, responseAdapterMock, bodies) = CreateMiddleware("POST", "/benzene-message", "{\"headers\":{}}");
+        var (middleware, responseAdapterMock, bodies) = CreateMiddleware("POST", "/benzene/invoke", "{\"headers\":{}}");
 
         await middleware.HandleAsync(new FakeHttpContext(), () => Task.CompletedTask);
 
@@ -197,7 +197,7 @@ public class BenzeneMessageHttpMiddlewareTest
     {
         // The D21 restriction: a restricted topic is answered not-found exactly as if no handler matched.
         var options = new BenzeneMessageHttpOptions { TopicFilter = topic => topic != "example" };
-        var (middleware, responseAdapterMock, bodies) = CreateMiddleware("POST", "/benzene-message", Envelope, options);
+        var (middleware, responseAdapterMock, bodies) = CreateMiddleware("POST", "/benzene/invoke", Envelope, options);
 
         await middleware.HandleAsync(new FakeHttpContext(), () => Task.CompletedTask);
 
@@ -209,10 +209,10 @@ public class BenzeneMessageHttpMiddlewareTest
     }
 
     [Theory]
-    [InlineData("/benzene-message", "benzene-message")]
-    [InlineData("/benzene-message", "/BENZENE-MESSAGE")]
-    [InlineData("/benzene-message", "/benzene-message/")]
-    [InlineData("benzene-message", "/benzene-message")]
+    [InlineData("/benzene/invoke", "benzene/invoke")]
+    [InlineData("/benzene/invoke", "/BENZENE/INVOKE")]
+    [InlineData("/benzene/invoke", "/benzene/invoke/")]
+    [InlineData("benzene/invoke", "/benzene/invoke")]
     [InlineData("/custom-path", "/custom-path")]
     public async Task HandleAsync_PathNormalization_MatchesRegardlessOfCaseTrailingSlashOrLeadingSlash(
         string configuredPath, string requestPath)

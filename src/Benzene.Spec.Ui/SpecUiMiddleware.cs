@@ -28,7 +28,7 @@ public class SpecUiMiddleware<TContext> : IMiddleware<TContext>, ITerminalMiddle
     /// <summary>
     /// Initializes a new instance of the <see cref="SpecUiMiddleware{TContext}"/> class.
     /// </summary>
-    /// <param name="path">The path the UI is served from (for example <c>/spec-ui</c>).</param>
+    /// <param name="path">The path the UI is served from (for example <c>/benzene/spec-ui</c>).</param>
     /// <param name="specUrl">The URL the page fetches the Benzene spec JSON from.</param>
     /// <param name="httpRequestAdapter">Adapter used to read the request method and path.</param>
     /// <param name="responseAdapter">Adapter used to write the HTML response.</param>

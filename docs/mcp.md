@@ -27,7 +27,7 @@ public override void Configure(IBenzeneApplicationBuilder app, IConfiguration co
             .UseMessageHandlers()));
 ```
 
-That answers `POST /mcp` on the same API the rest of the service already deploys. The same call
+That answers `POST /benzene/mcp` (`McpOptions.DefaultPath`, configurable) on the same API the rest of the service already deploys. The same call
 works on `UseHttp(...)` (Azure Functions, ASP.NET Core) and the self-hosted HTTP worker, because the
 middleware drives the transport-neutral request/response adapters, like the BenzeneMessage HTTP endpoint.
 

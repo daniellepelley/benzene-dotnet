@@ -205,6 +205,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   takes an optional `headerName` and the MCP dispatcher writes `IBenzeneWireNames.Version`.
   *Migration*: producers that set a bare `version`/`x-version` header to pick a handler must send
   `benzene-version` (or the app renames the one header to theirs).
+- **BREAKING (spec-0.2.0, design-principles §5.2 / D4): every default path moves under `/benzene/`.**
+  `BenzeneMessageHttpOptions.DefaultPath` (the envelope endpoint, `UseBenzeneMessage`) `/benzene-message`
+  → `/benzene/invoke` (and `HttpMeshServiceDispatcher` derives `<origin>/benzene/invoke` when an entry
+  has no `invokeUrl`); `SpecUiExtensions.DefaultPath` `/spec-ui` → `/benzene/spec-ui`, fetching
+  `DefaultSpecUrl` `/benzene/spec?type=benzene` (was `/spec?type=benzene`); `MeshUiExtensions.DefaultPath`
+  `/mesh-ui` → `/benzene/mesh-ui`, with `DefaultSpecUiPath` `/mesh-spec-ui.html` →
+  `/benzene/mesh-spec-ui.html` beside it so the UI's relative *spec* link still resolves; `McpOptions.DefaultPath`
+  `/mcp` → `/benzene/mcp`. The mesh UI's default manifest URL (`manifest.json`, relative) is now resolved
+  against the served path's depth (new `MeshUiExtensions.ResolveManifestUrl`: `../manifest.json` at
+  `/benzene/mesh-ui`), so it still names the root-level `manifest.json` the artifact middleware serves; an
+  explicit manifest URL is used verbatim. Every path stays configurable, and the mesh examples and
+  `deploy/Mesh` host, which configure `/mesh-ui` explicitly (their Terraform health checks and links
+  target it), are unchanged. *Migration*: callers of an endpoint at its old default path — envelope
+  clients (`AddHttpBenzeneMessageClient`, `UseBenzeneMessageOverHttp`), a mesh registry entry's
+  `invokeUrl`, MCP client configuration, bookmarks — move to the new path, or the host pins the old one
+  (`new BenzeneMessageHttpOptions { Path = "/benzene-message" }`, `UseSpecUi("/spec-ui", "/spec?type=benzene")`,
+  `UseMeshUi("/mesh-ui")` + `UseMeshSpecUi("/mesh-spec-ui.html")`, `McpBuilder.AtPath("/mcp")`).
 - **BREAKING (mesh.md's 2026-08 revision): the mesh producer/consumer graph is now declared, never
   trace-derived.** `MeshServiceDescriptor` gains a `Consumes` field (mesh.md §2), populated from a new
   explicit **outbound registration** concept (§2.3, mirroring core-concepts.md §9's inbound handler

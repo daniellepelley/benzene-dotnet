@@ -19,7 +19,7 @@ namespace Benzene.Mcp.Hosting;
 public static class McpHttpExtensions
 {
     /// <summary>
-    /// Adds an MCP endpoint (default path <c>/mcp</c>), configuring the tools and the inner
+    /// Adds an MCP endpoint (default path <c>/benzene/mcp</c>), configuring the tools and the inner
     /// BenzeneMessage pipeline inline.
     /// </summary>
     /// <typeparam name="TContext">The HTTP context type.</typeparam>

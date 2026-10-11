@@ -25,7 +25,7 @@ because it drives the transport-neutral request/response adapters directly.
 ```csharp
 using Benzene.Http.BenzeneMessage;
 
-// Inline pipeline — serves POST /benzene-message
+// Inline pipeline — serves POST /benzene/invoke
 app.UseApiGateway(apiGateway => apiGateway
     .UseBenzeneMessage(messageApp => messageApp
         .UseMessageHandlers(router => router.UseFluentValidation()))
@@ -47,7 +47,7 @@ aws.UseApiGateway(apiGateway => apiGateway
 POST a BenzeneMessage envelope; the `body` is the payload **as a JSON string**:
 
 ```bash
-curl -X POST http://localhost:8080/benzene-message \
+curl -X POST http://localhost:8080/benzene/invoke \
   -H "content-type: application/json" \
   -d '{ "topic": "order:create", "headers": {}, "body": "{\"customerId\":\"11111111-1111-1111-1111-111111111111\"}" }'
 ```
@@ -73,7 +73,7 @@ from Benzene auth middleware in the pipeline is a processed envelope (200).
 ```csharp
 apiGateway.UseBenzeneMessage(new BenzeneMessageHttpOptions
 {
-    Path = "/admin/benzene-message",              // default: /benzene-message
+    Path = "/admin/benzene-message",              // default: /benzene/invoke
     TopicFilter = topic => topic.StartsWith("order:")  // reject → a not-found envelope (HTTP 200)
 }, messageApp => messageApp.UseMessageHandlers());
 ```

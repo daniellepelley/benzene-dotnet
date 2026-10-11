@@ -40,20 +40,22 @@ using Benzene.Spec.Ui;          // UseSpecUi
 
 // AWS Lambda API Gateway (the same call works on Azure Functions, ASP.NET, self-host).
 app.UseApiGateway(http => http
-    .UseSpecUi()                                   // serves GET /spec-ui
-    .UseSpec()                                     // serves the spec on GET /spec (see docs/spec.md)
+    .UseSpecUi()                                   // serves GET /benzene/spec-ui
+    .UseSpec()                                     // the benzene:spec topic; map GET /benzene/spec to it (see docs/spec.md)
     .UseMessageHandlers(router => router.UseFluentValidation())
 );
 
 // Customise the path and/or the spec URL it fetches:
 app.UseApiGateway(http => http
-    .UseSpecUi("/docs", "/spec?type=benzene")
+    .UseSpecUi("/docs", "/api/spec?type=benzene")
     .UseSpec()
     .UseMessageHandlers(router => router)
 );
 ```
 
-Browse to `/spec-ui`. The page fetches `/spec?type=benzene` and renders it.
+Browse to `/benzene/spec-ui`. The page fetches `/benzene/spec?type=benzene` (`SpecUiExtensions.DefaultSpecUrl`)
+and renders it. Both are the [default paths](https://github.com/daniellepelley/Benzene/blob/main/docs/specification/design-principles.md)
+every Benzene port uses, and both are configurable.
 
 > Use the **`benzene`** spec type — the UI is designed around its topic/payload/validation shape,
 > not `openapi`/`asyncapi`.
@@ -64,7 +66,7 @@ The viewer is a single self-contained HTML file with no external requests. If yo
 middleware, get the markup from `SpecUiPage` and write it to any HTTP response:
 
 ```csharp
-var html = SpecUiPage.GetHtml("/spec?type=benzene"); // inject the spec URL onto the page
+var html = SpecUiPage.GetHtml("/benzene/spec?type=benzene"); // inject the spec URL onto the page
 // write `html` with content-type "text/html"
 ```
 

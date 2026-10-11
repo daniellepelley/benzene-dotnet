@@ -15,15 +15,38 @@ namespace Benzene.Mesh.Ui;
 public static class MeshUiExtensions
 {
     /// <summary>The default path the mesh UI is served from.</summary>
-    public const string DefaultPath = "/mesh-ui";
+    public const string DefaultPath = "/benzene/mesh-ui";
 
     /// <summary>
     /// The default URL the UI fetches <c>manifest.json</c> from - a relative path, since the
     /// realistic case is the HTML sitting in the same directory as the aggregator's generated
     /// artifacts (unlike <c>Benzene.Spec.Ui</c>'s default, which points at a route on the same
-    /// live service).
+    /// live service). When the pipeline serves the page from a nested path (the default
+    /// <see cref="DefaultPath"/>, <c>/benzene/mesh-ui</c>), this default is resolved against the
+    /// page's depth - <c>../manifest.json</c> there - so it still names the root-level
+    /// <c>manifest.json</c> the artifact middleware serves, and stays relative (a host behind a path
+    /// prefix, such as an API Gateway stage, keeps working). A manifest URL passed explicitly is
+    /// used verbatim.
     /// </summary>
     public const string DefaultManifestUrl = "manifest.json";
+
+    /// <summary>
+    /// Resolves <see cref="DefaultManifestUrl"/> against the depth of the path a page is served
+    /// from (see <see cref="DefaultManifestUrl"/>); any other manifest URL is returned unchanged.
+    /// </summary>
+    /// <param name="path">The path the page is served from.</param>
+    /// <param name="manifestUrl">The configured manifest URL.</param>
+    /// <returns>The manifest URL the page is given.</returns>
+    public static string ResolveManifestUrl(string path, string manifestUrl)
+    {
+        if (manifestUrl != DefaultManifestUrl || string.IsNullOrWhiteSpace(path))
+        {
+            return manifestUrl;
+        }
+
+        var depth = path.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries).Length - 1;
+        return depth <= 0 ? manifestUrl : string.Concat(Enumerable.Repeat("../", depth)) + manifestUrl;
+    }
 
     /// <summary>
     /// Serves the Benzene Mesh Explorer page at <paramref name="path"/> on any HTTP pipeline. This
@@ -100,7 +123,7 @@ public static class MeshUiExtensions
     {
         app.Register(x =>
             x.AddSingleton(resolver => new MeshUiMiddleware<TContext>(
-                path, manifestUrl, envelopeUrl, dispatchUrl, logoutUrl, refreshUrl, environment,
+                path, ResolveManifestUrl(path, manifestUrl), envelopeUrl, dispatchUrl, logoutUrl, refreshUrl, environment,
                 resolver.GetService<IHttpRequestAdapter<TContext>>(),
                 resolver.GetService<IBenzeneResponseAdapter<TContext>>()
             )));
@@ -109,12 +132,15 @@ public static class MeshUiExtensions
     }
 
     /// <summary>
-    /// The default path the mesh-hosted Spec Explorer is served from. It ends in <c>.html</c> so the
-    /// single relative link <c>mesh-ui.html</c> builds (<c>mesh-spec-ui.html?service=…</c>) resolves
-    /// correctly whether the mesh UI is a static file next to the artifacts or served from this
-    /// pipeline at <c>/mesh-ui</c> - see <see cref="MeshSpecUiMiddleware{TContext}"/>.
+    /// The default path the mesh-hosted Spec Explorer is served from. It ends in <c>.html</c> and sits
+    /// beside <see cref="DefaultPath"/> so the single relative link <c>mesh-ui.html</c> builds
+    /// (<c>mesh-spec-ui.html?service=…</c>) resolves correctly whether the mesh UI is a static file next
+    /// to the artifacts or served from this pipeline at <c>/benzene/mesh-ui</c> - see
+    /// <see cref="MeshSpecUiMiddleware{TContext}"/>. A host that serves the mesh UI from another path
+    /// serves this page from that path's directory too (e.g. <c>/mesh-ui</c> with
+    /// <c>/mesh-spec-ui.html</c>).
     /// </summary>
-    public const string DefaultSpecUiPath = "/mesh-spec-ui.html";
+    public const string DefaultSpecUiPath = "/benzene/mesh-spec-ui.html";
 
     /// <summary>
     /// Serves the mesh-hosted Spec Explorer page (<see cref="MeshSpecUiPage"/>) at
@@ -141,7 +167,7 @@ public static class MeshUiExtensions
     {
         app.Register(x =>
             x.AddSingleton(resolver => new MeshSpecUiMiddleware<TContext>(
-                path, manifestUrl,
+                path, ResolveManifestUrl(path, manifestUrl),
                 resolver.GetService<IHttpRequestAdapter<TContext>>(),
                 resolver.GetService<IBenzeneResponseAdapter<TContext>>()
             )));

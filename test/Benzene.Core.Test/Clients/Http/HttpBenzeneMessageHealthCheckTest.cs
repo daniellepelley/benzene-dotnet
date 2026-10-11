@@ -16,7 +16,7 @@ namespace Benzene.Test.Clients.Http;
 /// </summary>
 public class HttpBenzeneMessageHealthCheckTest
 {
-    private const string Url = "https://service-b.internal/benzene-message";
+    private const string Url = "https://service-b.internal/benzene/invoke";
 
     [Fact]
     public async Task ExecuteAsync_ReturnsOk_AndPostsAHealthcheckEnvelope_WhenTheTargetAnswers2xx()
@@ -92,14 +92,14 @@ public class HttpBenzeneMessageHealthCheckTest
     [Fact]
     public async Task ExecuteAsync_StripsBasicAuthCredentialsFromTheReportedUrlAndDependency()
     {
-        var url = "https://user:s3cret@service-b.internal/benzene-message";
+        var url = "https://user:s3cret@service-b.internal/benzene/invoke";
         var check = new HttpBenzeneMessageHealthCheck(new HttpClient(new CapturingHandler(HttpStatusCode.OK)), url);
 
         var result = await check.ExecuteAsync(CancellationToken.None);
 
         Assert.DoesNotContain("s3cret", (string)result.Data["Url"]);
-        Assert.Equal("https://service-b.internal/benzene-message", result.Data["Url"]);
-        Assert.Equal("https://service-b.internal/benzene-message", Assert.Single(result.Dependencies).Name);
+        Assert.Equal("https://service-b.internal/benzene/invoke", result.Data["Url"]);
+        Assert.Equal("https://service-b.internal/benzene/invoke", Assert.Single(result.Dependencies).Name);
     }
 
     // The envelope endpoint answers 200 for every envelope it processed (transport-bindings §1): the

@@ -26,7 +26,7 @@ namespace Benzene.Test.Clients.Http;
 /// </summary>
 public class OutboundBenzeneMessageHttpTest
 {
-    private const string Url = "https://service-b.internal/benzene-message";
+    private const string Url = "https://service-b.internal/benzene/invoke";
 
     private static (IBenzeneMessageSender Sender, IServiceProvider Provider) Build(
         HttpMessageHandler handler, Action<OutboundRoutingBuilder> configure)

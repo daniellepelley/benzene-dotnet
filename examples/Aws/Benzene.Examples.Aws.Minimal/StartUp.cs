@@ -50,7 +50,7 @@ public class StartUp : BenzeneStartUp
         app.UseAwsLambda(aws =>
         {
             // The transport-neutral BenzeneMessage envelope pipeline, reused directly and mounted on
-            // API Gateway as the /benzene-message endpoint.
+            // API Gateway as the /benzene/invoke endpoint.
             var pipeline = aws.Create<BenzeneMessageContext>()
                 .UseMessageHandlers(_ => { });
 

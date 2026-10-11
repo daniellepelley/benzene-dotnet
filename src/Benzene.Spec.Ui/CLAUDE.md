@@ -35,7 +35,7 @@ events, and validation rules). It is the Benzene equivalent of `UseSwaggerUI`, b
 rather than path-centric.
 
 This package renders the spec; it does **not** generate it. Generation lives in
-`Benzene.Schema.OpenApi` (the `spec` topic / `GET /spec?type=benzene`).
+`Benzene.Schema.OpenApi` (the `spec` topic / `GET /benzene/spec?type=benzene`, the default route).
 
 ## Key types
 - `SpecUiPage` — transport-agnostic accessor for the viewer HTML.
@@ -45,7 +45,7 @@ This package renders the spec; it does **not** generate it. Generation lives in
 - `SpecUiMiddleware<TContext> : IMiddleware<TContext> where TContext : IHttpContext` — transport-
   agnostic HTTP middleware. On a GET/HEAD to its path it writes the page as `text/html` and
   short-circuits; otherwise it calls `next`.
-- `SpecUiExtensions.UseSpecUi<TContext>(this IMiddlewarePipelineBuilder<TContext>, path = "/spec-ui", specUrl = "/spec?type=benzene")`
+- `SpecUiExtensions.UseSpecUi<TContext>(this IMiddlewarePipelineBuilder<TContext>, path = "/benzene/spec-ui", specUrl = "/benzene/spec?type=benzene")`
   — registers the middleware on any Benzene HTTP pipeline.
 
 ## Why it isn't ASP.NET-specific
@@ -99,7 +99,7 @@ change any of it, change `benzene-ui` and re-vendor (see above).
   ASP.NET / web-framework dependency. `SpecUiPage` alone has no Benzene dependencies at all.
 
 ## Conventions
-- Point the UI at the `benzene` spec type (`/spec?type=benzene`) — it is designed around the
+- Point the UI at the `benzene` spec type (`/benzene/spec?type=benzene`) — it is designed around the
   topic/payload/validation shape of that format, not `openapi`/`asyncapi`.
 - `spec-ui.html` itself is not a convention to keep in mind while editing — it isn't edited here at
   all. See the vendoring section at the top of this file.

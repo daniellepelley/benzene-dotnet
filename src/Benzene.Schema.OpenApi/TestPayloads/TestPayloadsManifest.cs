@@ -35,7 +35,7 @@ public class TestPayloadHttpMapping
     public string Path { get; set; } = string.Empty;
 }
 
-/// <summary>The transport-agnostic BenzeneMessage envelope - the shape POSTed to <c>/benzene-message</c>.</summary>
+/// <summary>The transport-agnostic BenzeneMessage envelope - the shape POSTed to <c>/benzene/invoke</c>.</summary>
 public class BenzeneMessagePayload
 {
     /// <summary>The topic to invoke.</summary>

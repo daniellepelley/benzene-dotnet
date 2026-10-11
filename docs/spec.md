@@ -55,7 +55,7 @@ When the service exposes a BenzeneMessage-over-HTTP endpoint (`UseBenzeneMessage
 top-level `messageEndpoint` field:
 
 ```json
-{ "openapi": "3.0.1", "info": { }, "messageEndpoint": "/benzene-message", "requests": [ ] }
+{ "openapi": "3.0.1", "info": { }, "messageEndpoint": "/benzene/invoke", "requests": [ ] }
 ```
 
 Consumers feature-detect send capability on this field — no field means the service accepts

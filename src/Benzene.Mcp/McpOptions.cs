@@ -4,7 +4,7 @@ namespace Benzene.Mcp;
 public sealed class McpOptions
 {
     /// <summary>The path the Streamable HTTP endpoint answers on. Ignored by the stdio host.</summary>
-    public const string DefaultPath = "/mcp";
+    public const string DefaultPath = "/benzene/mcp";
 
     internal McpOptions(string path, McpServerInfo serverInfo, IReadOnlyList<McpToolDefinition> tools,
         Func<Exception, McpToolResult?>? toolFailure, Action<string>? log)

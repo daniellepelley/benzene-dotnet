@@ -14,7 +14,7 @@ public sealed partial class McpBuilder
     private Func<Exception, McpToolResult?>? _toolFailure;
     private Action<string>? _log;
 
-    /// <summary>The path the Streamable HTTP endpoint answers on (default <c>/mcp</c>). Ignored over stdio.</summary>
+    /// <summary>The path the Streamable HTTP endpoint answers on (default <c>/benzene/mcp</c>). Ignored over stdio.</summary>
     public McpBuilder AtPath(string path)
     {
         _path = path;

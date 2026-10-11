@@ -8,7 +8,7 @@ Outbound HTTP for the Benzene client, in **two flavours**:
    the target is a normal REST route.
 2. **BenzeneMessage envelope** (`HttpBenzeneMessageClient`, added 2026-07-22) — carries the transport-neutral
    envelope `{ topic, headers, body }` over HTTP to another Benzene service's BenzeneMessage endpoint (the
-   serving side's `BenzeneMessageHttpMiddleware`, default path `/benzene-message`), and maps the returned
+   serving side's `BenzeneMessageHttpMiddleware`, default path `/benzene/invoke`), and maps the returned
    `{ statusCode, headers, body }` envelope back to `IBenzeneResult<TResponse>`. This is the HTTP counterpart
    of the AWS Lambda invoke path (`AwsLambdaBenzeneMessageClient`) — **the topic travels inside the JSON body,
    so one endpoint serves every topic**, letting two Benzene containers exchange lightweight messages over

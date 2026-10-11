@@ -47,7 +47,7 @@ public class BenzeneMessageHttpPipelineTest
         var host = CreateHost();
 
         var response = await host.SendApiGatewayAsync(
-            HttpBuilder.Create("POST", "/benzene-message", CreateEnvelope(Defaults.Topic)));
+            HttpBuilder.Create("POST", "/benzene/invoke", CreateEnvelope(Defaults.Topic)));
 
         Assert.NotNull(response);
         Assert.Equal(200, response.StatusCode);
@@ -62,7 +62,7 @@ public class BenzeneMessageHttpPipelineTest
         var host = CreateHost();
 
         var response = await host.SendApiGatewayAsync(
-            HttpBuilder.Create("POST", "/benzene-message", CreateEnvelope("no-such-topic")));
+            HttpBuilder.Create("POST", "/benzene/invoke", CreateEnvelope("no-such-topic")));
 
         Assert.NotNull(response);
         Assert.Equal(200, response.StatusCode);
@@ -82,7 +82,7 @@ public class BenzeneMessageHttpPipelineTest
         var host = CreateHost();
 
         var response = await host.SendApiGatewayAsync(
-            HttpBuilder.Create("POST", "/benzene-message", CreateEnvelope("no-such-topic")));
+            HttpBuilder.Create("POST", "/benzene/invoke", CreateEnvelope("no-such-topic")));
 
         Assert.NotNull(response);
         Assert.Equal(200, response.StatusCode);
@@ -100,7 +100,7 @@ public class BenzeneMessageHttpPipelineTest
         var host = CreateHost(new BenzeneMessageHttpOptions { TopicFilter = topic => topic != Defaults.Topic });
 
         var response = await host.SendApiGatewayAsync(
-            HttpBuilder.Create("POST", "/benzene-message", CreateEnvelope(Defaults.Topic)));
+            HttpBuilder.Create("POST", "/benzene/invoke", CreateEnvelope(Defaults.Topic)));
 
         Assert.NotNull(response);
         Assert.Equal(200, response.StatusCode);

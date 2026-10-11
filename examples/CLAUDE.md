@@ -23,7 +23,7 @@ handler/logic in `Benzene.Examples.App` and wiring it from the hosts, rather tha
     [docs/getting-started-aspnet.md](../docs/getting-started-aspnet.md) (`GET /hello/{name}` only), using the
     documented `BenzeneStartUp` + `WebApplicationBuilder.UseBenzene<StartUp>()` model. Start ASP.NET
     newcomers here; the [platform picker](../docs/getting-started.md) routes other platforms to their guide.
-  - `Benzene.Example.Asp` — the fuller host: Spec UI (`/spec-ui`) + `spec` endpoint, FluentValidation,
+  - `Benzene.Example.Asp` — the fuller host: Spec UI (`/benzene/spec-ui`) + `spec` endpoint, FluentValidation,
     Serilog, controllers, and an OAuth2-protected `/protected/ping` route. It wires Benzene by hand via
     `IApplicationBuilder.UseBenzene(builder => builder.UseHttp(...))` (the other documented ASP.NET path,
     see [docs/hosting.md](../docs/hosting.md)) because it needs native ASP.NET plumbing —

@@ -93,7 +93,7 @@ pre-built builder).
   shape as `CorsMiddleware`/`SpecUiMiddleware`, so it works on every HTTP transport. The envelope
   is always read/written with Benzene's default JSON serialization, independent of the app's own
   negotiated payload formats.
-- `BenzeneMessageHttpOptions` - `Path` (default `/benzene-message`) and optional `TopicFilter`
+- `BenzeneMessageHttpOptions` - `Path` (default `/benzene/invoke`) and optional `TopicFilter`
   allowlist predicate - spec D21's required topic restriction (rejected topic → a `not-found` envelope
   carrying the router's problem document, HTTP 200, exactly as if no handler matched).
 - `IBenzeneMessageHttpEndpointInfo` - registered by `UseBenzeneMessage` so the `benzene` spec

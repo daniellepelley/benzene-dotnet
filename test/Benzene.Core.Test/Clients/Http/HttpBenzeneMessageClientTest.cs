@@ -17,12 +17,12 @@ namespace Benzene.Test.Clients.Http;
 
 /// <summary>
 /// Coverage for <see cref="HttpBenzeneMessageClient"/> - the client that carries a BenzeneMessage envelope
-/// (<c>{ topic, headers, body }</c>) over HTTP to another Benzene service's <c>/benzene-message</c> endpoint,
+/// (<c>{ topic, headers, body }</c>) over HTTP to another Benzene service's <c>/benzene/invoke</c> endpoint,
 /// the HTTP counterpart of the Lambda invoke path.
 /// </summary>
 public class HttpBenzeneMessageClientTest
 {
-    private const string Url = "https://service-b.internal/benzene-message";
+    private const string Url = "https://service-b.internal/benzene/invoke";
 
     [Fact]
     public async Task SendMessageAsync_PostsTheEnvelope_ToTheConfiguredUrl_WithTopicHeadersAndSerializedBody()

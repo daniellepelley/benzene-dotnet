@@ -149,4 +149,23 @@ public class MeshUiMiddlewareTest
             x => x.SetBody(context, MeshUiPage.GetHtml("manifest.json", "/benzene/invoke")),
             Times.Once);
     }
+
+    [Theory]
+    [InlineData("/benzene/mesh-ui", "manifest.json", "../manifest.json")]
+    [InlineData("/benzene/mesh-spec-ui.html", "manifest.json", "../manifest.json")]
+    [InlineData("/mesh-ui", "manifest.json", "manifest.json")]
+    [InlineData("/a/b/mesh-ui", "manifest.json", "../../manifest.json")]
+    [InlineData("/benzene/mesh-ui", "/artifacts/manifest.json", "/artifacts/manifest.json")]
+    [InlineData("/benzene/mesh-ui", "./manifest.json", "./manifest.json")]
+    public void ResolveManifestUrl_ResolvesOnlyTheDefaultAgainstThePageDepth(string path, string manifestUrl, string expected)
+    {
+        Assert.Equal(expected, MeshUiExtensions.ResolveManifestUrl(path, manifestUrl));
+    }
+
+    [Fact]
+    public void Defaults_ServeTheMeshUiAndItsSpecPageUnderBenzene()
+    {
+        Assert.Equal("/benzene/mesh-ui", MeshUiExtensions.DefaultPath);
+        Assert.Equal("/benzene/mesh-spec-ui.html", MeshUiExtensions.DefaultSpecUiPath);
+    }
 }

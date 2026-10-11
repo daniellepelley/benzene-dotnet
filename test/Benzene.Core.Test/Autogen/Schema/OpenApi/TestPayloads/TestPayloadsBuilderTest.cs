@@ -37,7 +37,7 @@ public class TestPayloadsBuilderTest
         Assert.Contains("sqs", getTopic.Transports);
         var payload = Assert.IsType<BenzeneMessagePayload>(getTopic.Payloads["benzene-message"]);
         Assert.Equal("user:get", payload.Topic);
-        // The body is a JSON-serialized example object - valid JSON, ready to POST to /benzene-message.
+        // The body is a JSON-serialized example object - valid JSON, ready to POST to /benzene/invoke.
         var body = JObject.Parse(payload.Body);
         Assert.NotNull(body);
     }

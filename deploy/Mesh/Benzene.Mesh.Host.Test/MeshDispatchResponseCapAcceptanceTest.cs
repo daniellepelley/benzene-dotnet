@@ -36,7 +36,7 @@ public class MeshDispatchResponseCapAcceptanceTest
     private const int TargetBodyBytes = 20_000; // comfortably under HttpMeshServiceDispatcher.DefaultMaxResponseBytes (131,072)
     private const int ConfiguredMaxResponseBytes = 500; // comfortably under TargetBodyBytes
 
-    /// <summary>A minimal loopback HTTP target standing in for a real mesh service's <c>/benzene-message</c> endpoint.</summary>
+    /// <summary>A minimal loopback HTTP target standing in for a real mesh service's <c>/benzene/invoke</c> endpoint.</summary>
     private sealed class FakeTargetService : IDisposable
     {
         private readonly HttpListener _listener;
@@ -49,7 +49,7 @@ public class MeshDispatchResponseCapAcceptanceTest
             var port = GetFreeTcpPort();
             // "localhost", not "127.0.0.1" - matching FakeJwksServer/FakeOidcProvider's established
             // HttpListener prefix precedent in this repo's test suite.
-            InvokeUrl = $"http://localhost:{port}/benzene-message";
+            InvokeUrl = $"http://localhost:{port}/benzene/invoke";
             _listener = new HttpListener();
             _listener.Prefixes.Add($"http://localhost:{port}/");
             _listener.Start();

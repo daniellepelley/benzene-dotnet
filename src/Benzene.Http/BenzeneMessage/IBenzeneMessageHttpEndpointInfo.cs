@@ -7,7 +7,7 @@
 /// </summary>
 public interface IBenzeneMessageHttpEndpointInfo
 {
-    /// <summary>Gets the path the endpoint listens on (for example <c>/benzene-message</c>).</summary>
+    /// <summary>Gets the path the endpoint listens on (for example <c>/benzene/invoke</c>).</summary>
     string Path { get; }
 }
 

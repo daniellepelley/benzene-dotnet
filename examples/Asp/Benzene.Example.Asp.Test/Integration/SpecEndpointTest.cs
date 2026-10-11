@@ -8,7 +8,7 @@ namespace Benzene.Example.Asp.Test.Integration;
 /// Covers the Asp example's spec surface - the canonical demonstration of Benzene's spec/schema
 /// generation (<c>UseSpec()</c>) and the Spec Explorer UI (<c>UseSpecUi()</c>), wired in
 /// <c>Startup.Configure</c>. Nothing else in the example suite exercised these before, even though
-/// <c>examples/CLAUDE.md</c> calls this folder out as "where the Spec UI (/spec-ui) and the spec
+/// <c>examples/CLAUDE.md</c> calls this folder out as "where the Spec UI (/benzene/spec-ui) and the spec
 /// endpoint are wired". A regression that stopped the spec listing the app's handlers - or stopped
 /// the UI serving - would now fail the build.
 /// </summary>
@@ -20,7 +20,7 @@ public class SpecEndpointTest : InMemoryOrdersTestBase
     public async Task Spec_Benzene_ListsTheAppsMessageTopics()
     {
         // The URL the Spec Explorer UI itself fetches on load (SpecUiExtensions.DefaultSpecUrl).
-        var response = await _client.GetAsync("/spec?type=benzene&format=json");
+        var response = await _client.GetAsync("/benzene/spec?type=benzene&format=json");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var spec = await response.Content.ReadAsStringAsync();
@@ -35,7 +35,7 @@ public class SpecEndpointTest : InMemoryOrdersTestBase
     [Fact]
     public async Task SpecUi_ServesTheSpecExplorerPage()
     {
-        var response = await _client.GetAsync("/spec-ui");
+        var response = await _client.GetAsync("/benzene/spec-ui");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var html = await response.Content.ReadAsStringAsync();

@@ -7,7 +7,7 @@
 public class BenzeneMessageHttpOptions
 {
     /// <summary>The default path the endpoint listens on.</summary>
-    public const string DefaultPath = "/benzene-message";
+    public const string DefaultPath = "/benzene/invoke";
 
     /// <summary>
     /// Gets or sets the path the endpoint listens on for POSTed BenzeneMessage envelopes.

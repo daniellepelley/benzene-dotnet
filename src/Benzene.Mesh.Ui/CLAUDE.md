@@ -65,8 +65,14 @@ This package renders the catalog; it does **not** generate it. Generation lives 
 - `MeshUiMiddleware<TContext> : IMiddleware<TContext> where TContext : IHttpContext` — transport-
   agnostic HTTP middleware, same short-circuit shape as `Benzene.Spec.Ui`'s `SpecUiMiddleware`. One
   ctor per `GetHtml` overload shape, each delegating to the widest one.
-- `MeshUiExtensions.UseMeshUi<TContext>(this IMiddlewarePipelineBuilder<TContext>, path = "/mesh-ui", manifestUrl = "manifest.json", envelopeUrl = null, dispatchUrl = null, logoutUrl = null, refreshUrl = null, environment = null)`
-  — registers the middleware on any Benzene HTTP pipeline. This is a **secondary convenience**,
+- `MeshUiExtensions.UseMeshUi<TContext>(this IMiddlewarePipelineBuilder<TContext>, path = "/benzene/mesh-ui", manifestUrl = "manifest.json", envelopeUrl = null, dispatchUrl = null, logoutUrl = null, refreshUrl = null, environment = null)`
+  — registers the middleware on any Benzene HTTP pipeline. The default `manifestUrl` is resolved against
+  the served path's depth (`MeshUiExtensions.ResolveManifestUrl`: `../manifest.json` at
+  `/benzene/mesh-ui`), so it still names the root-level `manifest.json` the artifact middleware serves
+  and stays relative for hosts behind a path prefix; an explicit `manifestUrl` is used verbatim. The
+  spec page's default path (`/benzene/mesh-spec-ui.html`) sits beside the UI's so the UI's relative
+  *spec* link resolves; a host that moves the UI (e.g. the mesh examples' `/mesh-ui`) moves the spec
+  page with it (`/mesh-spec-ui.html`). This is a **secondary convenience**,
   not the primary deployment path (see below). Pass `envelopeUrl` (e.g. `"/benzene/invoke"`) on a
   mesh host that also serves a `Benzene.Mesh.Collector` to fold the live Fleet plane into the catalog.
 
@@ -89,7 +95,7 @@ labels the estate, has to be a sentence the host wrote deliberately.
   `placement.environment` reaches the spec, so the host must supply it explicitly or the page says the
   environment is not published — it never guesses from a hostname.
 - `MeshSpecUiPage` / `MeshSpecUiMiddleware<TContext>` / `UseMeshSpecUi<TContext>(path =
-  "/mesh-spec-ui.html", manifestUrl = "manifest.json")` — the **mesh-hosted per-service Spec UI**
+  "/benzene/mesh-spec-ui.html", manifestUrl = "manifest.json")` — the **mesh-hosted per-service Spec UI**
   (page: `mesh-spec-ui.html`), the target of `mesh-ui.html`'s per-service *spec* link. It renders a
   single service's Benzene spec — the same Swagger-style view as `Benzene.Spec.Ui`'s `spec-ui.html` —
   but reads the spec the aggregator already captured into the **same-origin** `services/{name}.json`

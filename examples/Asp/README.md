@@ -1,6 +1,6 @@
 # Benzene ASP.NET Core Example
 
-The ASP.NET Core host example — also where the Spec UI (`/spec-ui`) and the `spec` endpoint are wired. See `examples/CLAUDE.md` for how this fits among the other host examples.
+The ASP.NET Core host example — also where the Spec UI (`/benzene/spec-ui`) and the `spec` endpoint are wired. See `examples/CLAUDE.md` for how this fits among the other host examples.
 
 ## Running
 
@@ -8,8 +8,8 @@ The ASP.NET Core host example — also where the Spec UI (`/spec-ui`) and the `s
 dotnet run --project Benzene.Example.Asp --urls http://localhost:5000
 ```
 
-- `GET /spec` — the derived Benzene spec document
-- `GET /spec-ui` — a Swagger-UI-style browser for it
+- `GET /benzene/spec` — the derived Benzene spec document
+- `GET /benzene/spec-ui` — a Swagger-UI-style browser for it
 - Order handlers under `/orders` (see `examples/App/Benzene.Examples.App`)
 
 ## Authentication demo
@@ -32,7 +32,7 @@ BAD_TOKEN=$(curl -s "http://localhost:5000/demo-token?scope=orders:write")
 curl -i -H "Authorization: Bearer $BAD_TOKEN" http://localhost:5000/protected/ping
 ```
 
-The public routes above (`/spec`, `/spec-ui`, `/orders/*`) are untouched by any of this — the
+The public routes above (`/benzene/spec`, `/benzene/spec-ui`, `/orders/*`) are untouched by any of this — the
 protected route lives in its own `app.Map("/protected", ...)` branch (see `Startup.cs`), which is
 also the pattern to follow if you need a real mix of public and protected routes in one app; see
 the cookbook's "Protecting Only Some Routes" section for why a plain second `UseHttp` pipeline

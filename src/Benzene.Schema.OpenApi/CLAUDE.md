@@ -49,7 +49,7 @@ for the `benzene` contract.
   topic (reserved utility topics skipped) it generates the deterministic, validation-aware example
   body via the runtime-safe `Examples.ExamplePayloadBuilder` and wraps it in the portable
   BenzeneMessage envelope (`{ topic, headers, body }`) - the exact shape a caller POSTs to
-  `/benzene-message` - plus the transports each topic is reachable on (`EventServiceDocument.Transports`
+  `/benzene/invoke` - plus the transports each topic is reachable on (`EventServiceDocument.Transports`
   + per-topic HTTP mappings). Deliberately AWS-free.
 - `ITestPayloadDresser` / `TestPayloadDressingContext` - the **per-transport dressing seam** (decision
   1(c) of `work/archive/runtime-test-payloads-plan-2026-08.md`). `TestPayloadsBuilder` resolves every registered
