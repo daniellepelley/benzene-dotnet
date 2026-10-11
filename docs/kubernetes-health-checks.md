@@ -203,7 +203,8 @@ spec:
 ```
 
 Both probes work correctly against Benzene's response because the HTTP status code — not just the
-JSON body — reflects health: `200` when healthy, `503 Service Unavailable` when not (see
+JSON body — reflects health: `200` when `isHealthy` is true, `503 Service Unavailable` when it is
+false, with the health report as the body either way (see
 [HTTP status codes](health-checks.md#http-status-codes)). Kubernetes' `httpGet` probe type only inspects
 the status code (2xx-399 is a pass, anything else is a failure), so this matters — a health check
 that returned `200` unconditionally, with the real status only visible in the response body, would

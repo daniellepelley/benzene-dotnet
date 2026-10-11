@@ -8,8 +8,9 @@ topic* (e.g. `BenzeneMessage`/HTTP-over-message-handlers), not a dedicated ASP.N
 HTTP-endpoint attribute - there is no built-in `/health` route and no HTTP-endpoint-attribute
 discovery in this package itself. An HTTP transport that maps message-handler results to HTTP
 responses (see e.g. `Benzene.AspNet.Core`) is what turns this middleware's result into an actual HTTP
-response - and that mapping DOES reflect health status in the HTTP status code (200 healthy, 503
-unhealthy, via `HealthCheckProcessor`), not just the JSON body. See `docs/kubernetes-health-checks.md`
+response - and that mapping DOES reflect health in the HTTP status code (200 healthy, 503 unhealthy),
+not just the JSON body: the result is `ok` either way and `Benzene.Http.HttpStatusCodeResponseHandler`
+maps the payload's `IsHealthy: false` (an `IHealthVerdict`) to 503 (spec transport-bindings §1). See `docs/kubernetes-health-checks.md`
 for the full Kubernetes wiring guide.
 
 ## Key types/interfaces
@@ -146,7 +147,10 @@ for the full Kubernetes wiring guide.
   (`IServiceResolver` has no child-scope API, so the engine can't isolate each check in its own scope.)
 - `.UseHealthCheck(topic, ...)` responds to `Constants.DefaultHealthCheckTopic` ("healthcheck") in
   addition to whatever topic is passed; `.UseLivenessCheck`/`.UseReadinessCheck` do not
-- `HealthCheckProcessor.PerformHealthChecksAsync` maps the aggregate result to
-  `BenzeneResultStatus.Ok`/`ServiceUnavailable` (HTTP 200/503 via the standard status code mapper),
-  not just an `isHealthy` body field - this matters for any consumer (Kubernetes probes, load
-  balancer target-health checks) that only inspects the status code
+- `HealthCheckProcessor.PerformHealthChecksAsync` answers `BenzeneResultStatus.Ok` whenever the checks
+  ran, healthy or not (spec wire-contracts §5, spec-0.2.0); `IsHealthy` on the `HealthCheckResponse`
+  carries the verdict. It used to answer `ServiceUnavailable` marked successful - a failure status with
+  `isSuccessful: true`, which the spec no longer permits. The HTTP 503 that Kubernetes probes and load
+  balancers need now comes from the HTTP binding mapping `IsHealthy: false` onto the status line
+  (`HttpStatusCodeResponseHandler`, via `Benzene.Abstractions.Results.IHealthVerdict`, which
+  `IHealthCheckResponse<T>` extends), on every route mapped to a health topic

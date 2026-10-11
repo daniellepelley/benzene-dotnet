@@ -11,9 +11,10 @@ public interface IHealthCheckProcessor
 {
     /// <summary>
     /// Runs every check (each under a timeout and exception isolation), captures each check's
-    /// duration, and returns an aggregated <c>HealthCheckResponse</c> mapped to
-    /// <see cref="BenzeneResultStatus.Ok"/> (HTTP 200) when healthy or
-    /// <see cref="BenzeneResultStatus.ServiceUnavailable"/> (HTTP 503) when not.
+    /// duration, and returns the aggregated <c>HealthCheckResponse</c> with status
+    /// <see cref="BenzeneResultStatus.Ok"/> - whether or not the service is healthy (wire-contracts.md
+    /// §5: the checks ran, so the health query succeeded). The verdict is the payload's <c>IsHealthy</c>;
+    /// the HTTP binding maps <c>IsHealthy: false</c> to 503.
     /// </summary>
     /// <remarks>
     /// <see cref="PerformHealthChecksAsync"/> takes no ambient <see cref="System.Threading.CancellationToken"/> -

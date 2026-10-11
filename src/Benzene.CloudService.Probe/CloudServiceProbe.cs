@@ -80,8 +80,8 @@ public static class CloudServiceProbe
                 $"GET {options.HealthPath} did not reach the service: {failure}"), false);
         }
         // A conformant service returns 200 when healthy and 503 when unhealthy - both carry the same
-        // health-report body (see Benzene.HealthChecks.HealthCheckProcessor, which sets the 503 as a
-        // successful result so the report still renders). Runtime degradation is NOT a conformance
+        // health-report body (transport-bindings.md §1: the health route maps the payload's isHealthy
+        // onto the status line; the health query itself is ok either way). Runtime degradation is NOT a conformance
         // failure (cloud-service-profile.md §4), so accept either and judge R3 on the report shape -
         // matching how the mesh aggregator reads a 503 body rather than treating it as a fetch failure.
         if (status != 200 && status != 503)

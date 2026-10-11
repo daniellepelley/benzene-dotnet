@@ -57,7 +57,10 @@ Provides HTTP abstractions and utilities for building HTTP-based Benzene applica
 ### Status Codes
 - `IHttpStatusCodeMapper` - Maps result status to HTTP status codes
 - `DefaultHttpStatusCodeMapper` - Default HTTP status mapping
-- `HttpStatusCodeResponseHandler<TContext>` - Sets HTTP status on response
+- `HttpStatusCodeResponseHandler<TContext>` - Sets HTTP status on response via `IHttpStatusCodeMapper` -
+  except a successful result whose payload is an `IHealthVerdict` (`Benzene.Abstractions.Results`, the
+  health report) with `IsHealthy: false`, which answers **503** (spec transport-bindings §1: any route
+  mapped to a health topic carries the verdict on its status line; the health query itself is `ok`)
 - `HttpProblemDetailsResponsePayloadMapper<TContext>` - decorates `IResponsePayloadMapper<TContext>`:
   on a failed result, fills the RFC 9457 `ProblemDetails.Status` member from the same
   `IHttpStatusCodeMapper` instance `HttpStatusCodeResponseHandler<TContext>` uses for the response

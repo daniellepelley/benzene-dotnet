@@ -161,6 +161,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Two declared defaults on one topic now fail start-up (`version-selection`).
   - `HttpVersioningOptions.KeepUnversionedRoute`'s unversioned route now reaches the topic's default
     handler, not "the latest".
+- **BREAKING (spec-0.2.0, wire-contracts §5 / D2): a health query answers `ok` whether or not the
+  service is healthy; `isHealthy` carries the verdict.** `HealthCheckProcessor` used to answer an
+  unhealthy service with `service-unavailable` marked *successful* — a failure status with
+  `isSuccessful: true`, which wire-contracts §1.2 no longer allows. Over HTTP nothing a probe sees
+  changes: any route mapped to a health topic still answers **503** when unhealthy (and 200 when
+  healthy or only warning), with the health report as the body — now because
+  `HttpStatusCodeResponseHandler` maps the payload's `IsHealthy: false` onto the status line, via the
+  new `Benzene.Abstractions.Results.IHealthVerdict` (which `IHealthCheckResponse<T>` extends).
+  *Migration*: code that read a health result's status (`ServiceUnavailable`) to decide health — over
+  the envelope, `/benzene/invoke`, a queue or in-process — must read the payload's `isHealthy`.
 - **BREAKING (spec-0.2.0, wire-contracts §2 / D10): one version header, `benzene-version` — the
   `version`/`x-version` fallback list is gone.** A producer's own `version` or `x-version` header is an
   ordinary header and selects nothing. `HeaderMessageVersionGetter<TContext>.DefaultHeaderNames` (a list)

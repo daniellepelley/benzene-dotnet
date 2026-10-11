@@ -56,7 +56,7 @@ public class ApiGatewayLivenessReadinessTest
     }
 
     [Fact]
-    public async Task UseReadinessCheck_ReportsUnhealthy_AsNonSuccessStatus()
+    public async Task UseReadinessCheck_ReportsUnhealthy_As503_WithTheHealthReport()
     {
         var mockHealthCheck = new Mock<IHealthCheck>();
         mockHealthCheck.Setup(x => x.ExecuteAsync(It.IsAny<CancellationToken>())).ReturnsAsync(HealthCheckResult.CreateInstance(false, "Database"));
@@ -71,7 +71,10 @@ public class ApiGatewayLivenessReadinessTest
         var request = HttpBuilder.Create("GET", "/readyz").AsApiGatewayRequest();
         var response = await host.SendApiGatewayAsync(request);
 
-        Assert.NotEqual(200, response.StatusCode);
+        // transport-bindings §1: a route mapped to a health topic answers 503 when isHealthy is false,
+        // with the health report as the body (not a problem document).
+        Assert.Equal(503, response.StatusCode);
+        Assert.Contains("\"isHealthy\":false", response.Body);
     }
 
     [Fact]

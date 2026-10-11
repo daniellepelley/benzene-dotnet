@@ -432,7 +432,7 @@ app.UseLivenessCheck("/custom/live/path", checks);  // path override
 ```
 
 Both variants (topic-based and HTTP-path-based) run through the same `HealthCheckProcessor`, so an
-unhealthy result maps to HTTP 503 the same way `.UseHealthCheck()`'s does — see
+unhealthy report maps to HTTP 503 the same way `.UseHealthCheck()`'s does — see
 [HTTP status codes](#http-status-codes) below.
 
 ### gRPC (grpc.health.v1)
@@ -510,14 +510,23 @@ whole response to `false` even if every other check succeeded.
 
 ### HTTP status codes
 
-Over an HTTP transport, the response's HTTP status code reflects `isHealthy`, not just its body:
-`200` when healthy, `503 Service Unavailable` when not (mapped by `DefaultHttpStatusCodeMapper`,
-same as everywhere else in Benzene). This matters because most health-check consumers — a
-Kubernetes HTTP probe, a load balancer target-health check — only look at the status code, not the
-response body, so a check whose body says `"isHealthy": false` but whose status code is still `200`
-would be silently treated as healthy by those consumers. `HealthCheckProcessor.PerformHealthChecksAsync`
-handles this for every `.UseHealthCheck()`/`.UseLivenessCheck()`/`.UseReadinessCheck()` variant, over
-every transport, with no extra configuration needed.
+A health query whose checks ran **succeeded**, whatever they found: its Benzene status is `ok`, and
+`isHealthy` in the report carries the verdict (spec wire-contracts §5). That is what every
+non-HTTP caller sees — the envelope, a queue, `/benzene/invoke` all answer `ok` with
+`"isHealthy": false` in the body for an unhealthy service.
+
+Over an HTTP route mapped to a health topic, the status line carries the verdict too: `200` when
+healthy, `503 Service Unavailable` when not, with the health report as the body either way (not a
+problem document). This is the one place the HTTP binding maps a payload field rather than the
+result's status (spec transport-bindings §1) — `HttpStatusCodeResponseHandler` reads any successful
+payload that is an `IHealthVerdict` (`HealthCheckResponse` is one) and answers 503 when `IsHealthy`
+is false. It matters because most health-check consumers — a Kubernetes HTTP probe, a load balancer
+target-health check — only look at the status code, so a report saying `"isHealthy": false` under a
+`200` would be silently treated as healthy. It applies to every route mapped to a health topic
+(`/benzene/health`, a liveness or readiness route, an API Gateway `/livez`), with no extra
+configuration. A `warning` check does not flip `isHealthy`, so it stays `200`. A health invocation that
+itself failed (it threw before the checks ran) is not a verdict and maps through the normal status
+table.
 
 `Data["Error"]`/`Data["Exception"]` entries (populated when a check fails with an exception, or
 times out) report the exception's *type name* (e.g. `"SqlException"`), not its message — some

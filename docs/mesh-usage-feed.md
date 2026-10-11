@@ -36,8 +36,8 @@ both tagged with the **standard metadata set**:
 
 > **The `result` collapse rule is part of the standard** (a 2026-07-23 change to the value set —
 > keys and instrument names are unchanged): emit **`success`** for any *successful* outcome
-> (`IHasMessageResult.MessageResult.IsSuccessful` — the bool, so a result that stays successful while
-> carrying a failure-class status like a health check's `service-unavailable` is still `success`); the
+> (`IHasMessageResult.MessageResult.IsSuccessful` — the bool, so an application-defined status the
+> producer marked successful is still `success`); the
 > failure's **status string verbatim** (`not-found`, `unauthorized`, `conflict`, `validation-error`, …)
 > for an unsuccessful result; **`exception`** when the pipeline threw (distinct from a handler that
 > *returned* `unexpected-error`); and `"<missing>"` when no result was recorded. This keeps success

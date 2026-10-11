@@ -11,7 +11,8 @@ namespace Benzene.HealthChecks;
 /// <see cref="ExceptionHandlingHealthCheck"/>, times each one, and aggregates into a
 /// <see cref="HealthCheckResponse"/>. <c>IsHealthy</c> is <c>true</c> unless at least one check
 /// reports <see cref="HealthCheckStatus.Failed"/> - a <see cref="HealthCheckStatus.Warning"/> does not
-/// flip it. Each result's key is assigned via <see cref="HealthCheckNamer"/> to stay unique even when
+/// flip it. The result's status is <c>ok</c> either way (wire-contracts.md §5): the verdict travels in
+/// the payload, and the HTTP binding maps an unhealthy one to 503. Each result's key is assigned via <see cref="HealthCheckNamer"/> to stay unique even when
 /// checks share (or omit) a <see cref="IHealthCheck.Type"/>. Per-check overrides are honoured: a check's
 /// <see cref="IHealthCheck.Timeout"/> replaces the processor-wide timeout, and a non-critical check
 /// (<see cref="IHealthCheck.IsNonCritical"/> == <c>true</c>) has a <see cref="HealthCheckStatus.Failed"/>
@@ -47,11 +48,12 @@ public class HealthCheckProcessor : IHealthCheckProcessor
         var message = new HealthCheckResponse(isHealthy,
             results.ToDictionary(x => healthCheckNamer.GetName(x.Type), x => x));
 
-        // Unhealthy: ServiceUnavailable so HTTP probes see a 503, but explicitly successful so
-        // the response body renders the health report payload rather than an error payload.
-        return isHealthy
-            ? BenzeneResult.Ok(message)
-            : BenzeneResult.Set(BenzeneResultStatus.ServiceUnavailable, message, true);
+        // Ok whether or not the service is healthy: the checks ran, so the health query succeeded
+        // (wire-contracts.md §5) and IsHealthy carries the verdict. This used to answer
+        // ServiceUnavailable marked successful - a failure status with isSuccessful: true, which the
+        // spec no longer allows (wire-contracts §1.2). HTTP probes still see a 503: the HTTP binding maps
+        // the payload's IsHealthy: false onto the status line (HttpStatusCodeResponseHandler).
+        return BenzeneResult.Ok(message);
     }
 
     // Times a single check and stamps the measured duration onto its (rebuilt) result. Runs

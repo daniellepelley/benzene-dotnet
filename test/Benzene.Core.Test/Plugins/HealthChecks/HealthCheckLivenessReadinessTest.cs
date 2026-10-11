@@ -91,8 +91,10 @@ public class HealthCheckLivenessReadinessTest
     }
 
     [Fact]
-    public async Task UseReadinessCheck_Unhealthy_ReturnsServiceUnavailable()
+    public async Task UseReadinessCheck_Unhealthy_IsOk_WithIsHealthyFalse()
     {
+        // wire-contracts §5: the checks ran, so the health query succeeded; the verdict is the payload's
+        // isHealthy. (Only an HTTP route maps it onto a 503 status line.)
         var livenessCheck = CreateMockCheck("Liveness");
         var readinessCheck = CreateMockCheck("Readiness", healthy: false);
         var (app, resolverFactory) = BuildApp(livenessCheck, readinessCheck);
@@ -100,11 +102,13 @@ public class HealthCheckLivenessReadinessTest
         var response = await app.HandleAsync(
             new BenzeneMessageRequest { Topic = HealthCheckConstants.DefaultReadinessTopic }, resolverFactory);
 
-        Assert.Equal(BenzeneResultStatus.ServiceUnavailable, response.StatusCode);
+        Assert.Equal(BenzeneResultStatus.Ok, response.StatusCode);
+        Assert.True(response.IsSuccessful);
+        Assert.Contains("\"isHealthy\":false", response.Body);
     }
 
     [Fact]
-    public async Task UseHealthCheck_Unhealthy_ReturnsServiceUnavailable()
+    public async Task UseHealthCheck_Unhealthy_IsOk_WithIsHealthyFalse()
     {
         var services = new ServiceCollection();
         services.UsingBenzene(x => x.AddBenzene().AddBenzeneMessage().AddMessageHandlers(typeof(HealthCheckLivenessReadinessTest).Assembly));
@@ -120,6 +124,8 @@ public class HealthCheckLivenessReadinessTest
         var response = await app.HandleAsync(
             new BenzeneMessageRequest { Topic = HealthCheckConstants.DefaultHealthCheckTopic }, resolverFactory);
 
-        Assert.Equal(BenzeneResultStatus.ServiceUnavailable, response.StatusCode);
+        Assert.Equal(BenzeneResultStatus.Ok, response.StatusCode);
+        Assert.True(response.IsSuccessful);
+        Assert.Contains("\"isHealthy\":false", response.Body);
     }
 }

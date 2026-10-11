@@ -73,7 +73,9 @@ public class HealthCheckTests
 
         var response = result.PayloadAsObject as HealthCheckResponse;
         Assert.False(response.IsHealthy);
-        Assert.Equal(BenzeneResultStatus.ServiceUnavailable, result.Status);
+        // The query succeeded - the verdict is IsHealthy, never the status (wire-contracts §5).
+        Assert.Equal(BenzeneResultStatus.Ok, result.Status);
+        Assert.True(result.IsSuccessful);
     }
 
     [Fact]
