@@ -92,7 +92,14 @@ public static class Extensions
             // feeds the mesh descriptor (info.service) and now the log scope + the benzene.service span
             // attribute (Benzene.Diagnostics), so a trace-store mesh reader can label a flow with the real
             // service name rather than the backend's segment name. Same string, three surfaces, never adrift.
-            x.SetApplicationInfo(serviceName, string.Empty, string.Empty);
+            // IApplicationInfo is the single source of the contract document's service/serviceVersion
+            // (contract-document.md §1) as well.
+            x.SetApplicationInfo(serviceName, builder.ServiceVersion ?? string.Empty, string.Empty);
+            if (builder.OutboundRegistry != null)
+            {
+                // Send declarations: the contract document's sends[] (contract-document.md §3.2).
+                x.AddSendDeclarations(builder.OutboundRegistry);
+            }
             x.AddSingleton(_ => report);
             x.AddSingleton<IHttpEndpointDefinition>(_ =>
                 new HttpEndpointDefinition("get", builder.SpecPath, Schema.OpenApi.Constants.DefaultSpecTopic));

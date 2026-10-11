@@ -33,6 +33,7 @@ using Benzene.FluentValidation;
 using Benzene.HealthChecks;
 using Benzene.HealthChecks.Core;
 using Benzene.Http;
+using Benzene.Mesh.Wire;
 using Benzene.Microsoft.Dependencies;
 using Benzene.Schema.OpenApi;
 using Benzene.Spec.Ui;
@@ -54,8 +55,10 @@ public static class MeshServiceWiring
     /// <summary>
     /// Registers the baseline, the domain handlers, HTTP routing, JSON console logging (captured to
     /// CloudWatch on Lambda), and the domain's FluentValidation validators. Each
-    /// <paramref name="outboundSends"/> both <b>declares</b> a topic this service sends (so it appears
-    /// in the spec's <c>events</c> → the mesh's structural topology) <b>and wires the runtime route</b>
+    /// <paramref name="outboundSends"/> both <b>declares</b> a topic this service puts on the wire - an
+    /// <see cref="OutboundKind.Event"/> it defines in the contract document's <c>events</c>, a
+    /// <see cref="OutboundKind.Send"/> to a topic another party defines in its <c>sends</c> (either way
+    /// → the mesh's structural topology) - <b>and wires the runtime route</b>
     /// (an <see cref="IBenzeneMessageSender"/> that fans the topic out to the SQS queue named by the
     /// send's env var — the ingress the target service already consumes).
     /// </summary>
@@ -99,12 +102,27 @@ public static class MeshServiceWiring
 
             if (outboundSends.Length > 0)
             {
-                // Declare each send in the spec's events → the mesh's structural topology edge. This is
-                // transport-agnostic on purpose: an SQS command, an SNS event and an EventBridge event all
-                // surface the same way, so the mesh topology shows every edge regardless of how it's carried.
-                x.AddResponseEventDeclarations(outboundSends
-                    .Select(s => (IMessageDefinition)new ResponseEventDefinition(s.Topic, s.MessageType))
-                    .ToArray());
+                // Declare each outbound topic by who owns its contract (contract-document.md §3), not by
+                // transport: an event this service defines → the document's events; a message to a topic
+                // another service defines (e.g. payments:capture, owned by payments) → its sends. The mesh
+                // reads both as producer edges, so the topology shows every edge regardless of how it's
+                // carried.
+                var events = outboundSends.Where(s => s.Kind == OutboundKind.Event).ToArray();
+                if (events.Length > 0)
+                {
+                    x.AddResponseEventDeclarations(events
+                        .Select(s => (IMessageDefinition)new ResponseEventDefinition(s.Topic, s.MessageType))
+                        .ToArray());
+                }
+
+                var sends = new Benzene.Mesh.Wire.MeshOutboundRegistry();
+                foreach (var send in outboundSends.Where(s => s.Kind == OutboundKind.Send))
+                {
+                    // One-way: every route here is fire-and-acknowledge (SendAsync<T, Void>).
+                    sends.Register(send.Topic, null, send.MessageType, typeof(Benzene.Abstractions.Results.Void));
+                }
+
+                x.AddSendDeclarations(sends);
 
                 // Only register the AWS clients for the transports this service actually sends over. Lazy
                 // factories so a client is only built on a real send — a service with no target env vars

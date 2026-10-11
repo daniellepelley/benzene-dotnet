@@ -1,10 +1,7 @@
 {
-  "openapi": "3.0.1",
-  "info": {
-    "title": "payments-api",
-    "description": "",
-    "version": ""
-  },
+  "schemaDialect": "openapi-3.0",
+  "service": "payments-api",
+  "serviceVersion": "1.0.0",
   "messageEndpoint": "/benzene/invoke",
   "transports": [
     "api-gateway",
@@ -13,6 +10,8 @@
     "sns",
     "eventbridge"
   ],
+  "contractHash": "sha256:7ee4bcd901e7b6bf0b50377c265d2a21f60b556261097153e52916ccb98fbe2f",
+  "registrationHash": "sha256:d1620d1a19a0d501bb17e56fcb6af9ebe1ecf3b6b409fb4877786a600203dcf9",
   "requests": [
     {
       "topic": "payments:capture",
@@ -27,11 +26,6 @@
       },
       "response": {
         "$ref": "#/components/schemas/PaymentDto"
-      },
-      "example": {
-        "orderId": "value",
-        "amount": 42.42,
-        "currency": "value"
       }
     },
     {
@@ -42,59 +36,28 @@
           "path": "/payments"
         }
       ],
-      "request": {
-        "$ref": "#/components/schemas/Void"
-      },
+      "request": { },
       "response": {
         "type": "array",
         "items": {
           "$ref": "#/components/schemas/PaymentDto"
         }
-      },
-      "example": {}
-    },
-    {
-      "topic": "benzene:spec",
-      "reserved": true,
-      "httpMappings": [
-        {
-          "method": "get",
-          "path": "/benzene/spec"
-        }
-      ],
-      "request": {
-        "$ref": "#/components/schemas/SpecRequest"
-      },
-      "response": {
-        "$ref": "#/components/schemas/RawStringMessage"
-      },
-      "example": {
-        "type": "value",
-        "format": "value"
       }
     }
   ],
   "events": [
     {
-      "topic": "shipping:book",
-      "message": {
-        "$ref": "#/components/schemas/OutboundShipmentBook"
-      },
-      "example": {
-        "orderId": "value",
-        "carrier": "value"
-      }
-    },
-    {
       "topic": "payment:captured",
       "message": {
         "$ref": "#/components/schemas/OutboundPaymentCaptured"
-      },
-      "example": {
-        "orderId": "value",
-        "paymentId": "value",
-        "amount": 42.42,
-        "currency": "value"
+      }
+    }
+  ],
+  "sends": [
+    {
+      "topic": "shipping:book",
+      "request": {
+        "$ref": "#/components/schemas/OutboundShipmentBook"
       }
     }
   ],
@@ -102,116 +65,93 @@
     "schemas": {
       "CapturePayment": {
         "required": [
-          "Currency",
-          "OrderId"
+          "amount",
+          "currency",
+          "orderId"
         ],
         "type": "object",
         "properties": {
-          "OrderId": {
+          "orderId": {
             "type": "string",
             "description": "Not Empty"
           },
-          "Amount": {
+          "amount": {
             "type": "number",
             "description": "Greater Than 0",
             "format": "double"
           },
-          "Currency": {
+          "currency": {
             "type": "string",
             "description": "Not Empty"
           }
-        },
-        "additionalProperties": false
+        }
       },
       "OutboundPaymentCaptured": {
+        "required": [
+          "amount",
+          "currency",
+          "orderId",
+          "paymentId"
+        ],
         "type": "object",
         "properties": {
-          "OrderId": {
-            "type": "string",
-            "nullable": true
+          "orderId": {
+            "type": "string"
           },
-          "PaymentId": {
-            "type": "string",
-            "nullable": true
+          "paymentId": {
+            "type": "string"
           },
-          "Amount": {
+          "amount": {
             "type": "number",
             "format": "double"
           },
-          "Currency": {
-            "type": "string",
-            "nullable": true
+          "currency": {
+            "type": "string"
           }
-        },
-        "additionalProperties": false
+        }
       },
       "OutboundShipmentBook": {
+        "required": [
+          "carrier",
+          "orderId"
+        ],
         "type": "object",
         "properties": {
-          "OrderId": {
-            "type": "string",
-            "nullable": true
+          "orderId": {
+            "type": "string"
           },
-          "Carrier": {
-            "type": "string",
-            "nullable": true
+          "carrier": {
+            "type": "string"
           }
-        },
-        "additionalProperties": false
+        }
       },
       "PaymentDto": {
+        "required": [
+          "amount",
+          "currency",
+          "id",
+          "orderId",
+          "status"
+        ],
         "type": "object",
         "properties": {
-          "Id": {
-            "type": "string",
-            "nullable": true
+          "id": {
+            "type": "string"
           },
-          "OrderId": {
-            "type": "string",
-            "nullable": true
+          "orderId": {
+            "type": "string"
           },
-          "Amount": {
+          "amount": {
             "type": "number",
             "format": "double"
           },
-          "Currency": {
-            "type": "string",
-            "nullable": true
+          "currency": {
+            "type": "string"
           },
-          "Status": {
-            "type": "string",
-            "nullable": true
+          "status": {
+            "type": "string"
           }
-        },
-        "additionalProperties": false
-      },
-      "RawStringMessage": {
-        "type": "object",
-        "properties": {
-          "Content": {
-            "type": "string",
-            "nullable": true
-          }
-        },
-        "additionalProperties": false
-      },
-      "SpecRequest": {
-        "type": "object",
-        "properties": {
-          "Type": {
-            "type": "string",
-            "nullable": true
-          },
-          "Format": {
-            "type": "string",
-            "nullable": true
-          }
-        },
-        "additionalProperties": false
-      },
-      "Void": {
-        "type": "object",
-        "additionalProperties": false
+        }
       }
     }
   }

@@ -47,10 +47,10 @@ public class Startup : BenzeneStartUp
         MeshServiceWiring.ConfigureServices(services, "payments", typeof(Startup).Assembly,
             // payments-api → shipping-api: on capture, send shipping:book to the shipping SQS queue
             // (a point-to-point command — one consumer, must arrive).
-            OutboundSend.Sqs("shipping:book", typeof(OutboundShipmentBook), "SHIPPING_QUEUE_URL"),
+            OutboundSend.Sqs("shipping:book", OutboundKind.Send, typeof(OutboundShipmentBook), "SHIPPING_QUEUE_URL"),
             // payments-api → notifications-api + analytics-api: publish payment:captured to EventBridge,
             // routed to interested consumers by rule (an integration event).
-            OutboundSend.EventBridge("payment:captured", typeof(OutboundPaymentCaptured), "EVENT_BUS_NAME"));
+            OutboundSend.EventBridge("payment:captured", OutboundKind.Event, typeof(OutboundPaymentCaptured), "EVENT_BUS_NAME"));
 
         // payments-api is the ONE service in this example that consumes outboxed traffic (orders-api's
         // payments:capture), so it's the one that pairs Benzene.Idempotency with it (see

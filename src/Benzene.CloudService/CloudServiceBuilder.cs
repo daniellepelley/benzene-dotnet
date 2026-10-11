@@ -14,7 +14,10 @@ namespace Benzene.CloudService;
 /// </summary>
 public interface ICloudServiceBuilder
 {
-    /// <summary>Sets the service version reported in the descriptor (participates in the contract hash).</summary>
+    /// <summary>
+    /// Sets the service version: the contract document's <c>serviceVersion</c> (through
+    /// <c>IApplicationInfo</c>, the one source of the service's identity) and the descriptor's.
+    /// </summary>
     ICloudServiceBuilder WithServiceVersion(string serviceVersion);
 
     /// <summary>Sets the instance id reported in the descriptor, traces, and heartbeats. Defaults to a generated per-process id.</summary>
@@ -46,13 +49,21 @@ public interface ICloudServiceBuilder
     ICloudServiceBuilder WithHandlers(params Type[] handlerTypes);
 
     /// <summary>
-    /// Declares what this service consumes (mesh.md §2.3's outbound registration) - the explicit,
-    /// no-handler, no-destination record of the (topic, version, request type, response type) tuples
-    /// this service may send, projected into the descriptor's <c>consumes</c> field. Without this, the
-    /// descriptor marks <c>consumes</c> degraded (<c>"outbound-registry"</c>) rather than asserting an
-    /// empty "consumes nothing" claim. Build the registry with <see cref="MeshOutboundRegistry"/>
+    /// Declares the messages this service sends to topics <b>another party</b> defines - its send
+    /// declarations (contract-document.md §3.2): the explicit, no-handler, no-destination record of
+    /// the (topic, version, request type, response type) tuples it may send. They become the contract
+    /// document's <c>sends[]</c> (a response type of <c>Void</c>, or <c>Register&lt;TRequest&gt;</c>,
+    /// is one-way: no <c>response</c>) and, until the descriptor is retired, the mesh descriptor's
+    /// <c>produces</c>. Events this service publishes and defines are not sends: declare them with
+    /// <c>AddResponseEventDeclarations</c>. Without this call the descriptor marks <c>produces</c>
+    /// degraded (<c>"outbound-registry"</c>) rather than asserting an empty claim. Build the registry
+    /// with <see cref="MeshOutboundRegistry"/>
     /// (e.g. <c>new MeshOutboundRegistry().Register&lt;PaymentsCaptureRequest&gt;("payments:capture")</c>).
     /// </summary>
+    ICloudServiceBuilder WithSends(MeshOutboundRegistry sends);
+
+    /// <summary>The former name of <see cref="WithSends"/>.</summary>
+    [Obsolete("Renamed WithSends: these are send declarations (contract-document.md §3.2). WithConsumes will be removed before 1.0.")]
     ICloudServiceBuilder WithConsumes(MeshOutboundRegistry outboundRegistry);
 
     /// <summary>
@@ -174,11 +185,14 @@ internal sealed class CloudServiceBuilder : ICloudServiceBuilder
         return this;
     }
 
-    public ICloudServiceBuilder WithConsumes(MeshOutboundRegistry outboundRegistry)
+    public ICloudServiceBuilder WithSends(MeshOutboundRegistry sends)
     {
-        OutboundRegistry = outboundRegistry;
+        OutboundRegistry = sends;
         return this;
     }
+
+    [Obsolete("Renamed WithSends.")]
+    public ICloudServiceBuilder WithConsumes(MeshOutboundRegistry outboundRegistry) => WithSends(outboundRegistry);
 
     public ICloudServiceBuilder WithMiddleware(Action<IMiddlewarePipelineBuilder<BenzeneMessageContext>> configure)
     {

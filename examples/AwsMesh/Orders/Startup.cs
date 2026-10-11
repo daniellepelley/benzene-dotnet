@@ -54,12 +54,12 @@ public class Startup : BenzeneStartUp
             // over Benzene.ClaimCheck's default 192 KiB threshold, and UseClaimCheck() (wired below
             // OutboundSend.ClaimChecked in MeshServiceWiring, AFTER UseOutbox()) offloads it to the
             // dedicated claim-checks S3 bucket instead of inlining it on the SQS message.
-            OutboundSend.Sqs("payments:capture", typeof(CapturePayment), "PAYMENTS_QUEUE_URL", outboxed: true, claimChecked: true),
+            OutboundSend.Sqs("payments:capture", OutboundKind.Send, typeof(CapturePayment), "PAYMENTS_QUEUE_URL", outboxed: true, claimChecked: true),
             // orders-api → inventory-api + notifications-api: publish order:placed to SNS, which fans it
             // out to every subscriber (a domain event, not a command). Also outboxed, atomically with the
             // send above and the order row (see CreateOrderMessageHandler). Not claim-checked: it never
             // carries the oversized demo field (see Handlers/OrderHandlers.cs).
-            OutboundSend.Sns("order:placed", typeof(OutboundOrderPlaced), "ORDER_PLACED_TOPIC_ARN", outboxed: true));
+            OutboundSend.Sns("order:placed", OutboundKind.Event, typeof(OutboundOrderPlaced), "ORDER_PLACED_TOPIC_ARN", outboxed: true));
 
         // The GENERATED DI registration, not a hand-written one: `benzene build -output topic-client`
         // now emits AddPaymentsClients() (plus a per-topic AddPaymentsCaptureServiceClient()) beside the

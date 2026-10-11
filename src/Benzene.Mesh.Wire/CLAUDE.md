@@ -34,7 +34,7 @@ pull-based collector idiom and can adopt these shapes as ingest sources (roadmap
   ever answers "what would we send", never constructs a sender. No handler, no destination/transport
   info - a registered outbound record is contract only (spec §2.3). A declared record with no
   response type (`Register<TRequest>`) projects `responseSchema: {}` (unconstrained) in `consumes`,
-  per §2. `Benzene.CloudService`'s `ICloudServiceBuilder.WithConsumes(MeshOutboundRegistry)` is the
+  per §2. `Benzene.CloudService`'s `ICloudServiceBuilder.WithSends(MeshOutboundRegistry)` (formerly `WithConsumes`) is the
   batteries-included wiring point (`CloudServiceBuilder.OutboundRegistry` → `CloudServiceDescriptorSource`).
 - `MeshSchemaGenerator.Derive(Type)` - the §2.1 CLR→JSON Schema mapping (startup-only
   reflection). "required" = properties the marshaler always emits: nullable-annotated (NRT or

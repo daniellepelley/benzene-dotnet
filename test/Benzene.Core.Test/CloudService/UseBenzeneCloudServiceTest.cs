@@ -79,6 +79,35 @@ public class UseBenzeneCloudServiceTest
     }
 
     [Fact]
+    public async Task SpecEndpoint_ServesTheContractDocument_IdentityFromTheCloudService_SendsFromWithSends()
+    {
+        var host = CreateHost(x => x
+            .WithServiceVersion("1.4.2")
+            .WithSends(new MeshOutboundRegistry()
+                .Register<ExampleRequestPayload>("payments:take")
+                .Register<ExampleRequestPayload, ExampleResponsePayload>("inventory:reserve", "v2")));
+
+        var response = await host.SendApiGatewayAsync(
+            HttpBuilder.Create("GET", CloudServicePaths.Spec, new { }));
+
+        Assert.Equal(200, response.StatusCode);
+        var document = System.Text.Json.Nodes.JsonNode.Parse(response.Body)!.AsObject();
+        Assert.Equal("openapi-3.0", document["schemaDialect"]!.GetValue<string>());
+        Assert.Equal("orders", document["service"]!.GetValue<string>());
+        Assert.Equal("1.4.2", document["serviceVersion"]!.GetValue<string>());
+        Assert.StartsWith("sha256:", document["contractHash"]!.GetValue<string>());
+        Assert.StartsWith("sha256:", document["registrationHash"]!.GetValue<string>());
+        var sends = document["sends"]!.AsArray().Select(x => x!.AsObject()).ToArray();
+        var take = Assert.Single(sends, x => x["topic"]!.GetValue<string>() == "payments:take");
+        Assert.False(take.ContainsKey("response")); // one-way
+        var reserve = Assert.Single(sends, x => x["topic"]!.GetValue<string>() == "inventory:reserve");
+        Assert.Equal("v2", reserve["version"]!.GetValue<string>());
+        Assert.True(reserve.ContainsKey("response"));
+        // No benzene: topic is ever listed (contract-document.md §1).
+        Assert.DoesNotContain(document["requests"]!.AsArray(), x => x!["topic"]!.GetValue<string>().StartsWith("benzene:"));
+    }
+
+    [Fact]
     public async Task HealthCheckTopic_IsInterceptedOnTheEnvelopePipeline()
     {
         var host = CreateHost();

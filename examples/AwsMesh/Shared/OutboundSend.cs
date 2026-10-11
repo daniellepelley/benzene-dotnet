@@ -19,13 +19,35 @@ public enum OutboundTransport
 }
 
 /// <summary>
-/// Declares that a service sends <see cref="Topic"/> (payload <see cref="MessageType"/>) downstream over
+/// Who owns an outbound topic's contract (contract-document.md §3) - not the transport, and not whether
+/// a reply comes back.
+/// </summary>
+public enum OutboundKind
+{
+    /// <summary>
+    /// A topic this service publishes and <b>defines</b> (e.g. orders' <c>order:placed</c>): the contract
+    /// document's <c>events[]</c>, part of what this service's clients depend on.
+    /// </summary>
+    Event,
+
+    /// <summary>
+    /// A message to a topic <b>another party</b> defines (e.g. orders' <c>payments:capture</c>, owned by
+    /// payments): the contract document's <c>sends[]</c>, a dependency of this service.
+    /// </summary>
+    Send
+}
+
+/// <summary>
+/// Declares that a service puts <see cref="Topic"/> (payload <see cref="MessageType"/>) on the wire over
 /// <see cref="Transport"/>, routed at runtime to the target whose identifier is in the
 /// <see cref="TargetEnvVar"/> environment variable — the ingress the target service already consumes.
-/// Used by <see cref="MeshServiceWiring.ConfigureServices"/> to both surface the topic in the spec's
-/// <c>events</c> (→ structural topology) and register the outbound route on the chosen transport.
+/// Used by <see cref="MeshServiceWiring.ConfigureServices"/> to both declare the topic - an
+/// <see cref="OutboundKind.Event"/> in the contract document's <c>events</c>, a
+/// <see cref="OutboundKind.Send"/> in its <c>sends</c> (both → the mesh's structural topology) - and
+/// register the outbound route on the chosen transport.
 /// </summary>
 /// <param name="Topic">The topic sent downstream (e.g. <c>payments:capture</c>).</param>
+/// <param name="Kind">Whether this service defines the topic (an event) or another party does (a send).</param>
 /// <param name="MessageType">The payload type (for the spec schema).</param>
 /// <param name="Transport">Which AWS transport carries it (SQS / SNS / EventBridge).</param>
 /// <param name="TargetEnvVar">
@@ -59,6 +81,7 @@ public enum OutboundTransport
 /// </param>
 public record OutboundSend(
     string Topic,
+    OutboundKind Kind,
     Type MessageType,
     OutboundTransport Transport,
     string TargetEnvVar,
@@ -66,14 +89,14 @@ public record OutboundSend(
     bool ClaimChecked = false)
 {
     /// <summary>Convenience for the common SQS command hop.</summary>
-    public static OutboundSend Sqs(string topic, Type messageType, string queueUrlEnvVar, bool outboxed = false, bool claimChecked = false)
-        => new(topic, messageType, OutboundTransport.Sqs, queueUrlEnvVar, outboxed, claimChecked);
+    public static OutboundSend Sqs(string topic, OutboundKind kind, Type messageType, string queueUrlEnvVar, bool outboxed = false, bool claimChecked = false)
+        => new(topic, kind, messageType, OutboundTransport.Sqs, queueUrlEnvVar, outboxed, claimChecked);
 
     /// <summary>Convenience for an SNS fan-out event.</summary>
-    public static OutboundSend Sns(string topic, Type messageType, string topicArnEnvVar, bool outboxed = false, bool claimChecked = false)
-        => new(topic, messageType, OutboundTransport.Sns, topicArnEnvVar, outboxed, claimChecked);
+    public static OutboundSend Sns(string topic, OutboundKind kind, Type messageType, string topicArnEnvVar, bool outboxed = false, bool claimChecked = false)
+        => new(topic, kind, messageType, OutboundTransport.Sns, topicArnEnvVar, outboxed, claimChecked);
 
     /// <summary>Convenience for an EventBridge routed integration event.</summary>
-    public static OutboundSend EventBridge(string topic, Type messageType, string eventBusNameEnvVar, bool outboxed = false, bool claimChecked = false)
-        => new(topic, messageType, OutboundTransport.EventBridge, eventBusNameEnvVar, outboxed, claimChecked);
+    public static OutboundSend EventBridge(string topic, OutboundKind kind, Type messageType, string eventBusNameEnvVar, bool outboxed = false, bool claimChecked = false)
+        => new(topic, kind, messageType, OutboundTransport.EventBridge, eventBusNameEnvVar, outboxed, claimChecked);
 }

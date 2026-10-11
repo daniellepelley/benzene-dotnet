@@ -68,7 +68,7 @@ public class Startup
                     // collector's Fleet view (spec §4, 2026-08 revision) for payments:get - present even
                     // before checkout is ever called, and dropped automatically if a future redeploy stops
                     // declaring it (re-registration replaces `consumes` wholesale, spec §4).
-                    .WithConsumes(new MeshOutboundRegistry().Register<PaymentsQueryV1>("payments:get", "1"))
+                    .WithSends(new MeshOutboundRegistry().Register<PaymentsQueryV1>("payments:get", "1"))
                     .WithSpecPath("/spec")
                     .WithHealthPath("/healthcheck")
                 )
