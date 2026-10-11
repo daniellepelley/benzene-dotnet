@@ -21,7 +21,7 @@ namespace Benzene.Clients.Common
         /// Phase 5 of work/archive/problem-details-plan-2026-08.md). When <c>Errors</c> is absent (an older producer
         /// still emitting only <c>{ status, detail }</c>), this falls back to a single message-only
         /// error built from <see cref="ProblemDetails.Detail"/> - unchanged behavior. Either way the
-        /// received document is attached to the result (via <see cref="BenzeneResult.AttachReceivedProblem{T}"/>)
+        /// received document is attached to the result (via <see cref="ProblemDocuments.ToFailedResult{T}(string, string, ISerializer)"/>)
         /// so <c>result.GetProblem()</c> (<c>Benzene.Results</c>) returns exactly what was received,
         /// not a synthesized document.
         /// </summary>
@@ -30,7 +30,9 @@ namespace Benzene.Clients.Common
         /// success signal (wire-contracts.md §1.2), which a receiver takes as authoritative and never
         /// re-derives from the status text. An envelope that omits it is malformed and is treated as
         /// <b>unsuccessful</b> (spec-0.2.0): classifying it from <c>statusCode</c> text instead would
-        /// misread any application-defined status.
+        /// misread any application-defined status. A failure body that does not read as a problem document
+        /// (not JSON, or not an object) leaves the envelope's failed status with no errors rather than
+        /// throwing - the envelope, not the body, is the outcome.
         /// </remarks>
         public static IBenzeneResult<T> AsBenzeneResult<T>(this BenzeneMessageClientResponse source, ISerializer serializer)
         {
@@ -60,7 +62,7 @@ namespace Benzene.Clients.Common
                 return BenzeneResult.Set(status, serializer.Deserialize<T>(body), true);
             }
 
-            return FailedResultFromProblem<T>(status, serializer.Deserialize<ProblemDetails>(body));
+            return ProblemDocuments.ToFailedResult<T>(status, body, serializer);
         }
 
         private static IBenzeneResult<T> ReturnGuidResult<T>(string status, bool isSuccessful, string body, ISerializer serializer)
@@ -70,29 +72,7 @@ namespace Benzene.Clients.Common
                 return (IBenzeneResult<T>)BenzeneResult.Set(status, ParseGuid(body, serializer), true);
             }
 
-            return FailedResultFromProblem<T>(status, serializer.Deserialize<ProblemDetails>(body));
-        }
-
-        /// <summary>
-        /// Builds the failed <paramref name="status"/> result for a deserialized failure body, per the
-        /// rules in <see cref="AsBenzeneResult{T}"/>'s remarks. <paramref name="problem"/> is
-        /// <c>null</c> when the body didn't deserialize to anything (e.g. an empty body) - that keeps
-        /// the historical no-errors behavior instead of throwing.
-        /// </summary>
-        private static IBenzeneResult<T> FailedResultFromProblem<T>(string status, ProblemDetails? problem)
-        {
-            if (problem == null)
-            {
-                return BenzeneResult.Set<T>(status, false);
-            }
-
-            IReadOnlyList<BenzeneError> errors = problem.Errors is { Length: > 0 }
-                ? problem.Errors
-                : string.IsNullOrEmpty(problem.Detail)
-                    ? Array.Empty<BenzeneError>()
-                    : new[] { new BenzeneError(problem.Detail) };
-
-            return BenzeneResult.AttachReceivedProblem<T>(status, isSuccessful: false, errors, problem);
+            return ProblemDocuments.ToFailedResult<T>(status, body, serializer);
         }
 
         private static Guid ParseGuid(string body, ISerializer serializer)

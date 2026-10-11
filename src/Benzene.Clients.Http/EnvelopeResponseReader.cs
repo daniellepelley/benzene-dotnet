@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Text.Json;
+using Benzene.Clients.Common;
 using Benzene.Results;
 
 namespace Benzene.Clients.Http;
@@ -16,13 +17,18 @@ namespace Benzene.Clients.Http;
 internal static class EnvelopeResponseReader
 {
     /// <summary>
-    /// Reads the response as a client envelope: the body's envelope when it is one, else a status-only
-    /// envelope mapped from <paramref name="httpStatus"/> by the reverse HTTP table.
+    /// Reads the response as a client envelope: the body's envelope when it is one, else an envelope mapped
+    /// from <paramref name="httpStatus"/> by the reverse HTTP table. A non-envelope failure whose content type
+    /// is <c>application/problem+json</c> - a host or gateway answering with its own problem document before
+    /// any envelope was read - keeps that document as the envelope body, so the caller rebuilds its
+    /// <c>errors</c> from it (core-concepts §12, error fidelity); any other non-envelope body is dropped, since
+    /// an arbitrary page is not a problem document.
     /// </summary>
     /// <param name="httpStatus">The HTTP response status.</param>
     /// <param name="body">The HTTP response body.</param>
+    /// <param name="mediaType">The response's content-type media type, without parameters (<c>null</c> when absent).</param>
     /// <param name="isEnvelope">Whether the body was an envelope.</param>
-    public static BenzeneMessageClientResponse Read(HttpStatusCode httpStatus, string? body, out bool isEnvelope)
+    public static BenzeneMessageClientResponse Read(HttpStatusCode httpStatus, string? body, string? mediaType, out bool isEnvelope)
     {
         if (TryRead(body, out var envelope))
         {
@@ -32,7 +38,8 @@ internal static class EnvelopeResponseReader
 
         isEnvelope = false;
         var mapped = httpStatus.Convert();
-        return new BenzeneMessageClientResponse(mapped.Status, null!,
+        var problemBody = !mapped.IsSuccessful && ProblemDocuments.IsJsonProblem(mediaType) ? body : null;
+        return new BenzeneMessageClientResponse(mapped.Status, problemBody!,
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase), mapped.IsSuccessful);
     }
 

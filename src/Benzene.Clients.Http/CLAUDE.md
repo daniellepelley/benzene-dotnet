@@ -29,7 +29,9 @@ row for the `IHttpClientFactory`/lifetime story (yours to own on both paths).
   the body is not an envelope (a proxy page, a host 401), treats an envelope without `isSuccessful` as
   unsuccessful (wire-contracts §1.2), and only surfaces a genuine
   connection failure as `ServiceUnavailable`. A `Void` (send-ack) caller
-  maps the status only, without deserializing a payload body.
+  maps a success's status only, without deserializing a payload body; a failure's problem document is read
+  for every caller (core-concepts §12, error fidelity). A non-envelope `application/problem+json` failure
+  (a host or gateway's own document) is read as a problem document too.
 
 ## Key types/interfaces
 - `HttpSendMessageContext` - the pipeline context wrapping an `HttpRequestMessage Request` and a
@@ -39,7 +41,10 @@ row for the `IHttpClientFactory`/lifetime story (yours to own on both paths).
   (the `path` is used verbatim as the request `Uri` - there is **no** URL-template/path-parameter
   substitution), serializes the request body as `application/json` (UTF-8), and copies
   `contextIn.Request.Headers` onto the request. `MapResponseAsync` reads the response body and maps the
-  `HttpStatusCode` to a Benzene result.
+  `HttpStatusCode` to a Benzene result (reverse HTTP table). On a non-success `application/problem+json`
+  response it also rebuilds the result's `errors` (field/code intact) and attaches the document for
+  `GetProblem()` (`Benzene.Clients.Common.ProblemDocuments`; core-concepts §12, error fidelity); an error
+  body of any other content type is not read.
 - `HttpClientMiddleware` - the transport step: its `HandleAsync` is
   `context.Response = await _httpClient.SendAsync(context.Request, cancellationToken)`, where
   `cancellationToken` comes from the constructor-optional `ICancellationTokenAccessor` (the

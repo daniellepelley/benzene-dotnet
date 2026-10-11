@@ -101,17 +101,20 @@ public class HttpBenzeneMessageClient : IBenzeneMessageClient
 
             // The envelope in the body is the outcome, whatever the status line; the reverse HTTP table only
             // when the body is not an envelope (transport-bindings §1).
-            var clientResponse = EnvelopeResponseReader.Read(httpResponse.StatusCode, responseBody, out var isEnvelope);
+            var clientResponse = EnvelopeResponseReader.Read(httpResponse.StatusCode, responseBody,
+                httpResponse.Content.Headers.ContentType?.MediaType, out var isEnvelope);
             if (!isEnvelope)
             {
                 _logger.LogError("Message {receiverTopic} to {receiver} returned HTTP {httpStatus} without a response envelope",
                     request.Topic, _url, (int)httpResponse.StatusCode);
             }
 
-            // For Void (send-acknowledgement) callers, map the status without deserializing a payload body:
-            // a Void-returning handler's body shape is undefined, so feeding it to AsBenzeneResult<Void> could
-            // throw. Nulling the body drives AsBenzeneResult down its status-only branch.
-            var result = typeof(TResponse) == typeof(Void)
+            // For Void (send-acknowledgement) callers, map a success's status without deserializing a payload
+            // body: a Void-returning handler's body shape is undefined, so feeding it to AsBenzeneResult<Void>
+            // could throw. Nulling the body drives AsBenzeneResult down its status-only branch. A failure's body
+            // is a problem document whatever the caller's TResponse, so it is always read - a Void caller gets
+            // the failure's errors too (core-concepts §12, error fidelity).
+            var result = typeof(TResponse) == typeof(Void) && clientResponse.IsSuccessful == true
                 ? new BenzeneMessageClientResponse(clientResponse.StatusCode, null!, clientResponse.Headers, clientResponse.IsSuccessful).AsBenzeneResult<TResponse>(_serializer)
                 : clientResponse.AsBenzeneResult<TResponse>(_serializer);
 

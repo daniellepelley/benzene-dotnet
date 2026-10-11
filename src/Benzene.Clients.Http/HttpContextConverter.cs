@@ -3,6 +3,7 @@ using Benzene.Abstractions.Messages.BenzeneClient;
 using Benzene.Abstractions.Middleware;
 using Benzene.Abstractions.Serialization;
 using Benzene.Clients;
+using Benzene.Clients.Common;
 using Benzene.Results;
 
 namespace Benzene.Clients.Http;
@@ -54,7 +55,13 @@ public class HttpContextConverter<TRequest, TResponse> : IContextConverter<IBenz
         return Task.FromResult(new HttpSendMessageContext(request));
     }
 
-    /// <summary>Reads and disposes the response, deserializing the body as <typeparamref name="TResponse"/> on success, and sets it on the client context.</summary>
+    /// <summary>
+    /// Reads and disposes the response and sets the result on the client context: on success, the body
+    /// deserialized as <typeparamref name="TResponse"/>; on failure, the status from the reverse HTTP table
+    /// (wire-contracts §4.1) and - when the response is an <c>application/problem+json</c> document - the
+    /// errors rebuilt from its <c>errors</c> with <c>field</c> and <c>code</c> intact, the document itself
+    /// attached for <c>result.GetProblem()</c> (core-concepts §12, error fidelity).
+    /// </summary>
     /// <param name="contextIn">The client context to set the response on.</param>
     /// <param name="contextOut">The completed <see cref="HttpSendMessageContext"/>.</param>
     public async Task MapResponseAsync(IBenzeneClientContext<TRequest, TResponse> contextIn, HttpSendMessageContext contextOut)
@@ -67,12 +74,22 @@ public class HttpContextConverter<TRequest, TResponse> : IContextConverter<IBenz
         using var httpResponse = contextOut.Response;
         var body = await httpResponse.Content.ReadAsStringAsync();
 
-        // Only parse the body as TResponse on a success status with a non-empty body. An error
-        // response commonly carries a different shape (problem+json, an HTML error page, or an empty
-        // body); deserializing that as TResponse would throw and mask the real HTTP status with a
-        // serialization exception. On an error we surface the mapped status with a default payload.
-        TResponse response = default;
-        if (httpResponse.IsSuccessStatusCode && !string.IsNullOrEmpty(body))
+        if (!httpResponse.IsSuccessStatusCode)
+        {
+            // An error response is never deserialized as TResponse: it commonly carries a different
+            // shape (an HTML error page, an empty body), and that would throw and mask the real HTTP
+            // status. Only an application/problem+json body is read, as the problem document it declares
+            // itself to be - an arbitrary endpoint's error body is not one. The status stays the reverse
+            // table's, never re-derived from the document (wire-contracts §1.3).
+            var status = httpResponse.StatusCode.Convert().Status;
+            contextIn.Response = ProblemDocuments.IsJsonProblem(httpResponse.Content.Headers.ContentType?.MediaType)
+                ? ProblemDocuments.ToFailedResult<TResponse>(status, body, _serializer)
+                : httpResponse.StatusCode.Convert<TResponse>(default!);
+            return;
+        }
+
+        TResponse response = default!;
+        if (!string.IsNullOrEmpty(body))
         {
             response = _serializer.Deserialize<TResponse>(body)!;
         }

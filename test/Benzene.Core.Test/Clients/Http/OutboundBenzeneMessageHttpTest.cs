@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Benzene.Abstractions.Results;
 using Benzene.Clients;
 using Benzene.Clients.Http;
 using Benzene.HealthChecks.Core;
@@ -104,6 +105,39 @@ public class OutboundBenzeneMessageHttpTest
     }
 
     [Fact]
+    public async Task SendAsync_AFailureEnvelopesProblemDocument_RebuildsErrorsWithFieldAndCode()
+    {
+        // core-concepts §12, error fidelity - for a Void caller too, since a failure's body is a problem document.
+        var handler = new CapturingHandler(HttpStatusCode.OK,
+            """{"statusCode":"validation-error","isSuccessful":false,"headers":{},"body":"{\"type\":\"https://benzene.app/problems/validation-error\",\"benzeneStatus\":\"validation-error\",\"errors\":[{\"message\":\"Name must not be empty\",\"field\":\"/name\",\"code\":\"NotEmptyValidator\"}]}"}""");
+        var (sender, _) = Build(handler, routing => routing
+            .Route(Defaults.Topic, pipeline => pipeline.UseBenzeneMessageOverHttp(Url)));
+
+        var result = await sender.SendAsync<ExampleRequestPayload, Void>(
+            Defaults.Topic, new ExampleRequestPayload { Id = 42, Name = "" });
+
+        Assert.Equal(BenzeneResultStatus.ValidationError, result.Status);
+        Assert.Equal(new[] { new BenzeneError("Name must not be empty", "/name", "NotEmptyValidator") }, result.Errors);
+    }
+
+    [Fact]
+    public async Task SendAsync_ANonEnvelopeProblemJsonFailure_RebuildsItsErrors()
+    {
+        var handler = new CapturingHandler(HttpStatusCode.Forbidden,
+            """{"type":"https://gateway.example/problems/denied","status":403,"errors":[{"message":"Scope missing","code":"ScopeMissing"}]}""",
+            "application/problem+json");
+        var (sender, _) = Build(handler, routing => routing
+            .Route(Defaults.Topic, pipeline => pipeline.UseBenzeneMessageOverHttp(Url)));
+
+        var result = await sender.SendAsync<ExampleRequestPayload, ExampleResponsePayload>(
+            Defaults.Topic, new ExampleRequestPayload { Id = 42, Name = "foo" });
+
+        Assert.Equal(BenzeneResultStatus.Forbidden, result.Status);
+        Assert.Equal(new[] { new BenzeneError("Scope missing", code: "ScopeMissing") }, result.Errors);
+        Assert.Equal("https://gateway.example/problems/denied", result.GetProblem().Type);
+    }
+
+    [Fact]
     public async Task SendAsync_ThroughTheExplicitInnerPipelineOverload_UsesTheGivenHttpClient()
     {
         // The rung below the default: the caller configures the inner send pipeline and hands over the
@@ -146,13 +180,15 @@ public class OutboundBenzeneMessageHttpTest
     {
         private readonly HttpStatusCode _status;
         private readonly string _body;
+        private readonly string _mediaType;
         public HttpRequestMessage LastRequest;
         public string LastRequestBody;
 
-        public CapturingHandler(HttpStatusCode status, string body)
+        public CapturingHandler(HttpStatusCode status, string body, string mediaType = "application/json")
         {
             _status = status;
             _body = body;
+            _mediaType = mediaType;
         }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -160,7 +196,7 @@ public class OutboundBenzeneMessageHttpTest
             cancellationToken.ThrowIfCancellationRequested();
             LastRequest = request;
             LastRequestBody = request.Content == null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
-            return new HttpResponseMessage(_status) { Content = new StringContent(_body, Encoding.UTF8, "application/json") };
+            return new HttpResponseMessage(_status) { Content = new StringContent(_body, Encoding.UTF8, _mediaType) };
         }
     }
 }

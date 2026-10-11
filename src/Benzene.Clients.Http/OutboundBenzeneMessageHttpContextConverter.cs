@@ -96,7 +96,9 @@ public class OutboundBenzeneMessageHttpContextConverter : IContextConverter<Outb
 
         // The envelope in the body is the outcome, whatever the HTTP status: the endpoint answers 200 for
         // every envelope it processed (transport-bindings §1). Only a body that is not an envelope (empty,
-        // a proxy's error page, a host-enforced 401) falls back to the reverse HTTP table.
-        contextIn.Response = EnvelopeResponseReader.Read(httpResponse.StatusCode, body, out _);
+        // a proxy's error page, a host-enforced 401) falls back to the reverse HTTP table - carrying the body
+        // on only when it is an application/problem+json document, whose errors the sender then rebuilds.
+        contextIn.Response = EnvelopeResponseReader.Read(httpResponse.StatusCode, body,
+            httpResponse.Content.Headers.ContentType?.MediaType, out _);
     }
 }

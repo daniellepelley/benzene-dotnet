@@ -92,7 +92,8 @@ public class HttpBenzeneMessageHealthCheck : IHealthCheck
             // the outcome is the envelope in the body - read it whatever the HTTP status; only a body that is
             // not an envelope falls back to the reverse HTTP table.
             var responseBody = await response.Content.ReadAsStringAsync(token);
-            var reply = EnvelopeResponseReader.Read(response.StatusCode, responseBody, out var isEnvelope);
+            var reply = EnvelopeResponseReader.Read(response.StatusCode, responseBody,
+                response.Content.Headers.ContentType?.MediaType, out var isEnvelope);
             if (isEnvelope)
             {
                 data["BenzeneStatus"] = reply.StatusCode;

@@ -158,17 +158,84 @@ public class HttpBenzeneMessageClientTest
         Assert.Equal(expectedSuccess, result.IsSuccessful);
     }
 
+    // A failure envelope whose body is a problem document carrying field/code errors and an app-defined type.
+    private const string FailureEnvelopeWithProblem = """
+        {"statusCode":"validation-error","isSuccessful":false,"headers":{"content-type":"application/problem+json"},
+         "body":"{\"type\":\"https://example.com/problems/custom-rule\",\"benzeneStatus\":\"validation-error\",\"detail\":\"Custom rule failed\",\"errors\":[{\"message\":\"Custom rule failed\",\"field\":\"/sku\",\"code\":\"CustomRule\"}]}"}
+        """;
+
+    [Fact]
+    public async Task SendMessageAsync_AFailureEnvelopesProblemDocument_RebuildsErrorsWithFieldAndCode()
+    {
+        // core-concepts §12, error fidelity (wire-contracts §1.3).
+        var client = new HttpBenzeneMessageClient(new HttpClient(new CapturingHandler(HttpStatusCode.OK, FailureEnvelopeWithProblem)), Url);
+
+        var result = await client.SendMessageAsync<string, string>(
+            new BenzeneClientRequest<string>("t", "m", new Dictionary<string, string>()));
+
+        Assert.Equal(BenzeneResultStatus.ValidationError, result.Status);
+        Assert.Equal(new[] { new BenzeneError("Custom rule failed", "/sku", "CustomRule") }, result.Errors);
+        Assert.Equal("https://example.com/problems/custom-rule", result.GetProblem().Type);
+    }
+
+    [Fact]
+    public async Task SendMessageAsync_ForVoidResponse_AFailureStillCarriesItsErrors()
+    {
+        // The Void path skips only a success body; a failure's body is a problem document whatever the
+        // caller's TResponse, so its errors are rebuilt too.
+        var client = new HttpBenzeneMessageClient(new HttpClient(new CapturingHandler(HttpStatusCode.OK, FailureEnvelopeWithProblem)), Url);
+
+        var result = await client.SendMessageAsync<string, Void>(
+            new BenzeneClientRequest<string>("t", "m", new Dictionary<string, string>()));
+
+        Assert.Equal(BenzeneResultStatus.ValidationError, result.Status);
+        Assert.Equal(new[] { new BenzeneError("Custom rule failed", "/sku", "CustomRule") }, result.Errors);
+    }
+
+    [Fact]
+    public async Task SendMessageAsync_ANonEnvelopeProblemJsonFailure_IsReadAsAProblemDocument()
+    {
+        // A host or gateway answering with its own problem document before any envelope was read: the
+        // reverse HTTP table classifies it, and the document's errors are rebuilt.
+        var handler = new CapturingHandler(HttpStatusCode.Unauthorized,
+            """{"type":"https://idp.example/problems/expired","status":401,"detail":"Token expired","errors":[{"message":"Token expired","code":"TokenExpired"}]}""",
+            "application/problem+json");
+        var client = new HttpBenzeneMessageClient(new HttpClient(handler), Url);
+
+        var result = await client.SendMessageAsync<string, string>(
+            new BenzeneClientRequest<string>("t", "m", new Dictionary<string, string>()));
+
+        Assert.Equal(BenzeneResultStatus.Unauthorized, result.Status);
+        Assert.Equal(new[] { new BenzeneError("Token expired", code: "TokenExpired") }, result.Errors);
+        Assert.Equal("https://idp.example/problems/expired", result.GetProblem().Type);
+    }
+
+    [Fact]
+    public async Task SendMessageAsync_ANonEnvelopeFailureThatIsNotProblemJson_CarriesNoErrors()
+    {
+        var handler = new CapturingHandler(HttpStatusCode.BadGateway, """{"message":"upstream down"}""");
+        var client = new HttpBenzeneMessageClient(new HttpClient(handler), Url);
+
+        var result = await client.SendMessageAsync<string, string>(
+            new BenzeneClientRequest<string>("t", "m", new Dictionary<string, string>()));
+
+        Assert.Equal(BenzeneResultStatus.ServiceUnavailable, result.Status);
+        Assert.Empty(result.Errors);
+    }
+
     private sealed class CapturingHandler : HttpMessageHandler
     {
         private readonly HttpStatusCode _status;
         private readonly string _body;
+        private readonly string _mediaType;
         public HttpRequestMessage? LastRequest;
         public string? LastRequestBody;
 
-        public CapturingHandler(HttpStatusCode status, string body)
+        public CapturingHandler(HttpStatusCode status, string body, string mediaType = "application/json")
         {
             _status = status;
             _body = body;
+            _mediaType = mediaType;
         }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -176,7 +243,7 @@ public class HttpBenzeneMessageClientTest
             cancellationToken.ThrowIfCancellationRequested();
             LastRequest = request;
             LastRequestBody = request.Content == null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
-            return new HttpResponseMessage(_status) { Content = new StringContent(_body, Encoding.UTF8, "application/json") };
+            return new HttpResponseMessage(_status) { Content = new StringContent(_body, Encoding.UTF8, _mediaType) };
         }
     }
 
