@@ -7,7 +7,9 @@ namespace Benzene.CodeGen.Cli.Core.Commands.CloudServiceProfile;
 /// <summary>
 /// CLI wrapper for the external live-probe checker (docs/specification/cloud-service-profile.md
 /// §5, <c>Benzene.CloudService.Probe</c>): hits a running Benzene Cloud Service over plain HTTP and
-/// independently assesses R1-R8 without trusting anything the service claims about itself. Unlike
+/// independently assesses the profile's R1-R5 and R7 without trusting anything the service claims about
+/// itself, and reports the meshed-service claim's M1/M2 (mesh.md §7.1) apart - they never trip
+/// <c>--fail-on</c>, since neither is observable from a single service. Unlike
 /// <see cref="Commands.HealthCheck.HealthCheckCommand"/>/<see cref="Commands.Spec.SpecCommand"/>,
 /// this talks to a plain HTTP URL rather than invoking AWS Lambda directly.
 /// </summary>
@@ -23,7 +25,7 @@ public class CloudServiceProfileCheckCommand : CommandBase<CloudServiceProfileCh
     private static readonly string[] ValidFailOnValues = { "not-satisfied", "inconclusive", "none" };
 
     public CloudServiceProfileCheckCommand()
-        : base("profile-check", "Externally probes a Benzene Cloud Service's R1-R8 conformance over HTTP")
+        : base("profile-check", "Externally probes a Benzene Cloud Service's profile conformance (R1-R5, R7) over HTTP")
     { }
 
     public override async Task ExecuteAsync(CloudServiceProfileCheckPayload payload)
@@ -108,11 +110,22 @@ public class CloudServiceProfileCheckCommand : CommandBase<CloudServiceProfileCh
             $"Summary: {satisfiedCount}/{report.Requirements.Count} satisfied" +
             $", {notSatisfied.Count} not satisfied" + (notSatisfied.Count == 0 ? "" : $" [{string.Join(", ", notSatisfied)}]") +
             $", {inconclusive.Count} inconclusive" + (inconclusive.Count == 0 ? "" : $" [{string.Join(", ", inconclusive)}]"));
+
+        if (report.MeshRequirements.Count > 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine("Meshed-service claim (mesh.md §7.1) - reported apart from the profile, never fails the check:");
+            foreach (var requirement in report.MeshRequirements)
+            {
+                Console.WriteLine($"{requirement.Id,-4} {requirement.Verdict,-13} {requirement.Description}");
+                Console.WriteLine($"     {requirement.Reason}");
+            }
+        }
     }
 
     private static void WriteJson(string url, CloudServiceProbeReport report)
     {
-        var json = JsonConvert.SerializeObject(new { url, report.Requirements, report.NotSatisfied, report.Inconclusive, report.IsFullyConformant },
+        var json = JsonConvert.SerializeObject(new { url, report.Requirements, report.NotSatisfied, report.Inconclusive, report.IsFullyConformant, report.MeshRequirements },
             Formatting.Indented, new StringEnumConverter());
         Console.WriteLine(json);
     }

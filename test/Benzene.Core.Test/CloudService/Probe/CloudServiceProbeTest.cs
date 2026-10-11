@@ -22,7 +22,7 @@ namespace Benzene.Test.CloudService.Probe;
 public class CloudServiceProbeTest
 {
     [Fact]
-    public async Task FullyConformantService_ReportsSatisfiedForEverythingExceptR8AndTheRegistrationHalfOfR6()
+    public async Task FullyConformantService_ReportsTheWholeProfileSatisfied_AndTheMeshClaimApartAsInconclusive()
     {
         var port = GetFreeTcpPort();
         using var fake = new FakeCloudService(port, CloudServiceProbePaths.Health, CloudServiceProbePaths.Spec, CloudServiceProbePaths.Invoke);
@@ -38,27 +38,57 @@ public class CloudServiceProbeTest
         using var client = new HttpClient { BaseAddress = new Uri($"http://localhost:{port}") };
         var report = await CloudServiceProbe.RunAsync(client);
 
+        // The profile is R1–R5 and R7 - all observable over HTTP, so a conformant service passes it outright.
+        Assert.Equal(new[] { "R1", "R2", "R3", "R4", "R5", "R7" }, report.Requirements.Select(x => x.Id));
         AssertVerdict(report, "R1", CloudServiceProbeVerdict.Satisfied);
         AssertVerdict(report, "R2", CloudServiceProbeVerdict.Satisfied);
         AssertVerdict(report, "R3", CloudServiceProbeVerdict.Satisfied);
         AssertVerdict(report, "R4", CloudServiceProbeVerdict.Satisfied);
         AssertVerdict(report, "R5", CloudServiceProbeVerdict.Satisfied);
-        AssertVerdict(report, "R6", CloudServiceProbeVerdict.Satisfied);
         AssertVerdict(report, "R7", CloudServiceProbeVerdict.Satisfied);
-        AssertVerdict(report, "R8", CloudServiceProbeVerdict.Inconclusive);
+        Assert.True(report.IsFullyConformant);
+        Assert.Empty(report.Inconclusive);
 
-        // R6 is Satisfied for the observable self-description (benzene:spec), but its reason must still
-        // say the registration/heartbeat half was never actually verified - a passing benzene:spec check
-        // must not silently imply the whole of R6.
-        var r6 = report.Requirements.Single(x => x.Id == "R6");
-        Assert.Contains("registration", r6.Reason, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("cannot be observed", r6.Reason, StringComparison.OrdinalIgnoreCase);
+        // R5 covers both halves: the HTTP spec surface and the benzene:spec topic over the envelope.
+        var r5 = report.Requirements.Single(x => x.Id == "R5");
+        Assert.Contains("benzene:spec", r5.Reason);
+        Assert.Contains(CloudServiceProbePaths.Spec, r5.Reason);
 
-        // R8 is never observable from one service, no matter how conformant it looks.
-        var r8 = report.Requirements.Single(x => x.Id == "R8");
-        Assert.Contains("cannot be verified", r8.Reason, StringComparison.OrdinalIgnoreCase);
+        // The meshed-service claim is reported apart: M1 (feeds) and M2 (propagation), never observable
+        // from one service, no matter how conformant it looks.
+        Assert.Equal(new[] { "M1", "M2" }, report.MeshRequirements.Select(x => x.Id));
+        AssertMeshVerdict(report, "M1", CloudServiceProbeVerdict.Inconclusive);
+        AssertMeshVerdict(report, "M2", CloudServiceProbeVerdict.Inconclusive);
+        var m1 = report.MeshRequirements.Single(x => x.Id == "M1");
+        Assert.Contains("registration", m1.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("cannot be observed", m1.Reason, StringComparison.OrdinalIgnoreCase);
+        var m2 = report.MeshRequirements.Single(x => x.Id == "M2");
+        Assert.Contains("cannot be verified", m2.Reason, StringComparison.OrdinalIgnoreCase);
 
-        Assert.All(report.Requirements, x => Assert.False(string.IsNullOrWhiteSpace(x.Reason)));
+        Assert.All(report.Requirements.Concat(report.MeshRequirements), x => Assert.False(string.IsNullOrWhiteSpace(x.Reason)));
+    }
+
+    [Fact]
+    public async Task SpecPathServedButTopicNot_R5IsNotSatisfied()
+    {
+        // R5 now carries "answer benzene:spec wherever the transport carries a reply" - the envelope does: a GET /benzene/spec alone is not enough.
+        var port = GetFreeTcpPort();
+        using var fake = new FakeCloudService(port, CloudServiceProbePaths.Health, CloudServiceProbePaths.Spec, CloudServiceProbePaths.Invoke);
+        fake.OnHealth = ctx => WriteJsonAsync(ctx, 200, "{\"isHealthy\":true}");
+        fake.OnSpec = ctx => WriteJsonAsync(ctx, 200, "{\"openapi\":\"3.0.0\"}");
+        fake.OnInvoke = (ctx, topic) => topic == "benzene:healthcheck"
+            ? WriteJsonAsync(ctx, 200, Envelope("{\"isHealthy\":true}"))
+            : WriteJsonAsync(ctx, 404, "{}");
+
+        using var client = new HttpClient { BaseAddress = new Uri($"http://localhost:{port}") };
+        var report = await CloudServiceProbe.RunAsync(client);
+
+        AssertVerdict(report, "R4", CloudServiceProbeVerdict.Satisfied);
+        AssertVerdict(report, "R5", CloudServiceProbeVerdict.NotSatisfied);
+        var r5 = report.Requirements.Single(x => x.Id == "R5");
+        Assert.Contains("'benzene:spec' returned 404", r5.Reason);
+        AssertVerdict(report, "R2", CloudServiceProbeVerdict.Inconclusive);
+        AssertVerdict(report, "R7", CloudServiceProbeVerdict.NotSatisfied);
     }
 
     [Fact]
@@ -116,12 +146,14 @@ public class CloudServiceProbeTest
         AssertVerdict(report, "R3", CloudServiceProbeVerdict.NotSatisfied);
         AssertVerdict(report, "R4", CloudServiceProbeVerdict.NotSatisfied);
         AssertVerdict(report, "R5", CloudServiceProbeVerdict.NotSatisfied);
-        AssertVerdict(report, "R6", CloudServiceProbeVerdict.NotSatisfied);
         // No contract document was reachable over benzene:spec, so there's no evidence either way for the registry.
         AssertVerdict(report, "R2", CloudServiceProbeVerdict.Inconclusive);
         // Default paths were used, but nothing checked out there.
         AssertVerdict(report, "R7", CloudServiceProbeVerdict.NotSatisfied);
-        AssertVerdict(report, "R8", CloudServiceProbeVerdict.Inconclusive);
+        AssertMeshVerdict(report, "M1", CloudServiceProbeVerdict.Inconclusive);
+        AssertMeshVerdict(report, "M2", CloudServiceProbeVerdict.Inconclusive);
+        Assert.DoesNotContain("M1", report.Inconclusive);
+        Assert.DoesNotContain("M2", report.Inconclusive);
     }
 
     [Fact]
@@ -141,10 +173,9 @@ public class CloudServiceProbeTest
         AssertVerdict(report, "R3", CloudServiceProbeVerdict.Satisfied);
         AssertVerdict(report, "R4", CloudServiceProbeVerdict.Satisfied);
         AssertVerdict(report, "R5", CloudServiceProbeVerdict.NotSatisfied);
-        AssertVerdict(report, "R6", CloudServiceProbeVerdict.NotSatisfied);
         // No contract document over benzene:spec - so no evidence about the registry.
         AssertVerdict(report, "R2", CloudServiceProbeVerdict.Inconclusive);
-        // Used default paths, but R5/R6 didn't check out there.
+        // Used default paths, but R5 didn't check out there.
         AssertVerdict(report, "R7", CloudServiceProbeVerdict.NotSatisfied);
     }
 
@@ -179,7 +210,6 @@ public class CloudServiceProbeTest
         AssertVerdict(report, "R3", CloudServiceProbeVerdict.Satisfied);
         AssertVerdict(report, "R4", CloudServiceProbeVerdict.Satisfied);
         AssertVerdict(report, "R5", CloudServiceProbeVerdict.Satisfied);
-        AssertVerdict(report, "R6", CloudServiceProbeVerdict.Satisfied);
         // Every probed surface checked out, but the probe was told to look elsewhere - it still
         // can't claim to know the service's *own* defaults are /benzene/*.
         AssertVerdict(report, "R7", CloudServiceProbeVerdict.Inconclusive);
@@ -188,7 +218,7 @@ public class CloudServiceProbeTest
     }
 
     [Fact]
-    public async Task SendTraceParentProbeDisabled_R8StaysInconclusiveWithoutTheBonusSignal()
+    public async Task SendTraceParentProbeDisabled_M2StaysInconclusiveWithoutTheBonusSignal()
     {
         var port = GetFreeTcpPort();
         using var fake = new FakeCloudService(port, CloudServiceProbePaths.Health, CloudServiceProbePaths.Spec, CloudServiceProbePaths.Invoke);
@@ -204,9 +234,31 @@ public class CloudServiceProbeTest
         using var client = new HttpClient { BaseAddress = new Uri($"http://localhost:{port}") };
         var report = await CloudServiceProbe.RunAsync(client, new CloudServiceProbeOptions { SendTraceParentProbe = false });
 
-        AssertVerdict(report, "R8", CloudServiceProbeVerdict.Inconclusive);
-        var r8 = report.Requirements.Single(x => x.Id == "R8");
-        Assert.DoesNotContain("bonus signal", r8.Reason, StringComparison.OrdinalIgnoreCase);
+        AssertMeshVerdict(report, "M2", CloudServiceProbeVerdict.Inconclusive);
+        var m2 = report.MeshRequirements.Single(x => x.Id == "M2");
+        Assert.DoesNotContain("bonus signal", m2.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SendTraceParentProbeEnabled_M2CarriesTheLabeledBonusSignal_ButStaysInconclusive()
+    {
+        var port = GetFreeTcpPort();
+        using var fake = new FakeCloudService(port, CloudServiceProbePaths.Health, CloudServiceProbePaths.Spec, CloudServiceProbePaths.Invoke);
+        fake.OnHealth = ctx => WriteJsonAsync(ctx, 200, "{\"isHealthy\":true}");
+        fake.OnSpec = ctx => WriteJsonAsync(ctx, 200, "{\"openapi\":\"3.0.0\"}");
+        fake.OnInvoke = (ctx, topic) => topic switch
+        {
+            "benzene:healthcheck" => WriteJsonAsync(ctx, 200, Envelope("{\"isHealthy\":true}")),
+            "benzene:spec" => WriteJsonAsync(ctx, 200, Envelope("{\"service\":\"orders\",\"requests\":[]}")),
+            _ => WriteJsonAsync(ctx, 404, "{}")
+        };
+
+        using var client = new HttpClient { BaseAddress = new Uri($"http://localhost:{port}") };
+        var report = await CloudServiceProbe.RunAsync(client);
+
+        AssertMeshVerdict(report, "M2", CloudServiceProbeVerdict.Inconclusive);
+        var m2 = report.MeshRequirements.Single(x => x.Id == "M2");
+        Assert.Contains("weak bonus signal", m2.Reason, StringComparison.OrdinalIgnoreCase);
     }
 
     private static void AssertVerdict(CloudServiceProbeReport report, string id, CloudServiceProbeVerdict expected)
@@ -215,6 +267,16 @@ public class CloudServiceProbeTest
         Assert.NotNull(requirement);
         Assert.True(expected == requirement!.Verdict,
             $"{id}: expected {expected} but was {requirement.Verdict} ({requirement.Reason})");
+    }
+
+    private static void AssertMeshVerdict(CloudServiceProbeReport report, string id, CloudServiceProbeVerdict expected)
+    {
+        var requirement = report.MeshRequirements.SingleOrDefault(x => x.Id == id);
+        Assert.NotNull(requirement);
+        Assert.True(expected == requirement!.Verdict,
+            $"{id}: expected {expected} but was {requirement.Verdict} ({requirement.Reason})");
+        // The meshed-service claim never appears among the profile's requirements.
+        Assert.DoesNotContain(report.Requirements, x => x.Id == id);
     }
 
     private static string Envelope(string body)

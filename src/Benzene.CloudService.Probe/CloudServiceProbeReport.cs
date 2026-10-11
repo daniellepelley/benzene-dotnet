@@ -5,8 +5,8 @@ namespace Benzene.CloudService.Probe;
 /// Cloud Service Profile (docs/specification/cloud-service-profile.md §2). Unlike
 /// <c>Benzene.CloudService.CloudServiceRequirement</c>'s simple bool (a wiring-time self-assessment
 /// that trusts the service's own setup code), a probe run from outside the service genuinely cannot
-/// always tell "yes" from "no" - some requirements (R8 in full, half of R6) are not observable over
-/// HTTP from a single service at all. Collapsing that into a bool would silently overclaim, which
+/// always tell "yes" from "no" - the meshed-service claim's M1 (feeds to a collector) and M2 (trace
+/// propagation) are not observable over HTTP from a single service at all. Collapsing that into a bool would silently overclaim, which
 /// this codebase's "no silent caps" convention rules out. <see cref="Inconclusive"/> exists so the
 /// probe can say "I don't know, and here is exactly why" instead of guessing.
 /// </summary>
@@ -21,15 +21,16 @@ public enum CloudServiceProbeVerdict
     /// <summary>
     /// The probe cannot determine this requirement from outside the service alone - either the
     /// relevant surface wasn't reachable at all (cascading from another failure), or the
-    /// requirement is inherently unobservable by a single-service HTTP probe (see R8's and R6's
-    /// remarks). Never treat this as a pass.
+    /// requirement is inherently unobservable by a single-service HTTP probe (see M1's and M2's
+    /// reasons). Never treat this as a pass.
     /// </summary>
     Inconclusive
 }
 
 /// <summary>
-/// One requirement of the Cloud Service Profile as independently assessed by an external
-/// <see cref="CloudServiceProbe"/> run - not by the target service's own wiring code.
+/// One requirement - of the Cloud Service Profile (R1–R5, R7) or of the meshed-service claim
+/// (mesh.md §7.1: M1, M2) - as independently assessed by an external <see cref="CloudServiceProbe"/>
+/// run, not by the target service's own wiring code.
 /// </summary>
 public sealed class CloudServiceProbeRequirement
 {
@@ -41,7 +42,7 @@ public sealed class CloudServiceProbeRequirement
         Reason = reason;
     }
 
-    /// <summary>The requirement id (R1-R8).</summary>
+    /// <summary>The requirement id: R1–R5 or R7 for the profile, M1 or M2 for the meshed-service claim.</summary>
     public string Id { get; }
 
     /// <summary>What the requirement mandates, in one line.</summary>
@@ -60,38 +61,55 @@ public sealed class CloudServiceProbeRequirement
 
 /// <summary>
 /// The result of one <see cref="CloudServiceProbe"/> run against a live service: an external,
-/// black-box, tri-state assessment of R1-R8 (docs/specification/cloud-service-profile.md §2) built
-/// entirely from what the probe itself observed over real HTTP - it never trusts anything the
-/// target service claims about itself (e.g. the <c>profile</c> field on its own contract document). This is
-/// the distinct, harder half of conformance checking described in the profile spec's §5: the
-/// self-check (<c>Benzene.CloudService.CloudServiceProfileReport</c>) answers "what did this
-/// service's own setup call provision"; this report answers "what can an outside operator or CI job
-/// actually verify by hitting the service".
+/// black-box, tri-state assessment of the Cloud Service Profile's R1–R5 and R7
+/// (docs/specification/cloud-service-profile.md §2), plus - reported apart - what the probe can say of
+/// the meshed-service claim's M1 and M2 (mesh.md §7.1), built entirely from what the probe itself
+/// observed over real HTTP. It never trusts anything the target service claims about itself (e.g. the
+/// <c>profile</c> field on its own contract document). This is the distinct, harder half of
+/// conformance checking described in the profile spec's §5: the self-check
+/// (<c>Benzene.CloudService.CloudServiceProfileReport</c>) answers "what did this service's own setup
+/// call provision"; this report answers "what can an outside operator or CI job actually verify by
+/// hitting the service".
 /// </summary>
 public sealed class CloudServiceProbeReport
 {
-    public CloudServiceProbeReport(IReadOnlyList<CloudServiceProbeRequirement> requirements)
+    /// <summary>Creates a report.</summary>
+    /// <param name="requirements">The profile's requirements (R1–R5, R7).</param>
+    /// <param name="meshRequirements">The meshed-service claim's requirements (M1, M2); none when null.</param>
+    public CloudServiceProbeReport(
+        IReadOnlyList<CloudServiceProbeRequirement> requirements,
+        IReadOnlyList<CloudServiceProbeRequirement>? meshRequirements = null)
     {
         Requirements = requirements;
+        MeshRequirements = meshRequirements ?? Array.Empty<CloudServiceProbeRequirement>();
     }
 
-    /// <summary>Every profile requirement with its independently-observed assessment, in R1-R8 order.</summary>
+    /// <summary>Every profile requirement with its independently-observed assessment: R1–R5 then R7.</summary>
     public IReadOnlyList<CloudServiceProbeRequirement> Requirements { get; }
 
-    /// <summary>The ids the probe positively observed as unmet.</summary>
+    /// <summary>
+    /// The meshed-service claim's requirements (mesh.md §7.1): M1 (registration, heartbeats, traces)
+    /// then M2 (trace context propagation), as far as the probe can observe them - from a single
+    /// service, neither is observable, so both are <see cref="CloudServiceProbeVerdict.Inconclusive"/>
+    /// with a reason saying so. Kept apart from <see cref="Requirements"/>: they never feed
+    /// <see cref="NotSatisfied"/>, <see cref="Inconclusive"/> or <see cref="IsFullyConformant"/>.
+    /// </summary>
+    public IReadOnlyList<CloudServiceProbeRequirement> MeshRequirements { get; }
+
+    /// <summary>The profile ids the probe positively observed as unmet.</summary>
     public IReadOnlyList<string> NotSatisfied =>
         Requirements.Where(x => x.Verdict == CloudServiceProbeVerdict.NotSatisfied).Select(x => x.Id).ToArray();
 
-    /// <summary>The ids the probe could not determine from outside the service.</summary>
+    /// <summary>The profile ids the probe could not determine from outside the service.</summary>
     public IReadOnlyList<string> Inconclusive =>
         Requirements.Where(x => x.Verdict == CloudServiceProbeVerdict.Inconclusive).Select(x => x.Id).ToArray();
 
     /// <summary>
-    /// True when every requirement was independently observed as <see cref="CloudServiceProbeVerdict.Satisfied"/>.
-    /// Given R8 (and half of R6) are structurally unobservable by a single-service probe (see their
-    /// reasons), this will essentially never be true in practice for a real service - that's
-    /// expected and correct, not a bug: it's the honest ceiling of what an external HTTP probe can
-    /// claim. Check <see cref="NotSatisfied"/> and <see cref="Inconclusive"/> for the actual picture.
+    /// True when every profile requirement (R1–R5, R7) was independently observed as
+    /// <see cref="CloudServiceProbeVerdict.Satisfied"/>. Every one of them is observable over HTTP, so a
+    /// conformant service probed at its default paths reaches this. The meshed-service claim
+    /// (<see cref="MeshRequirements"/>) does not count: it is a separate claim, and not observable from
+    /// one service.
     /// </summary>
     public bool IsFullyConformant => Requirements.All(x => x.Verdict == CloudServiceProbeVerdict.Satisfied);
 }

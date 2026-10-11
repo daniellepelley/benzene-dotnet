@@ -23,7 +23,7 @@ namespace Benzene.Test.CloudService.Probe;
 public class CloudServiceProbeIntegrationTest
 {
     [Fact]
-    public async Task ProbingARealCloudService_ReportsTheExpectedMostlyConformantResult()
+    public async Task ProbingARealCloudService_ReportsTheProfileFullySatisfied_AndTheMeshClaimApart()
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
@@ -54,16 +54,16 @@ public class CloudServiceProbeIntegrationTest
             AssertVerdict(report, "R3", CloudServiceProbeVerdict.Satisfied);
             AssertVerdict(report, "R4", CloudServiceProbeVerdict.Satisfied);
             AssertVerdict(report, "R5", CloudServiceProbeVerdict.Satisfied);
-            AssertVerdict(report, "R6", CloudServiceProbeVerdict.Satisfied);
             AssertVerdict(report, "R7", CloudServiceProbeVerdict.Satisfied);
-            // Not observable from a single service no matter how conformant it is.
-            AssertVerdict(report, "R8", CloudServiceProbeVerdict.Inconclusive);
+            // The profile (R1–R5, R7) needs no collector and is fully observable over HTTP.
+            Assert.True(report.IsFullyConformant);
 
-            // R6's self-description (benzene:spec) checks out (no collector needed for that), but its reason
-            // must still be honest that registration/heartbeat delivery was never actually
-            // exercised by this probe - the two halves of R6 stay distinguishable in the reason.
-            var r6 = report.Requirements.Single(x => x.Id == "R6");
-            Assert.Contains("registration", r6.Reason, StringComparison.OrdinalIgnoreCase);
+            // The meshed-service claim (M1 feeds, M2 propagation) is reported apart - and is not
+            // observable from a single service no matter how conformant it is.
+            Assert.Equal(new[] { "M1", "M2" }, report.MeshRequirements.Select(x => x.Id));
+            Assert.All(report.MeshRequirements, x => Assert.Equal(CloudServiceProbeVerdict.Inconclusive, x.Verdict));
+            var m1 = report.MeshRequirements.Single(x => x.Id == "M1");
+            Assert.Contains("registration", m1.Reason, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {

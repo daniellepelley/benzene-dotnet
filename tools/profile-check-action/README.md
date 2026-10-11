@@ -43,10 +43,10 @@ silent false pass.
 | `url` | yes | — | Base URL of the Benzene Cloud Service to probe |
 | `fail-on` | no | `not-satisfied` | `not-satisfied`, `inconclusive`, or `none` — see below |
 | `cli-version` | no | latest prerelease | Pin to a specific `Benzene.CodeGen.Cli` version |
-| `invoke-path` | no | `/benzene/invoke` | Override the R4/R6 envelope endpoint path |
-| `spec-path` | no | `/benzene/spec` | Override the R5 derived-spec endpoint path |
+| `invoke-path` | no | `/benzene/invoke` | Override the envelope endpoint path (R4, and R5's `benzene:spec` topic) |
+| `spec-path` | no | `/benzene/spec` | Override the R5 derived-spec HTTP path |
 | `health-path` | no | `/benzene/health` | Override the R3 health endpoint path |
-| `no-traceparent-probe` | no | `false` | Skip the R8 bonus `traceparent` header on R4/R6 calls |
+| `no-traceparent-probe` | no | `false` | Skip the M2 bonus `traceparent` header on the envelope calls |
 
 Passing any of `invoke-path`/`spec-path`/`health-path` means the probe can no longer confirm the
 service's *own* defaults, so R7 degrades to `Inconclusive` in that run — this is the checker's own
@@ -54,24 +54,26 @@ documented behavior, not a bug in this action.
 
 ### `fail-on`: read this before setting it to `inconclusive`
 
-R8 (trace-context propagation) and half of R6 (registration/heartbeat delivery to a collector) are
-**structurally unobservable** by a single-service HTTP probe — this is documented, deliberate
-behavior of the checker, not a gap. A real, fully-conformant service will still show R8 (at least)
-as `Inconclusive`. Setting `fail-on: inconclusive` will therefore fail on essentially every real
-service, including a perfectly conformant one — it exists for completeness, not as the
-recommended setting. Use the default `not-satisfied` unless you specifically understand this
-trade-off.
+The Cloud Service Profile is R1–R5 and R7, and every one of them is observable over HTTP: a
+conformant service probed at its default paths comes back fully `Satisfied`, so it passes even
+`fail-on: inconclusive`. What can still be `Inconclusive` is R7 when you override a path input (see
+above) and R2 when the contract document lists no requests.
+
+The **meshed-service claim** (mesh.md §7.1) — M1, registration/heartbeat/trace delivery to a
+collector, and M2, trace-context propagation (formerly the profile's R6 and R8) — is **structurally
+unobservable** by a single-service HTTP probe. The report carries it apart (`MeshRequirements`,
+always `Inconclusive`, with the reason), and it never counts toward `fail-on` or the outputs below.
 
 ### Outputs
 
 | Output | Description |
 |---|---|
 | `verdict` | `pass` or `fail`, per the resolved `fail-on` threshold |
-| `not-satisfied` | JSON array of requirement ids observed as unmet (e.g. `["R3","R5"]`) |
-| `inconclusive` | JSON array of requirement ids the probe could not determine |
-| `report-json` | The full report — every R1-R8 requirement, verdict, and reason — as JSON |
+| `not-satisfied` | JSON array of profile requirement ids observed as unmet (e.g. `["R3","R5"]`) |
+| `inconclusive` | JSON array of profile requirement ids the probe could not determine |
+| `report-json` | The full report — every R1–R5/R7 requirement, plus the M1/M2 meshed-service claim, with verdict and reason — as JSON |
 
-A markdown table (one row per requirement, plus a summary line) is written to the job's step
+A markdown table (one row per profile requirement, a summary line, and a second table for the meshed-service claim) is written to the job's step
 summary (`$GITHUB_STEP_SUMMARY`) on every run, pass or fail.
 
 ## Example: post-deploy gate
@@ -96,9 +98,9 @@ jobs:
 - It does not implement any probe logic itself — that lives entirely in
   `Benzene.CloudService.Probe` / the `benzene` CLI, which this action only installs and invokes.
   Fixing or extending the probe's behavior is a `benzene-dotnet` change, not an action change.
-- It does not call `/benzene/invoke` in any capacity beyond the checker's own read-only R4/R6
+- It does not call `/benzene/invoke` in any capacity beyond the checker's own read-only R4/R5
   probes (no dispatch, no side effects on the target service).
-- It cannot make R8/half-R6 observable — no CI wrapper can; that is a property of a single-service
+- It cannot make the meshed-service claim (M1/M2) observable — no CI wrapper can; that is a property of a single-service
   black-box HTTP probe, documented in the
   [Cloud Service Profile spec §5](https://github.com/daniellepelley/Benzene/blob/main/docs/specification/cloud-service-profile.md#5-conformance-testing).
 

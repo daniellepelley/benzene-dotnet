@@ -1,7 +1,7 @@
 name: 'Benzene Cloud Service Profile Check'
 description: >-
-  Probes a deployed Benzene Cloud Service over plain HTTP for Cloud Service Profile (R1-R8)
-  conformance, using the language-neutral `benzene profile-check` live-probe checker, and fails
+  Probes a deployed Benzene Cloud Service over plain HTTP for Cloud Service Profile (R1-R5, R7)
+  conformance (the meshed-service claim's M1/M2 are reported apart and never fail the job), using the language-neutral `benzene profile-check` live-probe checker, and fails
   the job per --fail-on. Works against any conforming service regardless of implementation
   language - the checker is BCL-only and audits over the wire, not by inspecting the target's
   code.
@@ -18,10 +18,10 @@ inputs:
     description: >-
       The verdict that fails the job: 'not-satisfied' (default) fails if any requirement was
       independently observed as unmet; 'inconclusive' additionally fails on a requirement the
-      probe could not determine (note: R8, and half of R6, are structurally unobservable by a
-      single-service HTTP probe and will almost always come back Inconclusive on any real
-      service - 'inconclusive' is rarely the right choice); 'none' reports only and always
-      succeeds.
+      probe could not determine (every profile requirement is observable over HTTP, so a
+      conformant service probed at its default paths passes even this; R7 is Inconclusive when
+      a path input is overridden); 'none' reports only and always succeeds. The meshed-service
+      claim's M1/M2 are never observable from one service and never count.
     required: false
     default: 'not-satisfied'
   cli-version:
@@ -34,11 +34,11 @@ inputs:
     required: false
     default: ''
   invoke-path:
-    description: 'Overrides the wire-envelope endpoint path probed for R4/R6 (default /benzene/invoke)'
+    description: 'Overrides the wire-envelope endpoint path probed for R4 and R5''s benzene:spec topic (default /benzene/invoke)'
     required: false
     default: ''
   spec-path:
-    description: 'Overrides the derived spec endpoint path probed for R5 (default /benzene/spec)'
+    description: 'Overrides the derived spec endpoint path probed for R5''s HTTP surface (default /benzene/spec)'
     required: false
     default: ''
   health-path:
@@ -46,7 +46,7 @@ inputs:
     required: false
     default: ''
   no-traceparent-probe:
-    description: "Skip the R8 bonus traceparent header sent with the R4/R6 probe requests. Set 'true' to skip."
+    description: "Skip the M2 bonus traceparent header sent with the envelope probe requests (R4, R5's benzene:spec topic). Set 'true' to skip."
     required: false
     default: 'false'
 
@@ -55,13 +55,13 @@ outputs:
     description: "'pass' or 'fail', per the resolved --fail-on threshold"
     value: ${{ steps.probe.outputs.verdict }}
   not-satisfied:
-    description: 'JSON array of requirement ids the probe independently observed as unmet'
+    description: 'JSON array of profile requirement ids the probe independently observed as unmet'
     value: ${{ steps.probe.outputs.not-satisfied }}
   inconclusive:
-    description: 'JSON array of requirement ids the probe could not determine from outside the service'
+    description: 'JSON array of profile requirement ids the probe could not determine from outside the service'
     value: ${{ steps.probe.outputs.inconclusive }}
   report-json:
-    description: 'The full probe report (every R1-R8 requirement, verdict, and reason) as JSON'
+    description: 'The full probe report (every R1-R5, R7 requirement, plus the M1/M2 meshed-service claim, with verdict and reason) as JSON'
     value: ${{ steps.probe.outputs.report-json }}
 
 runs:
@@ -131,6 +131,12 @@ runs:
           jq -r '.Requirements[] | "| \(.Id) | \(.Verdict) | \(.Description | gsub("\\|"; "\\|")) | \(.Reason | gsub("\\|"; "\\|")) |"' report.json
           echo ""
           jq -r '"**Summary:** \([.Requirements[] | select(.Verdict=="Satisfied")] | length)/\(.Requirements | length) satisfied, \(.NotSatisfied | length) not satisfied, \(.Inconclusive | length) inconclusive"' report.json
+          echo ""
+          echo "**Meshed-service claim** (mesh.md §7.1) - reported apart, never fails the job:"
+          echo ""
+          echo "| Requirement | Verdict | Description | Reason |"
+          echo "|---|---|---|---|"
+          jq -r '(.MeshRequirements // [])[] | "| \(.Id) | \(.Verdict) | \(.Description | gsub("\\|"; "\\|")) | \(.Reason | gsub("\\|"; "\\|")) |"' report.json
         } >> "$GITHUB_STEP_SUMMARY"
 
         exit "$EXIT_CODE"
