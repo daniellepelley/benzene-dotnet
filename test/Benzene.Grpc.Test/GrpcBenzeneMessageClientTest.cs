@@ -104,7 +104,7 @@ public class GrpcBenzeneMessageClientTest
     {
         var richStatus = new Google.Rpc.Status { Code = (int)StatusCode.InvalidArgument, Message = "bad request" };
         var badRequest = new Google.Rpc.BadRequest();
-        badRequest.FieldViolations.Add(new Google.Rpc.BadRequest.Types.FieldViolation { Field = "Name", Description = "Name must not be empty" });
+        badRequest.FieldViolations.Add(new Google.Rpc.BadRequest.Types.FieldViolation { Field = "items[0].sku", Description = "Sku must not be empty" });
         badRequest.FieldViolations.Add(new Google.Rpc.BadRequest.Types.FieldViolation { Description = "Age must be greater than 0" });
         richStatus.Details.Add(Google.Protobuf.WellKnownTypes.Any.Pack(badRequest));
 
@@ -122,8 +122,9 @@ public class GrpcBenzeneMessageClientTest
         Assert.False(result.IsSuccessful);
         Assert.Equal(BenzeneResultStatus.BadRequest, result.Status);
         Assert.Equal(2, result.Errors.Count);
-        Assert.Equal("Name must not be empty", result.Errors[0].Message);
-        Assert.Equal("Name", result.Errors[0].Field);
+        Assert.Equal("Sku must not be empty", result.Errors[0].Message);
+        // The dotted FieldViolation path read back as the JSON Pointer every other transport carries.
+        Assert.Equal("/items/0/sku", result.Errors[0].Field);
         Assert.Equal("Age must be greater than 0", result.Errors[1].Message);
         Assert.Null(result.Errors[1].Field);
     }

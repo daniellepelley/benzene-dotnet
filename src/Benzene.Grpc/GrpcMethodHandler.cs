@@ -214,10 +214,12 @@ public class GrpcMethodHandler : IGrpcMethodHandler
     /// Attaches a <c>google.rpc.Status</c> to the <c>grpc-status-details-bin</c> trailer alongside the
     /// flat <c>benzene-status</c> trailer, so a gRPC client can read structured error details. A
     /// <see cref="Benzene.Results.BenzeneResultStatus.ValidationError"/> maps its error messages to a
-    /// <c>google.rpc.BadRequest</c> with one field violation per message - <see cref="Benzene.Abstractions.Results.BenzeneError.Field"/>
-    /// fills <see cref="Google.Rpc.BadRequest.Types.FieldViolation.Field"/> when present (left unset,
-    /// not empty-string, when the error isn't scoped to a field - Phase 5 of
-    /// work/archive/problem-details-plan-2026-08.md, "gRPC gets a free correctness win", ruling §5.3). Carrying
+    /// <c>google.rpc.BadRequest</c> with one field violation per message - <see cref="Benzene.Abstractions.Results.BenzeneError.Field"/>,
+    /// a JSON Pointer, fills <see cref="Google.Rpc.BadRequest.Types.FieldViolation.Field"/> converted to
+    /// gRPC's dotted form by <see cref="GrpcFieldPath.FromPointer"/> (<c>/items/0/sku</c> →
+    /// <c>items[0].sku</c>, wire-contracts.md §4.2), and is left empty (proto3's unset) when the error
+    /// isn't scoped to a field - Phase 5 of work/archive/problem-details-plan-2026-08.md, "gRPC gets a
+    /// free correctness win", ruling §5.3. Carrying
     /// <see cref="Benzene.Abstractions.Results.BenzeneError.Code"/> in <c>google.rpc.ErrorInfo</c> is
     /// out of scope (parked, plan §8) - not added here.
     /// </summary>
@@ -234,11 +236,13 @@ public class GrpcMethodHandler : IGrpcMethodHandler
             var badRequest = new Google.Rpc.BadRequest();
             foreach (var error in errors)
             {
-                var fieldViolation = new Google.Rpc.BadRequest.Types.FieldViolation { Description = error.Message };
-                if (!string.IsNullOrEmpty(error.Field))
+                // FieldViolation.field is a dotted path, so the error's JSON Pointer is converted
+                // (wire-contracts §4.2): /items/0/sku -> items[0].sku. No field -> empty (proto3's unset).
+                var fieldViolation = new Google.Rpc.BadRequest.Types.FieldViolation
                 {
-                    fieldViolation.Field = error.Field;
-                }
+                    Description = error.Message,
+                    Field = GrpcFieldPath.FromPointer(error.Field)
+                };
 
                 badRequest.FieldViolations.Add(fieldViolation);
             }

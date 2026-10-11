@@ -120,7 +120,9 @@ public class GrpcBenzeneMessageClient : IBenzeneMessageClient
     /// <c>Benzene.Grpc.GrpcMethodHandler.AddRichErrorDetails</c>), one <see cref="BenzeneError"/> per
     /// <c>FieldViolation</c> - <see cref="Google.Rpc.BadRequest.Types.FieldViolation.Description"/> as
     /// the message, <see cref="Google.Rpc.BadRequest.Types.FieldViolation.Field"/> as the field when
-    /// non-empty (mirroring the HTTP client's <c>ProblemDetails.Errors</c> read). Otherwise falls back
+    /// non-empty, converted from gRPC's dotted path back to the JSON Pointer every other transport
+    /// carries (<c>items[0].sku</c> → <c>/items/0/sku</c>, <see cref="GrpcFieldPath.ToPointer"/>), so
+    /// the result reads the same as the HTTP client's <c>ProblemDetails.Errors</c>. Otherwise falls back
     /// to a single message-only error from <see cref="Status.Detail"/> - unchanged behavior for a
     /// non-Benzene gRPC server, or a Benzene failure that isn't <c>ValidationError</c> (the only status
     /// the server attaches field violations for today).
@@ -137,7 +139,7 @@ public class GrpcBenzeneMessageClient : IBenzeneMessageClient
             return fieldViolations
                 .Select(fieldViolation => new BenzeneError(
                     fieldViolation.Description,
-                    string.IsNullOrEmpty(fieldViolation.Field) ? null : fieldViolation.Field))
+                    GrpcFieldPath.ToPointer(fieldViolation.Field)))
                 .ToArray();
         }
 

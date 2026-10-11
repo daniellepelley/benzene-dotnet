@@ -126,7 +126,12 @@ on the result — one error per entry in `ValidationResult.MemberNames` (a resul
 yields a single field-less error) — and (when the failure travels over the wire) one entry in the
 [problem document](message-result.md#problem-documents-rfc-9457)'s `errors` array:
 
-- **`Field`** ← the member name(s) `ValidationResult.MemberNames` reports, e.g. `Name`.
+- **`Field`** ← each member name `ValidationResult.MemberNames` reports, converted to a
+  [JSON Pointer](https://www.rfc-editor.org/rfc/rfc6901) into the request as it looks on the wire —
+  property names as your JSON serializer writes them (camelCase by default, `[JsonPropertyName]`
+  renames honoured): `Name` → `/name`. A path an `IValidatableObject` reports the .NET way
+  (`Lines[1].Sku`) converts too (`/lines/1/sku`). A member name the request type doesn't have yields a
+  field-less error rather than an invented pointer, and so does a class-level rule.
 - **`Code`** — always `null`. `ValidationResult` doesn't expose which `ValidationAttribute` produced
   it, so there's no machine-readable code to carry (unlike FluentValidation's `ErrorCode`).
 
@@ -138,7 +143,7 @@ yields a single field-less error) — and (when the failure travels over the wir
   "detail": "The Name field is required.",
   "benzeneStatus": "validation-error",
   "errors": [
-    { "message": "The Name field is required.", "field": "Name" }
+    { "message": "The Name field is required.", "field": "/name" }
   ]
 }
 ```

@@ -134,6 +134,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stale data" warning downstream on every no-op invalidate.
 
 ### Changed
+- **BREAKING (spec 0.2, wire-contracts §1.3 / D8): `errors[].field` is a JSON Pointer into the
+  request's JSON form.** `Benzene.FluentValidation` and `Benzene.DataAnnotations` used to emit the .NET
+  property path verbatim (`Name`, `Items[0].Sku`); they now emit an RFC 6901 pointer addressed the way
+  the caller's body is written - `/name`, `/items/0/sku` - with property names as the service's JSON
+  serializer writes them (camelCase by default; a configured `JsonSerializerOptions` naming policy and
+  `[JsonPropertyName]` renames are honoured, `~`/`/` escaped). A rule that names no single location
+  (`RuleFor(x => x)`, a cross-field check, an `OverridePropertyName` or member name the request type
+  doesn't have, a dictionary entry) now carries **no** `field` rather than an unresolvable one. Over
+  gRPC, `FieldViolation.field` carries the pointer's dotted form (`items[0].sku`, a digits-only
+  segment written `[n]`), and `Benzene.Grpc.Client` converts it back to the pointer, so a result's
+  `Field` reads the same over every transport. `Benzene.JsonSchema` already emitted pointers and is
+  unchanged. **Migration:** a caller that matched `field` against a .NET property name matches the
+  pointer instead (`"Name"` → `"/name"`). New supporting API (additive): `IJsonPropertyNameResolver` /
+  `JsonPropertyNameResolver` (`Benzene.Abstractions.Serialization`), implemented by
+  `Benzene.Core.MessageHandlers`' `JsonSerializer` and registered by `AddBenzene`;
+  `Benzene.Abstractions.Validation.FieldPointer`; `Benzene.FluentValidation.ValidationResultExtensions.ToBenzeneErrors`;
+  `Benzene.Grpc.GrpcFieldPath`; a `Benzene.DataAnnotations.ValidationMiddleware` constructor taking an
+  `IJsonPropertyNameResolver`.
 - **BREAKING (mesh.md's 2026-08 revision): the mesh producer/consumer graph is now declared, never
   trace-derived.** `MeshServiceDescriptor` gains a `Consumes` field (mesh.md §2), populated from a new
   explicit **outbound registration** concept (§2.3, mirroring core-concepts.md §9's inbound handler

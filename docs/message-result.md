@@ -119,8 +119,8 @@ failure and served over HTTP looks like this on the wire:
   "detail": "Name must not be empty, Age must be greater than 0",
   "benzeneStatus": "validation-error",
   "errors": [
-    { "message": "Name must not be empty", "field": "Name", "code": "NotEmptyValidator" },
-    { "message": "Age must be greater than 0", "field": "Age", "code": "GreaterThanValidator" }
+    { "message": "Name must not be empty", "field": "/name", "code": "NotEmptyValidator" },
+    { "message": "Age must be greater than 0", "field": "/age", "code": "GreaterThanValidator" }
   ]
 }
 ```
@@ -131,7 +131,11 @@ failure and served over HTTP looks like this on the wire:
   already used, unchanged.
 - `benzeneStatus` mirrors the result's `Status` string — the transport-neutral discriminator every
   reader should classify on; `status` (numeric) only exists for HTTP.
-- `errors`, when present, is the result's structured `BenzeneError`s. See
+- `errors`, when present, is the result's structured `BenzeneError`s. `field` is a
+  [JSON Pointer](https://www.rfc-editor.org/rfc/rfc6901) into the request as the caller sent it
+  (`/name`, `/items/0/sku`) — every Benzene validation integration emits one, and an error that
+  belongs to no single location has no `field`. A handler that builds its own `BenzeneError` should
+  follow the same rule. See
   [Fluent Validation](fluent-validation.md#structured-errors-on-the-wire-field-and-code) /
   [Data Annotations](data-annotations.md#structured-errors-on-the-wire-field-and-code) for which
   integration populates `field`/`code` and how.

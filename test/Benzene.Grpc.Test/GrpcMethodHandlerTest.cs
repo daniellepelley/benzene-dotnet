@@ -101,14 +101,15 @@ public class GrpcMethodHandlerTest
     }
 
     // Phase 5 of work/archive/problem-details-plan-2026-08.md ("gRPC gets a free correctness win", ruling §5.3):
-    // FieldViolation.Field is filled from BenzeneError.Field when the producer supplied one.
+    // FieldViolation.Field is filled from BenzeneError.Field when the producer supplied one - the JSON
+    // Pointer converted to gRPC's dotted path (wire-contracts §4.2).
     [Fact]
     public async Task HandleAsync_ValidationErrorWithStructuredErrors_FillsFieldViolationFieldFromBenzeneErrorField()
     {
         var errors = new[]
         {
-            new Benzene.Abstractions.Results.BenzeneError("Name must not be empty", "Name", "NotEmptyValidator"),
-            new Benzene.Abstractions.Results.BenzeneError("Age must be greater than 0", "Age", "GreaterThanValidator"),
+            new Benzene.Abstractions.Results.BenzeneError("Name must not be empty", "/name", "NotEmptyValidator"),
+            new Benzene.Abstractions.Results.BenzeneError("Sku must not be empty", "/items/0/sku", "NotEmptyValidator"),
         };
         var pipeline = BuildResultPipeline(BenzeneResult.ValidationError(errors), out var serviceResolverFactory);
         var handler = new GrpcMethodHandler(new GrpcMethodDefinition("/x/y", "topic"), serviceResolverFactory, pipeline);
@@ -122,10 +123,10 @@ public class GrpcMethodHandlerTest
         var badRequest = richStatus.Details[0].Unpack<Google.Rpc.BadRequest>();
 
         Assert.Equal(2, badRequest.FieldViolations.Count);
-        Assert.Equal("Name", badRequest.FieldViolations[0].Field);
+        Assert.Equal("name", badRequest.FieldViolations[0].Field);
         Assert.Equal("Name must not be empty", badRequest.FieldViolations[0].Description);
-        Assert.Equal("Age", badRequest.FieldViolations[1].Field);
-        Assert.Equal("Age must be greater than 0", badRequest.FieldViolations[1].Description);
+        Assert.Equal("items[0].sku", badRequest.FieldViolations[1].Field);
+        Assert.Equal("Sku must not be empty", badRequest.FieldViolations[1].Description);
     }
 
     [Fact]

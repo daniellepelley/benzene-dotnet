@@ -83,7 +83,9 @@ public class CreateProductHandler : IMessageHandler<CreateProductRequest, Create
 
 Standard FluentValidation, nothing Benzene-specific: `RuleFor(x => x)` gives you the whole request,
 so `.Must(...)` can compare two of its properties. `.WithName(...)` controls which property name
-the resulting error is attributed to:
+the resulting error is attributed to — and so its `field` on the wire: `.WithName(nameof(...DiscontinueDate))`
+below gives `"field": "/discontinueDate"`. Without it, or with a name the request type doesn't have,
+the error carries no `field`, since a whole-request rule points at no single location:
 
 ```csharp
 using FluentValidation;
@@ -308,7 +310,7 @@ RuleFor(x => x.Name)
 ```
 
 A caller reading the response's [problem document](../message-result.md#problem-documents-rfc-9457)
-now sees `{ "message": "A product named 'Widget' already exists", "field": "Name", "code":
+now sees `{ "message": "A product named 'Widget' already exists", "field": "/name", "code":
 "duplicate_name" }` in `errors`, and can branch on `"duplicate_name"` without parsing `message` text.
 See [Fluent Validation — Structured errors on the wire](../fluent-validation.md#structured-errors-on-the-wire-field-and-code)
 for the general `field`/`code` rule this follows.

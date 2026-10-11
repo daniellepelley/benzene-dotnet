@@ -41,15 +41,7 @@ public class ValidationMiddleware<TRequest, TResponse> : IMiddleware<IMessageHan
             if (!validationResult.IsValid)
             {
                 var status = _validationStatusMapper.GetStatus(context.HandlerType, typeof(TRequest), validationResult);
-                // FluentValidation's PropertyName/ErrorCode are emitted verbatim as Field/Code
-                // (work/benzene-result-errors-ruling.md §5.1) - ErrorCode defaults to the validator
-                // type name (e.g. "NotEmptyValidator"), not stripped or normalized.
-                var errors = validationResult.Errors
-                    .Select(x => new BenzeneError(
-                        x.ErrorMessage,
-                        string.IsNullOrEmpty(x.PropertyName) ? null : x.PropertyName,
-                        string.IsNullOrEmpty(x.ErrorCode) ? null : x.ErrorCode))
-                    .ToArray();
+                var errors = validationResult.ToBenzeneErrors(typeof(TRequest), FieldPointer.ResolveNames(_serviceResolver));
                 // Set<TResponse>(status, errors), not SetFailed<TResponse> - the arbitrary-status
                 // (IValidationStatusMapper-driven) structured overload, so status stays whatever the
                 // mapper resolved while errors keep their Field/Code.

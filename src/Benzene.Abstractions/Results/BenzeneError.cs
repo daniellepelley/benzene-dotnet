@@ -27,9 +27,10 @@ public sealed record BenzeneError
     /// <summary>Initializes a new instance with the given message and optional field/code.</summary>
     /// <param name="message">The human-readable error message.</param>
     /// <param name="field">
-    /// The field this error belongs to, if any - the producer's property path (e.g. a .NET property
-    /// name for the validation middlewares, or a JSON Pointer for <c>Benzene.JsonSchema</c>). Each
-    /// producer documents which shape it emits.
+    /// The field this error belongs to, if any - an RFC 6901 JSON Pointer into the handler's request in
+    /// its JSON form (<c>/name</c>, <c>/items/0/sku</c>; wire-contracts.md §1.3). Every validation
+    /// integration emits one; a producer with a .NET property path converts it with
+    /// <c>Benzene.Abstractions.Validation.FieldPointer</c>.
     /// </param>
     /// <param name="code">
     /// A machine-readable rule code a caller can branch on, if the producer supplies one (e.g.
@@ -46,8 +47,9 @@ public sealed record BenzeneError
     public string Message { get; init; } = string.Empty;
 
     /// <summary>
-    /// The field this error belongs to, if any. <c>null</c> when the error isn't scoped to a single
-    /// field, or the producer can't determine one.
+    /// The field this error belongs to, if any, as a JSON Pointer into the request's JSON form.
+    /// <c>null</c> when the error isn't scoped to a single location (a cross-field or whole-request
+    /// rule), or the producer can't determine one - never an invented location.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Field { get; init; }

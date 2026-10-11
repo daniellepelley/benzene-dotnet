@@ -20,6 +20,16 @@ the rule-to-schema wiring live in the implementation/adapter packages that consu
 - `ValidationStatusAttribute` - class-only attribute, applied to a message handler type, overriding
   the result status a failed validation produces for that handler (e.g. `BadRequest` vs
   `ValidationError`).
+- `FieldPointer` - the one conversion every validation integration uses for `errors[].field`
+  (wire-contracts.md §1.3): `FromPropertyPath(requestType, path, names)` turns a .NET property path
+  (`Name`, `Address.Line1`, `Items[0].Sku`) into an RFC 6901 JSON Pointer into the request's JSON form
+  (`/name`, `/address/line1`, `/items/0/sku`), resolving each segment against the request type and
+  naming it through an `IJsonPropertyNameResolver` (`Benzene.Abstractions.Serialization`), escaping
+  `~`/`/`. Returns `null` - omit `field` - for a path naming no single location: empty (whole-request
+  or cross-field rule), a member the type lacks or the serializer ignores, a dictionary "index", a
+  non-numeric index. `ResolveNames(IServiceResolver)` picks the resolver: a registered
+  `IJsonPropertyNameResolver` (AddBenzene registers the JSON serializer), else the `ISerializer` if it
+  can name members, else `JsonPropertyNameResolver.Default` (camelCase).
 - `ValidationConstants` - the canonical rule-name strings (`MinLength`, `MaxLength`, `IsGuid`,
   `IsNumeric`, `NotEmpty`, `NotNull`, `IsOneOf`, `Regex`, `Email`, `Phone`, `GreaterThan`, ... ).
 
@@ -44,5 +54,5 @@ the rule-to-schema wiring live in the implementation/adapter packages that consu
   keeps its own pre-existing default validation-error status unchanged.
 
 ## Tests
-Exercised via the validation middleware/implementation tests in `test/` (this package is
-interfaces + constants only).
+Exercised via the validation middleware/implementation tests in `test/`; `FieldPointer` directly in
+`test/Benzene.Core.Test/Plugins/Validation/FieldPointerTest.cs`.

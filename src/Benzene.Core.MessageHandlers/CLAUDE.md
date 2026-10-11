@@ -96,7 +96,11 @@ Provides complete implementation of message handler infrastructure for command/q
 ### Serialization
 - `JsonSerializer` - System.Text.Json implementation of `ISerializer`; also implements
   `IPayloadSerializer` (byte-oriented, via `Utf8JsonWriter`/`Utf8JsonReader`), so it's used on the
-  byte path whenever an `IMessageBodyBytesGetter<TContext>` is registered for the context
+  byte path whenever an `IMessageBodyBytesGetter<TContext>` is registered for the context; and
+  `IJsonPropertyNameResolver` (names members exactly as its own options write them - built lazily on
+  the first validation failure). `AddBenzene` registers the concrete `JsonSerializer` (the one
+  `JsonMediaFormat` reads requests with) as the `IJsonPropertyNameResolver`, so every validation
+  integration's `errors[].field` pointer follows the options the service really uses
 
 ### BenzeneMessage (Transport-Agnostic)
 - `BenzeneMessageApplication` - Application for BenzeneMessage

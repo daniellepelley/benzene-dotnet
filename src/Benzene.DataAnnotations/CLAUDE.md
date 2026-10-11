@@ -16,7 +16,12 @@ integration. It does honour the shared handler-level `[ValidationStatus]` overri
   if any `ValidationResult` was produced, sets `BenzeneResult.Set<TResponse>(status, errors)` and
   stops the pipeline. Each `ValidationResult` becomes one `BenzeneError` per entry in its
   `MemberNames` (so a result naming two members yields two errors, same `Message`, different
-  `Field`); a result naming no member yields one field-less error. `Code` is always `null` -
+  `Field`); a result naming no member yields one field-less error. `Field` is the member name (or a
+  path an `IValidatableObject` reports, e.g. `Lines[1].Sku`) converted to a JSON Pointer into the
+  request's JSON form (wire-contracts.md §1.3 - `/name`, `/lines/1/sku`) via
+  `Benzene.Abstractions.Validation.FieldPointer`, named by the `IJsonPropertyNameResolver` the builder
+  resolves (the service's JSON serializer); an unresolvable name leaves that error field-less.
+  Exact duplicates are collapsed. `Code` is always `null` -
   `System.ComponentModel.DataAnnotations.ValidationResult` doesn't expose the attribute that
   produced it. No errors → `next()`. The failure `status` is resolved once, via an optional
   `IValidationStatusMapper` (`Benzene.Abstractions.Validation`) - when one is registered (e.g.
@@ -24,7 +29,8 @@ integration. It does honour the shared handler-level `[ValidationStatus]` overri
   the resolved handler type; absent a registered mapper, falls back to
   `IDefaultStatuses.ValidationError` (or the built-in literal), same as before this mapper existed.
 - `ValidationMiddlewareBuilder : IHandlerMiddlewareBuilder` - constructs the middleware per handler,
-  resolving both `IDefaultStatuses` and `IValidationStatusMapper` (both optional via `TryGetService`).
+  resolving `IDefaultStatuses` and `IValidationStatusMapper` (both optional via `TryGetService`) and
+  the field-pointer naming (`FieldPointer.ResolveNames`).
 - `DependencyExtensions.UseDataAnnotationsValidation(this IMessageRouterBuilder)` - the single entry
   point; adds `ValidationMiddlewareBuilder` to the pipeline. There is no `AddDataAnnotations` DI step
   and nothing to register, because validation reads attributes off the request type at runtime.
@@ -47,7 +53,8 @@ integration. It does honour the shared handler-level `[ValidationStatus]` overri
 
 ## Important conventions
 - The result's errors are structured `BenzeneError`s (`Message`/`Field`/`Code`), not bare strings -
-  `Field` is populated, `Code` is always `null` (see `Benzene.Results/CLAUDE.md`'s capability table).
+  `Field` is a JSON Pointer (not the raw member name), `Code` is always `null` (see
+  `Benzene.Results/CLAUDE.md`'s capability table). Covered by `DataAnnotationsFieldPointerTest`.
 - Put `ValidationAttribute`s on the request type's properties; the middleware validates all
   properties (`validateAllProperties: true`).
 - The result is `ValidationError` unless a registered `IValidationStatusMapper` resolves a different
