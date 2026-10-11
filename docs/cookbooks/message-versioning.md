@@ -7,7 +7,7 @@ payloads around it (with multi-step version chains handled for you).
 The version is metadata, never part of the body — it travels in the `benzene-version` header (a message
 attribute on SQS/SNS, a header on HTTP and the envelope). A message with no version is treated as the
 topic's default. The language-neutral rules live in the
-[versioning specification](https://github.com/daniellepelley/Benzene/blob/main/docs/specification/versioning.md);
+[versioning specification](https://github.com/daniellepelley/Benzene/blob/main/docs/specification/versioning.md) (how .NET builds it: [versioning internals](versioning-internals.md));
 this cookbook is the .NET how-to.
 
 > **Runnable, tested reference.** Everything here is demonstrated end to end in

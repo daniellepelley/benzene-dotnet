@@ -54,7 +54,7 @@ app.UseApiGateway(http => http
 ```
 
 Browse to `/benzene/spec-ui`. The page fetches `/benzene/spec?type=benzene` (`SpecUiExtensions.DefaultSpecUrl`)
-and renders it. Both are the [default paths](https://github.com/daniellepelley/Benzene/blob/main/docs/specification/design-principles.md)
+and renders it. Both are the [default paths](https://github.com/daniellepelley/Benzene/blob/main/docs/specification/transport-bindings.md#1-the-binding-contract)
 every Benzene port uses, and both are configurable.
 
 > Use the **`benzene`** spec type — the UI is designed around its topic/payload/validation shape,
