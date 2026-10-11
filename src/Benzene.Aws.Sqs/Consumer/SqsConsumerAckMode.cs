@@ -25,4 +25,14 @@ public enum SqsConsumerAckMode
     /// iteration in this mode.
     /// </summary>
     PerMessage = 1,
+
+    /// <summary>
+    /// At-most-once: every message in the poll batch is deleted whatever its outcome - a failure
+    /// result, no result, or a thrown exception (logged) - so nothing is redelivered or redriven to the
+    /// DLQ. Unlike <see cref="WholeBatch"/>, a thrown exception does not keep the batch on the queue.
+    /// The at-most-once override transport-bindings.md §1 (obligation 8) requires every one-way binding
+    /// to offer; use it only for loss-tolerant workloads. An infrastructure (mis-wiring) failure still
+    /// deletes nothing: it is not a message outcome.
+    /// </summary>
+    AtMostOnce = 2,
 }

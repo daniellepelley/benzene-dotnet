@@ -27,4 +27,15 @@ public enum ServiceBusConsumerAckMode
     /// processor's auto-complete off itself.
     /// </summary>
     Explicit = 1,
+
+    /// <summary>
+    /// At-most-once: Benzene completes every message whatever its outcome - a failure result, no
+    /// result, or a thrown exception (logged) - so nothing is redelivered or dead-lettered by the
+    /// entity's max delivery count. A settlement the handler requested explicitly
+    /// (<see cref="ServiceBusSettlementHolder"/>) still wins. The at-most-once override
+    /// transport-bindings.md §1 (obligation 8) requires every one-way binding to offer; use it only for
+    /// loss-tolerant workloads. Unlike <see cref="AutoComplete"/>, a thrown exception does not abandon
+    /// the message; an infrastructure (mis-wiring) failure still does - it is not a message outcome.
+    /// </summary>
+    AtMostOnce = 2,
 }

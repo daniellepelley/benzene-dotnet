@@ -124,6 +124,10 @@ public static class Extensions
         // extension resolves this (when the caller left its own topic-attribute/-property key at that
         // transport's default) to seed the wire's topic key from one place - see BenzeneWireNames.cs.
         services.TryAddSingleton<Benzene.Abstractions.IBenzeneWireNames, Benzene.Abstractions.BenzeneWireNames>();
+        // How the validation integrations name a request's members in errors[].field's JSON Pointer
+        // (wire-contracts §1.3): exactly as the JSON serializer the JSON media format reads requests
+        // with writes them. TryAdd, so a service with its own naming registers its own.
+        services.TryAddSingleton<IJsonPropertyNameResolver>(x => x.GetService<JsonSerializer>());
         services.AddServiceResolver();
         services.AddBenzeneMiddleware();
         return services;

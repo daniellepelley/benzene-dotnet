@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Settlement (spec 0.2, transport-bindings §1 obligation 8 / D16): an at-most-once override on every
+  one-way binding, and unmatched-topic-as-ignored.** Additive; no default changes. Where a binding's
+  knobs did not already compose to "acknowledge whatever the outcome", it gains one:
+  `SqsBatchFailureMode.AtMostOnce` (Lambda SQS), `KafkaBatchFailureMode.AtMostOnce` (Lambda MSK),
+  `SqsConsumerAckMode.AtMostOnce` (self-hosted SQS), `ServiceBusConsumerAckMode.AtMostOnce` (self-hosted
+  Service Bus), `DynamoDbOptions.AtMostOnce` (new, via `UseDynamoDb(action, configure)`),
+  `KinesisStreamOptions.AtMostOnce`, `CosmosDbChangeFeedOptions.AtMostOnce` (new, via
+  `UseCosmosDbChangeFeed<T>(action, configure)`) and `BlobStorageOptions.AtMostOnce` (new, via
+  `UseBlobStorage(action, configure)`). Each still refuses to acknowledge an infrastructure
+  (mis-wiring) failure. `UseUnmatchedTopicAsIgnored()` (`Benzene.Core.MessageHandlers`), placed before
+  `UseMessageHandlers()` on any binding's pipeline, settles a message whose topic no handler serves as
+  `ignored` (acknowledged) instead of `not-found` (redelivered) - for subscribers on a shared bus.
+  Every binding's shape and defaults are now asserted against the fixture's `settlementDefaults`
+  (`SettlementDefaultsConformanceTest`).
 - **`SagaResult` gains `Failures` and `StateStoreFailure` (additive - both new members, no existing
   member changed shape or removed).** `Failures` (`IReadOnlyList<SagaStepOutcome>`) carries every step
   that failed within the failing stage, not just one - the normal case when two steps in the same
@@ -252,6 +266,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   send into a queue or function settle instead of being a `not-found` the transport redelivers until it
   dead-letters it. On by default; `DisablePing()` (new `PingOptions`) opts out, after which the topic
   routes like any other.
+- **BREAKING (spec 0.2, wire-contracts §1.3 / D8): `errors[].field` is a JSON Pointer into the
+  request's JSON form.** `Benzene.FluentValidation` and `Benzene.DataAnnotations` used to emit the .NET
+  property path verbatim (`Name`, `Items[0].Sku`); they now emit an RFC 6901 pointer addressed the way
+  the caller's body is written - `/name`, `/items/0/sku` - with property names as the service's JSON
+  serializer writes them (camelCase by default; a configured `JsonSerializerOptions` naming policy and
+  `[JsonPropertyName]` renames are honoured, `~`/`/` escaped). A rule that names no single location
+  (`RuleFor(x => x)`, a cross-field check, an `OverridePropertyName` or member name the request type
+  doesn't have, a dictionary entry) now carries **no** `field` rather than an unresolvable one. Over
+  gRPC, `FieldViolation.field` carries the pointer's dotted form (`items[0].sku`, a digits-only
+  segment written `[n]`), and `Benzene.Grpc.Client` converts it back to the pointer, so a result's
+  `Field` reads the same over every transport. `Benzene.JsonSchema` already emitted pointers and is
+  unchanged. **Migration:** a caller that matched `field` against a .NET property name matches the
+  pointer instead (`"Name"` → `"/name"`). New supporting API (additive): `IJsonPropertyNameResolver` /
+  `JsonPropertyNameResolver` (`Benzene.Abstractions.Serialization`), implemented by
+  `Benzene.Core.MessageHandlers`' `JsonSerializer` and registered by `AddBenzene`;
+  `Benzene.Abstractions.Validation.FieldPointer`; `Benzene.FluentValidation.ValidationResultExtensions.ToBenzeneErrors`;
+  `Benzene.Grpc.GrpcFieldPath`; a `Benzene.DataAnnotations.ValidationMiddleware` constructor taking an
+  `IJsonPropertyNameResolver`.
 - **BREAKING (mesh.md's 2026-08 revision): the mesh producer/consumer graph is now declared, never
   trace-derived.** `MeshServiceDescriptor` gains a `Consumes` field (mesh.md §2), populated from a new
   explicit **outbound registration** concept (§2.3, mirroring core-concepts.md §9's inbound handler

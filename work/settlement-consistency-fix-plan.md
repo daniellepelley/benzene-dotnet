@@ -319,6 +319,9 @@ requires the maintainer, not a code review.**
 | RabbitMQ ack-on-null reversed, overturning a documented+tested deliberate behaviour | **CLOSED**, but flagged: this reverses a written decision. If the maintainer disagrees, row 7 is the one to veto | 2026-08-25 |
 | Pub/Sub and Service Bus Functions added to the flip list beyond the original proposal | **CLOSED** subject to maintainer veto before Batch 1 — see §1 † | 2026-08-25 |
 | Promote settlement policy into the language-neutral spec | **CLOSED: yes, as a follow-up** — §4 | 2026-08-25 |
+| Every one-way binding offers an at-most-once override — new `AtMostOnce` modes/flags where the existing knobs did not compose to one (Lambda SQS/Kafka, DynamoDB, Kinesis, SQS consumer, Service Bus worker, Cosmos DB and Blob triggers), overturning DS5's "no at-most-once mode" for DynamoDB. Supersedes §0 rule 5 for these options only | **CLOSED** — spec 0.2, transport-bindings.md §1 obligation 8 (D16): a MUST | 2026-10-11 |
+| Unmatched topic as `ignored`: one pipeline option on every binding (`UseUnmatchedTopicAsIgnored()`), off by default | **CLOSED** — spec 0.2, obligation 8: a SHOULD | 2026-10-11 |
+| An unmatched topic is not a null outcome: the router records `not-found`, so it settles on the failure-result axis everywhere, the Kafka/Event Hub carve-outs included (they skip only a missing result). The "null/unrouted" wording in §1 predates this check | **RECORDED** — no policy change; docs corrected where they claimed otherwise | 2026-10-11 |
 | Kinesis/DynamoDB ESM `ReportBatchItemFailures` dependency — warn, throw, or document only | **OPEN** — needs a proposal; documenting the dependency is the interim step | — |
 | `SchemaCompatibilityComparer` breaking-vs-warning classification | **OPEN** | — |
 | `DynamoDbHealthCheck` — which `TableStatus` values fail | **OPEN** | — |

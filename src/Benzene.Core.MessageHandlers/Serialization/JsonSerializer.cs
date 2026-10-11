@@ -43,9 +43,10 @@ namespace Benzene.Core.MessageHandlers.Serialization;
 /// remaining difference (STJ crashing outright without this option vs. Newtonsoft's default tolerance).
 /// </para>
 /// </remarks>
-public class JsonSerializer : ISerializer, IPayloadSerializer
+public class JsonSerializer : ISerializer, IPayloadSerializer, IJsonPropertyNameResolver
 {
     private readonly JsonSerializerOptions _jsonSerializerOptions;
+    private JsonPropertyNameResolver? _propertyNames;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="JsonSerializer"/> class with the default options:
@@ -115,5 +116,21 @@ public class JsonSerializer : ISerializer, IPayloadSerializer
     {
         var utf8JsonReader = new Utf8JsonReader(payload);
         return System.Text.Json.JsonSerializer.Deserialize(ref utf8JsonReader, type, _jsonSerializerOptions);
+    }
+
+    /// <summary>
+    /// Names a member exactly as this serializer writes it - its own options' naming policy, rename
+    /// attributes and ignore rules - so a validation error's <c>field</c> pointer addresses the
+    /// request in the JSON form this serializer reads and writes (wire-contracts.md §1.3).
+    /// </summary>
+    /// <param name="type">The type that declares (or inherits) the member.</param>
+    /// <param name="memberName">The .NET member name.</param>
+    /// <returns>The JSON property name, or <c>null</c> when the type has no serialized member of that name.</returns>
+    public virtual string? GetJsonPropertyName(Type type, string memberName)
+    {
+        // Built on first use (a validation failure), not in the constructor: most serializer instances
+        // never name a field, and the resolver copies the options.
+        _propertyNames ??= new JsonPropertyNameResolver(_jsonSerializerOptions);
+        return _propertyNames.GetJsonPropertyName(type, memberName);
     }
 }

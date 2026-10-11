@@ -17,7 +17,11 @@ message for redelivery (subject to the entity's own lock duration/max-delivery-c
 settings), rather than silently completing it. This is a behavioral change from earlier versions,
 which defaulted to `AutoComplete` (a returned failure was silently completed — only a throw
 abandoned). Set `AckMode = ServiceBusConsumerAckMode.AutoComplete` to hand settlement back to the
-processor if you specifically want a non-exception failure result to complete the message. Because a
+processor if you specifically want a non-exception failure result to complete the message (a throw
+still abandons). `AckMode = ServiceBusConsumerAckMode.AtMostOnce` is the at-most-once override spec
+0.2 requires (transport-bindings.md §1, obligation 8): Benzene completes every message whatever its
+outcome, a thrown exception included (logged), unless the handler requested a settlement explicitly;
+an infrastructure failure still abandons. Because a
 failure now redelivers, the handler needs to be idempotent — see
 [Capability Matrix](../../docs/capability-matrix.md) /
 [Idempotency](../../docs/cookbooks/idempotency.md).

@@ -52,14 +52,18 @@ status string rather than thrown exceptions. Transport adapters map the status t
     deserialization target).
 
 ### Structured errors - which validation integration populates what
-`BenzeneError` (`Benzene.Abstractions.Results`) is `{ Message, Field?, Code? }`. Each validation
-integration populates `Field`/`Code` differently - see each package's own `CLAUDE.md` for detail:
+`BenzeneError` (`Benzene.Abstractions.Results`) is `{ Message, Field?, Code? }`. `Field` is always
+an RFC 6901 JSON Pointer into the handler's request in its **JSON form** (wire-contracts.md §1.3, D8):
+every integration emits one, converting a host-language property path through
+`Benzene.Abstractions.Validation.FieldPointer` (the serializer's naming policy and rename attributes
+applied, via `IJsonPropertyNameResolver`), and a rule naming no single location leaves it `null`. Each
+validation integration populates `Field`/`Code` as follows - see each package's own `CLAUDE.md`:
 
 | Integration | `Field` | `Code` |
 |---|---|---|
-| `Benzene.FluentValidation` | `ValidationFailure.PropertyName` (.NET property path) | `ValidationFailure.ErrorCode`, verbatim (e.g. `NotEmptyValidator` - not stripped/normalized) |
-| `Benzene.DataAnnotations` | `ValidationResult.MemberNames` (one error per member; `null` when the result names no member) | always `null` - `ValidationResult` doesn't expose the attribute that produced it |
-| `Benzene.JsonSchema` | the failing value's JSON Pointer (e.g. `/name`; `null` at the root) | the failed schema keyword (e.g. `maxLength`, `required`) |
+| `Benzene.FluentValidation` | `ValidationFailure.PropertyName` → pointer (`Items[0].Sku` → `/items/0/sku`; `null` when unresolvable) | `ValidationFailure.ErrorCode`, verbatim (e.g. `NotEmptyValidator` - not stripped/normalized) |
+| `Benzene.DataAnnotations` | each of `ValidationResult.MemberNames` → pointer (one error per member; `null` when the result names no member or the name is unresolvable) | always `null` - `ValidationResult` doesn't expose the attribute that produced it |
+| `Benzene.JsonSchema` | the failing value's JSON Pointer as the schema evaluator reports it (e.g. `/name`; `null` at the root) | the failed schema keyword (e.g. `maxLength`, `required`) |
 
 Note: `IBenzeneResult` and `IBenzeneResult<T>` themselves (and `Void`) are declared in
 `Benzene.Abstractions.Results`, not here. This package supplies the concrete builders and helpers.

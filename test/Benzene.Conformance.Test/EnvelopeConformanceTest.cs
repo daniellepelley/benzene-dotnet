@@ -27,7 +27,11 @@ public class EnvelopeConformanceTest
     {
         public string Name { get; set; } = string.Empty;
 
-        /// <summary>The capability a conditional case needs (README.md "requires"); null for an unconditional case.</summary>
+        /// <summary>
+        /// Optional (README.md's envelope case format): the capability a port must implement for the
+        /// case to apply - e.g. <c>validation</c>, a validation integration that can run
+        /// <c>conformance:validate</c>. A case requiring a capability this port does not claim is skipped.
+        /// </summary>
         public string? Requires { get; set; }
 
         public EnvelopeRequest Request { get; set; } = new();
@@ -63,6 +67,38 @@ public class EnvelopeConformanceTest
         /// leaked onto a transport with no HTTP response (wire-contracts.md §1.3).
         /// </summary>
         public List<string>? BodyExclude { get; set; }
+
+        /// <summary>
+        /// Optional (README.md's envelope case format): the <c>field</c> values the problem document's
+        /// <c>errors</c> must carry, compared as a <b>set</b> - every error carries a <c>field</c>, and the
+        /// set of them equals this list. Order, messages and codes are the validation library's own.
+        /// </summary>
+        public List<string>? ErrorFields { get; set; }
+    }
+
+    /// <summary>
+    /// Asserts <paramref name="expectedFields"/> against the problem document in
+    /// <paramref name="responseBody"/> per README.md's <c>errorFields</c> rule.
+    /// </summary>
+    public static void AssertErrorFields(string caseName, List<string> expectedFields, string? responseBody)
+    {
+        Assert.False(string.IsNullOrEmpty(responseBody), $"{caseName}: expected a problem document but no body was written");
+        using var problem = JsonDocument.Parse(responseBody!);
+        Assert.True(problem.RootElement.TryGetProperty("errors", out var errors) && errors.ValueKind == JsonValueKind.Array,
+            $"{caseName}: expected an 'errors' array on the problem document");
+
+        var actualFields = new List<string>();
+        foreach (var error in errors.EnumerateArray())
+        {
+            Assert.True(error.TryGetProperty("field", out var field) && field.ValueKind == JsonValueKind.String,
+                $"{caseName}: every error must carry a 'field' - found {error.GetRawText()}");
+            actualFields.Add(field.GetString()!);
+        }
+
+        var expected = new HashSet<string>(expectedFields, StringComparer.Ordinal);
+        var actual = new HashSet<string>(actualFields, StringComparer.Ordinal);
+        Assert.True(expected.SetEquals(actual),
+            $"{caseName}: expected error fields {{{string.Join(", ", expected)}}} but found {{{string.Join(", ", actual)}}}");
     }
 
     private static readonly Lazy<EnvelopeFixture> Fixture = new(() =>

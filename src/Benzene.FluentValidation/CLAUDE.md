@@ -13,7 +13,11 @@ with a validation-status result carrying the FluentValidation error messages. Th
   (Name `"FluentValidation"`) - the inbound (handler-side) validator. `TryGetService<IValidator<TRequest>>()`;
   no validator registered → pass through to `next()`. Null request → `BenzeneResult.SetFailed<TResponse>(status, "Request is null")`.
   Invalid → `BenzeneResult.Set<TResponse>(status, errors)` with one `BenzeneError` per
-  `ValidationFailure`: `Message` = `ErrorMessage`, `Field` = `PropertyName` (empty → `null`), `Code` =
+  `ValidationFailure` (`ValidationResultExtensions.ToBenzeneErrors`): `Message` = `ErrorMessage`,
+  `Field` = `PropertyName` converted to a JSON Pointer into the request's JSON form
+  (wire-contracts.md §1.3 - `Items[0].Sku` → `/items/0/sku`, named by the registered
+  `IJsonPropertyNameResolver`, i.e. the service's JSON serializer; `null` for a rule naming no single
+  location, see `Benzene.Abstractions.Validation.FieldPointer`), `Code` =
   `ErrorCode` **verbatim** (FluentValidation's default is the validator type name, e.g.
   `NotEmptyValidator` - never stripped or normalized; empty → `null`).
   The `status` comes from `IValidationStatusMapper`, not a hardcoded HTTP code.
@@ -66,6 +70,9 @@ with a validation-status result carrying the FluentValidation error messages. Th
 - **FluentValidation** (NuGet) - the validation engine itself.
 
 ## Important conventions
+- `Field` is a JSON Pointer, never the raw `PropertyName` (a breaking change in the spec 0.2
+  catch-up). Don't hand-build `BenzeneError`s from `ValidationFailure`s - call `ToBenzeneErrors` so
+  the conversion stays in one place.
 - The result's errors are structured `BenzeneError`s (`Message`/`Field`/`Code`), not bare strings -
   see `Benzene.Results/CLAUDE.md`'s capability table for how each validation package populates
   `Field`/`Code`. `Code` is FluentValidation's `ErrorCode`, emitted **verbatim** - do not assume it's
@@ -94,3 +101,6 @@ with a validation-status result carrying the FluentValidation error messages. Th
   end-to-end via a real pipeline in `EnhancedFluentValidationTest.cs`.
 - `Utils.GetAllTypes`/`GetAssemblies` (assembly/type discovery for auto-registering validators) -
   `UtilsTest.cs`.
+- `Field` pointers (nested `RuleForEach`/`ChildRules`, rename attributes, a configured serializer
+  naming policy, whole-request rules) - `FluentValidationFieldPointerTest.cs`; the path → pointer
+  conversion itself - `test/Benzene.Core.Test/Plugins/Validation/FieldPointerTest.cs`.

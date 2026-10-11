@@ -20,24 +20,37 @@ namespace Benzene.Aws.Lambda.DynamoDb;
 /// as the batch item failure, so Lambda checkpoints there and redelivers from that record.
 /// </summary>
 /// <remarks>
-/// Deliberately has no <c>DynamoDbOptions</c>/<c>CatchExceptions</c>/<c>RaiseOnFailureStatus</c>
-/// toggle, unlike <c>SnsApplication</c>/<c>S3Application</c>/<c>EventBridgeApplication</c> - ordering
-/// is the whole point of this shape (see the class summary), so there is no "catch and keep going"
-/// or "at-most-once" mode to opt into: any failure (thrown or returned) always stops the batch at
-/// that record and reports it, full stop. See <c>work/archive/batch-failure-handling-2026-07.md</c>'s
-/// "Deliberately deferred" note on DS5 for the design record.
+/// By default any failure (thrown, returned, or no result at all) stops the batch at that record and
+/// reports it - ordering is the whole point of this shape (see the class summary), and
+/// <c>work/archive/batch-failure-handling-2026-07.md</c>'s DS5 note records why there is no
+/// "catch and keep going" toggle of the SNS/S3/EventBridge kind. The one exception is
+/// <see cref="DynamoDbOptions.AtMostOnce"/>, the at-most-once override spec 0.2 requires of every
+/// one-way binding (transport-bindings.md §1, obligation 8): opt in and a failed record is logged and
+/// skipped instead, the rest of the batch still running in order.
 /// </remarks>
 public class DynamoDbApplication : IMiddlewareApplication<DynamoDbEvent, DynamoDbBatchResponse>
 {
     private readonly IMiddlewarePipeline<DynamoDbRecordContext> _pipeline;
+    private readonly DynamoDbOptions _options;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DynamoDbApplication"/> class.
     /// </summary>
     /// <param name="pipeline">The built DynamoDB middleware pipeline to run each record through.</param>
     public DynamoDbApplication(IMiddlewarePipeline<DynamoDbRecordContext> pipeline)
+        : this(pipeline, null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DynamoDbApplication"/> class with settlement options.
+    /// </summary>
+    /// <param name="pipeline">The built DynamoDB middleware pipeline to run each record through.</param>
+    /// <param name="options">How the batch settles; <c>null</c> for the default (stop at the first failure).</param>
+    public DynamoDbApplication(IMiddlewarePipeline<DynamoDbRecordContext> pipeline, DynamoDbOptions? options)
     {
         _pipeline = new TransportMiddlewarePipeline<DynamoDbRecordContext>(TransportNames.DynamoDb, pipeline);
+        _options = options ?? new DynamoDbOptions();
     }
 
     /// <summary>
@@ -56,6 +69,7 @@ public class DynamoDbApplication : IMiddlewareApplication<DynamoDbEvent, DynamoD
         foreach (var record in @event.Records)
         {
             var context = DynamoDbRecordContext.CreateInstance(@event, record);
+            var infrastructureFailure = false;
             try
             {
                 using (var scope = serviceResolverFactory.CreateScope())
@@ -65,10 +79,11 @@ public class DynamoDbApplication : IMiddlewareApplication<DynamoDbEvent, DynamoD
             }
             catch (Exception ex)
             {
+                infrastructureFailure = BenzeneFailure.IsInfrastructure(ex);
                 using (var loggingScope = serviceResolverFactory.CreateScope())
                 {
                     loggingScope.GetService<ILogger<DynamoDbApplication>>()
-                        .LogError(ex, BenzeneFailure.IsInfrastructure(ex)
+                        .LogError(ex, infrastructureFailure
                     ? BenzeneFailure.InfrastructureLogPrefix + " Processing DynamoDB stream record {sequenceNumber} failed — this service is mis-wired; the message is not at fault"
                     : "Processing DynamoDB stream record {sequenceNumber} failed", record.Dynamodb?.SequenceNumber);
                 }
@@ -81,6 +96,21 @@ public class DynamoDbApplication : IMiddlewareApplication<DynamoDbEvent, DynamoD
             // past in an ordered CDC stream - that would silently skip it. Stop here for redelivery.
             if (context.MessageResult?.IsSuccessful != true)
             {
+                // The at-most-once override (transport-bindings §1, obligation 8) waives redelivery for
+                // a record's own failure - logged, then skipped - but not for an infrastructure
+                // (mis-wiring) failure, which is no record's outcome and still stops the batch.
+                if (_options.AtMostOnce && !infrastructureFailure)
+                {
+                    using (var loggingScope = serviceResolverFactory.CreateScope())
+                    {
+                        loggingScope.GetService<ILogger<DynamoDbApplication>>().LogWarning(
+                            "DynamoDB stream record {sequenceNumber} failed with {status}; acknowledged without redelivery (AtMostOnce)",
+                            record.Dynamodb?.SequenceNumber, context.MessageResult?.Status ?? "<no result>");
+                    }
+
+                    continue;
+                }
+
                 return new DynamoDbBatchResponse
                 {
                     BatchItemFailures = new List<DynamoDbBatchResponse.BatchItemFailure>

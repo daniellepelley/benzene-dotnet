@@ -21,6 +21,13 @@ Benzene-specific logger interface. What remains here is the scope-enrichment bui
 
 ### Serialization
 - `ISerializer` - Abstraction for serializing/deserializing objects
+- `IJsonPropertyNameResolver` - names a type's members as the service's JSON serializer writes them
+  (naming policy, rename attributes, ignore rules), so a validation error's `field` can be a JSON
+  Pointer into the request's JSON form (wire-contracts.md §1.3). `JsonPropertyNameResolver` is the
+  System.Text.Json implementation (reads the options' own contract metadata from a private read-only
+  copy, never locking the caller's options); `JsonPropertyNameResolver.Default` is camelCase.
+  `Benzene.Core.MessageHandlers`' `JsonSerializer` implements the interface from its own options, and
+  `AddBenzene` registers it.
 - `IPayloadSerializer : ISerializer` - Additive byte-oriented extension (`Serialize(Type, object, IBufferWriter<byte>)` / `Deserialize(Type, ReadOnlySpan<byte>)`), avoiding an intermediate string allocation when both the serializer and the transport's body getter support bytes
 
 ### Results
@@ -28,8 +35,8 @@ Benzene-specific logger interface. What remains here is the scope-enrichment bui
   `Errors` is `IReadOnlyList<BenzeneError>` (never `null`; a shared empty instance on
   success/error-less results, so that path allocates nothing).
 - `BenzeneError` (namespace `Benzene.Abstractions.Results`) - one error in a failed result:
-  `Message`, optional `Field` (the producer's property path - a .NET property name for the
-  validation middlewares, a JSON Pointer for `Benzene.JsonSchema`) and optional `Code`
+  `Message`, optional `Field` (an RFC 6901 JSON Pointer into the request's JSON form - every
+  validation integration emits one, wire-contracts.md §1.3) and optional `Code`
   (machine-readable, producer-specific - e.g. FluentValidation's `ErrorCode`, emitted verbatim). A
   `sealed record` with a public parameterless constructor and init-only properties (not positional -
   it doubles as a wire DTO across several serializers); `ToString()` returns `Message`, so

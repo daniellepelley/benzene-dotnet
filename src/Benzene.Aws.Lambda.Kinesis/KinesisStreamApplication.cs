@@ -104,13 +104,28 @@ public class KinesisStreamApplication : StreamMiddlewareApplication<KinesisEvent
                     checkpointer.CheckpointAll();
                 }
             }
-            catch (Exception ex) when (_options.CatchExceptions)
+            catch (Exception ex) when (_options.CatchExceptions || AcknowledgesAnyway(ex))
             {
+                if (AcknowledgesAnyway(ex) && context.Checkpointer is KinesisStreamCheckpointer checkpointer)
+                {
+                    // The at-most-once override (transport-bindings §1, obligation 8): the failed batch
+                    // is checkpointed to the end, so Kinesis redelivers none of it.
+                    checkpointer.CheckpointAll();
+                    serviceResolver.GetService<ILogger<KinesisStreamApplication>>()
+                        .LogError(ex, "Kinesis stream processing failed; the batch is acknowledged without redelivery (AtMostOnce)");
+                    return;
+                }
+
                 serviceResolver.GetService<ILogger<KinesisStreamApplication>>()
                     .LogError(ex, BenzeneFailure.IsInfrastructure(ex)
                     ? BenzeneFailure.InfrastructureLogPrefix + " Kinesis stream processing failed; resuming from the last checkpoint — this service is mis-wired; the message is not at fault"
                     : "Kinesis stream processing failed; resuming from the last checkpoint");
             }
+        }
+
+        private bool AcknowledgesAnyway(Exception ex)
+        {
+            return _options.AtMostOnce && !BenzeneFailure.IsInfrastructure(ex);
         }
     }
 }

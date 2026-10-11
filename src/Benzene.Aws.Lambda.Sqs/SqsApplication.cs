@@ -128,6 +128,20 @@ public class SqsApplication : IMiddlewareApplication<SQSEvent, SQSBatchResponse>
             throw new SqsBatchProcessingException(batchItemFailures.Select(f => f.ItemIdentifier).ToArray());
         }
 
+        if (batchItemFailures.Count > 0 && _options.BatchFailureMode == SqsBatchFailureMode.AtMostOnce)
+        {
+            // The at-most-once override (transport-bindings §1, obligation 8): acknowledge everything,
+            // reporting nothing for redelivery - but say so, since these messages are now gone.
+            using (var loggingScope = serviceResolverFactory.CreateScope())
+            {
+                loggingScope.GetService<ILogger<SqsApplication>>().LogWarning(
+                    "Acknowledging {count} failed SQS message(s) without redelivery (BatchFailureMode.AtMostOnce): {messageIds}",
+                    batchItemFailures.Count, string.Join(", ", batchItemFailures.Select(f => f.ItemIdentifier)));
+            }
+
+            return new SQSBatchResponse(new List<SQSBatchResponse.BatchItemFailure>());
+        }
+
         return new SQSBatchResponse(batchItemFailures);
     }
 }

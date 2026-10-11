@@ -204,8 +204,15 @@ one `BenzeneError` (`Message`/`Field`/`Code`) on the result, and (when the failu
 wire) one entry in the [problem document](message-result.md#problem-documents-rfc-9457)'s `errors`
 array:
 
-- **`Field`** ← `ValidationFailure.PropertyName` (empty → `null`) — the .NET property path, e.g.
-  `Name`.
+- **`Field`** ← `ValidationFailure.PropertyName`, converted to a
+  [JSON Pointer](https://www.rfc-editor.org/rfc/rfc6901) into the request **as it looks on the wire**:
+  property names as your JSON serializer writes them (camelCase by default; a `[JsonPropertyName]`
+  rename or a custom `JsonSerializerOptions` naming policy is honoured), collection indexes as their
+  own segments. `Name` → `/name`, `Address.Line1` → `/address/line1`, `Items[0].Sku` →
+  `/items/0/sku`. A caller resolves it against the body it sent, whatever language it is written in.
+  A rule that doesn't name one location — a rule on the whole request (`RuleFor(x => x)`), a
+  cross-field check, or an `OverridePropertyName` naming something the request type doesn't have —
+  carries no `field` at all rather than a made-up one.
 - **`Code`** ← `ValidationFailure.ErrorCode`, emitted **verbatim** — FluentValidation's own default
   is the validator type name (e.g. `NotEmptyValidator`, `GreaterThanValidator`), not a
   hand-stripped/normalized code. Set your own with `.WithErrorCode("...")` on a rule if you want a
@@ -223,10 +230,18 @@ array:
   "detail": "'Name' must not be empty.",
   "benzeneStatus": "validation-error",
   "errors": [
-    { "message": "'Name' must not be empty.", "field": "Name", "code": "NotEmptyValidator" }
+    { "message": "'Name' must not be empty.", "field": "/name", "code": "NotEmptyValidator" },
+    { "message": "'Sku' must not be empty.", "field": "/items/0/sku", "code": "NotEmptyValidator" }
   ]
 }
 ```
+
+Over gRPC the same pointer travels as `google.rpc.BadRequest`'s dotted `FieldViolation.field`
+(`items[0].sku`), and a Benzene gRPC client reads it back as the pointer.
+
+> **Changed in the spec 0.2 catch-up.** `field` used to be FluentValidation's .NET property path
+> verbatim (`Items[0].Sku`). A caller that matched on it needs the pointer form now — see the
+> CHANGELOG.
 
 The same rule applies to `ValidationClientMiddleware` on the outgoing-client side. See [Message
 Results — Problem documents](message-result.md#problem-documents-rfc-9457) for the full document

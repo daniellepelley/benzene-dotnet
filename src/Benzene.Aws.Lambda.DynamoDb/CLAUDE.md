@@ -36,13 +36,16 @@ format into plain JSON, so handlers receive ordinary POCOs. See
   (`DynamoDbApplication`'s per-record `serviceResolverFactory.CreateScope()`), which doesn't
   inherit the outer invocation's `IBenzeneInvocation` — `InvocationId` = the record's `eventID`.
 
-## No `DynamoDbOptions` / `CatchExceptions` / `RaiseOnFailureStatus` — deliberate, not a gap
-Unlike SNS/S3/EventBridge/Kinesis, `DynamoDbApplication` has no options class and no way to catch an
-exception and keep going, or to accept a failure result without stopping the batch. This is design
-decision DS5 (`work/archive/batch-failure-handling-2026-07.md`): ordering is the whole point of the
-sequential stop-at-first-failure shape (see the class summary above), so there is no "catch and
-continue" mode to opt into — any failure (thrown or returned) always stops the batch at that record
-and reports it for redelivery, full stop.
+## Settlement: stop at the first failure, or `DynamoDbOptions.AtMostOnce`
+By default any failure (thrown, returned, or no result) stops the batch at that record and reports its
+sequence number — the **unit of settlement** is that record and everything after it in the batch.
+This is design decision DS5 (`work/archive/batch-failure-handling-2026-07.md`): ordering is the whole
+point of the sequential stop-at-first-failure shape, so there is still no SNS-style
+`CatchExceptions`/`RaiseOnFailureStatus` pair. Spec 0.2 (transport-bindings.md §1, obligation 8)
+requires every one-way binding to offer an at-most-once override, so `DynamoDbOptions.AtMostOnce`
+(via `UseDynamoDb(action, options => ...)`, default `false`) is the one exception: a failed record is
+logged and skipped, the rest of the batch still runs in order, and nothing is reported. An
+infrastructure (mis-wiring) failure still stops the batch. Tests: `AtMostOnceOverrideTest`.
 
 ## When to use this package
 - Handling table change streams (event sourcing, projections, cache invalidation, outbox) with

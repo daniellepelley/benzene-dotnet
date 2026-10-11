@@ -52,7 +52,10 @@ transport-host-agnostic - depends only on `Grpc.Core.Api` and `Google.Protobuf`,
   standard `grpc-status-details-bin` trailer (via `Grpc.StatusProto`/`Google.Api.CommonProtos`), so a
   gRPC client can read structured details with `RpcException.GetRpcStatus()`. A `ValidationError` maps
   its error messages to a `google.rpc.BadRequest` (one field violation per message). Alongside, not
-  replacing, the flat `benzene-status` trailer.
+  replacing, the flat `benzene-status` trailer. `FieldViolation.field` is the error's JSON Pointer
+  converted to gRPC's dotted path by `GrpcFieldPath.FromPointer` (wire-contracts.md §4.2: unescaped
+  segments joined with `.`, a digits-only segment written `[n]` - `/items/0/sku` → `items[0].sku`;
+  empty when the error has no field); `GrpcFieldPath.ToPointer` is the reverse the client uses.
 - `IGrpcServerCallAccessor`/`GrpcServerCallAccessor` - scoped accessor exposing the call's
   `ServerCallContext`/`CancellationToken` to handler code (mirrors `IHttpContextAccessor`)
 - `GrpcMessageHeadersGetter` - maps inbound `RequestHeaders` (skipping binary entries) to Benzene

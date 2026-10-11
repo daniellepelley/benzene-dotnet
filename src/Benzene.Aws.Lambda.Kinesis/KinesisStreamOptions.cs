@@ -33,4 +33,16 @@ public class KinesisStreamOptions
     /// or logs.
     /// </summary>
     public bool CatchExceptions { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets whether a failed batch is acknowledged anyway. Defaults to <c>false</c>: a batch
+    /// whose pipeline throws resumes from the handler's last explicit checkpoint, so Kinesis
+    /// redelivers every record after it - the unit of settlement is the batch from that resume point
+    /// on (a fan-in handler sees the whole batch, so there is no per-record result). Set <c>true</c>
+    /// for at-most-once (the override transport-bindings.md §1, obligation 8, requires every one-way
+    /// binding to offer): a throwing pipeline is logged and the batch is checkpointed to the end, so
+    /// nothing is redelivered - whatever <see cref="CatchExceptions"/> says. An infrastructure
+    /// (mis-wiring) failure is not acknowledged: it is no record's outcome.
+    /// </summary>
+    public bool AtMostOnce { get; set; }
 }

@@ -14,6 +14,7 @@ using Benzene.Conformance.Test.Handlers;
 using Benzene.Core.MessageHandlers;
 using Benzene.Core.MessageHandlers.BenzeneMessage;
 using Benzene.Core.MessageHandlers.DI;
+using Benzene.FluentValidation;
 using Benzene.Core.Messages.BenzeneMessage;
 using Benzene.Core.Middleware;
 using Benzene.HealthChecks;
@@ -167,35 +168,22 @@ public class ProblemDetailsConformanceTest
     // bodyExclude support) as EnvelopeConformanceTest.
     // ------------------------------------------------------------------
 
-    // A case gated on a capability (README.md "requires") runs only where the port claims it. This
-    // runner does not claim `validation` yet: the JSON Pointer work for the validation integrations
-    // (FluentValidation/DataAnnotations) and the canonical conformance:validate handler land on the
-    // phase1-validation branch, which claims the case and removes this exclusion.
-    private static readonly HashSet<string> ClaimedCapabilities = new();
+    // The capabilities this port implements, for cases marked "requires" (README.md): validation is
+    // Benzene.FluentValidation/Benzene.DataAnnotations - the runner wires FluentValidation.
+    private static readonly HashSet<string> Capabilities = new(StringComparer.Ordinal) { "validation" };
 
     public static IEnumerable<object[]> EnvelopeCaseNames() =>
         Fixture.Value.EnvelopeCases
-            .Where(x => x.Requires == null || ClaimedCapabilities.Contains(x.Requires))
+            .Where(x => x.Requires == null || Capabilities.Contains(x.Requires))
             .Select(x => new object[] { x.Name });
 
-    [Fact(Skip = "TODO(phase1-validation): validation-error-fields-are-json-pointers requires 'validation' - " +
-                 "claimed on branch phase1-validation with the conformance:validate handler and errorFields; not run here yet.")]
-    public void EnvelopeCase_RequiresValidation_ClaimedOnThePhase1ValidationBranch()
-    {
-        var gated = Fixture.Value.EnvelopeCases.Where(x => x.Requires == "validation").ToList();
-        Assert.NotEmpty(gated);
-    }
-
     [Fact]
-    public void EnvelopeCases_EveryUnclaimedCapabilityIsAccountedFor()
+    public void EveryRequiredCapability_IsOneThisRunnerKnows()
     {
-        // A new `requires` value must be a deliberate decision here, not a silently unrun case.
-        var unclaimed = Fixture.Value.EnvelopeCases
-            .Where(x => x.Requires != null && !ClaimedCapabilities.Contains(x.Requires))
-            .Select(x => x.Requires!)
-            .Distinct()
-            .ToList();
-        Assert.Equal(new[] { "validation" }, unclaimed);
+        // A case requiring a capability this runner has never heard of would be skipped silently -
+        // fail instead, so a new capability in the fixture is a decision, not an accident.
+        Assert.All(Fixture.Value.EnvelopeCases.Where(x => x.Requires != null),
+            x => Assert.Contains(x.Requires!, Capabilities));
     }
 
     [Theory]
@@ -238,6 +226,11 @@ public class ProblemDetailsConformanceTest
                     $"{caseName}: body member '{excludedMember}' was expected to be genuinely absent but was present");
             }
         }
+
+        if (envelopeCase.Expected.ErrorFields is { } errorFields)
+        {
+            EnvelopeConformanceTest.AssertErrorFields(caseName, errorFields, response.Body);
+        }
     }
 
     private static async Task<IBenzeneMessageResponse> RunPipelineAsync(BenzeneMessageRequest request)
@@ -249,10 +242,17 @@ public class ProblemDetailsConformanceTest
         container.AddBenzene().AddBenzeneMessage();
 
         var pipelineBuilder = new MiddlewarePipelineBuilder<BenzeneMessageContext>(container);
+        // conformance:validate is validated through this port's own integration (README.md's canonical
+        // handlers), FluentValidation; the other canonical handlers have no validator, so pass through.
         pipelineBuilder.UseMessageHandlers(
-            typeof(GreetConformanceHandler),
-            typeof(StatusConformanceHandler),
-            typeof(ProblemConformanceHandler));
+            new[]
+            {
+                typeof(GreetConformanceHandler),
+                typeof(StatusConformanceHandler),
+                typeof(ProblemConformanceHandler),
+                typeof(ValidateConformanceHandler),
+            },
+            router => router.UseFluentValidation(new[] { typeof(ValidateConformanceValidator) }));
         var pipeline = pipelineBuilder.Build();
 
         var application = new BenzeneMessageApplication(pipeline);

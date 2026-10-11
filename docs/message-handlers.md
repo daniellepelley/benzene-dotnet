@@ -202,6 +202,21 @@ the pipeline. `MessageRouter<TContext>.HandleAsync`:
    set the transport's topic attribute/header on the producer (check the configured topic key
    matches the one the producer sends), or configure UsePresetTopic(...)…"; for a real topic it's
    "No handler found for topic '{topic}'".
+
+   On a one-way binding (a queue, topic, stream or event trigger) `not-found` is a failure, so the
+   message is not acknowledged and the transport redelivers it until its redrive policy dead-letters
+   it. A subscriber on a shared bus that sees other services' topics can settle those as `ignored`
+   (acknowledged) instead, with the same call on any binding:
+
+   ```csharp
+   app.UseSqs(sqs => sqs
+       .UseUnmatchedTopicAsIgnored()   // immediately before UseMessageHandlers
+       .UseMessageHandlers());
+   ```
+
+   Only a topic id with no handler at any version is ignored; a reserved `benzene:` topic, a message
+   with no topic, and a known topic at a version no handler serves still answer `not-found`. See
+   the settlement section of the [Capability Matrix](capability-matrix.md).
 3. Creates the handler instance via `IMessageHandlerFactory` (resolving it from DI, wrapping it per
    `IMessageHandlerWrapper`, and building its own per-handler middleware pipeline — see
    [Response handling](#response-handling) below).

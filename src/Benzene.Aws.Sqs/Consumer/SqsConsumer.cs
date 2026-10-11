@@ -96,9 +96,20 @@ public class SqsConsumer : IBenzeneWorker
                     // thrown exception above already skipped this whole block via the outer catch, so
                     // reaching here means every message succeeded (or failed only via a non-throwing
                     // result, which WholeBatch still deletes along with the rest) - delete everything.
+                    // Under AtMostOnce, everything is deleted whatever happened to it (the at-most-once
+                    // override, transport-bindings §1 obligation 8) - said out loud below.
                     var messagesToDelete = _options.AckMode == SqsConsumerAckMode.PerMessage
                         ? batchResult.SuccessfulMessages
                         : result.Messages;
+
+                    if (_options.AckMode == SqsConsumerAckMode.AtMostOnce && batchResult.FailedMessages.Count > 0)
+                    {
+                        using var loggingScope = _serviceResolverFactory.CreateScope();
+                        loggingScope.GetService<ILogger<SqsConsumer>>().LogWarning(
+                            "Deleting {count} failed SQS message(s) from {queueUrl} without redelivery (AckMode.AtMostOnce): {messageIds}",
+                            batchResult.FailedMessages.Count, _sqsConsumerConfig.QueueUrl,
+                            string.Join(", ", batchResult.FailedMessages.Select(x => x.MessageId)));
+                    }
 
                     if (messagesToDelete.Count > 0)
                     {
