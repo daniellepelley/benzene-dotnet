@@ -10,8 +10,7 @@ which this page was moved (spec Phase 2, 2026-10-11).
 ## Reading the version: `IMessageVersionGetter<TContext>`
 
 Extracting the version is a **new, replaceable extension point**, following the same
-producer/consumer, default/override shape every existing convention uses (the design principles
-§4):
+producer/consumer, default/override shape every existing convention uses (the [design principles](https://github.com/daniellepelley/Benzene/blob/main/docs/guides/design-principles.md) §4):
 
 ```csharp
 namespace Benzene.Abstractions.Messages.Mappers;
@@ -99,7 +98,7 @@ mapper is a **decorator** around the existing one:
    existing `IMessageTopicGetter<TContext>`.
 2. If no version was signalled, or the topic has no registered schema casters, delegate straight to
    the inner `IRequestMapper<TContext>` unchanged — **zero overhead, zero behavior change** for any
-   topic that doesn't opt in (the design principles §1's "never require it" rule).
+   topic that doesn't opt in (the [design principles](https://github.com/daniellepelley/Benzene/blob/main/docs/guides/design-principles.md)' "never require it" rule).
 3. Otherwise, look up the caster for `(incomingVersion, canonicalVersion, topic)` via the
    already-shipped `ISchemaCasters.GetSchemaCaster(...)` (`Benzene.Core.Versioning.Schemas`). The
    returned `ISchemaCaster.FromType` **is** the incoming payload's CLR shape — no separate
@@ -155,7 +154,7 @@ Symmetric, and hooks into `IResponsePayloadMapper<TContext>`
    genuinely different problem — a topic *override*, not a repeatable read).
 3. **Default: symmetric versioning** — respond in the same version the request declared, so a V1
    producer always gets a V1 response back without needing a separate "Accept-Version" negotiation.
-   This default MUST be overridable (the design principles §4's rule) for services that want
+   This default MUST be overridable (spec versioning §5) for services that want
    asymmetric negotiation; the override point is replacing this decorator's registration.
 4. Downcast the canonical payload via `ISchemaCasters.TryGetSchemaCaster(topic, canonicalType,
    requestedVersion, out caster)` (reverse direction from §4.1) and serialize the result as
@@ -194,7 +193,7 @@ Symmetric, and hooks into `IResponsePayloadMapper<TContext>`
 
 ### Degradation
 
-Per the design principles §3's normative pattern, this capability's requirement and degradation:
+Per the spec's degradation rule (core-concepts §11), this capability's requirement and degradation:
 
 | Requires | Why | Degradation when declined |
 |---|---|---|
