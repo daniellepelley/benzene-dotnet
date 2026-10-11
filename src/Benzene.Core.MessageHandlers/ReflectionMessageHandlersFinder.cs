@@ -76,7 +76,8 @@ public class ReflectionMessageHandlersFinder : IMessageHandlersFinder
                     attribute.Version,
                     genericArguments[0],
                     genericArguments.Length > 1 ? genericArguments[1] : typeof(Void),
-                    m
+                    m,
+                    attribute.IsDefault
                 ) as IMessageHandlerDefinition;
             })
             .Where(x => x != null)

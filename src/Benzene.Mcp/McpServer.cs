@@ -158,7 +158,8 @@ public sealed class McpServer
         var arguments = parameters["arguments"] as JsonObject ?? new JsonObject();
         var call = new McpToolCall(name, arguments, sessionId);
 
-        var dispatcher = new McpMessageDispatcher(_pipeline, resolver.GetService<IServiceResolverFactory>(), sessionId);
+        var dispatcher = new McpMessageDispatcher(_pipeline, resolver.GetService<IServiceResolverFactory>(), sessionId,
+            resolver.TryGetService<Benzene.Abstractions.IBenzeneWireNames>()?.Version);
 
         McpToolResult result;
         try

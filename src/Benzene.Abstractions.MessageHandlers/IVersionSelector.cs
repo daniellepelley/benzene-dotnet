@@ -1,27 +1,37 @@
-﻿namespace Benzene.Abstractions.MessageHandlers;
+﻿using Benzene.Abstractions.Messages;
+
+namespace Benzene.Abstractions.MessageHandlers;
 
 /// <summary>
-/// Chooses which handler version to route a message to when a topic has multiple registered
-/// handler versions, allowing several versions of the same message contract to coexist (e.g. so
-/// callers can migrate at their own pace). The default implementation matches the requested version
-/// exactly if available, otherwise falls back to the highest available version.
+/// Chooses which of a topic's registered handlers answers a message, by the message's version
+/// (docs/specification/core-concepts.md §2, "Version selection"). Called only when at least one
+/// handler is registered for the topic id.
 /// </summary>
+/// <remarks>
+/// <para>
+/// The default implementation, <c>Benzene.Core.MessageHandlers.VersionSelector</c>, applies the spec's
+/// rule: for a message carrying version <c>v</c>, the handler registered for exactly <c>v</c>; else the
+/// handler the service can <b>cast</b> <c>v</c> to (<see cref="IPayloadVersionCasts"/>), with the topic's
+/// default handler winning a tie; else none (<c>not-found</c>). A message with no version goes to the
+/// topic's default handler - the unversioned one, else the one declared default
+/// (<see cref="IMessageHandlerDefinition.IsDefault"/>) - else none.
+/// </para>
+/// <para>
+/// There is deliberately no "highest available" fallback in the default: serving another version's
+/// behaviour to a caller that named a version is the failure versioning exists to prevent. A different
+/// policy (e.g. <c>HighestAvailableVersionSelector</c>) is an explicit, replaceable registration.
+/// </para>
+/// </remarks>
 public interface IVersionSelector
 {
-    /// <summary>Selects a handler version to use for the requested version.</summary>
-    /// <param name="requestedVersion">
-    /// The version requested by the incoming message, or <c>null</c>/empty for an unversioned message
-    /// (see <see cref="Benzene.Abstractions.Messages.Mappers.IMessageVersionGetter{TContext}"/> - "null/empty
-    /// means the topic's default version"). <see cref="Benzene.Core.MessageHandlers.MessageHandlerDefinitionLookUp"/>,
-    /// the only caller, passes exactly that for every unversioned message.
+    /// <summary>Selects the handler that answers <paramref name="topic"/>.</summary>
+    /// <param name="topic">
+    /// The message's topic: its id and requested version (<see cref="ITopic.Version"/> empty when the
+    /// message carried no version signal).
     /// </param>
-    /// <param name="availableVersions">The versions of the handler that are registered for the topic.</param>
-    /// <returns>
-    /// The version to route to, which must be one of <paramref name="availableVersions"/> - a contract
-    /// that presumes a non-empty <paramref name="availableVersions"/> array and so cannot hold when it's
-    /// empty. Unreachable via the default lookup path today: <c>MessageHandlerDefinitionLookUp</c>
-    /// early-returns before calling <see cref="Select"/> when zero handlers are registered for the
-    /// topic, and fast-paths (skips calling <see cref="Select"/> at all) when exactly one is.
-    /// </returns>
-    string Select(string? requestedVersion, string[] availableVersions);
+    /// <param name="candidates">
+    /// Every handler registered for <paramref name="topic"/>'s id - never empty, one per version.
+    /// </param>
+    /// <returns>The handler to route to, or <c>null</c> when none answers this version (<c>not-found</c>).</returns>
+    IMessageHandlerDefinition? Select(ITopic topic, IMessageHandlerDefinition[] candidates);
 }

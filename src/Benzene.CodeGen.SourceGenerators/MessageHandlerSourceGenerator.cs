@@ -210,6 +210,9 @@ namespace Benzene.CodeGen.SourceGenerators
                 }
             }
 
+            var isDefaultArg = messageAttribute.NamedArguments.FirstOrDefault(a => a.Key == "IsDefault");
+            var isDefault = isDefaultArg.Key != null && isDefaultArg.Value.Value is true;
+
             // Fully qualified, global:: and all. The generated file sits in namespace
             // Benzene.Core.MessageHandlers.DI with Benzene usings in scope, so an unqualified name can
             // be captured by something else that is visible from there - a request type called Request
@@ -228,6 +231,7 @@ namespace Benzene.CodeGen.SourceGenerators
             return new MessageHandlerInfo(
                 topic,
                 version,
+                isDefault,
                 requestType,
                 responseType,
                 typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
@@ -363,7 +367,10 @@ namespace Benzene.CodeGen.SourceGenerators
                 var topicLiteral = SymbolDisplay.FormatLiteral(handler.Topic, quote: true);
                 var versionLiteral = SymbolDisplay.FormatLiteral(handler.Version, quote: true);
                 sb.AppendLine($"            services.AddScoped<{handler.HandlerFullType}>();");
-                sb.AppendLine($"            services.AddSingleton<IMessageHandlerDefinition>(_ => MessageHandlerDefinition.CreateInstance({topicLiteral}, {versionLiteral}, typeof({handler.RequestFullType}), typeof({handler.ResponseFullType}), typeof({handler.HandlerFullType})));");
+                // IsDefault ([Message(topic, version, IsDefault = true)]) carries through, or a source-
+                // generated registration would lose the default declaration a reflection scan keeps.
+                var isDefaultLiteral = handler.IsDefault ? "true" : "false";
+                sb.AppendLine($"            services.AddSingleton<IMessageHandlerDefinition>(_ => MessageHandlerDefinition.CreateInstance({topicLiteral}, {versionLiteral}, typeof({handler.RequestFullType}), typeof({handler.ResponseFullType}), typeof({handler.HandlerFullType}), {isDefaultLiteral}));");
             }
 
             sb.AppendLine("");
@@ -413,6 +420,7 @@ namespace Benzene.CodeGen.SourceGenerators
     {
         public string Topic { get; }
         public string Version { get; }
+        public bool IsDefault { get; }
         public string RequestFullType { get; }
         public string ResponseFullType { get; }
         public string HandlerFullType { get; }
@@ -424,6 +432,7 @@ namespace Benzene.CodeGen.SourceGenerators
         public MessageHandlerInfo(
             string topic,
             string version,
+            bool isDefault,
             string requestFullType,
             string responseFullType,
             string handlerFullType,
@@ -434,6 +443,7 @@ namespace Benzene.CodeGen.SourceGenerators
         {
             Topic = topic;
             Version = version;
+            IsDefault = isDefault;
             RequestFullType = requestFullType;
             ResponseFullType = responseFullType;
             HandlerFullType = handlerFullType;
@@ -448,6 +458,7 @@ namespace Benzene.CodeGen.SourceGenerators
             return other is not null
                 && Topic == other.Topic
                 && Version == other.Version
+                && IsDefault == other.IsDefault
                 && RequestFullType == other.RequestFullType
                 && ResponseFullType == other.ResponseFullType
                 && HandlerFullType == other.HandlerFullType
@@ -466,6 +477,7 @@ namespace Benzene.CodeGen.SourceGenerators
                 var hash = 17;
                 hash = hash * 31 + (Topic?.GetHashCode() ?? 0);
                 hash = hash * 31 + (Version?.GetHashCode() ?? 0);
+                hash = hash * 31 + IsDefault.GetHashCode();
                 hash = hash * 31 + (RequestFullType?.GetHashCode() ?? 0);
                 hash = hash * 31 + (ResponseFullType?.GetHashCode() ?? 0);
                 hash = hash * 31 + (HandlerFullType?.GetHashCode() ?? 0);

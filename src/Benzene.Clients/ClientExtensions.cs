@@ -43,16 +43,23 @@ public static class ClientExtensions
     }
 
     /// <summary>
-    /// Returns a copy of <paramref name="headers"/> with the standard version header
-    /// (<see cref="MessageVersionHeaders.Default"/>) set to <paramref name="version"/>. A null/empty version
-    /// leaves the headers unchanged (returns a non-null copy).
+    /// Returns a copy of <paramref name="headers"/> with the version header set to <paramref name="version"/>.
+    /// A null/empty version leaves the headers unchanged (returns a non-null copy).
     /// </summary>
-    public static IDictionary<string, string> WithVersion(this IDictionary<string, string>? headers, string version)
+    /// <param name="headers">The headers to copy.</param>
+    /// <param name="version">The message's version.</param>
+    /// <param name="headerName">
+    /// The one version header (wire-contracts.md §2). Defaults to <see cref="MessageVersionHeaders.Default"/>
+    /// (<c>benzene-version</c>); an application that renamed it in <c>IBenzeneWireNames.Version</c> passes
+    /// that name, so it writes the same header its own receivers read.
+    /// </param>
+    public static IDictionary<string, string> WithVersion(this IDictionary<string, string>? headers, string version,
+        string headerName = MessageVersionHeaders.Default)
     {
         var merged = headers is null ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) : new Dictionary<string, string>(headers, StringComparer.OrdinalIgnoreCase);
         if (!string.IsNullOrEmpty(version))
         {
-            merged[MessageVersionHeaders.Default] = version;
+            merged[string.IsNullOrEmpty(headerName) ? MessageVersionHeaders.Default : headerName] = version;
         }
         return merged;
     }

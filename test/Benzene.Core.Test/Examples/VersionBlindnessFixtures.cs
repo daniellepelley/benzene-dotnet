@@ -9,10 +9,11 @@ namespace Benzene.Test.Examples;
 
 // Shared fixtures for WP-P (work/archive/bug-fix-designs-round7-10-2026-08.md) regression tests: a topic
 // with two registered handler versions whose request types are genuinely different shapes, so a
-// version-blind lookup (falling back to VersionSelector's unversioned max-by-ordinal default) is
-// observably wrong rather than accidentally correct. "v2" sorts higher than "v1" by ordinal
-// comparison, so a request that declares "v1" but is (incorrectly) looked up unversioned would
-// resolve to the V2 handler/schema instead - exactly the failure mode #69/#70 describe.
+// version-blind lookup is observably wrong rather than accidentally correct. When these were written
+// the selector fell back to the max-by-ordinal version ("v2") for an unversioned lookup; under the
+// spec's selection rule (core-concepts §2) the topic has no default handler, so an unversioned lookup
+// finds nothing at all. Either way a request that declares "v1" but is (incorrectly) looked up
+// unversioned does not reach the V1 handler/schema - exactly the failure mode #69/#70 describe.
 public static class VersionBlindnessDefaults
 {
     public const string Topic = "test:version-blindness";

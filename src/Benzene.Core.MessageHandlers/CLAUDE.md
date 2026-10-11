@@ -150,18 +150,31 @@ Provides complete implementation of message handler infrastructure for command/q
     message** — an unbounded memory leak. Register handler-middleware builders as singletons (or feed a
     stable array) so the cache key stays constant. No core package trips this; it is a caveat for custom
     handler-middleware builders only.
-- `VersionSelector` - Selects handler versions
+- `VersionSelector` - the default `IVersionSelector`, the spec's selection rule (core-concepts §2):
+  exact version; else the handler the version can be **cast** to (via `IPayloadVersionCasts`, which
+  `Benzene.Core.Versioning` registers - this package knows nothing of casting itself); the topic's
+  default handler wins a tie, otherwise the documented tie-break is the ordinal-greatest version
+  (unversioned lowest); else `null` (not-found, the router naming topic + version). No version → the
+  default handler: the unversioned one, else the one declared `IsDefault`
+  (`[Message(topic, version, IsDefault = true)]` / `AddMessageHandler(..., isDefault: true)` /
+  `MessageHandlerDefinition.CreateInstance(..., isDefault)`), else not-found. Never "highest available";
+  that policy survives only as the explicit opt-in `HighestAvailableVersionSelector`.
+  `MessageHandlerDefinitionLookUp.FindHandler` runs the selector even for a single registered handler
+  (the old single-handler fast path routed any version to a topic's only handler).
+- `VersionSelectionStartUpCheck` (`"version-selection"`) - throws for two declared defaults on one
+  topic; logs a warning for a topic with only versioned handlers and no default, for a declared default
+  shadowed by an unversioned handler, and for each cast tie naming the tie-break's pick.
 - `HeaderMessageVersionGetter<TContext>` - the default `IMessageVersionGetter<TContext>`: reads the
-  payload schema version from the header dictionary, trying each name in an ordered fallback list
-  (default `["benzene-version", "version", "x-version"]`, `DefaultHeaderNames`)
-- `MessageVersionHeaderNames` + `MessageVersionHeaderNamesExtensions` - the header-name fallback is
-  an **application-wide** concern (same set regardless of transport, unlike a per-transport topic
-  key), so it's overridden in one place: `AddMessageVersionHeaderNames(...)` registers a
-  `MessageVersionHeaderNames` that every transport's getter resolves at message-handle time. Each
-  transport registers its version getter via `AddHeaderMessageVersionGetter<TContext>()`
-  (`TryAdd...` for `BenzeneMessageContext`); the HTTP transports layer the route-parameter check in
-  front via `HttpMessageVersionGetterBase` subclasses that thread the same override. No override
-  registered ⇒ `DefaultHeaderNames`
+  message's version from **one** header, `benzene-version` (`DefaultHeaderName`). There is no fallback
+  list: a `version`/`x-version` header is an ordinary header and selects nothing (spec D10).
+- `MessageVersionHeaderNameExtensions` - the header name is a reserved name like the topic key, so it
+  lives in `IBenzeneWireNames.Version` (the one injectable value of reserved names, registered by
+  `AddBenzene()`); `AddMessageVersionHeaderName(name)` is sugar for registering one with that version
+  name. Each transport registers its version getter via `AddHeaderMessageVersionGetter<TContext>()`
+  (`TryAdd...` for `BenzeneMessageContext`), which reads `IBenzeneWireNames.Version` at message-handle
+  time; the HTTP transports layer the route-parameter check in front via `HttpMessageVersionGetterBase`
+  subclasses that read the same name. Outbound, `ClientExtensions.WithVersion(..., headerName)` and the
+  MCP dispatcher write the same name.
 - `MessageErrorState` (2026-07-25) - scoped (one per message, registered by `AddContextItems`),
   records a handler-converted exception's TYPE name + an optional spec-§4.1 remediation-hint key
   (`deserialization` from the request-mapping catch). Written by `MessageHandler`'s three catch

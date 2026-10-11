@@ -8,7 +8,7 @@ namespace Benzene.Http.Routing;
 /// Decorates an <see cref="IHttpEndpointFinder"/> to apply the path-based versioning policy
 /// (<see cref="HttpVersioningOptions"/>): each discovered route is re-emitted under a version segment
 /// (<c>/v{version}/…</c>) so path-versioned requests reach the same topic, optionally keeping the original
-/// unversioned route (which resolves to the latest handler). A route the app already declared with the
+/// unversioned route (which resolves to the topic's default handler - core-concepts §2). A route the app already declared with the
 /// <c>{version}</c> parameter is treated as a hand-authored override and passed through untouched.
 /// <para>
 /// Registered by <c>AddHttpVersioning()</c> in place of the composite finder, so both the route table

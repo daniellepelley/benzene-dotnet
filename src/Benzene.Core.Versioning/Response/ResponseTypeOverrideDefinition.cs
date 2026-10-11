@@ -22,5 +22,6 @@ internal class ResponseTypeOverrideDefinition : IMessageHandlerDefinition
     public ITopic Topic => _inner.Topic;
     public Type RequestType => _inner.RequestType;
     public Type HandlerType => _inner.HandlerType;
+    public bool IsDefault => _inner.IsDefault;
     public Type ResponseType { get; }
 }

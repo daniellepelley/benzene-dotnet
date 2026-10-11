@@ -13,9 +13,11 @@ namespace Benzene.Examples.Versioning.Handlers;
 /// version "v1" via the second argument of <see cref="MessageAttribute"/>; the router runs it only when
 /// the incoming <c>benzene-version</c> is "v1". It shares the topic with
 /// <see cref="CreateOrderV2MessageHandler"/> - two genuinely different request shapes, two handlers, no
-/// casting between them.
+/// casting between them. It is also declared the topic's <b>default</b> (<c>IsDefault = true</c>): a
+/// producer that sends no version at all - one written before versioning was turned on for this topic -
+/// reaches V1, the oldest shape the topic still accepts (docs/specification/core-concepts.md §2).
 /// </summary>
-[Message(Topics.OrderCreate, Versions.V1)]
+[Message(Topics.OrderCreate, Versions.V1, IsDefault = true)]
 public class CreateOrderV1MessageHandler : IMessageHandler<V1.CreateOrder, V1.OrderAccepted>
 {
     private readonly IProcessedLog _log;

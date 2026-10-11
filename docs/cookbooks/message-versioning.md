@@ -32,7 +32,7 @@ never cast; a topic with one handler is never version-routed).
 Give each handler the same topic but a different version, via the second argument of `[Message]`:
 
 ```csharp
-[Message("order:create", "v1")]
+[Message("order:create", "v1", IsDefault = true)]
 public class CreateOrderV1Handler : IMessageHandler<V1.CreateOrder, V1.OrderAccepted>
 {
     public Task<IBenzeneResult<V1.OrderAccepted>> HandleAsync(V1.CreateOrder request) { /* ... */ }
@@ -45,17 +45,32 @@ public class CreateOrderV2Handler : IMessageHandler<V2.CreateOrder, V2.OrderAcce
 }
 ```
 
-The router reads the incoming version with `IMessageVersionGetter<TContext>` (the default
-`HeaderMessageVersionGetter` scans `benzene-version` → `version` → `x-version`) and hands it to
-`IVersionSelector`. The default selector returns the handler for the **exact** version if one exists,
-otherwise the **highest** registered version. So:
+The router reads the incoming version with `IMessageVersionGetter<TContext>` — the default
+`HeaderMessageVersionGetter` reads **one** header, `benzene-version` — and hands it to `IVersionSelector`.
+The default selector applies the spec's rule (core-concepts §2):
 
-- `benzene-version: v1` → the V1 handler.
+- `benzene-version: v1` → the V1 handler (an exact match).
 - `benzene-version: v2` → the V2 handler.
-- **no version** → the highest registered version (`v2`) — i.e. the newest handler is the topic's default.
+- `benzene-version: v9` → `not-found`, naming the topic and `v9`. There is no "nearest" or "highest
+  available" fallback: serving another version's behaviour to a caller that named a version is the failure
+  versioning exists to prevent.
+- **no version** → the topic's **default handler**: an unversioned handler if there is one, else the one
+  declared `IsDefault = true` (above: V1, the oldest shape the topic still accepts, so producers written
+  before versioning keep working). With neither, `not-found` — and a start-up warning names the topic.
 
 That's all the wiring: register the handlers' assembly (`AddMessageHandlers(...)`) as usual. No caster
-config is involved.
+config is involved. Registering explicitly instead of by attribute, the same declaration is
+`router.AddMessageHandler<CreateOrderV1Handler, V1.CreateOrder, V1.OrderAccepted>("order:create", "v1", isDefault: true)`.
+
+**One header, no fallback list.** A producer that sends a plain `version` or `x-version` header for its own
+purposes (an API or SDK version) is not sending a Benzene version: those are ordinary headers and select
+nothing. To use a different name, rename the header in the one place every reserved name lives —
+`services.AddMessageVersionHeaderName("schema-version")`, or an `IBenzeneWireNames` registration carrying
+it — and the configured name *replaces* `benzene-version`. On HTTP, a `/v{version}` route segment
+(`AddHttpVersioning()`) supplies the version exactly as if the header had been sent.
+
+If you want the old "exact, else the highest registered version" behaviour, it is still available as an
+explicit opt-in: register `HighestAvailableVersionSelector` as the `IVersionSelector`.
 
 This version-augmentation (combining the topic with `IMessageVersionGetter<TContext>` before handler
 lookup) is centralized behind one shared helper, `GetVersionedTopic` on `IMessageTopicGetter<TContext>`
@@ -63,7 +78,7 @@ lookup) is centralized behind one shared helper, `GetVersionedTopic` on `IMessag
 that resolves a handler by topic (`Benzene.JsonSchema`'s request validation, `Benzene.Diagnostics`'
 `ActivityMiddlewareDecorator`/`UseBenzeneEnrichment`, `Benzene.Aws.Lambda.XRay`'s subsegment tagging)
 call it, so a multi-version topic is validated and traced against the version the request actually
-declares, never `IVersionSelector`'s unversioned max-by-ordinal fallback. A custom middleware that
+declares, never the topic's default handler by accident. A custom middleware that
 looks up a handler by topic should call the same helper rather than re-deriving the combination.
 
 ## Mechanism B — one handler, transparent casting (with chaining)
@@ -119,6 +134,18 @@ a reason not to.
 With **no** `benzene-version`, the casting decorator delegates straight through: the body is deserialized
 directly as the handler's own (newest) type, no caster runs. So the handler's declared request type *is*
 the canonical/default version — `ToSchemas` names the version(s) the handler understands.
+
+### How a versioned message reaches the one handler
+
+The `inventory:adjust` handler above is **unversioned**, yet a message carrying `benzene-version: v1` still
+reaches it — not because a lone handler takes every version (it doesn't: a version the service cannot
+handle is `not-found`), but by step 2 of version selection: when no handler is registered for exactly
+`v1`, the handler whose request type `v1` can be **cast** to is chosen. `AddPayloadVersioning` exposes its
+casts to the selector (`IPayloadVersionCasts`), so `v1`/`v2` reach the V3 handler through their casts and
+`v3` reaches it because it names the handler's own type. When one version can be cast to several handlers,
+the topic's default handler wins if it is among them; otherwise the handler with the greatest version
+(ordinal comparison, unversioned lowest) — a deterministic tie-break that prefers casting forward over
+casting back, and that the start-up checks log so you can see it.
 
 ## Testing it
 

@@ -121,7 +121,11 @@ public class MessageRouter<TContext> : IMiddleware<TContext>, ITerminalMiddlewar
                 // Single-quote the topic id on the wire (this detail is serialized into the HTTP
                 // body): quotes delimit the value legibly and, unlike the internal "<missing>"
                 // sentinel's angle brackets, don't rely on the sentinel spelling being wire-friendly.
-                : $"No handler found for topic '{topic.Id}'";
+                // A message that named a version is told which one found nothing (core-concepts §2:
+                // not-found names the topic and the version) - the topic may well have other versions.
+                : string.IsNullOrEmpty(topic.Version)
+                    ? $"No handler found for topic '{topic.Id}'"
+                    : $"No handler found for topic '{topic.Id}' at version '{topic.Version}'";
             _logger.LogWarning("No handler found for topic {topic}. {detail}", topic.Id, detail);
             await _messageHandlerResultSetter.SetResultAsync(context, new MessageHandlerResult(topic, MessageHandlerDefinition.Empty(), BenzeneResult.Set(_defaultStatuses.NotFound, detail)));
             return;

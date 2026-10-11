@@ -83,7 +83,7 @@ public class HttpMessageVersionGetterBaseTest
     {
         var getter = new TestMessageVersionGetter(new FixedRouteFinder(null), new FixedHeadersGetter(new Dictionary<string, string>
         {
-            ["version"] = "V1"
+            ["benzene-version"] = "V1"
         }));
 
         Assert.Equal("V1", getter.GetVersion(new TestContext("GET", "/unknown")));

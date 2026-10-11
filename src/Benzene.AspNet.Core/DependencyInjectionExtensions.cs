@@ -48,7 +48,7 @@ public static class DependencyInjectionExtensions
         services.TryAddScoped<IMessageVersionGetter<AspNetContext>>(resolver =>
             new AspNetMessageVersionGetter(resolver.GetService<IRouteFinder>(),
                 resolver.GetService<IMessageHeadersGetter<AspNetContext>>(),
-                resolver.TryGetService<MessageVersionHeaderNames>()?.HeaderNames));
+                resolver.TryGetService<Benzene.Abstractions.IBenzeneWireNames>()?.Version));
         services.TryAddScoped<IMessageHeadersGetter<AspNetContext>, AspNetMessageHeadersGetter>();
         services.TryAddScoped<IMessageBodyGetter<AspNetContext>, AspNetMessageBodyGetter>();
         services.TryAddScoped<IHttpRequestBodyReader<AspNetContext>, AspNetMessageBodyGetter>();

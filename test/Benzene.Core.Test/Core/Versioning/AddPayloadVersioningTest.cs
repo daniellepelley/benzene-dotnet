@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Benzene.Abstractions.MessageHandlers;
 using Benzene.Abstractions.Results;
@@ -95,6 +96,55 @@ public class AddPayloadVersioningTest
         // V1-shaped: none of V2's Currency / V3's Reference leaked out.
         Assert.DoesNotContain("currency", response.Body, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("reference", response.Body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AVersionTheServiceCannotCast_IsNotFound_NamingTheVersion()
+    {
+        // core-concepts §2: no exact handler and no cast from "V9" -> not-found, never the only handler.
+        var app = BuildApp(out var factory);
+
+        var response = await app.HandleAsync(new BenzeneMessageRequest
+        {
+            Topic = "order",
+            Body = JsonConvert.SerializeObject(new V3.OrderPayload { Id = "order-1", Quantity = 5 }),
+            Headers = new Dictionary<string, string> { { "benzene-version", "V9" } }
+        }, factory);
+
+        Assert.Equal(BenzeneResultStatus.NotFound, response.StatusCode);
+        Assert.Contains("V9", response.Body);
+    }
+
+    [Fact]
+    public async Task TheHandlersOwnVersion_ReachesItWithNoCast()
+    {
+        // "V3" names the handler's own request type: reachable, and nothing to cast.
+        var app = BuildApp(out var factory);
+
+        var response = await app.HandleAsync(new BenzeneMessageRequest
+        {
+            Topic = "order",
+            Body = JsonConvert.SerializeObject(new V3.OrderPayload { Id = "order-1", Quantity = 5, Currency = "GBP", Reference = "r" }),
+            Headers = new Dictionary<string, string> { { "benzene-version", "V3" } }
+        }, factory);
+
+        Assert.Equal(BenzeneResultStatus.Ok, response.StatusCode);
+        Assert.Equal("GBP|r", JsonConvert.DeserializeObject<V3.OrderPayload>(response.Body).Id);
+    }
+
+    [Fact]
+    public void RegisteringVersioning_ExposesTheCastsToVersionSelection()
+    {
+        BuildApp(out var factory);
+        using var resolver = factory.CreateScope();
+
+        var casts = resolver.GetService<IPayloadVersionCasts>();
+
+        Assert.True(casts.CanCast("order", "V1", typeof(V3.OrderPayload)));
+        Assert.True(casts.CanCast("order", "V3", typeof(V3.OrderPayload)));
+        Assert.False(casts.CanCast("order", "V9", typeof(V3.OrderPayload)));
+        Assert.False(casts.CanCast("other", "V1", typeof(V3.OrderPayload)));
+        Assert.Equal(new[] { "V1", "V2", "V3" }, casts.GetVersions("order").OrderBy(x => x).ToArray());
     }
 
     [Fact]

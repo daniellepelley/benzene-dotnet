@@ -23,16 +23,23 @@ public sealed class McpMessageDispatcher : IMcpMessageDispatcher
     private readonly BenzeneMessageApplication _application;
     private readonly IServiceResolverFactory _serviceResolverFactory;
     private readonly string? _sessionId;
+    private readonly string _versionHeader;
 
     /// <summary>Initializes a new instance of the <see cref="McpMessageDispatcher"/> class.</summary>
     /// <param name="pipeline">The built BenzeneMessage pipeline.</param>
     /// <param name="serviceResolverFactory">Creates the scope each message runs in.</param>
     /// <param name="sessionId">The current MCP session id, sent as <see cref="SessionHeader"/> when present.</param>
-    public McpMessageDispatcher(IMiddlewarePipeline<BenzeneMessageContext> pipeline, IServiceResolverFactory serviceResolverFactory, string? sessionId = null)
+    /// <param name="versionHeader">
+    /// The header a tool's version is sent under - the application's <c>IBenzeneWireNames.Version</c>, so the
+    /// same one name is written here as every version getter reads. Defaults to <c>benzene-version</c>.
+    /// </param>
+    public McpMessageDispatcher(IMiddlewarePipeline<BenzeneMessageContext> pipeline, IServiceResolverFactory serviceResolverFactory,
+        string? sessionId = null, string? versionHeader = null)
     {
         _application = new BenzeneMessageApplication(pipeline);
         _serviceResolverFactory = serviceResolverFactory;
         _sessionId = sessionId;
+        _versionHeader = string.IsNullOrEmpty(versionHeader) ? MessageVersionHeaders.Default : versionHeader;
     }
 
     /// <inheritdoc />
@@ -44,7 +51,7 @@ public sealed class McpMessageDispatcher : IMcpMessageDispatcher
         {
             foreach (var (key, value) in headers) requestHeaders[key] = value;
         }
-        if (!string.IsNullOrEmpty(version)) requestHeaders[MessageVersionHeaders.Default] = version;
+        if (!string.IsNullOrEmpty(version)) requestHeaders[_versionHeader] = version;
         if (_sessionId is not null) requestHeaders[SessionHeader] = _sessionId;
 
         var request = new BenzeneMessageRequest

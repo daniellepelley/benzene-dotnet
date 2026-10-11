@@ -445,9 +445,9 @@ public class ActivityMiddlewareTest
     public async Task AddDiagnostics_TagsHandlerAndVersion_ForTheDeclaredVersion_NotTheMaxOrdinalFallback()
     {
         // WP-P (work/archive/bug-fix-designs-round7-10-2026-08.md), task #70: without version-augmentation,
-        // the decorator resolves the topic unversioned, which VersionSelector then falls back to
-        // resolving as the highest-ordinal registered version ("v2") regardless of what the request
-        // actually declares - so a v1 request would be tagged with the (never-run) V2 handler's name
+        // the decorator resolves the topic unversioned, which the selector of the time resolved as the
+        // highest-ordinal registered version ("v2") - and today resolves as no handler at all, the topic
+        // having no default - regardless of what the request actually declares - so a v1 request would be tagged with the (never-run) V2 handler's name
         // and a blank benzene.version. Reverting GetVersionedTopic's use in ActivityMiddlewareDecorator
         // reproduces this: the assertions below flip to VersionBlindnessV2Handler / null.
         var (activities, listener) = ListenToBenzeneActivities();

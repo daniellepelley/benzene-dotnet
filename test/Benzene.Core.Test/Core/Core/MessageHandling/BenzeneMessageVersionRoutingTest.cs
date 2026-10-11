@@ -16,12 +16,11 @@ using Xunit;
 namespace Benzene.Test.Core.Core.MessageHandling;
 
 /// <summary>
-/// The BenzeneMessage transport must resolve the payload schema version through the configurable,
-/// priority-ordered <see cref="IMessageVersionGetter{TContext}"/> (default order
-/// <c>benzene-version</c> &gt; <c>version</c> &gt; <c>x-version</c>) - not by baking the raw
-/// <c>"version"</c> header into the topic in <c>BenzeneMessageGetter.GetTopic</c>. A topic-getter
+/// The BenzeneMessage transport must resolve the message's version through the configurable
+/// <see cref="IMessageVersionGetter{TContext}"/> (one header, <c>benzene-version</c>) - not by baking the
+/// raw <c>"version"</c> header into the topic in <c>BenzeneMessageGetter.GetTopic</c>. A topic-getter
 /// version is treated as a deliberate preset override that skips the version getter, so hardcoding
-/// one there silently defeats the configured header order. The join itself now happens inside
+/// one there silently defeats the configured header. The join itself now happens inside
 /// <c>BenzeneMessageGetter.GetTopic</c> (task #98, work/archive/bug-fix-designs-round10-2026-08.md WP-V) -
 /// <see cref="MessageRouter{TContext}"/> just consumes the already-joined topic - so the version
 /// getter is wired into the getter here, not into the router.
@@ -65,8 +64,8 @@ public class BenzeneMessageVersionRoutingTest
     [Fact]
     public void BenzeneVersionHeaderWinsOverVersionHeader()
     {
-        // Both present: the configured order puts benzene-version first, so it must win. Before the
-        // fix, GetTopic read the raw "version" header as a preset override and routed to "1".
+        // Both present: benzene-version is the one version header, so it must win. Before the fix,
+        // GetTopic read the raw "version" header as a preset override and routed to "1".
         var routed = RouteVersionFor(new Dictionary<string, string>
         {
             { "benzene-version", "2" },
@@ -78,13 +77,13 @@ public class BenzeneMessageVersionRoutingTest
     }
 
     [Fact]
-    public void VersionHeaderAloneStillResolves()
+    public void VersionHeaderAlone_IsAnOrdinaryHeader_NotAVersion()
     {
-        // The common single-header case is unchanged: "version" alone still routes to that version
-        // (now via the version getter rather than the hardcoded topic version).
+        // One version header, no fallback list (wire-contracts.md §2): a producer's own "version" header
+        // selects nothing, so the message goes to the topic's default handler.
         var routed = RouteVersionFor(new Dictionary<string, string> { { "version", "3" } });
 
-        Assert.Equal("3", routed.Version);
+        Assert.Equal("", routed.Version);
     }
 
     [Fact]

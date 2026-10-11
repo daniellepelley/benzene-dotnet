@@ -70,8 +70,10 @@ public record PaymentTaken(string PaymentId, string Status);
 // The SINGLE payment:take handler, written against version 2 only ([Message("payment:take", "2")], taking
 // V2.TakePaymentRequest). A v1 payload from orders-api is upcast to v2 before this runs (Startup wires the
 // V1->V2 caster + UsePayloadVersionCasting for the payments service), so request.Currency is always present -
-// seeded by the upcast when the producer was on v1. This is the "send v1 -> upcast -> one v2 handler" story.
-[Message("payment:take", "2")]
+// seeded by the upcast when the producer was on v1. This is the "send v1 -> upcast -> one v2 handler" story:
+// "1" has no handler of its own, so version selection routes it to the handler its payload casts to. Declared
+// the topic's default too, so a caller that sends no version (POST /payments) still reaches it.
+[Message("payment:take", "2", IsDefault = true)]
 [HttpEndpoint("POST", "/payments")]
 public class TakePaymentHandler : IMessageHandler<V2.TakePaymentRequest, PaymentTaken>
 {

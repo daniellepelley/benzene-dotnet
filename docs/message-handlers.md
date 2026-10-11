@@ -87,6 +87,7 @@ public class MessageAttribute : Attribute
     public MessageAttribute(string topic, string version = "");
 
     public string Version { get; }
+    public bool IsDefault { get; set; }   // [Message("order:create", "v1", IsDefault = true)]
     public string Topic { get; }
 }
 ```
@@ -94,7 +95,10 @@ public class MessageAttribute : Attribute
 Applied once per handler class. `Topic` is the routing key used to look up the handler at request
 time (see [Handler discovery](#handler-discovery-imessagehandlersfinder) below); `Version` is optional and lets multiple
 versions of a handler coexist for the same topic — `IVersionSelector` picks which version answers a
-given request.
+given request, by its `benzene-version` header: the exact version, else one its payload can be cast to,
+else `not-found`. A request with no version goes to the topic's **default** handler — the unversioned one,
+else the one declared with `IsDefault = true` (see
+[message versioning](cookbooks/message-versioning.md)).
 
 ## `[HttpEndpoint("METHOD", "/path")]`
 
@@ -155,8 +159,8 @@ New handlers are found automatically — you don't register them individually. D
 
 `IMessageHandlerDefinitionLookUp` (`MessageHandlerDefinitionLookUp`) is what actually answers "which
 handler serves this topic at request time": it merges every registered finder's definitions, groups
-by `(topic, version)`, and uses `IVersionSelector` to pick the best-matching version when more than
-one exists for the same topic.
+by `(topic, version)`, and uses `IVersionSelector` to pick the handler for the request's version (exact,
+else cast-reachable, else none — never "the highest available").
 
 `UseMessageHandlers(...)` wires the assemblies/types you pass (or, if you pass none,
 `AppDomain.CurrentDomain.GetAssemblies()`) into `AddMessageHandlers(...)`, which registers
@@ -185,8 +189,7 @@ the pipeline. `MessageRouter<TContext>.HandleAsync`:
    version signal (`IMessageVersionGetter<TContext>`) via the shared `GetVersionedTopic` extension
    method (`Benzene.Abstractions.MessageHandlers.Mappers`) whenever the topic getter didn't already
    supply one — this is what lets `IMessageHandlerDefinitionLookUp.FindHandler` below resolve the
-   *version the request actually declares* rather than `IVersionSelector`'s unversioned max-by-ordinal
-   fallback. Any other consumer that resolves a handler by topic (validation, tracing/log diagnostics)
+   *version the request actually declares* rather than the topic's default handler. Any other consumer that resolves a handler by topic (validation, tracing/log diagnostics)
    should call the same `GetVersionedTopic` helper rather than re-deriving this combination — see
    [message versioning](cookbooks/message-versioning.md). The built-in topic getters never return a
    null topic — an unresolvable topic becomes the `"<missing>"` sentinel — so the router's

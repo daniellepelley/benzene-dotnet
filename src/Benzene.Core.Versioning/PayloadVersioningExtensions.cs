@@ -109,6 +109,10 @@ public class PayloadVersioningBuilder
 
         var schemaCasters = new SchemaCasters(expanded);
         _ = services.AddSingleton<ISchemaCasters>(schemaCasters);
+        // Version selection consults the casts: a version with no handler of its own routes to the
+        // handler its payload casts to (docs/specification/core-concepts.md §2, step 2).
+        _ = services.AddSingleton<Benzene.Abstractions.MessageHandlers.IPayloadVersionCasts>(
+            new SchemaCasterVersionCasts(schemaCasters));
 
         foreach (var context in _contexts)
         {

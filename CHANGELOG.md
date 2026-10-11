@@ -134,6 +134,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stale data" warning downstream on every no-op invalidate.
 
 ### Changed
+- **BREAKING (spec-0.2.0, core-concepts §2 / D1): version selection is exact, else cast-reachable, else
+  `not-found` — never "the highest available".** The default `VersionSelector` now picks the handler
+  registered for exactly the message's version; else the handler its payload can be **cast** to (a
+  registered `Benzene.Core.Versioning` cast to that handler's request type — `AddPayloadVersioning`
+  exposes its casts to selection as the new `IPayloadVersionCasts`); else answers `not-found`, the
+  router's detail naming the topic **and** the version. A message with **no** version goes to the topic's
+  **default handler**: the unversioned one, else the one declared default. When a version casts to several
+  handlers the default wins; otherwise the deterministic, documented tie-break is the ordinal-greatest
+  version (unversioned lowest).
+  - *Declare a default*: `[Message("order:create", "v1", IsDefault = true)]`, or
+    `AddMessageHandler<...>("order:create", "v1", isDefault: true)`, or
+    `MessageHandlerDefinition.CreateInstance(..., isDefault: true)`. `IMessageHandlerDefinition` gains
+    `bool IsDefault` (a default interface member, `false`, so existing implementers compile unchanged).
+  - *`IVersionSelector` changes shape* — `string Select(string?, string[])` becomes
+    `IMessageHandlerDefinition? Select(ITopic topic, IMessageHandlerDefinition[] candidates)`, because
+    cast reachability needs the candidates' request types. A custom selector must be ported.
+  - *Migration*: a topic whose handlers are all versioned used to answer a version-less message with
+    its highest version; it now answers `not-found` (and the new `version-selection` start-up check logs
+    a warning naming the topic). Declare the default you want — usually the **oldest** version the topic
+    still accepts, so pre-versioning producers keep working. A message naming a version no handler
+    serves used to reach the highest version; it is now `not-found`. A message naming any version sent
+    to a topic's **only** handler used to reach it regardless (a single-handler fast path); it now
+    reaches it only by exact version, by cast, or — with no version — as the default. To keep the old
+    policy wholesale, register the new opt-in `HighestAvailableVersionSelector` as `IVersionSelector`.
+  - Two declared defaults on one topic now fail start-up (`version-selection`).
+  - `HttpVersioningOptions.KeepUnversionedRoute`'s unversioned route now reaches the topic's default
+    handler, not "the latest".
+- **BREAKING (spec-0.2.0, wire-contracts §2 / D10): one version header, `benzene-version` — the
+  `version`/`x-version` fallback list is gone.** A producer's own `version` or `x-version` header is an
+  ordinary header and selects nothing. `HeaderMessageVersionGetter<TContext>.DefaultHeaderNames` (a list)
+  is replaced by `DefaultHeaderName` and the constructor takes `string? headerName`; the HTTP version
+  getters (`HttpMessageVersionGetterBase` and its AspNet/API Gateway/Azure Functions subclasses) likewise.
+  `MessageVersionHeaderNames`/`AddMessageVersionHeaderNames(params string[])` are removed: the name now
+  lives where every reserved name lives, `IBenzeneWireNames.Version` (registered by `AddBenzene()`), which
+  every transport's version getter reads; `AddMessageVersionHeaderName(string)` is sugar for registering
+  one, and a configured name *replaces* `benzene-version`. Outbound, `ClientExtensions.WithVersion`
+  takes an optional `headerName` and the MCP dispatcher writes `IBenzeneWireNames.Version`.
+  *Migration*: producers that set a bare `version`/`x-version` header to pick a handler must send
+  `benzene-version` (or the app renames the one header to theirs).
 - **BREAKING (mesh.md's 2026-08 revision): the mesh producer/consumer graph is now declared, never
   trace-derived.** `MeshServiceDescriptor` gains a `Consumes` field (mesh.md §2), populated from a new
   explicit **outbound registration** concept (§2.3, mirroring core-concepts.md §9's inbound handler

@@ -72,7 +72,9 @@ public class BenzeneMessagePipelineTest
             .WithHeaders(new Dictionary<string, string>
             {
                 { "sender", "some-sender" },
-                { "version", "2.0"}
+                // The one version header (wire-contracts §2). A bare "version" header used to be read as a
+                // fallback; it is an ordinary header now.
+                { "benzene-version", "2.0"}
             })
             .AsBenzeneMessage();
 

@@ -77,14 +77,13 @@ public class BenzeneMessageGetter : IMessageGetter<BenzeneMessageContext>, IMess
     /// <returns>The request's topic.</returns>
     /// <remarks>
     /// The raw envelope topic (<see cref="RawTopicGetter"/>) never carries a version itself: the
-    /// payload schema version is resolved by the configurable, priority-ordered
-    /// <see cref="IMessageVersionGetter{TContext}"/> (default <c>benzene-version</c> &gt;
-    /// <c>version</c> &gt; <c>x-version</c>) and joined in here via the shared
+    /// message's version is resolved by the configurable <see cref="IMessageVersionGetter{TContext}"/>
+    /// (one header, <c>benzene-version</c>) and joined in here via the shared
     /// <see cref="MessageTopicGetterExtensions.GetVersionedTopic{TContext}"/> helper, like every other
     /// transport's <c>IMessageGetter</c>. Baking the raw <c>"version"</c> header into the raw topic
     /// directly would make <see cref="MessageRouter{TContext}"/> (and every other consumer of this
-    /// topic) treat it as a preset override and skip the version getter, defeating both the configured
-    /// header order and any app that narrows the list (docs/specification/versioning.md §2.1). This
+    /// topic) treat it as a preset override and skip the version getter, defeating the configured
+    /// header name (docs/specification/versioning.md §2.1). This
     /// class used to leave the join to each individual consumer (the router did it locally, and every
     /// other reader - <c>UseMeshTrace</c>, <c>Benzene.CloudService</c>, health checks - silently read
     /// the version-less topic instead); it is now resolved once here so <c>GetTopic</c> means the same

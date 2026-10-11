@@ -19,8 +19,9 @@ public class MessageAttribute : Attribute
     /// </summary>
     /// <param name="topic">The topic id this handler processes messages for.</param>
     /// <param name="version">
-    /// The optional version of this handler, used by <see cref="Benzene.Abstractions.MessageHandlers.IVersionSelector"/> when multiple
-    /// handlers are registered for the same topic. Defaults to an empty string (unversioned).
+    /// The optional version of this handler: a message carrying exactly this version (its
+    /// <c>benzene-version</c> header) is routed here by <see cref="Benzene.Abstractions.MessageHandlers.IVersionSelector"/>.
+    /// Defaults to an empty string (unversioned) - the handler a message with no version goes to.
     /// </param>
     public MessageAttribute(string topic, string version = "")
     {
@@ -37,4 +38,14 @@ public class MessageAttribute : Attribute
     /// Gets the topic id this handler processes messages for.
     /// </summary>
     public string Topic { get; }
+
+    /// <summary>
+    /// Declares this versioned handler the topic's <b>default</b>: a message that carries no version is
+    /// routed here when the topic has no unversioned handler (docs/specification/core-concepts.md §2).
+    /// <c>[Message("order:create", "v1", IsDefault = true)]</c>. At most one handler per topic is the
+    /// default - an unversioned handler always is one - and a topic whose handlers are all versioned
+    /// with none declared default is reported at start-up, since every unversioned message to it fails
+    /// with <c>not-found</c>.
+    /// </summary>
+    public bool IsDefault { get; set; }
 }

@@ -13,12 +13,13 @@ namespace Benzene.Core.MessageHandlers;
 /// </summary>
 public class MessageHandlerDefinition : IMessageHandlerDefinition
 {
-    private MessageHandlerDefinition(ITopic topic, Type requestType, Type responseType, Type handlerType)
+    private MessageHandlerDefinition(ITopic topic, Type requestType, Type responseType, Type handlerType, bool isDefault = false)
     {
         Topic = topic;
         RequestType = requestType;
         ResponseType = responseType;
         HandlerType = handlerType;
+        IsDefault = isDefault;
     }
 
     /// <summary>
@@ -33,6 +34,23 @@ public class MessageHandlerDefinition : IMessageHandlerDefinition
     public static MessageHandlerDefinition CreateInstance(string topic, string version, Type requestType, Type responseType, Type handlerType)
     {
         return new MessageHandlerDefinition(new Topic(topic, version), requestType, responseType, handlerType);
+    }
+
+    /// <summary>
+    /// Creates a definition for a versioned handler, optionally declared its topic's default - the
+    /// handler a message carrying no version goes to when the topic has no unversioned handler
+    /// (docs/specification/core-concepts.md §2).
+    /// </summary>
+    /// <param name="topic">The topic id the handler answers.</param>
+    /// <param name="version">The version of the handler.</param>
+    /// <param name="requestType">The handler's request type.</param>
+    /// <param name="responseType">The handler's response type.</param>
+    /// <param name="handlerType">The CLR type implementing the handler.</param>
+    /// <param name="isDefault">Whether this handler is declared the topic's default.</param>
+    /// <returns>A new <see cref="MessageHandlerDefinition"/>.</returns>
+    public static MessageHandlerDefinition CreateInstance(string topic, string version, Type requestType, Type responseType, Type handlerType, bool isDefault)
+    {
+        return new MessageHandlerDefinition(new Topic(topic, version), requestType, responseType, handlerType, isDefault);
     }
 
     /// <summary>
@@ -83,5 +101,8 @@ public class MessageHandlerDefinition : IMessageHandlerDefinition
 
     /// <inheritdoc />
     public Type HandlerType { get; init; }
+
+    /// <inheritdoc />
+    public bool IsDefault { get; init; }
 
 }

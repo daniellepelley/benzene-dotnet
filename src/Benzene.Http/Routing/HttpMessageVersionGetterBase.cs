@@ -6,16 +6,17 @@ namespace Benzene.Http.Routing;
 
 /// <summary>
 /// Base <see cref="IMessageVersionGetter{TContext}"/> for HTTP-shaped transports: reads the
-/// payload schema version from the matched route's <c>version</c> route parameter (e.g.
-/// <c>/v{version}/orders/{id}</c>), falling back to the header fallback list
+/// message's version from the matched route's <c>version</c> route parameter (e.g.
+/// <c>/v{version}/orders/{id}</c>) - sugar that supplies the version exactly as if the
+/// <c>benzene-version</c> header had been sent - and reads that one header
 /// (<see cref="HeaderMessageVersionGetter{TContext}"/>) when the matched route declares no such
-/// parameter (docs/specification/versioning.md §2.1) - so an HTTP transport can support both a
+/// parameter (docs/specification/versioning.md §2.1). So an HTTP transport can support both a
 /// path-versioned and a header-versioned surface for the same topic without duplicating routes.
 /// </summary>
 /// <typeparam name="TContext">The transport-specific HTTP context type.</typeparam>
 public abstract class HttpMessageVersionGetterBase<TContext> : IMessageVersionGetter<TContext>
 {
-    /// <summary>The route parameter name checked before falling back to headers.</summary>
+    /// <summary>The route parameter name checked before the version header.</summary>
     public const string VersionRouteParameterName = "version";
 
     private readonly IRouteFinder _routeFinder;
@@ -25,12 +26,15 @@ public abstract class HttpMessageVersionGetterBase<TContext> : IMessageVersionGe
     /// Initializes a new instance of the <see cref="HttpMessageVersionGetterBase{TContext}"/> class.
     /// </summary>
     /// <param name="routeFinder">The route finder used to match the request's method and path to a route.</param>
-    /// <param name="headersGetter">Extracts the header dictionary from the context, for the fallback path.</param>
-    /// <param name="headerNames">The header-name fallback list; defaults to <see cref="HeaderMessageVersionGetter{TContext}.DefaultHeaderNames"/>.</param>
-    protected HttpMessageVersionGetterBase(IRouteFinder routeFinder, IMessageHeadersGetter<TContext> headersGetter, IReadOnlyList<string>? headerNames = null)
+    /// <param name="headersGetter">Extracts the header dictionary from the context, for the header path.</param>
+    /// <param name="headerName">
+    /// The one version header; defaults to <see cref="HeaderMessageVersionGetter{TContext}.DefaultHeaderName"/>
+    /// (<c>benzene-version</c>). The transports pass <see cref="Benzene.Abstractions.IBenzeneWireNames.Version"/>.
+    /// </param>
+    protected HttpMessageVersionGetterBase(IRouteFinder routeFinder, IMessageHeadersGetter<TContext> headersGetter, string? headerName = null)
     {
         _routeFinder = routeFinder;
-        _headerFallback = new HeaderMessageVersionGetter<TContext>(headersGetter, headerNames);
+        _headerFallback = new HeaderMessageVersionGetter<TContext>(headersGetter, headerName);
     }
 
     /// <summary>Extracts the HTTP method and path this transport's context carries.</summary>

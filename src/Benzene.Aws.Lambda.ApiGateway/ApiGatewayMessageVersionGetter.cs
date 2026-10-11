@@ -6,7 +6,7 @@ namespace Benzene.Aws.Lambda.ApiGateway;
 
 /// <summary>
 /// Extracts the payload schema version from the matched route's <c>version</c> route parameter,
-/// falling back to the header fallback list when the matched route declares no such parameter
+/// reading the one version header when the matched route declares no such parameter
 /// (docs/specification/versioning.md §2.1).
 /// </summary>
 public class ApiGatewayMessageVersionGetter : HttpMessageVersionGetterBase<ApiGatewayContext>
@@ -15,10 +15,10 @@ public class ApiGatewayMessageVersionGetter : HttpMessageVersionGetterBase<ApiGa
     /// Initializes a new instance of the <see cref="ApiGatewayMessageVersionGetter"/> class.
     /// </summary>
     /// <param name="routeFinder">The route finder used to match the request to a registered topic.</param>
-    /// <param name="headersGetter">Extracts the header dictionary from the context, for the fallback path.</param>
-    /// <param name="headerNames">The header-name fallback list; defaults to <see cref="Benzene.Core.MessageHandlers.HeaderMessageVersionGetter{TContext}.DefaultHeaderNames"/> when null.</param>
-    public ApiGatewayMessageVersionGetter(IRouteFinder routeFinder, IMessageHeadersGetter<ApiGatewayContext> headersGetter, IReadOnlyList<string>? headerNames = null)
-        : base(routeFinder, headersGetter, headerNames)
+    /// <param name="headersGetter">Extracts the header dictionary from the context, for the header path.</param>
+    /// <param name="headerName">The one version header; defaults to <c>benzene-version</c> when null (the transport passes <see cref="Benzene.Abstractions.IBenzeneWireNames.Version"/>).</param>
+    public ApiGatewayMessageVersionGetter(IRouteFinder routeFinder, IMessageHeadersGetter<ApiGatewayContext> headersGetter, string? headerName = null)
+        : base(routeFinder, headersGetter, headerName)
     {
     }
 

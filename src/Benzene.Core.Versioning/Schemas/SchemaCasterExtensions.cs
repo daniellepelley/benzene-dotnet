@@ -12,10 +12,14 @@ public static class SchemaCasterExtensions
     /// </summary>
     public static IBenzeneServiceContainer RegisterPayloadSchemaVersions(this IBenzeneServiceContainer services, IEnumerable<PayloadSchemaVersions> payloadSchemaVersions)
     {
-        return services.AddSingleton<ISchemaCasters>(x =>
+        services.AddSingleton<ISchemaCasters>(x =>
                 new SchemaCasters(
                     new SchemaCastDefinitionsExpander().Expand(x.GetServices<ISchemaCaster>().ToArray(),
                         payloadSchemaVersions.ToArray())));
+        // Version selection consults the casts: a version with no handler of its own routes to the
+        // handler it casts to (core-concepts §2, step 2).
+        return services.AddSingleton<Benzene.Abstractions.MessageHandlers.IPayloadVersionCasts>(x =>
+            new SchemaCasterVersionCasts(x.GetService<ISchemaCasters>()));
     }
 
     /// <summary>

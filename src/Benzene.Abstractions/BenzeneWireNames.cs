@@ -48,7 +48,11 @@ public interface IBenzeneWireNames
     string Topic { get; }
 
     /// <summary>
-    /// The metadata key carrying the payload's schema version. Defaults to <c>benzene-version</c>.
+    /// The one header/metadata key carrying the message's version - the signal that selects the handler
+    /// and names the payload's schema version (wire-contracts.md §2). Defaults to <c>benzene-version</c>.
+    /// Unlike <see cref="Topic"/>, this is read by <b>every</b> transport's default version getter (and
+    /// written by the MCP binding), so renaming it here renames it everywhere; there is no fallback list,
+    /// so the default stops being read once it is renamed.
     /// </summary>
     string Version { get; }
 }
@@ -70,7 +74,7 @@ public class BenzeneWireNames : IBenzeneWireNames
     public const string DefaultTopic = "topic";
 
     /// <summary>
-    /// The default payload-version metadata key: <c>benzene-version</c>.
+    /// The default version header/metadata key: <c>benzene-version</c>.
     /// </summary>
     public const string DefaultVersion = "benzene-version";
 

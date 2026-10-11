@@ -45,7 +45,7 @@ public static class DependencyInjectionExtensions
         services.TryAddScoped<IMessageVersionGetter<ApiGatewayContext>>(resolver =>
             new ApiGatewayMessageVersionGetter(resolver.GetService<IRouteFinder>(),
                 resolver.GetService<IMessageHeadersGetter<ApiGatewayContext>>(),
-                resolver.TryGetService<MessageVersionHeaderNames>()?.HeaderNames));
+                resolver.TryGetService<Benzene.Abstractions.IBenzeneWireNames>()?.Version));
         services.TryAddScoped<IMessageHeadersGetter<ApiGatewayContext>, ApiGatewayMessageHeadersGetter>();
         services.TryAddScoped<IMessageBodyGetter<ApiGatewayContext>, ApiGatewayMessageBodyGetter>();
         services.TryAddScoped<IMessageBodyBytesGetter<ApiGatewayContext>, ApiGatewayMessageBodyBytesGetter>();
@@ -91,7 +91,7 @@ public static class DependencyInjectionExtensions
         services.TryAddScoped<IMessageVersionGetter<ApiGatewayV2Context>>(resolver =>
             new ApiGatewayV2MessageVersionGetter(resolver.GetService<IRouteFinder>(),
                 resolver.GetService<IMessageHeadersGetter<ApiGatewayV2Context>>(),
-                resolver.TryGetService<MessageVersionHeaderNames>()?.HeaderNames));
+                resolver.TryGetService<Benzene.Abstractions.IBenzeneWireNames>()?.Version));
         services.TryAddScoped<IMessageHeadersGetter<ApiGatewayV2Context>, ApiGatewayV2MessageHeadersGetter>();
         services.TryAddScoped<IMessageBodyGetter<ApiGatewayV2Context>, ApiGatewayV2MessageBodyGetter>();
         services.TryAddScoped<IMessageBodyBytesGetter<ApiGatewayV2Context>, ApiGatewayV2MessageBodyBytesGetter>();

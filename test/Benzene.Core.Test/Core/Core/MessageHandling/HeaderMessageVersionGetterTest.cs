@@ -24,7 +24,7 @@ public class HeaderMessageVersionGetterTest
     }
 
     [Fact]
-    public void GetVersion_BenzeneVersionHeaderPresent_TakesPriorityOverFallbacks()
+    public void GetVersion_ReadsBenzeneVersion_IgnoringEveryOtherVersionShapedHeader()
     {
         var headers = new Dictionary<string, string>
         {
@@ -37,30 +37,21 @@ public class HeaderMessageVersionGetterTest
         Assert.Equal("V2", getter.GetVersion(new TestContext()));
     }
 
-    [Fact]
-    public void GetVersion_NoBenzeneVersionHeader_FallsBackToPlainVersionHeader()
+    [Theory]
+    [InlineData("version")]
+    [InlineData("x-version")]
+    public void GetVersion_OnlyAProducersOwnVersionHeader_IsNoVersion(string header)
     {
-        var headers = new Dictionary<string, string>
-        {
-            ["version"] = "V1",
-            ["x-version"] = "V3"
-        };
+        // One header, no fallback list (wire-contracts.md §2): a plain version/x-version header is an
+        // ordinary header - it used to be read as the payload version and could misroute a message.
+        var headers = new Dictionary<string, string> { [header] = "V1" };
         var getter = new HeaderMessageVersionGetter<TestContext>(new FixedHeadersGetter(headers));
 
-        Assert.Equal("V1", getter.GetVersion(new TestContext()));
+        Assert.Null(getter.GetVersion(new TestContext()));
     }
 
     [Fact]
-    public void GetVersion_OnlyXVersionHeaderPresent_FallsBackToIt()
-    {
-        var headers = new Dictionary<string, string> { ["x-version"] = "V3" };
-        var getter = new HeaderMessageVersionGetter<TestContext>(new FixedHeadersGetter(headers));
-
-        Assert.Equal("V3", getter.GetVersion(new TestContext()));
-    }
-
-    [Fact]
-    public void GetVersion_NoneOfTheFallbackHeadersPresent_ReturnsNull()
+    public void GetVersion_NoVersionHeaderPresent_ReturnsNull()
     {
         var headers = new Dictionary<string, string> { ["content-type"] = "application/json" };
         var getter = new HeaderMessageVersionGetter<TestContext>(new FixedHeadersGetter(headers));
@@ -86,14 +77,13 @@ public class HeaderMessageVersionGetterTest
     }
 
     [Fact]
-    public void GetVersion_CustomHeaderNameList_OnlyRecognizesConfiguredNames()
+    public void GetVersion_RenamedHeader_ReplacesBenzeneVersion()
     {
         var headers = new Dictionary<string, string> { ["benzene-version"] = "V2", ["schema-version"] = "V9" };
-        var getter = new HeaderMessageVersionGetter<TestContext>(new FixedHeadersGetter(headers), headerNames: ["schema-version"]);
+        var getter = new HeaderMessageVersionGetter<TestContext>(new FixedHeadersGetter(headers), headerName: "schema-version");
 
-        // benzene-version is ignored entirely because it isn't in the configured list - proves an
-        // app with a conflicting pre-existing "version"-shaped header can narrow the fallback
-        // (docs/specification/versioning.md §2.1).
+        // A configured name replaces the default; it does not join a list (versioning.md §2.1).
         Assert.Equal("V9", getter.GetVersion(new TestContext()));
+        Assert.Equal("schema-version", getter.HeaderName);
     }
 }

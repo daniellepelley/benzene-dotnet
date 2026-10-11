@@ -30,11 +30,15 @@ public class MessageHandlerDefinitionLookUp : IMessageHandlerDefinitionLookUp
     }
 
     /// <summary>
-    /// Finds the handler definition registered for the given topic, using <see cref="IVersionSelector"/>
-    /// to pick between definitions when more than one version is registered for the same topic id.
+    /// Finds the handler that answers <paramref name="topic"/>: the topic id's registered handlers, chosen
+    /// between by <see cref="IVersionSelector"/> (docs/specification/core-concepts.md §2 - exact version,
+    /// else a cast-reachable handler, else none; no version means the topic's default handler).
     /// </summary>
     /// <param name="topic">The topic (id + requested version) to find a handler for.</param>
-    /// <returns>The matching handler definition, or <c>null</c>/default if none is registered for the topic id.</returns>
+    /// <returns>
+    /// The matching handler definition, or <c>null</c> when no handler is registered for the topic id or
+    /// none answers the requested version.
+    /// </returns>
     public IMessageHandlerDefinition FindHandler(ITopic topic)
     {
         var handlers = _index.GetByTopicId(topic.Id);
@@ -43,29 +47,11 @@ public class MessageHandlerDefinitionLookUp : IMessageHandlerDefinitionLookUp
             return null;
         }
 
-        // Fast path for the overwhelmingly common single-registered-version topic: version selection is
-        // a no-op there (VersionSelector returns the requested version if it matches, else the max of the
-        // available set - and the max of a one-element set is that element), so it always resolves to the
-        // sole handler regardless of the requested version. Skip the candidate-version array + selector +
-        // FirstOrDefault scan entirely. This runs on every dispatch (and, with the tracing wrappers, several
-        // times per message via their tag lookups), so the saved per-call array allocation adds up.
-        if (handlers.Length == 1)
-        {
-            return handlers[0];
-        }
-
-        // Resolve the target version once. Folding this into the FirstOrDefault predicate re-ran the
-        // whole version selection (and re-allocated the candidate-version array) for every handler in
-        // the list - O(n^2) work and allocation per dispatch for a value that doesn't vary across the
-        // scan.
-        var availableVersions = new string[handlers.Length];
-        for (var i = 0; i < handlers.Length; i++)
-        {
-            availableVersions[i] = handlers[i].Topic.Version;
-        }
-
-        var selectedVersion = _versionSelector.Select(topic.Version, availableVersions);
-        return handlers.FirstOrDefault(x => x.Topic.Version == selectedVersion);
+        // Selection runs even for a single registered handler. It used to be skipped there ("the max of a
+        // one-element set is that element"), which routed a message naming any version at all to a topic's
+        // only handler - a v2 message reached an unversioned handler. The rule is exact-or-cast, so the
+        // version has to be looked at; the selector is allocation-free on the exact-match path.
+        return _versionSelector.Select(topic, handlers);
     }
 
     /// <summary>

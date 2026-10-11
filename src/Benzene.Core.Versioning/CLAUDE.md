@@ -90,6 +90,16 @@ branching, no separate version-to-type registry).
   Collects registered casters via `IServiceResolver.GetServices<ISchemaCaster>()`
 - `PayloadSchemaVersions` - declares, per topic, which versions may arrive (`FromSchemas`) and
   which the registered handler(s) actually understand (`ToSchemas`)
+- `SchemaCasterVersionCasts` - the `IPayloadVersionCasts` (`Benzene.Abstractions.MessageHandlers`) over the
+  expanded `ISchemaCasters`, registered by both `AddPayloadVersioning` and `RegisterPayloadSchemaVersions`.
+  It is what lets version selection's step 2 (core-concepts §2) route a message whose version has no handler
+  of its own - e.g. `v1` sent to the single unversioned V3 handler - to the handler its payload casts to. A
+  version reaches a request type when a cast (chained casts already expanded) goes there; when the version
+  *names* that type (it is a from/to schema of a registered cast with exactly that CLR type), so the
+  handler's own version needs no cast; or when the request type takes part in none of the topic's casts
+  (only the responses are versioned, e.g. the Mesh example's `payments:get`) and the version is one the
+  topic's casts name - the request has the same shape whatever its version. Without it (no versioning registered) selection stops at the exact
+  match, and a versioned message to an unversioned-only topic is not-found.
 
 ## When to use this package
 - When consumers and producers of a topic evolve payload schemas at different speeds

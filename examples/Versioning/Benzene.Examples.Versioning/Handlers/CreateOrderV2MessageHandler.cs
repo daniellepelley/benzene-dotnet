@@ -10,9 +10,9 @@ namespace Benzene.Examples.Versioning.Handlers;
 
 /// <summary>
 /// Handler-version dispatch (Mechanism A): the V2 implementation of <c>order:create</c>. Registered for
-/// version "v2". Because "v2" is the highest registered version, it is also the one the default
-/// <see cref="Benzene.Core.MessageHandlers.VersionSelector"/> falls back to when a producer sends no
-/// version at all - i.e. V2 is the topic's default handler.
+/// version "v2"; the router runs it only when the incoming <c>benzene-version</c> is "v2". Being the
+/// newest version does not make it the default - a message with no version goes to
+/// <see cref="CreateOrderV1MessageHandler"/>, the handler declared default.
 /// </summary>
 [Message(Topics.OrderCreate, Versions.V2)]
 public class CreateOrderV2MessageHandler : IMessageHandler<V2.CreateOrder, V2.OrderAccepted>

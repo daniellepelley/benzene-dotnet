@@ -59,7 +59,13 @@ Defines abstractions for message-based request/response handling in Benzene. Pro
 
 ### Routing
 - `IMessageRouterBuilder` - Builds message routing configuration
-- `IVersionSelector` - Selects handler version
+- `IVersionSelector` - `Select(ITopic, IMessageHandlerDefinition[] candidates)`: picks the handler for the
+  message's version (spec core-concepts §2), or `null` for not-found
+- `IPayloadVersionCasts` - what casts the service registered (`CanCast(topic, fromVersion, requestType)`,
+  `GetVersions(topic)`), so selection can route a version with no handler of its own to the handler it casts
+  to; implemented by `Benzene.Core.Versioning`
+- `IMessageHandlerDefinition.IsDefault` - a default interface member (`false`): the versioned handler the
+  application declared its topic's default
 
 ### Message Extraction
 - `IMessageGetter<TContext>` - Extracts message from transport context

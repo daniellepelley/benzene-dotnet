@@ -19,10 +19,12 @@ public class HttpVersioningOptions
     public string VersionSegment { get; set; } = "v{version}";
 
     /// <summary>
-    /// When <c>true</c> (the default) the original unversioned route is kept alongside the versioned one and
-    /// resolves to the <em>latest</em> handler (the version selector picks the highest available when no
-    /// version is signalled) — so a caller can address <c>/orders</c> (latest) or <c>/v1/orders</c> (pinned).
-    /// Set <c>false</c> to require an explicit version segment on every request.
+    /// When <c>true</c> (the default) the original unversioned route is kept alongside the versioned one. A
+    /// request to it carries no version from the path (a <c>benzene-version</c> header still supplies one),
+    /// so it reaches the topic's <em>default handler</em> - the unversioned handler, else the one declared
+    /// with <c>[Message(topic, version, IsDefault = true)]</c>, else <c>not-found</c>
+    /// (docs/specification/core-concepts.md §2). A caller addresses <c>/orders</c> (the default) or
+    /// <c>/v1/orders</c> (pinned). Set <c>false</c> to require an explicit version on every request.
     /// </summary>
     public bool KeepUnversionedRoute { get; set; } = true;
 

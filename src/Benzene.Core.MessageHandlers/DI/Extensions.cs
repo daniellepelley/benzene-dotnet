@@ -114,7 +114,10 @@ public static class Extensions
         services.TryAddScoped<ICancellationTokenAccessor>(x => x.GetService<Benzene.Core.CancellationTokenAccessor>());
 
         services.TryAddSingleton<IApplicationInfo, BlankApplicationInfo>();
-        services.TryAddSingleton<IVersionSelector, VersionSelector>();
+        // The spec's selection rule (exact, else cast-reachable, else not-found). Payload casts are
+        // consulted when Benzene.Core.Versioning registered them - resolved here, not injected by
+        // constructor selection, so the rule doesn't depend on which constructor a container prefers.
+        services.TryAddSingleton<IVersionSelector>(x => new VersionSelector(x.TryGetService<IPayloadVersionCasts>()));
         services.TryAddSingleton<ISerializer, JsonSerializer>();
         services.TryAddSingleton<JsonSerializer>();
         // TryAdd, so a user registration in ConfigureServices wins. Each transport's Add*Consumer
@@ -227,6 +230,9 @@ public static class Extensions
         // Reports a pipeline that composes cleanly and can never handle anything - UseSqs(sqs => { })
         // and its relatives, which dead-letter every message without failing.
         services.TryAddSingletonImplementation<IStartUpCheck, TerminalMiddlewareStartUpCheck>();
+        // Version selection's configuration errors (two defaults, an ambiguous cast) and its warning (a
+        // topic whose unversioned messages can never route) - known at registration, so found here.
+        services.TryAddSingletonImplementation<IStartUpCheck, VersionSelectionStartUpCheck>();
     }
 
     /// <summary>

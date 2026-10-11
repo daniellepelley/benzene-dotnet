@@ -7,7 +7,7 @@ versioning axes Benzene ships.
 
 The version always travels as metadata — the `benzene-version` header (a message attribute on SQS/SNS,
 a header on API Gateway and the envelope) — never inside the payload body. A message with no version
-signal is treated as the topic's default.
+signal goes to the topic's default handler: the unversioned handler, else the one declared `IsDefault`.
 
 ## Mechanism A — handler-version dispatch (`order:create`)
 
@@ -18,9 +18,11 @@ Two genuinely different request shapes, two handlers, no casting: the incoming v
 | `v1` | [`CreateOrderV1MessageHandler`](Benzene.Examples.Versioning/Handlers/CreateOrderV1MessageHandler.cs) | flat `CustomerName` |
 | `v2` | [`CreateOrderV2MessageHandler`](Benzene.Examples.Versioning/Handlers/CreateOrderV2MessageHandler.cs) | `FirstName`/`LastName` + `Currency` |
 
-Registered with `[Message("order:create", "v1")]` / `[Message("order:create", "v2")]`. When a producer
-sends **no** version, `IVersionSelector` falls back to the highest registered version (`v2`) — so V2 is
-the topic's default handler. Proven end to end over the envelope, SQS and SNS in
+Registered with `[Message("order:create", "v1", IsDefault = true)]` / `[Message("order:create", "v2")]`.
+When a producer sends **no** version, the message goes to the topic's declared default — V1, the oldest
+shape the topic still accepts, so producers written before versioning keep working. A version no handler
+serves (`v9`) is `not-found`: there is no "highest available" fallback. Proven end to end over the
+envelope, SQS and SNS in
 [`HandlerVersionRoutingTests`](Benzene.Examples.Versioning.Tests/HandlerVersionRoutingTests.cs).
 
 ## Mechanism B — transparent payload casting with **caster chaining** (`inventory:adjust`)

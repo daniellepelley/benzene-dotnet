@@ -13,4 +13,12 @@ public interface IMessageHandlerDefinition : IRequestResponseMessageDefinition
 {
     /// <summary>The concrete CLR type implementing the handler (e.g. an <see cref="IMessageHandler{TRequest, TResponse}"/>).</summary>
     Type HandlerType { get; }
+
+    /// <summary>
+    /// Whether the application declared this versioned handler its topic's <b>default</b>: the one a
+    /// message carrying no version goes to when the topic has no unversioned handler
+    /// (docs/specification/core-concepts.md §2). Declared with <c>[Message(topic, version, IsDefault = true)]</c>
+    /// or the <c>isDefault</c> argument of explicit registration. Defaults to <c>false</c>.
+    /// </summary>
+    bool IsDefault => false;
 }

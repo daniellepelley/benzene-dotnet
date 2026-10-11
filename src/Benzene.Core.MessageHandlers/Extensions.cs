@@ -245,14 +245,19 @@ public static class MiddlewarePipelineExtensions
     /// <param name="builder">The router builder to register the handler with.</param>
     /// <param name="topic">The topic id this handler answers.</param>
     /// <param name="version">The optional version of this handler. Defaults to an empty string (unversioned).</param>
-    public static void AddMessageHandler<THandler, TRequest, TResponse>(this IMessageRouterBuilder builder, string topic, string? version = null)
+    /// <param name="isDefault">
+    /// Declares this versioned handler the topic's default - the handler a message carrying no version
+    /// goes to when the topic has no unversioned one (docs/specification/core-concepts.md §2). The
+    /// explicit-registration counterpart of <c>[Message(topic, version, IsDefault = true)]</c>.
+    /// </param>
+    public static void AddMessageHandler<THandler, TRequest, TResponse>(this IMessageRouterBuilder builder, string topic, string? version = null, bool isDefault = false)
         where THandler : class, IMessageHandler<TRequest, TResponse>
         where TRequest : class
     {
         builder.Register(x =>
         {
             x.TryAddScoped<THandler>();
-            x.AddSingleton<IMessageHandlerDefinition>(MessageHandlerDefinition.CreateInstance(topic, version ?? string.Empty, typeof(TRequest), typeof(TResponse), typeof(THandler)));
+            x.AddSingleton<IMessageHandlerDefinition>(MessageHandlerDefinition.CreateInstance(topic, version ?? string.Empty, typeof(TRequest), typeof(TResponse), typeof(THandler), isDefault));
         });
     }
 
@@ -264,14 +269,17 @@ public static class MiddlewarePipelineExtensions
     /// <param name="builder">The router builder to register the handler with.</param>
     /// <param name="topic">The topic id this handler answers.</param>
     /// <param name="version">The optional version of this handler. Defaults to an empty string (unversioned).</param>
-    public static void AddMessageHandler<THandler, TRequest>(this IMessageRouterBuilder builder, string topic, string? version = null)
+    /// <param name="isDefault">
+    /// Declares this versioned handler the topic's default - see the request/response overload.
+    /// </param>
+    public static void AddMessageHandler<THandler, TRequest>(this IMessageRouterBuilder builder, string topic, string? version = null, bool isDefault = false)
         where THandler : class, IMessageHandler<TRequest>
         where TRequest : class
     {
         builder.Register(x =>
         {
             x.TryAddScoped<THandler>();
-            x.AddSingleton<IMessageHandlerDefinition>(MessageHandlerDefinition.CreateInstance(topic, version ?? string.Empty, typeof(TRequest), typeof(Benzene.Abstractions.Results.Void), typeof(THandler)));
+            x.AddSingleton<IMessageHandlerDefinition>(MessageHandlerDefinition.CreateInstance(topic, version ?? string.Empty, typeof(TRequest), typeof(Benzene.Abstractions.Results.Void), typeof(THandler), isDefault));
         });
     }
 }
