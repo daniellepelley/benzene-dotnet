@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Benzene.Abstractions;
 using Benzene.Abstractions.Hosting;
 using Benzene.Abstractions.MessageHandlers;
 using Benzene.AspNet.Core;
@@ -15,7 +16,10 @@ using Benzene.Core.MessageHandlers.BenzeneMessage;
 using Benzene.Core.MessageHandlers.DI;
 using Benzene.Core.Messages.BenzeneMessage;
 using Benzene.Core.Middleware;
+using Benzene.HealthChecks;
+using Benzene.HealthChecks.Core;
 using Benzene.HostedService;
+using Benzene.Http.BenzeneMessage;
 using Benzene.Http.Routing;
 using Benzene.Microsoft.Dependencies;
 using Benzene.Results;
@@ -69,6 +73,53 @@ public class ProblemDetailsConformanceTest
     {
         public List<HttpRuleRow> FailureCases { get; set; } = new();
         public HttpRuleSuccessCase SuccessCase { get; set; } = new();
+        public EnvelopeEndpointGroup EnvelopeEndpoint { get; set; } = new();
+        public HealthEndpointGroup HealthEndpoint { get; set; } = new();
+    }
+
+    public class EnvelopeEndpointGroup
+    {
+        public string Path { get; set; } = string.Empty;
+        public List<EnvelopeEndpointCase> Cases { get; set; } = new();
+    }
+
+    public class EnvelopeEndpointCase
+    {
+        public string Name { get; set; } = string.Empty;
+        public EnvelopeConformanceTest.EnvelopeRequest? Request { get; set; }
+        public string? RawBody { get; set; }
+        public EnvelopeEndpointExpectation Expected { get; set; } = new();
+    }
+
+    public class EnvelopeEndpointExpectation
+    {
+        public int HttpStatus { get; set; }
+        public EnvelopeConformanceTest.EnvelopeExpectation? Envelope { get; set; }
+    }
+
+    public class HealthEndpointGroup
+    {
+        public string Path { get; set; } = string.Empty;
+        public List<HealthEndpointCase> Cases { get; set; } = new();
+    }
+
+    public class HealthEndpointCase
+    {
+        public string Name { get; set; } = string.Empty;
+        public List<HealthEndpointCheck> Checks { get; set; } = new();
+        public HealthEndpointExpectation Expected { get; set; } = new();
+    }
+
+    public class HealthEndpointCheck
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+    }
+
+    public class HealthEndpointExpectation
+    {
+        public int HttpStatus { get; set; }
+        public JsonElement? Body { get; set; }
     }
 
     public class HttpRuleRow
@@ -116,8 +167,36 @@ public class ProblemDetailsConformanceTest
     // bodyExclude support) as EnvelopeConformanceTest.
     // ------------------------------------------------------------------
 
+    // A case gated on a capability (README.md "requires") runs only where the port claims it. This
+    // runner does not claim `validation` yet: the JSON Pointer work for the validation integrations
+    // (FluentValidation/DataAnnotations) and the canonical conformance:validate handler land on the
+    // phase1-validation branch, which claims the case and removes this exclusion.
+    private static readonly HashSet<string> ClaimedCapabilities = new();
+
     public static IEnumerable<object[]> EnvelopeCaseNames() =>
-        Fixture.Value.EnvelopeCases.Select(x => new object[] { x.Name });
+        Fixture.Value.EnvelopeCases
+            .Where(x => x.Requires == null || ClaimedCapabilities.Contains(x.Requires))
+            .Select(x => new object[] { x.Name });
+
+    [Fact(Skip = "TODO(phase1-validation): validation-error-fields-are-json-pointers requires 'validation' - " +
+                 "claimed on branch phase1-validation with the conformance:validate handler and errorFields; not run here yet.")]
+    public void EnvelopeCase_RequiresValidation_ClaimedOnThePhase1ValidationBranch()
+    {
+        var gated = Fixture.Value.EnvelopeCases.Where(x => x.Requires == "validation").ToList();
+        Assert.NotEmpty(gated);
+    }
+
+    [Fact]
+    public void EnvelopeCases_EveryUnclaimedCapabilityIsAccountedFor()
+    {
+        // A new `requires` value must be a deliberate decision here, not a silently unrun case.
+        var unclaimed = Fixture.Value.EnvelopeCases
+            .Where(x => x.Requires != null && !ClaimedCapabilities.Contains(x.Requires))
+            .Select(x => x.Requires!)
+            .Distinct()
+            .ToList();
+        Assert.Equal(new[] { "validation" }, unclaimed);
+    }
 
     [Theory]
     [MemberData(nameof(EnvelopeCaseNames))]
@@ -280,5 +359,175 @@ public class ProblemDetailsConformanceTest
         Assert.DoesNotContain("\"status\"", body);
         Assert.DoesNotContain("\"benzeneStatus\"", body);
         Assert.DoesNotContain("\"type\"", body);
+    }
+
+    // ------------------------------------------------------------------
+    // httpRules.envelopeEndpoint - the envelope endpoint (transport-bindings §1): every processed
+    // envelope is HTTP 200 with the response envelope as the body; only a body that is not an
+    // envelope is a carrier failure. Hosted on AspNet like the rows above.
+    // ------------------------------------------------------------------
+
+    public class EnvelopeEndpointStartUp : BenzeneStartUp
+    {
+        public static int Port;
+        public static string Path = "/benzene/invoke";
+
+        public override IConfiguration GetConfiguration() => new ConfigurationBuilder().Build();
+
+        public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
+            => services.UsingBenzene(x => x.AddBenzene());
+
+        public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration) => app
+            .UseWorker(worker => worker.UseAspNet(
+                asp => asp.UseBenzeneMessage(new BenzeneMessageHttpOptions { Path = Path },
+                    message => message.UseMessageHandlers(typeof(GreetConformanceHandler), typeof(StatusConformanceHandler))),
+                options => options.Urls = $"http://127.0.0.1:{Port}"));
+    }
+
+    public class HealthEndpointStartUp : BenzeneStartUp
+    {
+        public static int Port;
+        public static string Path = "/benzene/health";
+        public static List<HealthEndpointCheck> Checks = new();
+
+        public override IConfiguration GetConfiguration() => new ConfigurationBuilder().Build();
+
+        public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
+            => services.UsingBenzene(x => x
+                .AddBenzene()
+                .AddSingleton<IHttpEndpointDefinition>(_ => new HttpEndpointDefinition("GET", Path, BenzeneTopic.HealthCheck)));
+
+        public override void Configure(IBenzeneApplicationBuilder app, IConfiguration configuration)
+        {
+            // Exactly the case's checks, each reporting its stated status.
+            var checks = Checks.Select(check => (IHealthCheck)new InlineHealthCheck(check.Name, () => Task.FromResult(check.Status switch
+            {
+                HealthCheckStatus.Ok => HealthCheckResult.CreateInstance(true, check.Name),
+                HealthCheckStatus.Warning => HealthCheckResult.CreateWarning(check.Name),
+                HealthCheckStatus.Failed => HealthCheckResult.CreateInstance(false, check.Name),
+                _ => throw new InvalidOperationException($"Unknown check status '{check.Status}' in the fixture.")
+            }))).ToArray();
+
+            app.UseWorker(worker => worker.UseAspNet(
+                asp => asp
+                    .UseHealthCheck(BenzeneTopic.HealthCheck, checks)
+                    .UseMessageHandlers(typeof(GreetConformanceHandler)),
+                options => options.Urls = $"http://127.0.0.1:{Port}"));
+        }
+    }
+
+    private static async Task<(int StatusCode, string Body)> SendAsync<TStartUp>(Func<HttpClient, Task<HttpResponseMessage>> send)
+        where TStartUp : BenzeneStartUp, new()
+    {
+        var host = new HostBuilder().UseBenzene<TStartUp>().Build();
+        var hostedServices = host.Services.GetServices<IHostedService>().ToList();
+        foreach (var service in hostedServices)
+        {
+            await service.StartAsync(CancellationToken.None);
+        }
+
+        try
+        {
+            using var client = new HttpClient();
+            var response = await send(client);
+            return ((int)response.StatusCode, await response.Content.ReadAsStringAsync());
+        }
+        finally
+        {
+            foreach (var service in hostedServices)
+            {
+                await service.StopAsync(CancellationToken.None);
+            }
+        }
+    }
+
+    public static IEnumerable<object[]> EnvelopeEndpointCaseNames() =>
+        Fixture.Value.HttpRules.EnvelopeEndpoint.Cases.Select(x => new object[] { x.Name });
+
+    [Theory]
+    [MemberData(nameof(EnvelopeEndpointCaseNames))]
+    public async Task HttpRule_EnvelopeEndpoint_AnswersAsTheCaseExpects(string caseName)
+    {
+        var group = Fixture.Value.HttpRules.EnvelopeEndpoint;
+        var endpointCase = group.Cases.Single(x => x.Name == caseName);
+        EnvelopeEndpointStartUp.Port = GetFreePort();
+        EnvelopeEndpointStartUp.Path = group.Path;
+
+        var requestBody = endpointCase.RawBody ?? JsonSerializer.Serialize(new
+        {
+            topic = endpointCase.Request!.Topic,
+            headers = endpointCase.Request.Headers,
+            body = endpointCase.Request.Body
+        });
+        var (statusCode, body) = await SendAsync<EnvelopeEndpointStartUp>(client => client.PostAsync(
+            $"http://127.0.0.1:{EnvelopeEndpointStartUp.Port}{group.Path}",
+            new StringContent(requestBody, Encoding.UTF8, "application/json")));
+
+        Assert.True(endpointCase.Expected.HttpStatus == statusCode,
+            $"{caseName}: HTTP {statusCode}, expected {endpointCase.Expected.HttpStatus} (body: {body})");
+
+        if (endpointCase.Expected.Envelope is not { } expected)
+        {
+            return;
+        }
+
+        using var envelope = JsonDocument.Parse(body);
+        var root = envelope.RootElement;
+        Assert.Equal(expected.StatusCode, root.GetProperty("statusCode").GetString());
+        if (expected.IsSuccessful is { } expectedIsSuccessful)
+        {
+            Assert.True(root.TryGetProperty("isSuccessful", out var isSuccessful), $"{caseName}: the envelope has no isSuccessful");
+            Assert.Equal(expectedIsSuccessful, isSuccessful.GetBoolean());
+        }
+
+        if (expected.Body is null && expected.BodyExclude is null)
+        {
+            return;
+        }
+
+        var innerBody = root.GetProperty("body").GetString();
+        Assert.False(string.IsNullOrEmpty(innerBody), $"{caseName}: expected an envelope body but none was written");
+        using var inner = JsonDocument.Parse(innerBody!);
+        if (expected.Body is { } expectedBody)
+        {
+            var mismatch = ConformanceFixtures.FindSubsetMismatch(expectedBody, inner.RootElement);
+            Assert.True(mismatch == null, $"{caseName}: envelope body mismatch at {mismatch}");
+        }
+        foreach (var excludedMember in expected.BodyExclude ?? new List<string>())
+        {
+            Assert.False(inner.RootElement.TryGetProperty(excludedMember, out _),
+                $"{caseName}: envelope body member '{excludedMember}' was expected to be genuinely absent but was present");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // httpRules.healthEndpoint - GET /benzene/health with exactly the case's checks: 200 when
+    // isHealthy, 503 when not, the health response as the body either way.
+    // ------------------------------------------------------------------
+
+    public static IEnumerable<object[]> HealthEndpointCaseNames() =>
+        Fixture.Value.HttpRules.HealthEndpoint.Cases.Select(x => new object[] { x.Name });
+
+    [Theory]
+    [MemberData(nameof(HealthEndpointCaseNames))]
+    public async Task HttpRule_HealthEndpoint_StatusLineCarriesTheVerdict(string caseName)
+    {
+        var group = Fixture.Value.HttpRules.HealthEndpoint;
+        var healthCase = group.Cases.Single(x => x.Name == caseName);
+        HealthEndpointStartUp.Port = GetFreePort();
+        HealthEndpointStartUp.Path = group.Path;
+        HealthEndpointStartUp.Checks = healthCase.Checks;
+
+        var (statusCode, body) = await SendAsync<HealthEndpointStartUp>(client =>
+            client.GetAsync($"http://127.0.0.1:{HealthEndpointStartUp.Port}{group.Path}"));
+
+        Assert.True(healthCase.Expected.HttpStatus == statusCode,
+            $"{caseName}: HTTP {statusCode}, expected {healthCase.Expected.HttpStatus} (body: {body})");
+        if (healthCase.Expected.Body is { } expectedBody)
+        {
+            using var actual = JsonDocument.Parse(body);
+            var mismatch = ConformanceFixtures.FindSubsetMismatch(expectedBody, actual.RootElement);
+            Assert.True(mismatch == null, $"{caseName}: health body mismatch at {mismatch}");
+        }
     }
 }

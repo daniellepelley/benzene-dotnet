@@ -26,6 +26,10 @@ public class EnvelopeConformanceTest
     public class EnvelopeCase
     {
         public string Name { get; set; } = string.Empty;
+
+        /// <summary>The capability a conditional case needs (README.md "requires"); null for an unconditional case.</summary>
+        public string? Requires { get; set; }
+
         public EnvelopeRequest Request { get; set; } = new();
         public EnvelopeExpectation Expected { get; set; } = new();
     }
@@ -133,7 +137,8 @@ public class EnvelopeConformanceTest
         container.AddBenzene().AddBenzeneMessage();
 
         var pipelineBuilder = new MiddlewarePipelineBuilder<BenzeneMessageContext>(container);
-        pipelineBuilder.UseMessageHandlers(typeof(GreetConformanceHandler), typeof(StatusConformanceHandler));
+        pipelineBuilder.UseMessageHandlers(typeof(GreetConformanceHandler), typeof(StatusConformanceHandler),
+            typeof(VersionedV1ConformanceHandler), typeof(VersionedV2ConformanceHandler));
         var pipeline = pipelineBuilder.Build();
 
         var application = new BenzeneMessageApplication(pipeline);
