@@ -5,6 +5,8 @@ using Benzene.Abstractions.MessageHandlers;
 using Benzene.Abstractions.Messages;
 using Benzene.Abstractions.Results;
 using Benzene.Clients;
+using Benzene.Clients.TraceContext;
+using System.Diagnostics;
 using Benzene.Core.MessageHandlers;
 using Benzene.Core.MessageHandlers.BenzeneMessage;
 using Benzene.Core.MessageHandlers.DI;
@@ -44,7 +46,8 @@ public class ResponseEventsPipelineTest
     private static async Task<(IBenzeneMessageResponse Response, List<OutboundContext> Published, IServiceResolver Resolver)> RunAsync(
         string mode,
         System.Action<ResponseEventsBuilder> configureEvents,
-        bool routePublishedTopic = true)
+        bool routePublishedTopic = true,
+        bool traceContext = false)
     {
         var published = new List<OutboundContext>();
 
@@ -53,7 +56,7 @@ public class ResponseEventsPipelineTest
         {
             x.AddBenzeneMessage();
             x.AddOutboundRouting(routing => routing
-                .Route(routePublishedTopic ? "order:created" : "some:other-topic", pipeline => pipeline
+                .Route(routePublishedTopic ? "order:created" : "some:other-topic", pipeline => (traceContext ? pipeline.UseW3CTraceContext() : pipeline)
                     .OnRequest(context =>
                     {
                         published.Add(context);
@@ -89,6 +92,30 @@ public class ResponseEventsPipelineTest
         var context = Assert.Single(published);
         Assert.Equal("order:created", context.Topic);
         Assert.Equal(42, ((ExampleRequestPayload)context.Request).Id);
+    }
+
+    [Fact]
+    public async Task Map_PublishedEvent_ForwardsTraceparent_LikeASend()
+    {
+        // Mesh §3 / M2: traceparent (and tracestate) is forwarded on every outbound message - sends and
+        // published events. A published event rides the same IBenzeneMessageSender route a send does, so
+        // the route's UseW3CTraceContext() stamps it exactly as it stamps a send.
+        using var activitySource = new ActivitySource("Test." + nameof(Map_PublishedEvent_ForwardsTraceparent_LikeASend));
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == activitySource.Name,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+        };
+        ActivitySource.AddActivityListener(listener);
+        using var activity = activitySource.StartActivity("inbound")!;
+        activity.TraceStateString = "vendor=1";
+
+        var (_, published, _) = await RunAsync("created", events => events
+            .Map("order:create", "order:created"), traceContext: true);
+
+        var context = Assert.Single(published);
+        Assert.Equal(activity.Id, context.Headers["traceparent"]);
+        Assert.Equal("vendor=1", context.Headers["tracestate"]);
     }
 
     [Fact]
