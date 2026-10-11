@@ -492,6 +492,40 @@ public class MeshCollectorStoreTest
         Assert.Empty(store.Fleet().Issues);
     }
 
+    // ---- spec §2.4: re-registering one version must not disturb a sibling version's edges ----
+    //
+    // Edges hold service NAMES (graph membership is by service), so retracting one version's claims
+    // must leave a name in place while another live version of that service still declares the
+    // topic. Before this, re-registering v1 without topic-a erased the consumer edge v2 still declared
+    // - the mesh-service-version-cases.json "re-registering one version does not disturb the other"
+    // case.
+
+    [Fact]
+    public void ReregisteringOneVersion_WithoutATopic_KeepsTheEdgeASiblingVersionStillDeclares()
+    {
+        var store = new MeshCollectorStore();
+        store.Register(Descriptor("payments", topics: new[] { "payment:take" }, produces: new[] { "ledger:post" }, serviceVersion: "1"));
+        store.Register(Descriptor("payments", topics: new[] { "payment:take" }, produces: new[] { "ledger:post" }, serviceVersion: "2"));
+
+        store.Register(Descriptor("payments", serviceVersion: "1")); // v1 redeploys declaring nothing
+
+        Assert.Equal(new[] { "payments" }, store.Topic("payment:take", null)!.Consumers);
+        Assert.Equal(new[] { "payments" }, store.Topic("ledger:post", null)!.Providers);
+    }
+
+    [Fact]
+    public void ReregisteringTheOnlyVersionThatDeclaredATopic_StillRetractsTheEdge()
+    {
+        var store = new MeshCollectorStore();
+        store.Register(Descriptor("payments", topics: new[] { "payment:take", "payment:refund" }, serviceVersion: "1"));
+        store.Register(Descriptor("payments", topics: new[] { "payment:take" }, serviceVersion: "2"));
+
+        store.Register(Descriptor("payments", topics: new[] { "payment:take" }, serviceVersion: "1"));
+
+        Assert.Empty(store.Topic("payment:refund", null)!.Consumers); // no live version declares it now
+        Assert.Equal(new[] { "payments" }, store.Topic("payment:take", null)!.Consumers);
+    }
+
     [Fact]
     public void TopicNoLiveVersionDeclares_IsStillFlaggedAsDrift_EvenWithMultipleLiveVersions()
     {

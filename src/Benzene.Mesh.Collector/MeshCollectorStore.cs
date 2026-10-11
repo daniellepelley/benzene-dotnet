@@ -151,9 +151,9 @@ public class MeshCollectorStore : IMeshFleetReadModel
             // alongside it must never evict a still-live sibling version's edges - two versions
             // producing/consuming different topics side by side is the expected canary/blue-green
             // state, not something to silently retire.
-            if (state.Descriptors.TryGetValue(versionKey, out var previous))
+            if (state.Descriptors.ContainsKey(versionKey))
             {
-                RetractEdges(previous, descriptor.Service);
+                RetractEdges(state, versionKey, descriptor.Service);
             }
             else if (state.Descriptors.Count >= _maxVersionsPerService)
             {
@@ -181,21 +181,37 @@ public class MeshCollectorStore : IMeshFleetReadModel
         }
     }
 
-    /// <summary>Removes exactly the provider/consumer edges <paramref name="descriptor"/> (one
-    /// specific service+version's prior registration) contributed, leaving every other version's
-    /// edges - and any other service's edges - on the shared <see cref="TopicState"/> untouched.</summary>
-    private void RetractEdges(MeshServiceDescriptor descriptor, string service)
+    /// <summary>Removes the provider/consumer edges one specific service+version's prior registration
+    /// (<paramref name="versionKey"/>) contributed, leaving every other service's edges - and every
+    /// edge another still-live version of the SAME service declares - on the shared
+    /// <see cref="TopicState"/> untouched.</summary>
+    /// <remarks>
+    /// The edge sets hold service NAMES, because graph membership is by service, not by version (spec
+    /// §4): two live versions declaring one topic contribute one edge. So retracting one version must
+    /// not remove a name a sibling version still declares - re-registering v1 without a topic would
+    /// otherwise erase the edge v2 keeps declaring, which §2.4 forbids ("MUST NOT disturb a different
+    /// service version of the same service"). Called before <paramref name="versionKey"/>'s entry is
+    /// replaced or removed, so the sibling check excludes it explicitly.
+    /// </remarks>
+    private void RetractEdges(ServiceState state, string versionKey, string service)
     {
-        foreach (var topic in descriptor.Topics)
+        var retracted = state.Descriptors[versionKey];
+        var siblings = state.Descriptors.Where(x => x.Key != versionKey).Select(x => x.Value).ToList();
+
+        foreach (var topic in retracted.Topics)
         {
-            if (_topics.TryGetValue((topic.Id, topic.Version ?? string.Empty), out var topicState))
+            var key = (topic.Id, topic.Version ?? string.Empty);
+            if (_topics.TryGetValue(key, out var topicState)
+                && !siblings.Any(d => d.Topics.Any(t => (t.Id, t.Version ?? string.Empty) == key)))
             {
                 topicState.Consumers.Remove(service);
             }
         }
-        foreach (var topic in descriptor.Produces)
+        foreach (var topic in retracted.Produces)
         {
-            if (_topics.TryGetValue((topic.Id, topic.Version ?? string.Empty), out var topicState))
+            var key = (topic.Id, topic.Version ?? string.Empty);
+            if (_topics.TryGetValue(key, out var topicState)
+                && !siblings.Any(d => d.Produces.Any(t => (t.Id, t.Version ?? string.Empty) == key)))
             {
                 topicState.Providers.Remove(service);
             }
@@ -242,7 +258,7 @@ public class MeshCollectorStore : IMeshFleetReadModel
             return; // nothing to evict (e.g. Descriptors is empty)
         }
 
-        RetractEdges(state.Descriptors[evictKey], service);
+        RetractEdges(state, evictKey, service);
         state.Descriptors.Remove(evictKey);
         state.DescriptorRegisteredAt.Remove(evictKey);
     }
