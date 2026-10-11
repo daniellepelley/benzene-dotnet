@@ -119,6 +119,18 @@ Test and example projects never pack.
 While the shared version is `< 1.0.0`, breaking changes are allowed in MINOR
 versions. Once `>= 1.0.0`, breaking changes require a MAJOR bump.
 
+### Before announcing a release: the canary
+
+Pre-1.0 breaks are clean (no compatibility shims), but they are not invisible: there is an installed
+base. [The Count](https://github.com/daniellepelley/the-count) pins eleven Benzene packages in its
+`Directory.Packages.props` and runs in production, so it is the canary for every release.
+
+1. Every breaking change gets a migration note under its version in `CHANGELOG.md` — what changed,
+   what a consumer has to do, and the spec release (`spec-x.y.z`) it implements, if any.
+2. After publishing, move The Count's pins to the new version, build it and run its tests.
+3. Announce the release only once The Count is green on it. A release The Count cannot take means
+   the migration note is wrong or the break was unintended; fix whichever it is first.
+
 ## Compatibility Guarantees
 
 ### What We Guarantee
