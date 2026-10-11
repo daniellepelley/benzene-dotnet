@@ -187,6 +187,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stale data" warning downstream on every no-op invalidate.
 
 ### Changed
+- **BREAKING - the Cloud Service Profile is R1–R5 and R7; the meshed-service claim is M1/M2 (spec 4,
+  cloud-service-profile.md §2, mesh.md §7.1).** R6 (mesh feeds) and R8 (trace propagation) left the
+  profile - their ids are not reused - and became the mesh module's own claim: M1 (registration,
+  heartbeats, traces) and M2 (W3C trace context joined inbound and forwarded on every outbound send and
+  published event).
+  - `CloudServiceProfileReport.Requirements`/`Missing`/`IsConformant` cover R1–R5 and R7 only; the
+    contract document's `profile.missing` never carries an M id. New `MeshRequirements`, `MeshMissing`
+    and `IsMeshed` (true only when the profile is also met) report the meshed-service claim apart. M2
+    keeps #167's rule: it reads the same resolved trace exporter `UseMeshTrace` is wired with.
+  - Behaviour change: a service wired with `UseBenzeneCloudService` and no collector, or with
+    `WithoutMesh()`, is now a full Cloud Service - `profile.missing` is omitted where it used to be
+    `["R6","R8"]` - and reports M1/M2 in `MeshMissing` instead.
+  - R5 now covers answering `benzene:spec` wherever the transport carries a reply, as well as
+    `/benzene/spec` over HTTP.
+  - `Benzene.CloudService.Probe` audits R1–R5 and R7. R5 checks both `GET /benzene/spec` and a
+    `benzene:spec` envelope over `/benzene/invoke`; the latter was R6's "observable half". M1/M2 are
+    in `CloudServiceProbeReport.MeshRequirements`, always `Inconclusive` (not observable from one
+    service). They never feed `NotSatisfied`/`Inconclusive`/`IsFullyConformant`, so a conformant
+    service probed at its default paths is now fully satisfied. `benzene profile-check --fail-on
+    inconclusive` no longer trips on every real service; the text/JSON output and the
+    `profile-check-action` step summary carry the meshed-service claim as a separate section.
+  - Known M2 gap, recorded on M2's note and in the capability matrix: the self-check sees only the
+    inbound join. Outbound forwarding is each outbound route's `UseW3CTraceContext()`, the same for
+    sends and published events (they share the `IBenzeneMessageSender` routes). It stamps
+    `Activity.Current`, not `MeshSpan.Current`.
+- **`UseBenzeneCloudService` runs the contract-document start-up check by default.** It registers
+  `AddContractDocumentStartUpCheck()`, so a component-name collision (contract-document.md §4.1 rule
+  4) or an event/send conflict now fails the host before the first message, not on the first
+  `benzene:spec` request. Opt out with the new `ICloudServiceBuilder.WithoutContractDocumentStartUpCheck()`
+  where the cold-start cost matters (e.g. AWS Lambda). (`ICloudServiceBuilder` gains a member - a
+  breaking change for anyone implementing the interface themselves.)
+- **Conformance fixtures re-vendored** from the spec 4 change (`contract-hash-cases.json`'s identity
+  case now carries `missing: ["R3"]`, hashes unchanged; the conformance README's claims table gains
+  the "Meshed service" row). `SPEC_VERSION` is unchanged pending the `spec-0.5.0` tag.
 - **BREAKING - the mesh register body is the contract document (spec 3b, spec-0.4.0; mesh.md §1–§2).**
   A service's only self-description is its contract document at `benzene:spec`; `Benzene.CloudService`
   registers that same document (byte-identical, through the same `SpecCache` entry) on

@@ -252,7 +252,8 @@ unfiltered behavior exactly.
 > Log Analytics (billed on data scanned) — a 7-day range raises the App-Insights query cost. The X-Ray
 > recent-flows scan is window-sensitive on both.
 
-This is the [Cloud Service Profile](https://benzene.app/docs/specification/cloud-service-profile.html)'s intended visibility
-surface (its R6 requirement provisions exactly the feeds the Fleet plane reads);
+This is a [meshed service](https://benzene.app/docs/specification/mesh.html)'s intended visibility
+surface (mesh.md §7.1: a Cloud Service plus M1, whose registration, heartbeats and traces are exactly
+the feeds the Fleet plane reads, and M2, trace propagation);
 [mesh.md §9](https://benzene.app/docs/specification/mesh.html#relationship-to-the-existing.net-mesh-packages-informative)
 covers how the artifact and collector pipelines converge.

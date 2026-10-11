@@ -37,10 +37,11 @@ non-trivial graph. See `work/archive/aws-mesh-multi-transport-plan-2026-08.md` f
                           │  Mesh UI reads the catalog artifacts
 ```
 
-- The six **service Lambdas** are full Cloud Service Profile (R1–R8) services: `/benzene/invoke`,
+- The six **service Lambdas** are full Cloud Service Profile (R1–R5, R7) services: `/benzene/invoke`,
   `/benzene/spec`, `/benzene/health`, `/benzene/spec-ui`, plus any domain routes — and they answer
   the mesh's **direct Lambda-Invoke** interrogation (`spec`/`healthcheck` topics) with no HTTP surface
-  required. They carry a `benzene` resource tag so discovery finds them.
+  required. They push nothing to a collector — this mesh *pulls* them — so they don't claim the
+  separate meshed-service feeds (mesh.md §7.1, M1/M2); their self-report's `profile.missing` is empty. They carry a `benzene` resource tag so discovery finds them.
 - The **mesh Lambda** runs, on an EventBridge schedule: discovery (`AwsLambdaDiscoveryProvider` →
   `ListFunctions`+`ListTags`, filtered by the `benzene` tag) → writes `registry.json` to S3 → the
   aggregator interrogates each discovered Lambda by Invoke → writes the catalog artifacts to S3. Its
