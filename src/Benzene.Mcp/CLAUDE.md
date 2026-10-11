@@ -24,8 +24,8 @@ dispatch; **tool design stays in the application** (see "Do NOT").
   `-32601`; `McpRequestException` while reading a request (no tool name, unknown tool) → `-32602`; inside a tool body → a refused
   tool result (`isError: true`); anything else → logged under a short reference, `-32603` with only the reference.
 - `IMcpMessageDispatcher` / `McpMessageDispatcher` - one message through the pipeline in a fresh DI
-  scope (`BenzeneMessageApplication`); sends `benzene-version` when set, `mcp-tool` for topic-bound calls,
-  `mcp-session` when the transport has a session. `AskAsync` maps the envelope to a tool result.
+  scope (`BenzeneMessageApplication`); sends `benzene-version` when set, `benzene-mcp-tool` for topic-bound calls,
+  `benzene-mcp-session` when the transport has a session (reserved `benzene-` names, spec-0.2.0 D6). `AskAsync` maps the envelope to a tool result.
 - `McpResults.ToToolResult` - success → body text (or the status when empty); failure →
   `"{status}: {detail | errors[].message | message | title | body}"` refusal.
 - `McpArgs` - strict argument reading (`RequiredText`, `OptionalDate` (yyyy-MM-dd only), `OptionalDecimal`

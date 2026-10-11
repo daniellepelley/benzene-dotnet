@@ -14,11 +14,17 @@ namespace Benzene.Mcp;
 /// </summary>
 public sealed class McpMessageDispatcher : IMcpMessageDispatcher
 {
-    /// <summary>The header carrying the tool name a topic-bound dispatch came from.</summary>
-    public const string ToolHeader = "mcp-tool";
+    /// <summary>
+    /// The header carrying the tool name a topic-bound dispatch came from - <c>benzene-mcp-tool</c>, a
+    /// reserved <c>benzene-</c> name (wire-contracts §2, spec-0.2.0; <c>mcp-tool</c> before it).
+    /// </summary>
+    public const string ToolHeader = "benzene-mcp-tool";
 
-    /// <summary>The header carrying the MCP session id, where the transport has one.</summary>
-    public const string SessionHeader = "mcp-session";
+    /// <summary>
+    /// The header carrying the MCP session id, where the transport has one - <c>benzene-mcp-session</c>
+    /// (wire-contracts §2, spec-0.2.0; <c>mcp-session</c> before it).
+    /// </summary>
+    public const string SessionHeader = "benzene-mcp-session";
 
     private readonly BenzeneMessageApplication _application;
     private readonly IServiceResolverFactory _serviceResolverFactory;

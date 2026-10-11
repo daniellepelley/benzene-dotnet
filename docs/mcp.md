@@ -110,7 +110,7 @@ the model as an answer it can act on:
 
 Over HTTP the middleware issues a `Mcp-Session-Id` on `initialize` and echoes a valid one back on
 every later request; tools receive it as `McpToolCall.SessionId` and topic-bound dispatches carry it
-as the `mcp-session` header. The server keeps no session state. What the id means (a chosen tenant,
+as the `benzene-mcp-session` header (and the tool's name as `benzene-mcp-tool`). The server keeps no session state. What the id means (a chosen tenant,
 a conversation's working set) is the application's, keyed on the id. Over stdio there is no session
 id: the process is the session.
 

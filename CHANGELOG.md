@@ -230,6 +230,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an ordinary field). The key is still read into the header dictionary and left in the body, never
   stripped. *Migration*: upgrade producers and consumers of a bus together, or have a non-.NET producer
   write `benzene-headers`.
+- **BREAKING (spec-0.2.0, wire-contracts §2 / D6): the MCP binding's headers are `benzene-mcp-tool` and
+  `benzene-mcp-session` (were `mcp-tool`/`mcp-session`).** `McpMessageDispatcher.ToolHeader` and
+  `.SessionHeader` take the reserved `benzene-` names. *Migration*: middleware or handlers that read the
+  tool name or session id from the old header names must read the new ones (or the constants).
 - **BREAKING (mesh.md's 2026-08 revision): the mesh producer/consumer graph is now declared, never
   trace-derived.** `MeshServiceDescriptor` gains a `Consumes` field (mesh.md §2), populated from a new
   explicit **outbound registration** concept (§2.3, mirroring core-concepts.md §9's inbound handler
