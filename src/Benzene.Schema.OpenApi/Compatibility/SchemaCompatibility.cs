@@ -59,9 +59,10 @@ public static class SchemaCompatibility
     /// <param name="rules">Optional rules; defaults to <see cref="SchemaCompatibilityRules.Default"/>.</param>
     /// <returns>The comparison report, when there are no breaking changes.</returns>
     /// <exception cref="SchemaCompatibilityException">The current contract has breaking changes.</exception>
+    /// <exception cref="LegacyBaselineException">The baseline is a legacy-shape document (no <c>schemaDialect</c>).</exception>
     public static SchemaCompatibilityReport EnsureBackwardCompatible(string baselineJson,
         EventServiceDocument current, SchemaCompatibilityRules? rules = null) =>
-        EnsureBackwardCompatible(new EventServiceDocumentDeserializer().Deserialize(baselineJson), current, rules);
+        EnsureBackwardCompatible(ReadBaseline(baselineJson), current, rules);
 
     /// <summary>
     /// Loads both the baseline and current contracts from their serialized JSON and checks the
@@ -72,10 +73,32 @@ public static class SchemaCompatibility
     /// <param name="rules">Optional rules; defaults to <see cref="SchemaCompatibilityRules.Default"/>.</param>
     /// <returns>The comparison report, when there are no breaking changes.</returns>
     /// <exception cref="SchemaCompatibilityException">The current contract has breaking changes.</exception>
+    /// <exception cref="LegacyBaselineException">The baseline is a legacy-shape document (no <c>schemaDialect</c>).</exception>
     public static SchemaCompatibilityReport EnsureBackwardCompatible(string baselineJson, string currentJson,
         SchemaCompatibilityRules? rules = null)
     {
+        RefuseLegacyBaseline(baselineJson);
         var deserializer = new EventServiceDocumentDeserializer();
         return EnsureBackwardCompatible(deserializer.Deserialize(baselineJson), deserializer.Deserialize(currentJson), rules);
+    }
+
+    /// <summary>
+    /// Reads a baseline with the conformant parse - after first refusing a legacy-shape baseline (no
+    /// <c>schemaDialect</c>) with the actionable <see cref="LegacyBaselineException"/> ("re-baseline")
+    /// rather than the parse's generic unknown-dialect error.
+    /// </summary>
+    /// <exception cref="LegacyBaselineException">The baseline is a legacy-shape document.</exception>
+    public static EventServiceDocument ReadBaseline(string baselineJson)
+    {
+        RefuseLegacyBaseline(baselineJson);
+        return new EventServiceDocumentDeserializer().Deserialize(baselineJson);
+    }
+
+    private static void RefuseLegacyBaseline(string baselineJson)
+    {
+        if (EventServiceDocumentDeserializer.IsLegacyShape(baselineJson))
+        {
+            throw new LegacyBaselineException();
+        }
     }
 }

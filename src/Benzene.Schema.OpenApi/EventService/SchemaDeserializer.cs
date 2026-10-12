@@ -13,14 +13,20 @@ namespace Benzene.Schema.OpenApi.EventService;
 /// <remarks>
 /// <list type="bullet">
 /// <item>A <c>schemaDialect</c> other than <c>openapi-3.0</c> is rejected
-/// (<see cref="UnknownSchemaDialectException"/>, contract-document.md §1).</item>
+/// (<see cref="UnknownSchemaDialectException"/>, contract-document.md §1) - and so is a document with
+/// no <c>schemaDialect</c> at all, whose dialect is unknown (spec 1.1; the
+/// <c>missing-schema-dialect-is-rejected</c> parse case).</item>
 /// <item>Any <c>benzene:</c>-prefixed entry is ignored (§1).</item>
 /// <item>An absent <c>response</c> reads as null - no payload (§2, §3.2).</item>
-/// <item>A <b>legacy</b> document (spec-0.2.0 and earlier: <c>openapi</c> and <c>info</c>, no
-/// <c>schemaDialect</c>) is still accepted, with a warning in <see cref="Warnings"/>: <c>service</c>,
-/// <c>serviceVersion</c> and <c>description</c> come from <c>info</c>, and its reserved entries are
-/// ignored like any other <c>benzene:</c> entry.</item>
 /// </list>
+/// <para>
+/// <see cref="Deserialize"/> is the conformant parse. A <b>legacy</b> document (spec-0.2.0 and earlier:
+/// <c>openapi</c> and <c>info</c>, no <c>schemaDialect</c>) is read only through the explicit opt-in
+/// <see cref="DeserializeAllowingLegacyShape"/>, outside that path: with a warning in
+/// <see cref="Warnings"/>, <c>service</c>, <c>serviceVersion</c> and <c>description</c> from <c>info</c>,
+/// its reserved entries ignored like any other <c>benzene:</c> entry, and
+/// <see cref="EventServiceDocument.IsLegacyShape"/> set.
+/// </para>
 /// </remarks>
 public class EventServiceDocumentDeserializer
 {
@@ -49,9 +55,27 @@ public class EventServiceDocumentDeserializer
     /// <summary>Whether <paramref name="json"/> is a legacy-shape document (see <see cref="IsLegacyShape(JObject)"/>).</summary>
     public static bool IsLegacyShape(string json) => IsLegacyShape(JObject.Parse(json));
 
-    /// <summary>Reads a document.</summary>
+    /// <summary>
+    /// Reads a document - the conformant parse (contract-document.md §1): a document whose
+    /// <c>schemaDialect</c> is absent or not <c>openapi-3.0</c> is rejected.
+    /// </summary>
+    /// <exception cref="UnknownSchemaDialectException">
+    /// The document declares a dialect this port does not know, or declares none (a legacy-shape
+    /// document included - read one with <see cref="DeserializeAllowingLegacyShape"/>).
+    /// </exception>
+    public EventServiceDocument Deserialize(string json) => Read(json, allowLegacyShape: false);
+
+    /// <summary>
+    /// Reads a document, additionally accepting the <b>legacy</b> shape (spec-0.2.0 and earlier:
+    /// <c>openapi</c> and <c>info</c>, no <c>schemaDialect</c>) with a <see cref="LegacyShapeWarning"/> -
+    /// an explicit opt-in for migration tooling, outside the conformant parse (<see cref="Deserialize"/>),
+    /// which rejects such a document as having an unknown dialect. A document that declares a
+    /// <c>schemaDialect</c> is read exactly as <see cref="Deserialize"/> reads it.
+    /// </summary>
     /// <exception cref="UnknownSchemaDialectException">The document declares a dialect this port does not know.</exception>
-    public EventServiceDocument Deserialize(string json)
+    public EventServiceDocument DeserializeAllowingLegacyShape(string json) => Read(json, allowLegacyShape: true);
+
+    private EventServiceDocument Read(string json, bool allowLegacyShape)
     {
         // A fresh builder (hence a fresh SchemaBuilder/SchemaRepository) per call keeps this
         // instance safe to call more than once: SchemaBuilder.AddSchema is first-write-wins, so
@@ -67,9 +91,10 @@ public class EventServiceDocumentDeserializer
         var jObject = JObject.Load(jsonReader);
 
         var dialect = jObject["schemaDialect"]?.Value<string>();
-        var legacy = IsLegacyShape(jObject);
+        var legacy = allowLegacyShape && IsLegacyShape(jObject);
         if (!legacy && dialect != EventServiceDocument.SchemaDialectOpenApi30)
         {
+            // contract-document.md §1: a document without schemaDialect has an unknown dialect.
             throw new UnknownSchemaDialectException(dialect);
         }
 

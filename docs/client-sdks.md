@@ -240,9 +240,11 @@ method, no interface member, and above all no `RequiredTopics` entry. A contract
 one (contract-document.md §1), and a `benzene:` entry in a document from elsewhere - a legacy one, or
 another producer's - is ignored. (The former `ClientSdkOptions.IncludeReservedTopics` is gone.)
 
-The generator reads only `schemaDialect: "openapi-3.0"` documents and rejects any other dialect. A
-legacy document (spec 0.2: `openapi`/`info`, no `schemaDialect`) is still read, with a warning on
-stderr - regenerate it from the current producer.
+The generator reads only `schemaDialect: "openapi-3.0"` documents and rejects any other dialect - and
+a document with no `schemaDialect`, whose dialect is unknown (contract-document.md §1). A legacy document
+(spec 0.2: `openapi`/`info`, no `schemaDialect`) is therefore rejected: regenerate it from the current
+producer. (Migration tooling can still read one through the explicit opt-in
+`EventServiceDocumentDeserializer.DeserializeAllowingLegacyShape`, which the CLI does not use.)
 
 `benzene:healthcheck` used to be the exception — every generated client implemented `IHasHealthCheck`,
 emitted a `HealthCheckAsync()`, and listed `benzene:healthcheck` in `RequiredTopics` unconditionally.

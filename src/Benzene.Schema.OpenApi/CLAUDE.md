@@ -106,9 +106,11 @@ for the `benzene` contract.
   from that assembly where they used to live) - contract-document.md §6's two hashes over the
   allow-listed, dereferenced, annotation-stripped projection; RFC 8785 + SHA-256. `NormalizeSchema` is
   the §6.2 steps 3-4 comparison form. Proven by `conformance/contract-hash-cases.json`.
-- `EventService/EventServiceDocumentDeserializer` - reads a document; rejects an unknown
-  `schemaDialect` (`UnknownSchemaDialectException`), ignores `benzene:` entries, reads a legacy
-  (spec-0.2.0, `openapi`/`info`) document with a warning (`Warnings`, `onWarning`, `IsLegacyShape`).
+- `EventService/EventServiceDocumentDeserializer` - `Deserialize` is the conformant parse: it rejects
+  an unknown `schemaDialect` **and a missing one** (`UnknownSchemaDialectException`, `SchemaDialect`
+  null; spec 1.1, parse case `missing-schema-dialect-is-rejected`) and ignores `benzene:` entries. A
+  legacy (spec-0.2.0, `openapi`/`info`) document is read only through the explicit, separately-named
+  opt-in `DeserializeAllowingLegacyShape`, with a warning (`Warnings`, `onWarning`, `IsLegacyShape`).
 - Builders implement the "consumer" seam interfaces in `Abstractions/` -
   `IConsumesApplicationInfo`, `IConsumesMessageHandlerDefinitions`, `IConsumesHttpEndpointDefinitions`,
   `IConsumesBroadcastEventsDefinitions`, `IConsumesMessageSenderDefinitions`,
@@ -173,8 +175,9 @@ for the `benzene` contract.
 ### Backward-compatibility gate (`Compatibility/`)
 - `SchemaCompatibility` - `Compare(baseline, current)` and `EnsureBackwardCompatible(...)` (throws
   `SchemaCompatibilityException` on breaking changes; JSON-string overloads deserialize a committed
-  baseline). `benzene:` entries are ignored; a legacy-shape baseline throws one
-  `LegacyBaselineException` (re-baseline) instead of being diffed. Supporting types: `SchemaCompatibilityComparer`, `SchemaCompatibilityReport`,
+  baseline - `ReadBaseline`). `benzene:` entries are ignored; a legacy-shape baseline throws one
+  `LegacyBaselineException` (re-baseline) instead of being diffed - checked before the conformant parse,
+  which would otherwise reject it as an unknown dialect. Supporting types: `SchemaCompatibilityComparer`, `SchemaCompatibilityReport`,
   `SchemaCompatibilityRules`, `SchemaChange`/`SchemaChangeKind`, `ChangeCompatibility`,
   `SchemaDirection`. Drop `EnsureBackwardCompatible` into a test to fail CI when the `benzene`
   contract stops being backward compatible with a baseline `spec.json`.

@@ -36,9 +36,10 @@ public class DiffCommand : CommandBase<DiffPayload>
         var baselineJson = await File.ReadAllTextAsync(payload.Baseline);
         var currentJson = await File.ReadAllTextAsync(payload.Current);
 
-        var deserializer = new EventServiceDocumentDeserializer(warning => Console.Error.WriteLine($"warning: {warning}"));
-        var baseline = deserializer.Deserialize(baselineJson);
-        var current = deserializer.Deserialize(currentJson);
+        // The conformant parse: a document without schemaDialect has an unknown dialect and is rejected
+        // (contract-document.md §1) - a legacy-shape baseline with the actionable re-baseline error.
+        var baseline = SchemaCompatibility.ReadBaseline(baselineJson);
+        var current = new EventServiceDocumentDeserializer().Deserialize(currentJson);
 
         var report = SchemaCompatibility.Compare(baseline, current);
 

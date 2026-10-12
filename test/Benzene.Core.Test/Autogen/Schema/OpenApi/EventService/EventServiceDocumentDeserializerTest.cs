@@ -114,7 +114,8 @@ public class EventServiceDocumentDeserializerTest
     {
         const string json = """
         {
-          "info": { "title": "svc", "version": "1.0" },
+          "schemaDialect": "openapi-3.0",
+          "service": "svc",
           "components": { "schemas": {} }
         }
         """;
@@ -142,10 +143,7 @@ public class EventServiceDocumentDeserializerTest
         Assert.Contains(exception.Report.BreakingChanges, x => x.Kind == SchemaChangeKind.PropertyRemoved);
     }
 
-    [Fact]
-    public void Deserialize_LegacyShape_IsReadWithAWarning_IdentityFromInfo_ReservedEntriesIgnored()
-    {
-        const string legacy = """
+    private const string LegacyDocument = """
         {
           "openapi": "3.0.1",
           "info": { "title": "orders", "version": "1.2", "description": "Order intake" },
@@ -157,9 +155,27 @@ public class EventServiceDocumentDeserializerTest
           "components": { "schemas": {} }
         }
         """;
+
+    [Fact]
+    public void Deserialize_LegacyShape_IsRejected_ItsDialectIsUnknown()
+    {
+        // contract-document.md §1 (spec 1.1): a document without schemaDialect has an unknown dialect, so
+        // the conformant parse rejects it - the missing-schema-dialect-is-rejected parse case.
+        var deserializer = new EventServiceDocumentDeserializer();
+
+        var error = Assert.Throws<UnknownSchemaDialectException>(() => deserializer.Deserialize(LegacyDocument));
+
+        Assert.Null(error.SchemaDialect);
+        Assert.StartsWith(UnknownSchemaDialectException.Kind, error.Message);
+        Assert.Empty(deserializer.Warnings);
+    }
+
+    [Fact]
+    public void DeserializeAllowingLegacyShape_LegacyShape_IsReadWithAWarning_IdentityFromInfo_ReservedEntriesIgnored()
+    {
         var warnings = new System.Collections.Generic.List<string>();
 
-        var document = new EventServiceDocumentDeserializer(warnings.Add).Deserialize(legacy);
+        var document = new EventServiceDocumentDeserializer(warnings.Add).DeserializeAllowingLegacyShape(LegacyDocument);
 
         Assert.Equal(EventServiceDocumentDeserializer.LegacyShapeWarning, Assert.Single(warnings));
         Assert.True(document.IsLegacyShape);
@@ -178,6 +194,26 @@ public class EventServiceDocumentDeserializerTest
         var error = Assert.Throws<UnknownSchemaDialectException>(() => new EventServiceDocumentDeserializer().Deserialize(json));
 
         Assert.Equal("json-schema-2020-12", error.SchemaDialect);
+    }
+
+    [Fact]
+    public void DeserializeAllowingLegacyShape_UnknownDeclaredDialect_IsStillRejected()
+    {
+        const string json = """{ "schemaDialect": "json-schema-2020-12", "service": "x", "requests": [], "events": [], "sends": [], "components": { "schemas": {} } }""";
+
+        Assert.Throws<UnknownSchemaDialectException>(() => new EventServiceDocumentDeserializer().DeserializeAllowingLegacyShape(json));
+    }
+
+    [Fact]
+    public void DeserializeAllowingLegacyShape_CurrentShape_ReadsAsTheConformantParseDoes()
+    {
+        var deserializer = new EventServiceDocumentDeserializer();
+
+        var document = deserializer.DeserializeAllowingLegacyShape(CurrentJson());
+
+        Assert.Empty(deserializer.Warnings);
+        Assert.False(document.IsLegacyShape);
+        Assert.Equal(document.ContractHash, document.DeclaredContractHash);
     }
 
     [Fact]

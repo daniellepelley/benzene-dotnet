@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (spec 1.1 follow-ups)
+- **Breaking: a contract document without `schemaDialect` is rejected (contract-document.md §1, spec
+  1.1: its dialect is unknown).** `EventServiceDocumentDeserializer.Deserialize` - the conformant parse
+  the CLI (`build`, `diff`, `lambda-test-tool`) and the compatibility gate use - now throws
+  `UnknownSchemaDialectException` (`SchemaDialect` null) for it, a legacy (spec-0.2.0,
+  `openapi`/`info`) document included, where it used to read one with a warning. Reading a legacy
+  document is kept only behind the explicit opt-in `DeserializeAllowingLegacyShape` (warning,
+  `IsLegacyShape`). The gate still refuses a legacy baseline with `LegacyBaselineException`
+  (`SchemaCompatibility.ReadBaseline`). Passes the new parse case `missing-schema-dialect-is-rejected`;
+  `contract-document-cases.json` re-vendored.
+
 ### Added
 - **Error fidelity in every client (core-concepts §12).** `Benzene.Clients.Common.ProblemDocuments`
   rebuilds a failed result's `errors` (`message`, `field`, `code`, in order) from a received problem
