@@ -129,6 +129,31 @@ public class GrpcBenzeneMessageClientTest
         Assert.Null(result.Errors[1].Field);
     }
 
+    // wire-contracts §4.2 (spec 1.1): a client SHOULD read FieldViolation.reason back into the error's code.
+    [Fact]
+    public async Task SendMessageAsync_FieldViolationReason_IsReadBackAsTheErrorCode()
+    {
+        var richStatus = new Google.Rpc.Status { Code = (int)StatusCode.AlreadyExists, Message = "conflict" };
+        var badRequest = new Google.Rpc.BadRequest();
+        badRequest.FieldViolations.Add(Benzene.Grpc.GrpcFieldViolationReason.Create("orderId", "Order already exists", "duplicate-order"));
+        badRequest.FieldViolations.Add(new Google.Rpc.BadRequest.Types.FieldViolation { Description = "No code here" });
+        richStatus.Details.Add(Google.Protobuf.WellKnownTypes.Any.Pack(badRequest));
+        var trailers = new Metadata { { "grpc-status-details-bin", richStatus.ToByteArray() } };
+        var invoker = new TestCallInvoker
+        {
+            RpcExceptionToThrow = new RpcException(new Status(StatusCode.AlreadyExists, "conflict"), trailers),
+        };
+        var client = BuildClient(invoker, out var registry);
+        registry.Add<EchoRequest, EchoReply>("echo-topic", "/benzene.test.TestService/Echo");
+
+        var result = await client.SendMessageAsync<EchoRequest, EchoReply>(
+            new BenzeneClientRequest<EchoRequest>("echo-topic", new EchoRequest { Name = "world" }, new Dictionary<string, string>()));
+
+        Assert.Equal(new Benzene.Abstractions.Results.BenzeneError("Order already exists", "/orderId", "duplicate-order"), result.Errors[0]);
+        // An empty reason is no code, never "".
+        Assert.Null(result.Errors[1].Code);
+    }
+
     [Fact]
     public async Task SendMessageAsync_FailureWithNoBadRequestDetails_FallsBackToAMessageOnlyErrorFromStatusDetail()
     {

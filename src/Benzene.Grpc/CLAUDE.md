@@ -50,8 +50,12 @@ transport-host-agnostic - depends only on `Grpc.Core.Api` and `Google.Protobuf`,
   `Grpc.Core.StatusCode`; every response also gets a `benzene-status` trailer carrying the raw status.
   **Rich errors**: on a non-OK result, `GrpcMethodHandler` also attaches a `google.rpc.Status` to the
   standard `grpc-status-details-bin` trailer (via `Grpc.StatusProto`/`Google.Api.CommonProtos`), so a
-  gRPC client can read structured details with `RpcException.GetRpcStatus()`. A `ValidationError` maps
-  its error messages to a `google.rpc.BadRequest` (one field violation per message). Alongside, not
+  gRPC client can read structured details with `RpcException.GetRpcStatus()`. A failure carrying
+  structured errors - any status, not only `ValidationError` (spec 1.1 follow-up) - maps them to a
+  `google.rpc.BadRequest` (one field violation per error), each error's `code` in
+  `FieldViolation.reason` (wire-contracts §4.2, spec 1.1; written and read on the wire as field 3 by
+  `GrpcFieldViolationReason`, since the resolved `Google.Api.CommonProtos` 2.13.0 predates the generated
+  property and lifting it would force a `Google.Protobuf` upgrade). Alongside, not
   replacing, the flat `benzene-status` trailer. `FieldViolation.field` is the error's JSON Pointer
   converted to gRPC's dotted path by `GrpcFieldPath.FromPointer` (wire-contracts.md §4.2: unescaped
   segments joined with `.`, a digits-only segment written `[n]` - `/items/0/sku` → `items[0].sku`;

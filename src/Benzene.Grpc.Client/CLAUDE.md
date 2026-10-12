@@ -46,7 +46,8 @@ a Benzene middleware pipeline over a `Grpc.Net.Client.GrpcChannel`. Mirrors the 
 - Structured errors - a failed call's `grpc-status-details-bin` `google.rpc.BadRequest` becomes one
   `BenzeneError` per `FieldViolation` (`GrpcBenzeneMessageClient.ExtractErrors`), its dotted `field`
   (`items[0].sku`) converted back to the JSON Pointer every other transport carries (`/items/0/sku`)
-  by `Benzene.Grpc`'s `GrpcFieldPath.ToPointer`, so a result reads the same whichever transport
+  by `Benzene.Grpc`'s `GrpcFieldPath.ToPointer`, and its `reason` read back as the error's `code`
+  (`GrpcFieldViolationReason.Get`; wire-contracts §4.2, spec 1.1), so a result reads the same whichever transport
   delivered it (wire-contracts.md §1.3, §4.2)
 
 ### Health check

@@ -237,7 +237,8 @@ array:
 ```
 
 Over gRPC the same pointer travels as `google.rpc.BadRequest`'s dotted `FieldViolation.field`
-(`items[0].sku`), and a Benzene gRPC client reads it back as the pointer.
+(`items[0].sku`), and a Benzene gRPC client reads it back as the pointer. The error's `code` (e.g.
+FluentValidation's `ErrorCode`) travels as `FieldViolation.reason` and is read back too.
 
 > **Changed in the spec 0.2 catch-up.** `field` used to be FluentValidation's .NET property path
 > verbatim (`Items[0].Sku`). A caller that matched on it needs the pointer form now — see the

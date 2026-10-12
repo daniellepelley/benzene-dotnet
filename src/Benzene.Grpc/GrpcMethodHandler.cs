@@ -212,16 +212,17 @@ public class GrpcMethodHandler : IGrpcMethodHandler
 
     /// <summary>
     /// Attaches a <c>google.rpc.Status</c> to the <c>grpc-status-details-bin</c> trailer alongside the
-    /// flat <c>benzene-status</c> trailer, so a gRPC client can read structured error details. A
-    /// <see cref="Benzene.Results.BenzeneResultStatus.ValidationError"/> maps its error messages to a
-    /// <c>google.rpc.BadRequest</c> with one field violation per message - <see cref="Benzene.Abstractions.Results.BenzeneError.Field"/>,
+    /// flat <c>benzene-status</c> trailer, so a gRPC client can read structured error details. A failure
+    /// carrying structured errors maps them to a <c>google.rpc.BadRequest</c> with one field violation
+    /// per error (wire-contracts.md §4.2), whatever its status - not only a
+    /// <see cref="Benzene.Results.BenzeneResultStatus.ValidationError"/>, so an error's field and code
+    /// survive a gRPC hop as they do an HTTP one. <see cref="Benzene.Abstractions.Results.BenzeneError.Field"/>,
     /// a JSON Pointer, fills <see cref="Google.Rpc.BadRequest.Types.FieldViolation.Field"/> converted to
     /// gRPC's dotted form by <see cref="GrpcFieldPath.FromPointer"/> (<c>/items/0/sku</c> →
-    /// <c>items[0].sku</c>, wire-contracts.md §4.2), and is left empty (proto3's unset) when the error
-    /// isn't scoped to a field - Phase 5 of work/archive/problem-details-plan-2026-08.md, "gRPC gets a
-    /// free correctness win", ruling §5.3. Carrying
-    /// <see cref="Benzene.Abstractions.Results.BenzeneError.Code"/> in <c>google.rpc.ErrorInfo</c> is
-    /// out of scope (parked, plan §8) - not added here.
+    /// <c>items[0].sku</c>), and is left empty (proto3's unset) when the error isn't scoped to a field;
+    /// <see cref="Benzene.Abstractions.Results.BenzeneError.Code"/> fills <c>FieldViolation.reason</c>
+    /// (<see cref="GrpcFieldViolationReason"/>; spec 1.1: a server SHOULD write it there), unset when the
+    /// error has no code.
     /// </summary>
     private static void AddRichErrorDetails(Metadata trailers, StatusCode statusCode, string detail, string? status, IReadOnlyList<Benzene.Abstractions.Results.BenzeneError>? errors)
     {
@@ -231,18 +232,16 @@ public class GrpcMethodHandler : IGrpcMethodHandler
             Message = detail,
         };
 
-        if (status == Benzene.Results.BenzeneResultStatus.ValidationError && errors is { Count: > 0 })
+        if (errors is { Count: > 0 })
         {
             var badRequest = new Google.Rpc.BadRequest();
             foreach (var error in errors)
             {
                 // FieldViolation.field is a dotted path, so the error's JSON Pointer is converted
                 // (wire-contracts §4.2): /items/0/sku -> items[0].sku. No field -> empty (proto3's unset).
-                var fieldViolation = new Google.Rpc.BadRequest.Types.FieldViolation
-                {
-                    Description = error.Message,
-                    Field = GrpcFieldPath.FromPointer(error.Field)
-                };
+                // The error's code rides in FieldViolation.reason (§4.2, spec 1.1) - empty when it has none.
+                var fieldViolation = GrpcFieldViolationReason.Create(
+                    GrpcFieldPath.FromPointer(error.Field), error.Message, error.Code);
 
                 badRequest.FieldViolations.Add(fieldViolation);
             }
