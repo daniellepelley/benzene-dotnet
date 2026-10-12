@@ -1,3 +1,5 @@
+using Benzene.Abstractions.Schema;
+
 namespace Benzene.Examples.K8sMesh.Service.Model.V1;
 
 /// <summary>
@@ -7,6 +9,7 @@ namespace Benzene.Examples.K8sMesh.Service.Model.V1;
 /// <see cref="V2.TakePaymentRequest"/> first (docs/specification/versioning.md). Same type name in a
 /// per-version namespace is the caster convention.
 /// </summary>
+[SchemaName("TakePaymentRequestV1")]
 public class TakePaymentRequest
 {
     public string OrderId { get; set; } = string.Empty;

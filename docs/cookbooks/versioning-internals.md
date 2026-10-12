@@ -85,6 +85,12 @@ a cookbook (`docs/cookbooks/`) rather than framework code once implemented.
 against the **latest** schema version. Producers on older (or newer) versions are transparently
 upcast (or downcast) at the edges of the pipeline; the handler never sees any version but its own.
 
+**Name the versions' schemas.** The usual layout keeps one type name in a per-version namespace
+(`Model.V1.TakePaymentRequest`, `Model.V2.TakePaymentRequest`). Both reach the contract document, and
+its component names are simple type names (contract-document §4.1), so the two collide — a
+start-up failure under `UseBenzeneCloudService`, which checks the document before the first message.
+Declare a distinct name on each: `[SchemaName("TakePaymentRequestV1")]` (see [spec.md](../spec.md)).
+
 ### Request path
 
 Hooks into `IRequestMapper<TContext>` (`Benzene.Core.MessageHandlers.Request`), which already sits

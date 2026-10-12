@@ -1,3 +1,5 @@
+using Benzene.Abstractions.Schema;
+
 namespace Benzene.Examples.K8sMesh.Service.Model.V2;
 
 /// <summary>
@@ -6,6 +8,7 @@ namespace Benzene.Examples.K8sMesh.Service.Model.V2;
 /// this before the handler runs, the caster seeding <see cref="Currency"/> with a default — so the handler
 /// only ever sees v2, whichever version the producer sent.
 /// </summary>
+[SchemaName("TakePaymentRequestV2")]
 public class TakePaymentRequest
 {
     public string OrderId { get; set; } = string.Empty;
