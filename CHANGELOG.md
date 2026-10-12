@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.1] - 2026-10-12
+
+The first release on the `0.1.0` base (`version.txt`), which marks the move to the language-neutral
+spec's 1.x line: these packages implement `spec-1.1.0` and are pinned to it
+(`test/conformance-fixtures/SPEC_VERSION`). Still a pre-release. Before 1.0, breaking changes go
+in a MINOR bump (VERSIONING.md), and this release has many, each marked **BREAKING** below. The
+entries were accumulated from the start of this changelog, so the earliest of them already shipped
+in `0.0.3-alpha.1` to `0.0.3-alpha.4`; everything merged after `0.0.3-alpha.4` (2026-09-29) is new
+here.
+
 ### Changed (spec 1.1 follow-ups)
 - **The Cloud Service's M2 self-check reflects outbound forwarding.** M2 (meshed-service claim) used to
   be satisfied whenever the inbound join was wired, with a note that outbound forwarding was invisible.

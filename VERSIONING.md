@@ -105,6 +105,10 @@ to `1.0.0` and publish `stable`).
 > generations never built together**. `version.txt` moved to `0.0.3` to clear the legacy ceiling:
 > `0.0.3-alpha.1` sorts above `0.0.2.18-alpha`, so latest-prerelease resolution is correct again.
 > Never set the base below a version already published.
+>
+> `version.txt` moved to `0.1.0` on 2026-10-12, when the packages reached the spec's 1.x line
+> (`spec-1.1.0`) and accumulated the breaking changes since `0.0.3-alpha.4`. `0.1.0-alpha.1` sorts
+> above every `0.0.3-*`.
 
 ### Packability
 
