@@ -14,6 +14,16 @@ namespace Benzene.Test.Autogen.Descriptor;
 /// Benzene.Test.csproj guarantees it is built alongside this test project; its location resolves
 /// reliably via reflection instead of a hard-coded bin/ path).
 /// </summary>
+/// <remarks>
+/// Serial, in <see cref="ConsoleRedirectionCollection"/>, for two reasons. The example's
+/// <c>UseMessageHandlers()</c> discovers handlers in every assembly loaded in the process, and other
+/// tests load assemblies with handlers in them while the suite runs (<c>AwsQuickstartRunsTest</c>
+/// compiles a docs snippet and loads it). Run alongside them, two emits in one test could see different
+/// handlers, and so different hashes, which failed <c>Emit_IdentityAndPlacementAreOutsideBothHashes</c>
+/// about one full run in five. And <see cref="DescriptorEmitter"/> swaps <c>Console.Out</c> while it
+/// builds the document, which is process-wide too.
+/// </remarks>
+[Collection(ConsoleRedirectionCollection.Name)]
 public class DescriptorEmitterTest
 {
     private static string MinimalAssemblyPath =>
