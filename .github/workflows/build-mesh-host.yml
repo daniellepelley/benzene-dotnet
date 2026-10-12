@@ -91,8 +91,14 @@ jobs:
       run: helm template benzene-mesh deploy/Mesh/helm/benzene-mesh > /tmp/benzene-mesh-rendered.yaml
     # `helm template --validate` needs a live, reachable cluster (it round-trips through the current
     # kube context's API discovery) - not available on a plain runner, and not what "no cluster needed"
-    # meant here. `kubectl apply --dry-run=client` gets the same rendered-manifest schema validation
-    # (malformed resources, unknown fields, bad apiVersion/kind) entirely client-side, using kubectl's
-    # bundled OpenAPI schemas - zero cluster cost, which the literal --validate flag can't offer.
-    - name: Validate rendered manifests (client-side, no cluster)
-      run: kubectl apply --dry-run=client -f /tmp/benzene-mesh-rendered.yaml
+    # meant here. Neither is `kubectl apply --dry-run=client`: it still contacts an API server for
+    # discovery, so on a runner with no cluster it failed every run. kubeconform validates the rendered
+    # manifests against the Kubernetes JSON schemas entirely offline (malformed resources, unknown
+    # fields under -strict, bad apiVersion/kind). Pinned and checksum-verified.
+    - name: Validate rendered manifests (kubeconform, no cluster)
+      run: |
+        curl -fsSL -o /tmp/kubeconform.tgz \
+          https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+        echo "95f14e87aa28c09d5941f11bd024c1d02fdc0303ccaa23f61cef67bc92619d73  /tmp/kubeconform.tgz" | sha256sum -c -
+        tar -xzf /tmp/kubeconform.tgz -C /tmp kubeconform
+        /tmp/kubeconform -strict -summary /tmp/benzene-mesh-rendered.yaml
