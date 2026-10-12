@@ -114,13 +114,40 @@ public class HttpContextConverterResponseTest
     }
 
     [Fact]
-    public async Task MapResponseAsync_TheStatusIsTheReverseHttpTables_NotTheDocuments()
+    public async Task MapResponseAsync_AProblemDocumentsBenzeneStatus_WinsOverTheReverseHttpTable()
     {
-        // Classification never reads the document's status/benzeneStatus (wire-contracts §1.3).
+        // wire-contracts §4.1 (spec 1.1): a client that reads a problem document takes the result's status
+        // from its benzeneStatus, not the reverse table (which would give conflict for a 409).
         var result = await MapAsync(HttpStatusCode.Conflict, ValidationProblem, "application/problem+json");
 
-        Assert.Equal(BenzeneResultStatus.Conflict, result.Status);
+        Assert.Equal(BenzeneResultStatus.ValidationError, result.Status);
+        Assert.False(result.IsSuccessful);
         Assert.Equal(2, result.Errors.Count);
+    }
+
+    [Fact]
+    public async Task MapResponseAsync_AnApplicationDefinedBenzeneStatus_SurvivesTheHop()
+    {
+        // The point of the rule: an application-defined status has no HTTP code of its own (it goes out as a
+        // 500 or 400), so only the document can carry it back.
+        var result = await MapAsync(HttpStatusCode.BadRequest,
+            """{"benzeneStatus":"insufficient-funds","detail":"Balance too low","errors":[{"message":"Balance too low","code":"funds"}]}""",
+            "application/problem+json");
+
+        Assert.Equal("insufficient-funds", result.Status);
+        Assert.False(result.IsSuccessful);
+        Assert.Equal(new[] { new BenzeneError("Balance too low", code: "funds") }, result.Errors);
+    }
+
+    [Fact]
+    public async Task MapResponseAsync_AProblemDocumentWithoutBenzeneStatus_KeepsTheReverseHttpTablesStatus()
+    {
+        // The reverse table applies to every other failure; the document's HTTP status member is never read.
+        var result = await MapAsync(HttpStatusCode.Conflict,
+            """{"status":422,"detail":"Already exists"}""", "application/problem+json");
+
+        Assert.Equal(BenzeneResultStatus.Conflict, result.Status);
+        Assert.Equal("Already exists", Assert.Single(result.Errors).Message);
     }
 
     [Fact]

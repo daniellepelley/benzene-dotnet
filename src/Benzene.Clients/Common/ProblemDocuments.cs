@@ -18,9 +18,14 @@ namespace Benzene.Clients.Common
     /// client (an <c>application/problem+json</c> response, <c>Benzene.Clients.Http.HttpContextConverter</c>).
     /// </para>
     /// <para>
-    /// The result's status is always the caller's - the envelope's <c>statusCode</c>, or the reverse HTTP
-    /// table for a plain HTTP response - never re-derived from the document's <c>status</c> or
-    /// <c>benzeneStatus</c> (wire-contracts §1.3: classification is envelope-first).
+    /// The result's status: inside an envelope it is the envelope's <c>statusCode</c> (classification is
+    /// envelope-first, wire-contracts §1.2/§1.3 - the document's <c>benzeneStatus</c> mirrors it), so
+    /// <see cref="ToFailedResult{T}(string, string, ISerializer)"/> keeps the status it is given. Where no
+    /// envelope carries one - a plain HTTP response, or a non-envelope failure an envelope client falls
+    /// back on - the status would come from the reverse HTTP table, and there the document's
+    /// <c>benzeneStatus</c> wins instead (<see cref="ToFailedResultFromDocumentStatus{T}"/>; wire-contracts
+    /// §4.1, spec 1.1), so an application-defined status survives the hop. The document's HTTP
+    /// <c>status</c> member is never read for classification.
     /// </para>
     /// </remarks>
     public static class ProblemDocuments
@@ -82,7 +87,41 @@ namespace Benzene.Clients.Common
             return BenzeneResult.AttachReceivedProblem<T>(status, isSuccessful: false, errors, problem);
         }
 
-        private static ProblemDetails? TryRead(string? body, ISerializer serializer)
+        /// <summary>
+        /// Builds the failed result for a problem document received <b>outside</b> an envelope - where the
+        /// status would otherwise come from the reverse HTTP table: the document's <c>benzeneStatus</c>, when
+        /// present and non-empty, is the result's status (wire-contracts §4.1, spec 1.1 - so an
+        /// application-defined status survives the hop); otherwise <paramref name="reverseTableStatus"/>.
+        /// Errors and the attached document as <see cref="ToFailedResult{T}(string, string, ISerializer)"/>.
+        /// </summary>
+        /// <typeparam name="T">The result's payload type.</typeparam>
+        /// <param name="reverseTableStatus">The status the reverse HTTP table gives the response.</param>
+        /// <param name="body">The received problem document.</param>
+        /// <param name="serializer">The serializer that reads the document.</param>
+        public static IBenzeneResult<T> ToFailedResultFromDocumentStatus<T>(string reverseTableStatus, string? body, ISerializer serializer)
+        {
+            var problem = TryRead(body, serializer);
+            return ToFailedResult<T>(StatusOf(problem, reverseTableStatus), problem);
+        }
+
+        /// <summary>
+        /// The status a received problem document gives a result where no envelope carries one: its
+        /// <c>benzeneStatus</c> when present and non-empty, else <paramref name="reverseTableStatus"/>
+        /// (wire-contracts §4.1, spec 1.1).
+        /// </summary>
+        /// <param name="problem">The received document; <c>null</c> yields <paramref name="reverseTableStatus"/>.</param>
+        /// <param name="reverseTableStatus">The status the reverse HTTP table gives the response.</param>
+        public static string StatusOf(ProblemDetails? problem, string reverseTableStatus)
+        {
+            return string.IsNullOrWhiteSpace(problem?.BenzeneStatus) ? reverseTableStatus : problem!.BenzeneStatus!;
+        }
+
+        /// <summary>
+        /// Reads <paramref name="body"/> as a problem document, or <c>null</c> when it is empty or not one.
+        /// </summary>
+        /// <param name="body">The received body.</param>
+        /// <param name="serializer">The serializer that reads the document.</param>
+        public static ProblemDetails? TryRead(string? body, ISerializer serializer)
         {
             if (string.IsNullOrWhiteSpace(body))
             {

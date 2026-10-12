@@ -138,6 +138,24 @@ public class OutboundBenzeneMessageHttpTest
     }
 
     [Fact]
+    public async Task SendAsync_ANonEnvelopeProblemDocumentsBenzeneStatus_IsTheResultsStatus()
+    {
+        // wire-contracts §4.1 (spec 1.1): outside an envelope, benzeneStatus wins over the reverse table.
+        var handler = new CapturingHandler(HttpStatusCode.Forbidden,
+            """{"status":403,"benzeneStatus":"tenant-suspended","errors":[{"message":"Tenant suspended"}]}""",
+            "application/problem+json");
+        var (sender, _) = Build(handler, routing => routing
+            .Route(Defaults.Topic, pipeline => pipeline.UseBenzeneMessageOverHttp(Url)));
+
+        var result = await sender.SendAsync<ExampleRequestPayload, ExampleResponsePayload>(
+            Defaults.Topic, new ExampleRequestPayload { Id = 42, Name = "foo" });
+
+        Assert.Equal("tenant-suspended", result.Status);
+        Assert.False(result.IsSuccessful);
+        Assert.Equal("Tenant suspended", Assert.Single(result.Errors).Message);
+    }
+
+    [Fact]
     public async Task SendAsync_ThroughTheExplicitInnerPipelineOverload_UsesTheGivenHttpClient()
     {
         // The rung below the default: the caller configures the inner send pipeline and hands over the

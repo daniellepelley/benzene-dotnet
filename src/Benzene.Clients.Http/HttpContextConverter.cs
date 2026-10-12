@@ -58,8 +58,9 @@ public class HttpContextConverter<TRequest, TResponse> : IContextConverter<IBenz
     /// <summary>
     /// Reads and disposes the response and sets the result on the client context: on success, the body
     /// deserialized as <typeparamref name="TResponse"/>; on failure, the status from the reverse HTTP table
-    /// (wire-contracts §4.1) and - when the response is an <c>application/problem+json</c> document - the
-    /// errors rebuilt from its <c>errors</c> with <c>field</c> and <c>code</c> intact, the document itself
+    /// (wire-contracts §4.1) - unless the response is an <c>application/problem+json</c> document carrying
+    /// <c>benzeneStatus</c>, whose status then wins (spec 1.1) - and, for a problem document, the errors
+    /// rebuilt from its <c>errors</c> with <c>field</c> and <c>code</c> intact, the document itself
     /// attached for <c>result.GetProblem()</c> (core-concepts §12, error fidelity).
     /// </summary>
     /// <param name="contextIn">The client context to set the response on.</param>
@@ -79,11 +80,12 @@ public class HttpContextConverter<TRequest, TResponse> : IContextConverter<IBenz
             // An error response is never deserialized as TResponse: it commonly carries a different
             // shape (an HTML error page, an empty body), and that would throw and mask the real HTTP
             // status. Only an application/problem+json body is read, as the problem document it declares
-            // itself to be - an arbitrary endpoint's error body is not one. The status stays the reverse
-            // table's, never re-derived from the document (wire-contracts §1.3).
+            // itself to be - an arbitrary endpoint's error body is not one. Its benzeneStatus, when present,
+            // is the status (wire-contracts §4.1, spec 1.1: an application-defined status survives the hop);
+            // the reverse table applies to every other failure.
             var status = httpResponse.StatusCode.Convert().Status;
             contextIn.Response = ProblemDocuments.IsJsonProblem(httpResponse.Content.Headers.ContentType?.MediaType)
-                ? ProblemDocuments.ToFailedResult<TResponse>(status, body, _serializer)
+                ? ProblemDocuments.ToFailedResultFromDocumentStatus<TResponse>(status, body, _serializer)
                 : httpResponse.StatusCode.Convert<TResponse>(default!);
             return;
         }

@@ -21,8 +21,9 @@ internal static class EnvelopeResponseReader
     /// from <paramref name="httpStatus"/> by the reverse HTTP table. A non-envelope failure whose content type
     /// is <c>application/problem+json</c> - a host or gateway answering with its own problem document before
     /// any envelope was read - keeps that document as the envelope body, so the caller rebuilds its
-    /// <c>errors</c> from it (core-concepts §12, error fidelity); any other non-envelope body is dropped, since
-    /// an arbitrary page is not a problem document.
+    /// <c>errors</c> from it (core-concepts §12, error fidelity), and takes its status from the document's
+    /// <c>benzeneStatus</c> when it carries one (wire-contracts §4.1, spec 1.1); any other non-envelope body
+    /// is dropped, since an arbitrary page is not a problem document.
     /// </summary>
     /// <param name="httpStatus">The HTTP response status.</param>
     /// <param name="body">The HTTP response body.</param>
@@ -39,7 +40,12 @@ internal static class EnvelopeResponseReader
         isEnvelope = false;
         var mapped = httpStatus.Convert();
         var problemBody = !mapped.IsSuccessful && ProblemDocuments.IsJsonProblem(mediaType) ? body : null;
-        return new BenzeneMessageClientResponse(mapped.Status, problemBody!,
+        // No envelope carries the status here, so a problem document's benzeneStatus wins over the reverse
+        // HTTP table (wire-contracts §4.1, spec 1.1); the table applies to every other failure.
+        var status = problemBody != null && TryReadBenzeneStatus(problemBody, out var benzeneStatus)
+            ? benzeneStatus
+            : mapped.Status;
+        return new BenzeneMessageClientResponse(status, problemBody!,
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase), mapped.IsSuccessful);
     }
 
@@ -100,6 +106,30 @@ internal static class EnvelopeResponseReader
         {
             return false;
         }
+    }
+
+    // A problem document's non-empty string benzeneStatus (wire-contracts §1.3), if it has one.
+    private static bool TryReadBenzeneStatus(string body, out string status)
+    {
+        status = string.Empty;
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            if (document.RootElement.ValueKind == JsonValueKind.Object
+                && TryGetProperty(document.RootElement, "benzeneStatus", out var value)
+                && value.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(value.GetString()))
+            {
+                status = value.GetString()!;
+                return true;
+            }
+        }
+        catch (JsonException)
+        {
+            // Not JSON: the reverse table's status stands.
+        }
+
+        return false;
     }
 
     // Case-insensitive on read, like every Benzene JSON reader of the envelope (writers emit camelCase).

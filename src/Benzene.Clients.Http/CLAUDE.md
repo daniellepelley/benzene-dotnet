@@ -42,9 +42,12 @@ row for the `IHttpClientFactory`/lifetime story (yours to own on both paths).
   substitution), serializes the request body as `application/json` (UTF-8), and copies
   `contextIn.Request.Headers` onto the request. `MapResponseAsync` reads the response body and maps the
   `HttpStatusCode` to a Benzene result (reverse HTTP table). On a non-success `application/problem+json`
-  response it also rebuilds the result's `errors` (field/code intact) and attaches the document for
-  `GetProblem()` (`Benzene.Clients.Common.ProblemDocuments`; core-concepts §12, error fidelity); an error
-  body of any other content type is not read.
+  response it takes the status from the document's `benzeneStatus` when present (wire-contracts §4.1,
+  spec 1.1 - `ProblemDocuments.ToFailedResultFromDocumentStatus`), rebuilds the result's `errors`
+  (field/code intact) and attaches the document for `GetProblem()` (`Benzene.Clients.Common.ProblemDocuments`;
+  core-concepts §12, error fidelity); an error body of any other content type is not read.
+  `EnvelopeResponseReader`'s non-envelope fallback does the same with a `benzeneStatus`; inside an envelope
+  the envelope's `statusCode` stays authoritative.
 - `HttpClientMiddleware` - the transport step: its `HandleAsync` is
   `context.Response = await _httpClient.SendAsync(context.Request, cancellationToken)`, where
   `cancellationToken` comes from the constructor-optional `ICancellationTokenAccessor` (the

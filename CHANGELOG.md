@@ -24,6 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `conflict` with a coded error used to lose it). `reason` is field 3 of `FieldViolation`; the resolved
   `Google.Api.CommonProtos` (2.13.0) predates its generated property, so `GrpcFieldViolationReason`
   writes and reads it on the wire rather than forcing a `Google.Protobuf` upgrade.
+- **A received problem document's `benzeneStatus` is the result's status (wire-contracts §4.1, spec
+  1.1).** Where no envelope carries the status - the plain REST client (`UseHttp` /
+  `HttpContextConverter`) and the envelope-over-HTTP readers' non-envelope fallback
+  (`HttpBenzeneMessageClient`, `UseBenzeneMessageOverHttp`) - an `application/problem+json` failure's
+  `benzeneStatus` now wins over the reverse HTTP table, so an application-defined status survives the
+  hop (a 500 carrying `benzeneStatus: "insufficient-funds"` used to read as `unexpected-error`). The
+  reverse table still applies to every other failure; inside an envelope the envelope's `statusCode`
+  stays authoritative. New `ProblemDocuments.ToFailedResultFromDocumentStatus`, `StatusOf`, and a public
+  `TryRead`.
 
 ### Added
 - **Error fidelity in every client (core-concepts §12).** `Benzene.Clients.Common.ProblemDocuments`

@@ -211,6 +211,41 @@ public class HttpBenzeneMessageClientTest
     }
 
     [Fact]
+    public async Task SendMessageAsync_ANonEnvelopeProblemDocumentsBenzeneStatus_WinsOverTheReverseHttpTable()
+    {
+        // wire-contracts §4.1 (spec 1.1): no envelope carries the status here, so the problem document's
+        // benzeneStatus is the result's status rather than the reverse table's (500 -> unexpected-error).
+        var handler = new CapturingHandler(HttpStatusCode.InternalServerError,
+            """{"benzeneStatus":"insufficient-funds","detail":"Balance too low"}""", "application/problem+json");
+        var client = new HttpBenzeneMessageClient(new HttpClient(handler), Url);
+
+        var result = await client.SendMessageAsync<string, string>(
+            new BenzeneClientRequest<string>("t", "m", new Dictionary<string, string>()));
+
+        Assert.Equal("insufficient-funds", result.Status);
+        Assert.False(result.IsSuccessful);
+        Assert.Equal("Balance too low", Assert.Single(result.Errors).Message);
+    }
+
+    [Fact]
+    public async Task SendMessageAsync_InsideAnEnvelope_TheEnvelopesStatusCodeStaysAuthoritative()
+    {
+        // Envelope-first (wire-contracts §1.2/§1.3): the document's benzeneStatus mirrors the envelope's
+        // statusCode, and where they disagree the envelope wins.
+        const string envelope = """
+            {"statusCode":"conflict","isSuccessful":false,
+             "body":"{\"benzeneStatus\":\"validation-error\",\"detail\":\"Already exists\"}"}
+            """;
+        var client = new HttpBenzeneMessageClient(new HttpClient(new CapturingHandler(HttpStatusCode.OK, envelope)), Url);
+
+        var result = await client.SendMessageAsync<string, string>(
+            new BenzeneClientRequest<string>("t", "m", new Dictionary<string, string>()));
+
+        Assert.Equal(BenzeneResultStatus.Conflict, result.Status);
+        Assert.Equal("Already exists", Assert.Single(result.Errors).Message);
+    }
+
+    [Fact]
     public async Task SendMessageAsync_ANonEnvelopeFailureThatIsNotProblemJson_CarriesNoErrors()
     {
         var handler = new CapturingHandler(HttpStatusCode.BadGateway, """{"message":"upstream down"}""");
