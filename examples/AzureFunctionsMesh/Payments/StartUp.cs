@@ -12,6 +12,7 @@ using Benzene.Microsoft.Dependencies;
 using Benzene.ResponseEvents;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Benzene.Mesh.Wire;
 
 namespace Benzene.Examples.AzureFunctionsMesh.Payments;
 
@@ -33,6 +34,9 @@ public class StartUp : BenzeneStartUp
             x.AddServiceBusSender(Environment.GetEnvironmentVariable("SHIPPING_QUEUE") ?? "shipping");
             x.AddEventGridPublisher();
             x.AddOutboundRouting(routing => routing
+                // Forward the mesh span (mesh.md §3, M2) on every route, so a downstream TraceEvent names this
+                // invocation's span as its parent - and the cloud service's M2 self-check reports it wired.
+                .UseMeshTraceContext()
                 .Route("shipment:book", pipeline => pipeline.UseServiceBus(sb => sb.UseServiceBusClient()))
                 .Route("payment:captured", pipeline => pipeline.UseEventGrid("payments-api", eg => eg.UseEventGridClient())));
         });

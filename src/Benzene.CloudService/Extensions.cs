@@ -28,9 +28,10 @@ namespace Benzene.CloudService;
 /// <item>the derived spec on the reserved <c>benzene:spec</c> topic and at <c>/benzene/spec</c> (R5)</item>
 /// <item>health checks on the reserved topic and at <c>/benzene/health</c> (R3)</item>
 /// <item>the trace feed, registration (its body the contract document <c>benzene:spec</c> serves) and
-/// heartbeats (M1), and the inbound W3C trace context join (M2's inbound half - outbound forwarding, on
-/// sends and published events alike, is each outbound route's <c>UseW3CTraceContext()</c>) - the
-/// meshed-service claim, reported apart from the profile</item>
+/// heartbeats (M1), and the inbound W3C trace context join (M2's inbound half - outbound forwarding of the
+/// mesh span, on sends and published events alike, is the outbound routing's
+/// <c>routing.UseMeshTraceContext()</c>, which the M2 self-check reads) - the meshed-service claim,
+/// reported apart from the profile</item>
 /// <item>message handlers via the registry, routed on both the HTTP and envelope pipelines (R1, R2)</item>
 /// <item>the contract-document start-up check (<c>AddContractDocumentStartUpCheck</c>), on by default:
 /// a component-name collision (contract-document.md §4.1 rule 4) fails the host before the first
@@ -85,7 +86,20 @@ public static class Extensions
                     batchSize: 16, flushInterval: TimeSpan.FromSeconds(1)))
             : null;
 
-        var report = CloudServiceProfileReport.Evaluate(builder, traceExporter);
+        // M2's outbound half: whether the container's outbound routes forward the mesh span. Read from the
+        // registrations made so far - the hosts' order (services, then the pipeline) puts AddOutboundRouting
+        // first; routes registered after this call are not seen.
+        var outbound = OutboundTraceForwarding.NoRoutes;
+        app.Register(x =>
+        {
+            outbound = x.IsTypeRegistered<MeshTraceContextForwarding>()
+                ? OutboundTraceForwarding.MeshForwardingOnEveryRoute
+                : x.IsTypeRegistered<Benzene.Clients.OutboundRoutingTopics>()
+                    ? OutboundTraceForwarding.RoutesWithoutMeshForwarding
+                    : OutboundTraceForwarding.NoRoutes;
+        });
+
+        var report = CloudServiceProfileReport.Evaluate(builder, traceExporter, outbound);
         builder.ProfileReportCallback?.Invoke(report);
         // The deployment-side fields of the contract document (contract-document.md §1), outside both
         // hashes: every document SpecBuilder derives carries them - the one benzene:spec serves and the

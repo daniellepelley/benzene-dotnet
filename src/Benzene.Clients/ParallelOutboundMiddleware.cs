@@ -44,6 +44,7 @@ internal class ParallelOutboundMiddleware : IMiddleware<OutboundContext>, ITermi
             // A fresh context per branch (OutboundContext's ctor copies Headers), so concurrent
             // branches don't race the shared header dictionary or the single Response slot.
             var branchContext = new OutboundContext(context.Topic, context.Request, context.Headers);
+            Benzene.Clients.TraceContext.OutboundTraceContext.CopyPin(context, branchContext);
             try
             {
                 await branch.Pipeline.HandleAsync(branchContext, _serviceResolver);

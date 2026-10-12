@@ -1,3 +1,4 @@
+using System.Threading.Tasks;
 using Benzene.Clients;
 using Benzene.Core.Middleware;
 using Benzene.Microsoft.Dependencies;
@@ -50,5 +51,26 @@ public class OutboundRoutingBuilderTest
         var routes = builder.Build();
 
         Assert.Empty(routes);
+    }
+
+    [Fact]
+    public async Task UseOnEveryRoute_RunsAheadOfEveryRoutesOwnMiddleware_WhicheverOrderTheyWereRegisteredIn()
+    {
+        var builder = CreateBuilder();
+        var calls = new System.Collections.Generic.List<string>();
+
+        builder
+            .Route("order:create", pipeline => pipeline.OnRequest(ctx => calls.Add($"{ctx.Topic}:own")))
+            .UseOnEveryRoute(pipeline => pipeline.OnRequest(ctx => calls.Add($"{ctx.Topic}:every")))
+            .Route("audit:log", pipeline => pipeline.OnRequest(ctx => calls.Add($"{ctx.Topic}:own")));
+
+        var routes = builder.Build();
+        // Building twice must not stack the every-route middleware twice.
+        routes = builder.Build();
+        var resolver = new MicrosoftServiceResolverAdapter(new ServiceCollection().BuildServiceProvider());
+        await routes["order:create"].HandleAsync(new OutboundContext("order:create", "x"), resolver);
+        await routes["audit:log"].HandleAsync(new OutboundContext("audit:log", "x"), resolver);
+
+        Assert.Equal(new[] { "order:create:every", "order:create:own", "audit:log:every", "audit:log:own" }, calls);
     }
 }

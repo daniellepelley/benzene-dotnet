@@ -67,4 +67,29 @@ public class W3CTraceContextMiddlewareTest
 
         Assert.False(context.Headers.ContainsKey("traceparent"));
     }
+
+    [Fact]
+    public async Task HandleAsync_APinnedTraceContext_IsLeftUntouched()
+    {
+        // The mesh pins the span its TraceEvent records (mesh.md §3 / M2); OpenTelemetry's Activity.Current
+        // must not overwrite it.
+        using var activitySource = new ActivitySource("Test.Pinned." + nameof(W3CTraceContextMiddlewareTest));
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = _ => true,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+        };
+        ActivitySource.AddActivityListener(listener);
+        using var activity = activitySource.StartActivity("outbound-call");
+        activity!.TraceStateString = "otel=1";
+
+        var context = new OutboundContext("my-topic", "hello", new Dictionary<string, string> { ["tracestate"] = "stale=1" });
+        OutboundTraceContext.Pin(context, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", null);
+
+        await new W3CTraceContextMiddleware().HandleAsync(context, () => Task.CompletedTask);
+
+        Assert.Equal("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", context.Headers["traceparent"]);
+        // Pinning without a tracestate drops a stale one rather than forwarding another parent's.
+        Assert.False(context.Headers.ContainsKey("tracestate"));
+    }
 }

@@ -91,6 +91,10 @@ public static class EnvelopeClient
         if (MeshSpan.Current is { } span)
         {
             headers["traceparent"] = span.ToTraceparent();
+            if (span.TraceState != null)
+            {
+                headers["tracestate"] = span.TraceState;
+            }
         }
         var envelope = JsonSerializer.Serialize(new { topic, headers, body });
         using var content = new StringContent(envelope, Encoding.UTF8, "application/json");

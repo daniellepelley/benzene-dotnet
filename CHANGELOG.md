@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed (spec 1.1 follow-ups)
+- **The Cloud Service's M2 self-check reflects outbound forwarding.** M2 (meshed-service claim) used to
+  be satisfied whenever the inbound join was wired, with a note that outbound forwarding was invisible.
+  It now also requires the container's outbound routing to forward the mesh span
+  (`routing.UseMeshTraceContext()`), or no outbound routes at all: a service whose routes only run
+  `UseW3CTraceContext()` now reports M2 missing (and so is not meshed). Read from registrations made
+  before `UseBenzeneCloudService`. The mesh examples (AzureFunctionsMesh, GoogleCloudMesh) now forward
+  the mesh span.
 - **Breaking: a contract document without `schemaDialect` is rejected (contract-document.md §1, spec
   1.1: its dialect is unknown).** `EventServiceDocumentDeserializer.Deserialize` - the conformant parse
   the CLI (`build`, `diff`, `lambda-test-tool`) and the compatibility gate use - now throws
@@ -54,7 +61,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixes a broker-reported failure being treated as sent).
 
 ### Added
-- **Error fidelity in every client (core-concepts §12).** `Benzene.Clients.Common.ProblemDocuments`
+- **Mesh: the forwarded `traceparent` carries the mesh span (mesh.md §3, §7.1 M2).** New
+  `UseMeshTraceContext()` (`Benzene.Mesh.Wire`) - per outbound route, or
+  `AddOutboundRouting(routing => routing.UseMeshTraceContext()...)` for every route (new
+  `OutboundRoutingBuilder.UseOnEveryRoute`) - stamps `MeshSpan.Current` (the span the invocation's
+  TraceEvent records) as `traceparent`, plus the joined `tracestate` (new `MeshSpan.TraceState`), on sends
+  and published events, so the downstream TraceEvent's `parentSpanId` is the upstream TraceEvent's
+  `spanId`. It pins the trace context (`Benzene.Clients.TraceContext.OutboundTraceContext`):
+  `UseW3CTraceContext()`, which forwards OpenTelemetry's `Activity.Current`, now leaves a pinned trace
+  context alone, so the mesh span wins whatever other tracing runs. Keep `UseW3CTraceContext()` for
+  OpenTelemetry without the mesh. `Benzene.Mesh.Wire` now references `Benzene.Clients`.
+ (core-concepts §12).** `Benzene.Clients.Common.ProblemDocuments`
   rebuilds a failed result's `errors` (`message`, `field`, `code`, in order) from a received problem
   document and attaches it for `result.GetProblem()`. The plain REST client (`UseHttp` /
   `HttpContextConverter`) now reads a non-success `application/problem+json` response (status still from

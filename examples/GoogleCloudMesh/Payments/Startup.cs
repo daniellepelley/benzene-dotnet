@@ -8,6 +8,7 @@ using Benzene.Microsoft.Dependencies;
 using Benzene.ResponseEvents;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Benzene.Mesh.Wire;
 
 namespace Benzene.Examples.GoogleCloudMesh.Payments;
 
@@ -25,6 +26,9 @@ public class Startup : BenzeneStartUp
                 new ResponseEventDefinition("payment:captured", typeof(OutboundPaymentCaptured)));
             x.AddPubSubPublisher();
             x.AddOutboundRouting(routing => routing
+                // Forward the mesh span (mesh.md §3, M2) on every route, so a downstream TraceEvent names this
+                // invocation's span as its parent - and the cloud service's M2 self-check reports it wired.
+                .UseMeshTraceContext()
                 .Route("shipment:book", pipeline => pipeline.UsePubSub(Environment.GetEnvironmentVariable("SHIPMENT_BOOK_TOPIC") ?? "shipment-book"))
                 .Route("payment:captured", pipeline => pipeline.UsePubSub(Environment.GetEnvironmentVariable("PAYMENT_CAPTURED_TOPIC") ?? "payment-captured")));
         });

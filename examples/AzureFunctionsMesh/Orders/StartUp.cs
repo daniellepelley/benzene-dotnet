@@ -9,6 +9,7 @@ using Benzene.Microsoft.Dependencies;
 using Benzene.ResponseEvents;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Benzene.Mesh.Wire;
 
 namespace Benzene.Examples.AzureFunctionsMesh.Orders;
 
@@ -34,6 +35,9 @@ public class StartUp : BenzeneStartUp
             x.AddServiceBusSender(Environment.GetEnvironmentVariable("PAYMENTS_QUEUE") ?? "payments");
             x.AddEventHubProducer(Environment.GetEnvironmentVariable("ORDER_PLACED_HUB") ?? "order-placed");
             x.AddOutboundRouting(routing => routing
+                // Forward the mesh span (mesh.md §3, M2) on every route, so a downstream TraceEvent names this
+                // invocation's span as its parent - and the cloud service's M2 self-check reports it wired.
+                .UseMeshTraceContext()
                 .Route("payment:take", pipeline => pipeline.UseServiceBus(sb => sb.UseServiceBusClient()))
                 .Route("order:placed", pipeline => pipeline.UseEventHub(eh => eh.UseEventHubClient())));
         });

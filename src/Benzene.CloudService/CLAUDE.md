@@ -30,10 +30,13 @@ Core setup) remains the full-control path and this package must never be require
   `ContractDocumentProfile`, outside both hashes; `missing` from R1–R5/R7 only, M1/M2 **never**)
   through the `ContractDocumentDeployment` the builder registers (`runtime: dotnet`, `placement` -
   default `self-hosted` - and `profile`). R5 is "answers `benzene:spec` wherever the transport carries
-  a reply, and `/benzene/spec`". M2's note records the known .NET gap: the self-check sees the inbound
-  join only; outbound forwarding (sends and published events alike - one `IBenzeneMessageSender` route
-  mechanism) is each route's `UseW3CTraceContext()`, which stamps `Activity.Current`, not
-  `MeshSpan.Current`. It reports *provisioning*, not runtime state — runtime degradation is not a
+  a reply, and `/benzene/spec`". M2 reflects both halves: the inbound join (`UseMeshTrace`, wired
+  with a collector or trace exporter) **and** outbound forwarding of the mesh span - satisfied only when
+  the container's outbound routing forwards `MeshSpan.Current` on every route
+  (`routing.UseMeshTraceContext()`, which registers `MeshTraceContextForwarding`) or has no outbound
+  routes at all; outbound routes without it (e.g. only `UseW3CTraceContext()`, which stamps OpenTelemetry's
+  `Activity.Current`) leave M2 unsatisfied with a note saying what to wire. Read from the registrations
+  made before `UseBenzeneCloudService` (the hosts' services-then-pipeline order). It reports *provisioning*, not runtime state — runtime degradation is not a
   conformance failure (profile §4).
 - `CloudServiceDocumentSource` — the registration body. `Get(resolver)` derives the complete
   contract document through `SpecBuilder` and the same `SpecCache` entry `benzene:spec` serves from, so

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Benzene.Abstractions.DI;
 using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Abstractions.MessageHandlers.Mappers;
+using Benzene.Clients;
 using Benzene.Abstractions.Middleware;
 using Benzene.Core.MessageHandlers;
 using Benzene.Core.Middleware;
@@ -66,10 +67,16 @@ public static class Extensions
             var headers = messageGetter.GetHeaders(context);
 
             TryGetHeader(headers, "traceparent", out var traceparent);
+            string? traceState = null;
             if (!Traceparent.TryParse(traceparent, out var traceId, out var parentSpanId))
             {
                 traceId = Traceparent.NewId(16);
                 parentSpanId = string.Empty;
+            }
+            else if (TryGetHeader(headers, "tracestate", out var inboundTraceState))
+            {
+                // W3C: tracestate travels with a valid traceparent only (a fresh trace drops it).
+                traceState = inboundTraceState;
             }
 
             var traceEvent = new MeshTraceEvent
@@ -87,7 +94,7 @@ public static class Extensions
 
             var stopwatch = Stopwatch.StartNew();
             var previousSpan = MeshSpan.Current;
-            MeshSpan.Current = new MeshSpan(traceEvent.TraceId, traceEvent.SpanId);
+            MeshSpan.Current = new MeshSpan(traceEvent.TraceId, traceEvent.SpanId, traceState);
             try
             {
                 await next();
@@ -111,6 +118,45 @@ public static class Extensions
                 }
             }
         }));
+    }
+
+    /// <summary>
+    /// Forwards the mesh span on this outbound route (mesh.md §3, §7.1 M2): every send through it - a
+    /// send, one-way or with a reply, or a published event (<c>Benzene.ResponseEvents</c> publishes
+    /// through the same routes) - carries <c>traceparent: 00-&lt;traceId&gt;-&lt;spanId&gt;-01</c> built
+    /// from <see cref="MeshSpan.Current"/>, the span the invocation's TraceEvent records, so the
+    /// downstream TraceEvent names it as <c>parentSpanId</c>; and the joined <c>tracestate</c>, unchanged.
+    /// With no mesh span (an invocation <see cref="UseMeshTrace{TContext}"/> did not trace) it does nothing
+    /// - degrade, never fabricate.
+    /// </summary>
+    /// <remarks>
+    /// The mesh span wins over any trace context already on the send and is pinned
+    /// (<c>Benzene.Clients.TraceContext.OutboundTraceContext</c>) so <c>UseW3CTraceContext()</c> - which
+    /// forwards OpenTelemetry's <c>Activity.Current</c>, a different span - leaves it alone wherever it
+    /// sits in the route: "whatever other tracing the port also runs". Prefer the routing-wide
+    /// <see cref="UseMeshTraceContext(OutboundRoutingBuilder)"/>, which covers every route and is what the
+    /// Cloud Service's M2 self-check can see.
+    /// </remarks>
+    /// <param name="app">The outbound route's pipeline.</param>
+    /// <returns>The pipeline, for chaining.</returns>
+    public static IMiddlewarePipelineBuilder<OutboundContext> UseMeshTraceContext(this IMiddlewarePipelineBuilder<OutboundContext> app)
+    {
+        return app.Use(_ => new MeshTraceContextMiddleware());
+    }
+
+    /// <summary>
+    /// Forwards the mesh span on <b>every</b> outbound route (<see cref="OutboundRoutingBuilder.UseOnEveryRoute"/>):
+    /// the route-level <see cref="UseMeshTraceContext(IMiddlewarePipelineBuilder{OutboundContext})"/>, ahead
+    /// of each route's own middleware, on sends and published events alike - the outbound half of mesh.md
+    /// §7.1 M2. Also registers <see cref="MeshTraceContextForwarding"/>, which <c>UseBenzeneCloudService</c>'s
+    /// M2 self-check reads.
+    /// </summary>
+    /// <param name="routing">The outbound routing being built (<c>AddOutboundRouting(routing =&gt; ...)</c>).</param>
+    /// <returns>The routing builder, for chaining.</returns>
+    public static OutboundRoutingBuilder UseMeshTraceContext(this OutboundRoutingBuilder routing)
+    {
+        routing.Register(x => x.AddSingleton(MeshTraceContextForwarding.Instance));
+        return routing.UseOnEveryRoute(route => route.UseMeshTraceContext());
     }
 
     /// <summary>

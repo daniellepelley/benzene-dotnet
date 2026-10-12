@@ -100,6 +100,26 @@ public sealed class CloudServiceProfileReport
     /// <summary>The contract document's <c>profile</c> field (contract-document.md §1): the profile's missing ids only.</summary>
     public ContractDocumentProfile ToProfile() => new(ProfileName, Missing);
 
+    /// <summary>M2's note when the inbound join is wired and every outbound route forwards the mesh span.</summary>
+    internal const string OutboundForwardingWired =
+        "inbound traceparent joined (UseMeshTrace); the mesh span (MeshSpan.Current, the span each TraceEvent records) " +
+        "is forwarded as traceparent/tracestate on every outbound route - sends and published events alike, which share " +
+        "the IBenzeneMessageSender routes - by OutboundRoutingBuilder.UseMeshTraceContext(); a raw IBenzeneMessageClient " +
+        "call outside the routes must set it itself (MeshSpan.Current.ToTraceparent())";
+
+    /// <summary>M2's note when outbound routes are registered but do not all forward the mesh span.</summary>
+    internal const string OutboundForwardingMissing =
+        "inbound traceparent is joined (UseMeshTrace), but the outbound routes do not forward the mesh span: call " +
+        "UseMeshTraceContext() on the OutboundRoutingBuilder (AddOutboundRouting(routing => routing.UseMeshTraceContext()...)) " +
+        "so every send and published event carries the span each TraceEvent records. UseW3CTraceContext() forwards " +
+        "OpenTelemetry's Activity.Current, a different span, and a per-route UseMeshTraceContext() is not visible to this self-check";
+
+    /// <summary>M2's note when the inbound join is wired and the container had no outbound routes when the service was wired.</summary>
+    internal const string NoOutboundRoutes =
+        "inbound traceparent joined (UseMeshTrace); no outbound routes were registered when the cloud service was wired, so " +
+        "there is nothing to forward - register routes before UseBenzeneCloudService, with " +
+        "OutboundRoutingBuilder.UseMeshTraceContext(), so this self-check sees them";
+
     /// <summary>
     /// Evaluates the profile and the meshed-service claim. <paramref name="traceExporter"/> must be the
     /// exact value <c>UseBenzeneCloudService</c> resolves and wires <c>UseMeshTrace</c> with (or null when
@@ -107,20 +127,8 @@ public sealed class CloudServiceProfileReport
     /// so the report can never claim trace propagation the pipeline didn't actually wire (#167; see
     /// Extensions.cs, where the two share this one resolved value).
     /// </summary>
-    /// <summary>
-    /// The known .NET M2 gap, carried on M2's note when the inbound join is wired: the self-check sees the
-    /// inbound half only. Outbound forwarding is the outbound route's <c>UseW3CTraceContext()</c> - sends and
-    /// published events alike, since <c>Benzene.ResponseEvents</c> publishes through the same
-    /// <c>IBenzeneMessageSender</c> routes - which the cloud service does not own and stamps from
-    /// <c>Activity.Current</c>, not from the mesh span (<c>MeshSpan.Current</c>).
-    /// </summary>
-    internal const string OutboundPropagationGap =
-        "inbound traceparent is joined (UseMeshTrace); outbound forwarding - on sends and published events alike, " +
-        "which share the IBenzeneMessageSender routes - is each outbound route's UseW3CTraceContext(), which this " +
-        "self-check cannot see and which stamps Activity.Current rather than the mesh span (MeshSpan.Current): " +
-        "wire it on every route, or forward MeshSpan.Current.ToTraceparent() yourself";
-
-    internal static CloudServiceProfileReport Evaluate(CloudServiceBuilder builder, IMeshTraceExporter? traceExporter)
+    internal static CloudServiceProfileReport Evaluate(CloudServiceBuilder builder, IMeshTraceExporter? traceExporter,
+        OutboundTraceForwarding outbound = OutboundTraceForwarding.NoRoutes)
     {
         var mesh = builder.MeshEnabled;
         var collector = builder.CollectorEnvelopeUrl != null;
@@ -148,12 +156,31 @@ public sealed class CloudServiceProfileReport
                 !mesh ? "mesh declined via WithoutMesh(): no registration, heartbeats or traces"
                     : !collector ? "no collector configured (WithCollector): the registration, heartbeat and trace feeds have no destination"
                     : null),
-            new CloudServiceRequirement("M2", "Trace context join and propagation (inbound join; traceparent forwarded on every outbound send and published event)", mesh && traceExporter != null,
+            new CloudServiceRequirement("M2", "Trace context join and propagation (inbound join; traceparent forwarded on every outbound send and published event)",
+                mesh && traceExporter != null && outbound != OutboundTraceForwarding.RoutesWithoutMeshForwarding,
                 !mesh ? "mesh declined via WithoutMesh(): the trace middleware that joins traceparent is not wired"
                     : traceExporter == null ? "no trace exporter configured (WithTraceExporter) and no collector URL: UseMeshTrace is not wired"
-                    : OutboundPropagationGap)
+                    : outbound switch
+                    {
+                        OutboundTraceForwarding.MeshForwardingOnEveryRoute => OutboundForwardingWired,
+                        OutboundTraceForwarding.RoutesWithoutMeshForwarding => OutboundForwardingMissing,
+                        _ => NoOutboundRoutes
+                    })
         };
 
         return new CloudServiceProfileReport(profile, meshed);
     }
+}
+
+/// <summary>What the container's outbound routing forwards, as the M2 self-check sees it when the service is wired.</summary>
+internal enum OutboundTraceForwarding
+{
+    /// <summary>No outbound routes are registered: nothing to forward.</summary>
+    NoRoutes,
+
+    /// <summary>Outbound routes are registered without the routing-wide <c>UseMeshTraceContext()</c>.</summary>
+    RoutesWithoutMeshForwarding,
+
+    /// <summary><c>OutboundRoutingBuilder.UseMeshTraceContext()</c>: every route forwards the mesh span.</summary>
+    MeshForwardingOnEveryRoute
 }

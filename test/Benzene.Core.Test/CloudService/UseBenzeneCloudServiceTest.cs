@@ -8,10 +8,14 @@ using System.Threading.Tasks;
 using Benzene.Aws.Lambda.ApiGateway;
 using Benzene.Aws.Lambda.ApiGateway.TestHelpers;
 using Benzene.Aws.Lambda.Core;
+using Benzene.Clients;
+using Benzene.Clients.TraceContext;
 using Benzene.CloudService;
+using Benzene.Core.MessageHandlers.StartUpChecks;
 using Benzene.Core.Messages.BenzeneMessage;
 using Benzene.Core.Middleware;
 using Benzene.Mesh.Wire;
+using Benzene.Microsoft.Dependencies;
 using Benzene.Test.Examples;
 using Benzene.Testing;
 using Benzene.Aws.Lambda.Core.TestHelpers;
@@ -455,10 +459,46 @@ public class UseBenzeneCloudServiceTest
         var m2 = report.MeshRequirements.Single(x => x.Id == "M2");
         Assert.True(m2.Satisfied);
         Assert.Equal(new[] { "M1" }, report.MeshMissing);
-        // The self-check sees the inbound join only: M2's note names the outbound half (sends and
-        // published events, one route mechanism) it cannot see - the recorded .NET M2 gap.
-        Assert.Equal(CloudServiceProfileReport.OutboundPropagationGap, m2.Note);
+        // No outbound routes were registered: nothing to forward, and the note says how routes would be seen.
+        Assert.Equal(CloudServiceProfileReport.NoOutboundRoutes, m2.Note);
+    }
+
+    // mesh.md §3 / §7.1 M2: the forwarded traceparent must carry the mesh span. The self-check reflects
+    // whether the outbound routing forwards it.
+
+    [Fact]
+    public void ProfileReport_OutboundRoutesWithoutMeshForwarding_M2IsNotSatisfied()
+    {
+        var report = BuildReport(cloud => cloud.WithCollector("http://collector/benzene/invoke"),
+            services => services.UsingBenzene(x => x
+                // The route is a stand-in (no transport); only the wiring is under test.
+                .AddBenzeneStartUpChecks(Benzene.Abstractions.StartUpChecks.BenzeneStartUpCheckMode.Disabled)
+                .AddOutboundRouting(routing => routing
+                .Route("payments:capture", route => route.UseW3CTraceContext().OnRequest(_ => { })))));
+
+        var m2 = report.MeshRequirements.Single(x => x.Id == "M2");
+        Assert.False(m2.Satisfied);
+        Assert.Equal(CloudServiceProfileReport.OutboundForwardingMissing, m2.Note);
+        Assert.Equal(new[] { "M2" }, report.MeshMissing);
+        Assert.False(report.IsMeshed);
+    }
+
+    [Fact]
+    public void ProfileReport_OutboundRoutingForwardsTheMeshSpan_M2IsSatisfied()
+    {
+        var report = BuildReport(cloud => cloud.WithCollector("http://collector/benzene/invoke"),
+            services => services.UsingBenzene(x => x
+                // The route is a stand-in (no transport); only the wiring is under test.
+                .AddBenzeneStartUpChecks(Benzene.Abstractions.StartUpChecks.BenzeneStartUpCheckMode.Disabled)
+                .AddOutboundRouting(routing => routing
+                .UseMeshTraceContext()
+                .Route("payments:capture", route => route.OnRequest(_ => { })))));
+
+        var m2 = report.MeshRequirements.Single(x => x.Id == "M2");
+        Assert.True(m2.Satisfied);
+        Assert.Equal(CloudServiceProfileReport.OutboundForwardingWired, m2.Note);
         Assert.Contains("published events", m2.Note);
+        Assert.True(report.IsMeshed);
     }
 
     private sealed class NoOpMeshTraceExporter : IMeshTraceExporter
@@ -466,11 +506,16 @@ public class UseBenzeneCloudServiceTest
         public void Export(MeshTraceEvent traceEvent) { }
     }
 
-    private static CloudServiceProfileReport BuildReport(Action<ICloudServiceBuilder>? configure)
+    private static CloudServiceProfileReport BuildReport(Action<ICloudServiceBuilder>? configure,
+        Action<global::Microsoft.Extensions.DependencyInjection.IServiceCollection>? configureServices = null)
     {
         CloudServiceProfileReport? report = null;
         new InlineAwsLambdaStartUp()
-            .ConfigureServices(services => services.ConfigureServiceCollection())
+            .ConfigureServices(services =>
+            {
+                services.ConfigureServiceCollection();
+                configureServices?.Invoke(services);
+            })
             .Configure(app => app
                 .UseApiGateway(apiGateway => apiGateway
                     .UseBenzeneCloudService("orders", cloud =>

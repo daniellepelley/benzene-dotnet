@@ -8,6 +8,7 @@ using Benzene.Microsoft.Dependencies;
 using Benzene.ResponseEvents;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Benzene.Mesh.Wire;
 
 namespace Benzene.Examples.GoogleCloudMesh.Orders;
 
@@ -27,6 +28,9 @@ public class Startup : BenzeneStartUp
             x.AddPubSubPublisher();
             // Wire the runtime Pub/Sub routes: each Benzene topic → the target Pub/Sub topic (from env).
             x.AddOutboundRouting(routing => routing
+                // Forward the mesh span (mesh.md §3, M2) on every route, so a downstream TraceEvent names this
+                // invocation's span as its parent - and the cloud service's M2 self-check reports it wired.
+                .UseMeshTraceContext()
                 .Route("payment:take", pipeline => pipeline.UsePubSub(Environment.GetEnvironmentVariable("PAYMENT_TAKE_TOPIC") ?? "payment-take"))
                 .Route("order:placed", pipeline => pipeline.UsePubSub(Environment.GetEnvironmentVariable("ORDER_PLACED_TOPIC") ?? "order-placed")));
         });

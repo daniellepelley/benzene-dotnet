@@ -14,10 +14,23 @@ public class MeshSpan
 {
     private static readonly AsyncLocal<MeshSpan?> Ambient = new();
 
+    /// <summary>Initializes a span with no <c>tracestate</c>.</summary>
+    /// <param name="traceId">The trace id (32 lowercase hex).</param>
+    /// <param name="spanId">This invocation's span id (16 lowercase hex) - the one its TraceEvent records.</param>
     public MeshSpan(string traceId, string spanId)
+        : this(traceId, spanId, null)
+    {
+    }
+
+    /// <summary>Initializes a span carrying the caller's W3C <c>tracestate</c>, forwarded unchanged.</summary>
+    /// <param name="traceId">The trace id (32 lowercase hex).</param>
+    /// <param name="spanId">This invocation's span id (16 lowercase hex) - the one its TraceEvent records.</param>
+    /// <param name="traceState">The inbound <c>tracestate</c> joined with the trace, or null.</param>
+    public MeshSpan(string traceId, string spanId, string? traceState)
     {
         TraceId = traceId;
         SpanId = spanId;
+        TraceState = string.IsNullOrEmpty(traceState) ? null : traceState;
     }
 
     /// <summary>The traced invocation currently executing on this async flow, or null when unmeshed
@@ -31,6 +44,12 @@ public class MeshSpan
     public string TraceId { get; }
 
     public string SpanId { get; }
+
+    /// <summary>
+    /// The W3C <c>tracestate</c> that arrived with the joined <c>traceparent</c>, carried forward unchanged
+    /// (wire-contracts §2; mesh.md §7.1, M2); null when there was none, or the trace started here.
+    /// </summary>
+    public string? TraceState { get; }
 
     /// <summary>Renders the span as a W3C traceparent header value: version 00, this span as the
     /// parent-id, sampled flag set.</summary>

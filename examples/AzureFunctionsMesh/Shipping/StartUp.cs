@@ -11,6 +11,7 @@ using Benzene.Microsoft.Dependencies;
 using Benzene.ResponseEvents;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Benzene.Mesh.Wire;
 
 namespace Benzene.Examples.AzureFunctionsMesh.Shipping;
 
@@ -29,6 +30,9 @@ public class StartUp : BenzeneStartUp
             x.AddResponseEventDeclarations((IMessageDefinition)new ResponseEventDefinition("shipment:dispatched", typeof(OutboundShipmentDispatched)));
             x.AddEventGridPublisher();
             x.AddOutboundRouting(routing => routing
+                // Forward the mesh span (mesh.md §3, M2) on every route, so a downstream TraceEvent names this
+                // invocation's span as its parent - and the cloud service's M2 self-check reports it wired.
+                .UseMeshTraceContext()
                 .Route("shipment:dispatched", pipeline => pipeline.UseEventGrid("shipping-api", eg => eg.UseEventGridClient())));
         });
 

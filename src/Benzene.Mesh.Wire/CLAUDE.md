@@ -36,8 +36,21 @@ pipeline: this package is the *wire contract*; the aggregator remains the pull-b
   heartbeats.
 - `Extensions.UseMeshTrace(info, exporter, statusReader)` - wire it
   **outermost**; per-invocation TraceEvent with traceparent join, `MeshSpan.Current` set across
-  `next()`, status read back via `IMeshStatusReader<TContext>` (BenzeneMessage reader ships here;
-  other transports add their own, following the `IMessageGetter<TContext>` mapper idiom).
+  `next()` (carrying the joined inbound `tracestate` as `MeshSpan.TraceState`), status read back via
+  `IMeshStatusReader<TContext>` (BenzeneMessage reader ships here; other transports add their own,
+  following the `IMessageGetter<TContext>` mapper idiom).
+- **Outbound forwarding (mesh.md §3 / §7.1 M2) - `UseMeshTraceContext()`.** `MeshTraceContextMiddleware`
+  stamps `MeshSpan.Current`'s `traceparent` (the span the invocation's TraceEvent records) and
+  `tracestate` onto an outbound route's headers and pins them (`Benzene.Clients.TraceContext.OutboundTraceContext`)
+  so `UseW3CTraceContext()` - OpenTelemetry's `Activity.Current`, a different span - cannot overwrite
+  them in either order; no mesh span → nothing stamped. `routing.UseMeshTraceContext()` on the
+  `OutboundRoutingBuilder` puts it on **every** route (`UseOnEveryRoute`, sends and published events
+  alike) and registers `MeshTraceContextForwarding`, which the Cloud Service's M2 self-check reads; the
+  route-level `pipeline.UseMeshTraceContext()` is for a single route. Keep `UseW3CTraceContext()` for an
+  app that runs OpenTelemetry without the mesh. This package references `Benzene.Clients` for it.
+  Tests: `test/Benzene.Core.Test/Clients/MeshTraceContextForwardingTest.cs` (downstream TraceEvent
+  `parentSpanId` == upstream TraceEvent `spanId`, for a send, a published event, and with OpenTelemetry
+  also forwarding).
 - `HttpMeshTraceExporter` - bounded channel (DropWrite), batches to a collector's envelope
   endpoint as `mesh:traces`. Lossy by design in every failure mode (§4); `DisposeAsync` flushes
   the tail and is idempotent. Implements **both** `IAsyncDisposable` and `IDisposable`: MS DI's

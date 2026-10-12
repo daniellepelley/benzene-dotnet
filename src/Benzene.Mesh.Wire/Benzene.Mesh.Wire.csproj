@@ -11,6 +11,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Benzene.Abstractions.MessageHandlers\Benzene.Abstractions.MessageHandlers.csproj" />
+    <!-- UseMeshTraceContext: forwarding the mesh span on outbound routes (OutboundContext) - mesh.md §3 / M2. -->
+    <ProjectReference Include="..\Benzene.Clients\Benzene.Clients.csproj" />
     <ProjectReference Include="..\Benzene.Core.MessageHandlers\Benzene.Core.MessageHandlers.csproj" />
     <ProjectReference Include="..\Benzene.Core.Messages\Benzene.Core.Messages.csproj" />
     <ProjectReference Include="..\Benzene.Core.Middleware\Benzene.Core.Middleware.csproj" />

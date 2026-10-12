@@ -10,6 +10,14 @@ namespace Benzene.Clients.TraceContext;
 /// <see cref="TraceContextBenzeneMessageClient"/> - see
 /// <c>work/archive/benzene-clients-redesign-plan-2026-07.md</c> §2.4.
 /// </summary>
+/// <remarks>
+/// For an application that runs OpenTelemetry (or any <see cref="Activity"/>-based tracing) <b>without</b>
+/// the mesh. A meshed service forwards the mesh span instead - <c>Benzene.Mesh.Wire</c>'s
+/// <c>UseMeshTraceContext()</c> - because mesh.md §3 / M2 requires the forwarded <c>traceparent</c> to
+/// carry the span the invocation's TraceEvent records, and <c>Activity.Current</c> is a different span.
+/// When both run on a route, this middleware leaves a trace context the mesh pinned
+/// (<see cref="OutboundTraceContext"/>) untouched, whichever runs first.
+/// </remarks>
 public class W3CTraceContextMiddleware : IMiddleware<OutboundContext>
 {
     /// <summary>Gets the name of this middleware.</summary>
@@ -23,7 +31,7 @@ public class W3CTraceContextMiddleware : IMiddleware<OutboundContext>
     public Task HandleAsync(OutboundContext context, Func<Task> next)
     {
         var activity = Activity.Current;
-        if (activity != null)
+        if (activity != null && !OutboundTraceContext.IsPinned(context))
         {
             context.Headers["traceparent"] = activity.Id!;
             if (!string.IsNullOrEmpty(activity.TraceStateString))
