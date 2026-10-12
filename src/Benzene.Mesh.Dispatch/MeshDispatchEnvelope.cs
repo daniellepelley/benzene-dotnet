@@ -53,4 +53,27 @@ public class MeshDispatchResult
 
     /// <summary>The response body the service returned.</summary>
     public string? Body { get; }
+
+    /// <summary>
+    /// The result of a dispatch that failed in transport before any reply arrived - no connection, a refused
+    /// or reset request, the client's own timeout (transport-bindings.md §1, spec 1.1: a result, not an
+    /// exception): <c>timeout</c> when a <see cref="TimeoutException"/> is in the exception's chain (e.g.
+    /// <c>HttpClient.Timeout</c>), otherwise <c>service-unavailable</c>; unsuccessful, the exception's message
+    /// as the body. The caller's own cancellation (a <c>UseTimeout()</c> deadline on the dispatch) is not one:
+    /// it still propagates.
+    /// </summary>
+    /// <param name="exception">What the dispatch threw.</param>
+    public static MeshDispatchResult TransportFailed(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        var timedOut = false;
+        for (var current = exception; current != null && !timedOut; current = current.InnerException)
+        {
+            timedOut = current is TimeoutException;
+        }
+
+        return new MeshDispatchResult(
+            timedOut ? Benzene.Results.BenzeneResultStatus.Timeout : Benzene.Results.BenzeneResultStatus.ServiceUnavailable,
+            exception.Message, isSuccessful: false);
+    }
 }

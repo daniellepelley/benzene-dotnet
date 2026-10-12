@@ -18,7 +18,7 @@ namespace Benzene.Clients.Azure.EventGrid;
 /// <see cref="EventGridEventSchemaContextConverter{T}"/> for the classic Event Grid schema instead.
 /// </summary>
 /// <typeparam name="T">The type of the outgoing message.</typeparam>
-public class EventGridContextConverter<T> : IContextConverter<IBenzeneClientContext<T, Void>, EventGridSendMessageContext>
+public class EventGridContextConverter<T> : IContextConverter<IBenzeneClientContext<T, Void>, EventGridSendMessageContext>, ITransportFailureMapper<IBenzeneClientContext<T, Void>>
 {
     private readonly string _source;
     private readonly ISerializer _serializer;
@@ -79,5 +79,15 @@ public class EventGridContextConverter<T> : IContextConverter<IBenzeneClientCont
     {
         contextIn.Response = BenzeneResult.Accepted<Void>();
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// A send that fails in transport becomes a <c>timeout</c>/<c>service-unavailable</c> result (<see cref="TransportFailure"/>) rather than an exception (transport-bindings.md §1, spec 1.1).
+    /// </summary>
+    /// <param name="contextIn">The context to set the result on.</param>
+    /// <param name="exception">What the send threw.</param>
+    public void MapTransportFailure(IBenzeneClientContext<T, Void> contextIn, Exception exception)
+    {
+        contextIn.Response = TransportFailure.ToResult<Void>(exception);
     }
 }

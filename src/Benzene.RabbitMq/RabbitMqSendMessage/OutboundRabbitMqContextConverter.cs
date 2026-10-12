@@ -22,7 +22,7 @@ namespace Benzene.RabbitMq.RabbitMqSendMessage;
 /// acknowledgement, so the response this converter produces is always <c>IBenzeneResult&lt;Void&gt;</c> -
 /// a topic routed here must be sent via <c>IBenzeneMessageSender.SendAsync&lt;TRequest,Void&gt;</c>.
 /// </remarks>
-public class OutboundRabbitMqContextConverter : IContextConverter<OutboundContext, RabbitMqSendMessageContext>
+public class OutboundRabbitMqContextConverter : IContextConverter<OutboundContext, RabbitMqSendMessageContext>, ITransportFailureMapper<OutboundContext>
 {
     private readonly ISerializer _serializer;
     private readonly string _exchange;
@@ -89,5 +89,15 @@ public class OutboundRabbitMqContextConverter : IContextConverter<OutboundContex
             ? BenzeneResult.Accepted<Void>()
             : BenzeneResult.ServiceUnavailable<Void>("RabbitMQ message was not published");
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// A send that fails in transport becomes a <see cref="TransportFailure"/> on the outbound context rather than an exception (transport-bindings.md §1, spec 1.1).
+    /// </summary>
+    /// <param name="contextIn">The context to set the result on.</param>
+    /// <param name="exception">What the send threw.</param>
+    public void MapTransportFailure(OutboundContext contextIn, Exception exception)
+    {
+        contextIn.Response = TransportFailure.From(exception);
     }
 }

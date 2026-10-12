@@ -84,7 +84,7 @@ public class KafkaBenzeneMessageClient : IBenzeneMessageClient
         catch (Exception ex)
         {
             _logger.LogError(ex, "Sending message {receiverTopic} failed", request.Topic);
-            return BenzeneResult.ServiceUnavailable<TResponse>(ex.Message);
+            return TransportFailure.ToResult<TResponse>(ex);
         }
     }
 

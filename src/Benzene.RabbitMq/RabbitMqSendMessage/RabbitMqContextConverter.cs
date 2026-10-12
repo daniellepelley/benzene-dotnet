@@ -17,7 +17,7 @@ namespace Benzene.RabbitMq.RabbitMqSendMessage;
 /// correlation/trace/version headers reach the wire - matching Kafka's header forwarding.
 /// </summary>
 /// <typeparam name="T">The request message type.</typeparam>
-public class RabbitMqContextConverter<T> : IContextConverter<IBenzeneClientContext<T, Void>, RabbitMqSendMessageContext>
+public class RabbitMqContextConverter<T> : IContextConverter<IBenzeneClientContext<T, Void>, RabbitMqSendMessageContext>, ITransportFailureMapper<IBenzeneClientContext<T, Void>>
 {
     private readonly ISerializer _serializer;
     private readonly string _exchange;
@@ -73,5 +73,15 @@ public class RabbitMqContextConverter<T> : IContextConverter<IBenzeneClientConte
             ? BenzeneResult.Accepted<Void>()
             : BenzeneResult.ServiceUnavailable<Void>("RabbitMQ message was not published");
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// A send that fails in transport becomes a <c>timeout</c>/<c>service-unavailable</c> result (<see cref="Benzene.Clients.TransportFailure"/>) rather than an exception (transport-bindings.md §1, spec 1.1).
+    /// </summary>
+    /// <param name="contextIn">The context to set the result on.</param>
+    /// <param name="exception">What the send threw.</param>
+    public void MapTransportFailure(IBenzeneClientContext<T, Void> contextIn, Exception exception)
+    {
+        contextIn.Response = Benzene.Clients.TransportFailure.ToResult<Void>(exception);
     }
 }

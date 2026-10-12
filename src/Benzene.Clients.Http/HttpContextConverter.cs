@@ -9,7 +9,7 @@ using Benzene.Results;
 namespace Benzene.Clients.Http;
 
 /// <summary>Converts an <see cref="IBenzeneClientContext{TRequest,TResponse}"/> to a plain HTTP request/response.</summary>
-public class HttpContextConverter<TRequest, TResponse> : IContextConverter<IBenzeneClientContext<TRequest, TResponse>, HttpSendMessageContext>
+public class HttpContextConverter<TRequest, TResponse> : IContextConverter<IBenzeneClientContext<TRequest, TResponse>, HttpSendMessageContext>, ITransportFailureMapper<IBenzeneClientContext<TRequest, TResponse>>
 {
     private readonly ISerializer _serializer;
     private readonly string _verb;
@@ -97,5 +97,15 @@ public class HttpContextConverter<TRequest, TResponse> : IContextConverter<IBenz
         }
 
         contextIn.Response = httpResponse.StatusCode.Convert(response);
+    }
+
+    /// <summary>
+    /// A send that fails in transport becomes a <c>timeout</c>/<c>service-unavailable</c> result (<see cref="TransportFailure"/>) rather than an exception (transport-bindings.md §1, spec 1.1).
+    /// </summary>
+    /// <param name="contextIn">The context to set the result on.</param>
+    /// <param name="exception">What the send threw.</param>
+    public void MapTransportFailure(IBenzeneClientContext<TRequest, TResponse> contextIn, Exception exception)
+    {
+        contextIn.Response = TransportFailure.ToResult<TResponse>(exception);
     }
 }

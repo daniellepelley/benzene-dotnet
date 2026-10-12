@@ -98,7 +98,7 @@ public class SnsBenzeneMessageClient : IBenzeneMessageClient
         catch (Exception ex)
         {
             _logger.LogError(ex, "Sending message {receiverTopic} to {receiver} failed", request.Topic, _topicArn);
-            return BenzeneResult.ServiceUnavailable<TResponse>(ex.Message);
+            return TransportFailure.ToResult<TResponse>(ex);
         }
     }
 

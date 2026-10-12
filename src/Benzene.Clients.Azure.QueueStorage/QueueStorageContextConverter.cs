@@ -25,7 +25,7 @@ namespace Benzene.Clients.Azure.QueueStorage;
 /// directly via a <see cref="Azure.Storage.Queues.QueueClient"/> instead. See this package's
 /// <c>CLAUDE.md</c>.
 /// </remarks>
-public class QueueStorageContextConverter<T> : IContextConverter<IBenzeneClientContext<T, Void>, QueueStorageSendMessageContext>
+public class QueueStorageContextConverter<T> : IContextConverter<IBenzeneClientContext<T, Void>, QueueStorageSendMessageContext>, ITransportFailureMapper<IBenzeneClientContext<T, Void>>
 {
     private readonly ISerializer _serializer;
 
@@ -75,5 +75,15 @@ public class QueueStorageContextConverter<T> : IContextConverter<IBenzeneClientC
     {
         contextIn.Response = BenzeneResult.Accepted<Void>();
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// A send that fails in transport becomes a <c>timeout</c>/<c>service-unavailable</c> result (<see cref="TransportFailure"/>) rather than an exception (transport-bindings.md §1, spec 1.1).
+    /// </summary>
+    /// <param name="contextIn">The context to set the result on.</param>
+    /// <param name="exception">What the send threw.</param>
+    public void MapTransportFailure(IBenzeneClientContext<T, Void> contextIn, Exception exception)
+    {
+        contextIn.Response = TransportFailure.ToResult<Void>(exception);
     }
 }

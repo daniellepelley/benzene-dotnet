@@ -92,7 +92,7 @@ public class EventGridBenzeneMessageClient : IBenzeneMessageClient
         catch (Exception ex)
         {
             _logger.LogError(ex, "Sending message {receiverTopic} to Event Grid failed", request.Topic);
-            return BenzeneResult.ServiceUnavailable<TResponse>(ex.Message);
+            return TransportFailure.ToResult<TResponse>(ex);
         }
     }
 

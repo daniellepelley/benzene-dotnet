@@ -21,7 +21,7 @@ namespace Benzene.Clients.GoogleCloud.PubSub;
 /// Pub/Sub is fire-and-acknowledge (a successful publish returns a server message id, no payload), so a
 /// topic routed here must be sent via <c>IBenzeneMessageSender.SendAsync&lt;TRequest, Void&gt;</c>.
 /// </remarks>
-public class OutboundPubSubContextConverter : IContextConverter<OutboundContext, PubSubSendMessageContext>
+public class OutboundPubSubContextConverter : IContextConverter<OutboundContext, PubSubSendMessageContext>, ITransportFailureMapper<OutboundContext>
 {
     /// <summary>
     /// The default message-attribute key the topic is written to — kept in sync with the inbound
@@ -166,5 +166,15 @@ public class OutboundPubSubContextConverter : IContextConverter<OutboundContext,
     {
         contextIn.Response = BenzeneResult.Accepted<Void>();
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// A send that fails in transport becomes a <see cref="TransportFailure"/> on the outbound context rather than an exception (transport-bindings.md §1, spec 1.1).
+    /// </summary>
+    /// <param name="contextIn">The context to set the result on.</param>
+    /// <param name="exception">What the send threw.</param>
+    public void MapTransportFailure(OutboundContext contextIn, Exception exception)
+    {
+        contextIn.Response = TransportFailure.From(exception);
     }
 }

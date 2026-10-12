@@ -21,7 +21,7 @@ namespace Benzene.Clients.Azure.ServiceBus;
 /// converter produces is always <see cref="IBenzeneResult{Void}"/> - a topic routed here must be sent
 /// via <c>IBenzeneMessageSender.SendAsync&lt;TRequest,Void&gt;</c>.
 /// </remarks>
-public class OutboundServiceBusContextConverter : IContextConverter<OutboundContext, ServiceBusSendMessageContext>
+public class OutboundServiceBusContextConverter : IContextConverter<OutboundContext, ServiceBusSendMessageContext>, ITransportFailureMapper<OutboundContext>
 {
     /// <summary>
     /// The default application-property key the topic is written to. It is a single default, not a
@@ -83,5 +83,15 @@ public class OutboundServiceBusContextConverter : IContextConverter<OutboundCont
     {
         contextIn.Response = BenzeneResult.Accepted<Void>();
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// A send that fails in transport becomes a <see cref="TransportFailure"/> on the outbound context rather than an exception (transport-bindings.md §1, spec 1.1).
+    /// </summary>
+    /// <param name="contextIn">The context to set the result on.</param>
+    /// <param name="exception">What the send threw.</param>
+    public void MapTransportFailure(OutboundContext contextIn, Exception exception)
+    {
+        contextIn.Response = TransportFailure.From(exception);
     }
 }

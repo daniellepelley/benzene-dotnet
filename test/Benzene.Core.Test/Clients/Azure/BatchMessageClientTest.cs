@@ -84,7 +84,52 @@ public class BatchMessageClientTest
         Assert.All(result.Failures, f => Assert.Contains("boom", f.ErrorMessage));
     }
 
+    // transport-bindings §1 (spec 1.1): a batch that never reaches the broker is a result, not an exception.
+    [Fact]
+    public async Task ServiceBus_WhenCreatingTheBatchFails_ReportsEveryMessage_RatherThanThrowing()
+    {
+        var mockSender = new Mock<ServiceBusSender>();
+        mockSender.Setup(s => s.CreateMessageBatchAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ServiceBusException("no connection", ServiceBusFailureReason.ServiceCommunicationProblem));
+
+        var result = await new ServiceBusBatchMessageClient(mockSender.Object).SendBatchAsync(Requests(3));
+
+        Assert.Equal(new[] { 0, 1, 2 }, result.Failures.Select(f => f.Index).ToArray());
+        Assert.All(result.Failures, f => Assert.Contains("no connection", f.ErrorMessage));
+    }
+
+    [Fact]
+    public async Task ServiceBus_WhenRollingToANewBatchFails_ReportsTheUnsentRemainder()
+    {
+        var created = 0;
+        var mockSender = new Mock<ServiceBusSender>();
+        mockSender.Setup(s => s.CreateMessageBatchAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => ++created == 1
+                ? CapacityBatch(2)
+                : throw new ServiceBusException("connection reset", ServiceBusFailureReason.ServiceCommunicationProblem));
+        mockSender.Setup(s => s.SendMessagesAsync(It.IsAny<ServiceBusMessageBatch>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var result = await new ServiceBusBatchMessageClient(mockSender.Object).SendBatchAsync(Requests(5));
+
+        // The first batch (0, 1) was sent; the roll failed, so 2, 3 and 4 never were.
+        Assert.Equal(new[] { 2, 3, 4 }, result.Failures.Select(f => f.Index).ToArray());
+    }
+
     // ---- Event Hub ----
+
+    [Fact]
+    public async Task EventHub_WhenCreatingTheBatchFails_ReportsEveryEvent_RatherThanThrowing()
+    {
+        var mockProducer = new Mock<EventHubProducerClient>();
+        mockProducer.Setup(p => p.CreateBatchAsync(It.IsAny<CreateBatchOptions>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new System.Net.Http.HttpRequestException("no connection"));
+
+        var result = await new EventHubBatchMessageClient(mockProducer.Object).SendBatchAsync(Requests(3));
+
+        Assert.Equal(new[] { 0, 1, 2 }, result.Failures.Select(f => f.Index).OrderBy(i => i).ToArray());
+        Assert.All(result.Failures, f => Assert.Contains("no connection", f.ErrorMessage));
+    }
 
     private static EventDataBatch CapacityEventBatch(int capacity, CreateBatchOptions options)
     {

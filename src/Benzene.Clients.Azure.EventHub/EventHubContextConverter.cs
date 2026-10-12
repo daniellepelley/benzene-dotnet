@@ -16,7 +16,7 @@ namespace Benzene.Clients.Azure.EventHub;
 /// so that a Benzene client pipeline can send messages via Azure Event Hubs.
 /// </summary>
 /// <typeparam name="T">The type of the outgoing message.</typeparam>
-public class EventHubContextConverter<T> : IContextConverter<IBenzeneClientContext<T, Void>, EventHubSendMessageContext>
+public class EventHubContextConverter<T> : IContextConverter<IBenzeneClientContext<T, Void>, EventHubSendMessageContext>, ITransportFailureMapper<IBenzeneClientContext<T, Void>>
 {
     /// <summary>
     /// The default event-property key the topic is written to. It is a single default, not a
@@ -92,5 +92,15 @@ public class EventHubContextConverter<T> : IContextConverter<IBenzeneClientConte
     {
         contextIn.Response = BenzeneResult.Accepted<Void>();
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// A send that fails in transport becomes a <c>timeout</c>/<c>service-unavailable</c> result (<see cref="TransportFailure"/>) rather than an exception (transport-bindings.md §1, spec 1.1).
+    /// </summary>
+    /// <param name="contextIn">The context to set the result on.</param>
+    /// <param name="exception">What the send threw.</param>
+    public void MapTransportFailure(IBenzeneClientContext<T, Void> contextIn, Exception exception)
+    {
+        contextIn.Response = TransportFailure.ToResult<Void>(exception);
     }
 }

@@ -101,13 +101,26 @@ public class EventHubBatchMessageClient : IBenzeneBatchMessageClient
         // malformed event, and without the finally the batch would leak on that path. On a roll the old
         // batch is disposed and the local nulled before the next is created, so a failed CreateBatchAsync
         // can't leave the finally double-disposing it.
-        EventDataBatch? batch = await _producerClient.CreateBatchAsync(batchOptions);
+        // Creating a batch is the first call that reaches the hub: one that fails (no connection) fails
+        // every entry it would have carried rather than throwing (transport-bindings §1, spec 1.1).
+        EventDataBatch? batch;
+        try
+        {
+            batch = await _producerClient.CreateBatchAsync(batchOptions);
+        }
+        catch (System.Exception ex)
+        {
+            FailFrom(group, 0, ex, failures);
+            return;
+        }
+
         var batchIndices = new List<int>();
 
         try
         {
-            foreach (var (context, itemIndex) in group)
+            for (var position = 0; position < group.Count; position++)
             {
+                var (context, itemIndex) = group[position];
                 if (!batch.TryAdd(context.EventData))
                 {
                     if (batchIndices.Count == 0)
@@ -121,7 +134,17 @@ public class EventHubBatchMessageClient : IBenzeneBatchMessageClient
                     batch.Dispose();
                     batch = null;
 
-                    batch = await _producerClient.CreateBatchAsync(batchOptions);
+                    try
+                    {
+                        batch = await _producerClient.CreateBatchAsync(batchOptions);
+                    }
+                    catch (System.Exception ex)
+                    {
+                        // This and every later entry of the group were never sent.
+                        FailFrom(group, position, ex, failures);
+                        return;
+                    }
+
                     batchIndices = new List<int>();
 
                     if (!batch.TryAdd(context.EventData))
@@ -143,6 +166,14 @@ public class EventHubBatchMessageClient : IBenzeneBatchMessageClient
         finally
         {
             batch?.Dispose();
+        }
+    }
+
+    private static void FailFrom(List<(EventHubSendMessageContext Context, int Index)> group, int fromPosition, System.Exception ex, List<FailedBatchEntry> failures)
+    {
+        for (var position = fromPosition; position < group.Count; position++)
+        {
+            failures.Add(new FailedBatchEntry(group[position].Index, ex.GetType().Name, ex.Message));
         }
     }
 

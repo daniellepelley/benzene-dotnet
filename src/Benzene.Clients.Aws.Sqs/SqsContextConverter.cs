@@ -17,7 +17,7 @@ namespace Benzene.Clients.Aws.Sqs;
 /// a Benzene client pipeline can send messages via SQS.
 /// </summary>
 /// <typeparam name="T">The type of the outgoing message.</typeparam>
-public class SqsContextConverter<T> : IContextConverter<IBenzeneClientContext<T, Void>, SqsSendMessageContext>
+public class SqsContextConverter<T> : IContextConverter<IBenzeneClientContext<T, Void>, SqsSendMessageContext>, ITransportFailureMapper<IBenzeneClientContext<T, Void>>
 {
     /// <summary>
     /// The default message-attribute key the topic is written to. It is a single default, not a
@@ -115,5 +115,15 @@ public class SqsContextConverter<T> : IContextConverter<IBenzeneClientContext<T,
     {
         contextIn.Response = contextOut.Response.HttpStatusCode.Convert<Void>();
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// A send that fails in transport becomes a <c>timeout</c>/<c>service-unavailable</c> result (<see cref="TransportFailure"/>) rather than an exception (transport-bindings.md §1, spec 1.1).
+    /// </summary>
+    /// <param name="contextIn">The context to set the result on.</param>
+    /// <param name="exception">What the send threw.</param>
+    public void MapTransportFailure(IBenzeneClientContext<T, Void> contextIn, Exception exception)
+    {
+        contextIn.Response = TransportFailure.ToResult<Void>(exception);
     }
 }

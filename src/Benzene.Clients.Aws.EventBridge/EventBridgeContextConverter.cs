@@ -22,7 +22,7 @@ namespace Benzene.Clients.Aws.EventBridge;
 /// there are headers to send and the payload serializes to a JSON object; extra field is benign for
 /// non-Benzene consumers.
 /// </summary>
-public class EventBridgeContextConverter<T> : IContextConverter<IBenzeneClientContext<T, Void>, EventBridgeSendMessageContext>
+public class EventBridgeContextConverter<T> : IContextConverter<IBenzeneClientContext<T, Void>, EventBridgeSendMessageContext>, ITransportFailureMapper<IBenzeneClientContext<T, Void>>
 {
     /// <summary>Must match the inbound binding's <c>EventBridgeMessageHeadersGetter.EmbeddedHeadersKey</c>.</summary>
     public const string EmbeddedHeadersKey = "benzene-headers";
@@ -90,6 +90,16 @@ public class EventBridgeContextConverter<T> : IContextConverter<IBenzeneClientCo
         detail[EmbeddedHeadersKey] = embedded;
         return detail.ToJsonString();
     }
+
+    /// <summary>
+    /// A send that fails in transport becomes a <c>timeout</c>/<c>service-unavailable</c> result (<see cref="TransportFailure"/>) rather than an exception (transport-bindings.md §1, spec 1.1).
+    /// </summary>
+    /// <param name="contextIn">The context to set the result on.</param>
+    /// <param name="exception">What the send threw.</param>
+    public void MapTransportFailure(IBenzeneClientContext<T, Void> contextIn, Exception exception)
+    {
+        contextIn.Response = TransportFailure.ToResult<Void>(exception);
+    }
 }
 
 /// <summary>
@@ -116,4 +126,5 @@ public static class EventBridgeResultMapper
             ? BenzeneResult.Accepted<TResponse>()
             : BenzeneResultHttpMapper.Map<TResponse>(response.HttpStatusCode);
     }
+
 }

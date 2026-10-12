@@ -25,6 +25,24 @@ packages) — design §30.1 of `work/archive/medium-fixes-design-2026-08.md`:
   per send** — no per-entry ack — so a failed batch/chunk send reports *every* message in that
   batch as failed. Each transport's `CLAUDE.md` states which model it uses.
 
+### Transport failures are results (spec 1.1, transport-bindings §1)
+A send that fails in transport - no connection, refused/reset, the client's own deadline - before any
+reply arrives, or for a one-way client before the broker accepts the message, yields a result:
+- `TransportFailure` (`IBenzeneResult`, never successful) - `StatusOf(ex)` is `timeout` when a
+  `TimeoutException` is anywhere in the chain (`HttpClient.Timeout`, SDK timeouts, RabbitMQ confirm
+  waits), else `service-unavailable` (the ambient-cancel classification the gRPC/HTTP clients already
+  used). `ToResult<T>()` for any caller type.
+- Every outbound transport converter implements `Benzene.Abstractions.Middleware.ITransportFailureMapper<TContext>`;
+  `ContextConverterMiddleware` calls it when the inner (send) pipeline throws. Only the send is covered:
+  `CreateRequestAsync` (serialization) and `MapResponseAsync` still throw, and so does an
+  `OperationCanceledException` while the ambient token is cancelled (it belongs to whoever owns it).
+- `DefaultBenzeneMessageSender` turns a route's `TransportFailure` into the caller's
+  `IBenzeneResult<TResponse>` (any `TResponse` - no `OutboundResponseTypeMismatchException`), and a
+  route's own `UseTimeout()` deadline (`TimeoutException`) into a `timeout` result.
+- Callers that relied on an exception must read the result: `Benzene.Outbox`'s relay does
+  (`OutboxDispatcher` reschedules/parks an unsuccessful send).
+- Tests: `test/Benzene.Core.Test/Clients/TransportFailureTest.cs`.
+
 ### Outbound routing (current, 2026-07-17)
 The outbound mechanism from `work/archive/benzene-clients-redesign-plan-2026-07.md` - a single topic-keyed
 pipeline table. See that document for the full design and its now-complete 4-step migration plan

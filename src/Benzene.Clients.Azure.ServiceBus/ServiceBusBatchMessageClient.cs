@@ -56,7 +56,19 @@ public class ServiceBusBatchMessageClient : IBenzeneBatchMessageClient
         // (serialization) or TryAddMessage can throw mid-loop, and without the finally the batch would
         // leak on that path. On a roll, the old batch is disposed and the local nulled before creating
         // the next, so a failed CreateMessageBatchAsync can't leave the finally double-disposing it.
-        ServiceBusMessageBatch? batch = await _sender.CreateMessageBatchAsync();
+        // Creating a batch is the first call that reaches the broker: one that fails (no connection) fails
+        // every entry it would have carried rather than throwing (transport-bindings §1, spec 1.1).
+        ServiceBusMessageBatch? batch;
+        try
+        {
+            batch = await _sender.CreateMessageBatchAsync();
+        }
+        catch (System.Exception ex)
+        {
+            FailFrom(0, requests.Count, ex, failures);
+            return new BatchSendResult(failures);
+        }
+
         var batchIndices = new List<int>();
         var index = 0;
 
@@ -96,7 +108,17 @@ public class ServiceBusBatchMessageClient : IBenzeneBatchMessageClient
                     batch.Dispose();
                     batch = null;
 
-                    batch = await _sender.CreateMessageBatchAsync();
+                    try
+                    {
+                        batch = await _sender.CreateMessageBatchAsync();
+                    }
+                    catch (System.Exception ex)
+                    {
+                        // This and every later entry were never sent.
+                        FailFrom(index, requests.Count, ex, failures);
+                        return new BatchSendResult(failures);
+                    }
+
                     batchIndices = new List<int>();
 
                     if (!batch.TryAddMessage(message))
@@ -123,6 +145,14 @@ public class ServiceBusBatchMessageClient : IBenzeneBatchMessageClient
         }
 
         return new BatchSendResult(failures);
+    }
+
+    private static void FailFrom(int fromIndex, int count, System.Exception ex, List<FailedBatchEntry> failures)
+    {
+        for (var failedIndex = fromIndex; failedIndex < count; failedIndex++)
+        {
+            failures.Add(new FailedBatchEntry(failedIndex, ex.GetType().Name, ex.Message));
+        }
     }
 
     private async Task SendBatchAndTrackFailuresAsync(ServiceBusMessageBatch batch, List<int> batchIndices, List<FailedBatchEntry> failures)

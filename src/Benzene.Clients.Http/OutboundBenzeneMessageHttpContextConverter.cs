@@ -32,7 +32,7 @@ namespace Benzene.Clients.Http;
 /// a route terminating here can return a typed response, not just <c>Void</c>.
 /// </para>
 /// </remarks>
-public class OutboundBenzeneMessageHttpContextConverter : IContextConverter<OutboundContext, HttpSendMessageContext>
+public class OutboundBenzeneMessageHttpContextConverter : IContextConverter<OutboundContext, HttpSendMessageContext>, ITransportFailureMapper<OutboundContext>
 {
     private readonly string _url;
     private readonly ISerializer _serializer;
@@ -100,5 +100,15 @@ public class OutboundBenzeneMessageHttpContextConverter : IContextConverter<Outb
         // on only when it is an application/problem+json document, whose errors the sender then rebuilds.
         contextIn.Response = EnvelopeResponseReader.Read(httpResponse.StatusCode, body,
             httpResponse.Content.Headers.ContentType?.MediaType, out _);
+    }
+
+    /// <summary>
+    /// A send that fails in transport becomes a <see cref="TransportFailure"/> on the outbound context rather than an exception (transport-bindings.md §1, spec 1.1).
+    /// </summary>
+    /// <param name="contextIn">The context to set the result on.</param>
+    /// <param name="exception">What the send threw.</param>
+    public void MapTransportFailure(OutboundContext contextIn, Exception exception)
+    {
+        contextIn.Response = TransportFailure.From(exception);
     }
 }

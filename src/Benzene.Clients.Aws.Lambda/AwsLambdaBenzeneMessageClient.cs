@@ -100,7 +100,7 @@ namespace Benzene.Clients.Aws.Lambda
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Sending message {receiverTopic} to {receiver} failed", request.Topic, _lambdaName);
-                return BenzeneResult.ServiceUnavailable<TResponse>(ex.Message);
+                return TransportFailure.ToResult<TResponse>(ex);
             }
         }
 

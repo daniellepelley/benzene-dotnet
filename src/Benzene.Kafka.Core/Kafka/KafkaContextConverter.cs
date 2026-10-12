@@ -9,7 +9,7 @@ using Confluent.Kafka;
 namespace Benzene.Kafka.Core.Kafka;
 
 /// <summary>Converts an <see cref="IBenzeneClientContext{T,Void}"/> to a Kafka produce request/response.</summary>
-public class KafkaContextConverter<T> : IContextConverter<IBenzeneClientContext<T, Abstractions.Results.Void>, KafkaSendMessageContext>
+public class KafkaContextConverter<T> : IContextConverter<IBenzeneClientContext<T, Abstractions.Results.Void>, KafkaSendMessageContext>, ITransportFailureMapper<IBenzeneClientContext<T, Abstractions.Results.Void>>
 {
     private readonly ISerializer _serializer;
     private readonly string _keyHeader;
@@ -69,5 +69,15 @@ public class KafkaContextConverter<T> : IContextConverter<IBenzeneClientContext<
             ? BenzeneResult.Accepted<Abstractions.Results.Void>()
             : BenzeneResult.ServiceUnavailable<Abstractions.Results.Void>("Kafka message was not persisted");
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// A send that fails in transport becomes a <c>timeout</c>/<c>service-unavailable</c> result (<see cref="Benzene.Clients.TransportFailure"/>) rather than an exception (transport-bindings.md §1, spec 1.1).
+    /// </summary>
+    /// <param name="contextIn">The context to set the result on.</param>
+    /// <param name="exception">What the send threw.</param>
+    public void MapTransportFailure(IBenzeneClientContext<T, Abstractions.Results.Void> contextIn, Exception exception)
+    {
+        contextIn.Response = Benzene.Clients.TransportFailure.ToResult<Abstractions.Results.Void>(exception);
     }
 }

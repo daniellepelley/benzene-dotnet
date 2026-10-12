@@ -88,7 +88,7 @@ public class QueueStorageBenzeneMessageClient : IBenzeneMessageClient
         catch (Exception ex)
         {
             _logger.LogError(ex, "Sending message {receiverTopic} to Queue Storage failed", request.Topic);
-            return BenzeneResult.ServiceUnavailable<TResponse>(ex.Message);
+            return TransportFailure.ToResult<TResponse>(ex);
         }
     }
 

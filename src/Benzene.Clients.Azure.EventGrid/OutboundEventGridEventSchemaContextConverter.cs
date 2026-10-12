@@ -22,7 +22,7 @@ namespace Benzene.Clients.Azure.EventGrid;
 /// bag - unlike <see cref="OutboundEventGridContextConverter"/> (CloudEvents), headers are not
 /// forwarded here.
 /// </remarks>
-public class OutboundEventGridEventSchemaContextConverter : IContextConverter<OutboundContext, EventGridSendMessageContext>
+public class OutboundEventGridEventSchemaContextConverter : IContextConverter<OutboundContext, EventGridSendMessageContext>, ITransportFailureMapper<OutboundContext>
 {
     private readonly ISerializer _serializer;
 
@@ -71,5 +71,15 @@ public class OutboundEventGridEventSchemaContextConverter : IContextConverter<Ou
     {
         contextIn.Response = BenzeneResult.Accepted<Void>();
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// A send that fails in transport becomes a <see cref="TransportFailure"/> on the outbound context rather than an exception (transport-bindings.md §1, spec 1.1).
+    /// </summary>
+    /// <param name="contextIn">The context to set the result on.</param>
+    /// <param name="exception">What the send threw.</param>
+    public void MapTransportFailure(OutboundContext contextIn, Exception exception)
+    {
+        contextIn.Response = TransportFailure.From(exception);
     }
 }

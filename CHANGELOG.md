@@ -33,6 +33,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reverse table still applies to every other failure; inside an envelope the envelope's `statusCode`
   stays authoritative. New `ProblemDocuments.ToFailedResultFromDocumentStatus`, `StatusOf`, and a public
   `TryRead`.
+- **Behaviour change: a send that fails in transport is a result, not an exception (transport-bindings
+  §1, spec 1.1).** No connection, a refused or reset request, the client's own deadline - before any
+  reply or, for a one-way client, before the broker accepts the message - now yields `timeout` (a
+  `TimeoutException` in the chain, e.g. `HttpClient.Timeout`, or a route's own `UseTimeout()`) or
+  `service-unavailable`, instead of throwing out of `IBenzeneMessageSender.SendAsync`. Covers every
+  outbound route transport: SQS, SNS, EventBridge, Service Bus, Event Hubs, Event Grid (both schemas),
+  Queue Storage, Pub/Sub, Kafka, RabbitMQ and BenzeneMessage-over-HTTP, plus the plain REST `UseHttp`
+  and the generic `IBenzeneClientContext` converters. New: `Benzene.Clients.TransportFailure` (the
+  classifier and the route-level result) and `Benzene.Abstractions.Middleware.ITransportFailureMapper<T>`,
+  which `ContextConverterMiddleware` calls when a converter's send throws. Request serialization errors
+  and the caller's own (ambient) cancellation still throw. The `IBenzeneMessageClient` clients and
+  `StepFunctionsClient`, which already returned `service-unavailable`, now return `timeout` for a timed-out
+  send; `HttpMeshServiceDispatcher`/`AwsLambdaMeshServiceDispatcher` return a `timeout`/`service-unavailable`
+  `MeshDispatchResult` for a dispatch that got no reply (a `UseTimeout()` on the dispatch still
+  propagates); the Service Bus and Event Hubs batch clients report a batch that could not be created as
+  every entry failed rather than throwing. **Migrate:** code that caught an exception from `SendAsync` to
+  detect a dead peer must check `result.IsSuccessful`. `Benzene.Outbox`'s relay now does - it
+  reschedules/parks a send that returns a failed result (it used to mark one dispatched, which also
+  fixes a broker-reported failure being treated as sent).
 
 ### Added
 - **Error fidelity in every client (core-concepts §12).** `Benzene.Clients.Common.ProblemDocuments`

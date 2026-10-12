@@ -113,7 +113,15 @@ public class OutboxDispatcher : IOutboxDispatcher
                     $"Deserializing outbox envelope '{envelope.Id}' payload as '{envelope.PayloadType}' returned null.");
 
             var sender = scope.GetService<IBenzeneMessageSender>();
-            await sender.SendAsync<object, Void>(envelope.Topic, payload, new Dictionary<string, string>(envelope.Headers));
+            var sent = await sender.SendAsync<object, Void>(envelope.Topic, payload, new Dictionary<string, string>(envelope.Headers));
+            if (!sent.IsSuccessful)
+            {
+                // A failed send is a result, not only an exception: a transport failure is reported as a
+                // timeout/service-unavailable result (transport-bindings §1, spec 1.1), and a broker that
+                // answered with a failure always was. Either way the message did not go: reschedule/park it
+                // through the failure path below rather than marking it dispatched.
+                throw new OutboxSendFailedException(envelope.Topic, sent);
+            }
 
             // The send above genuinely happened. From here on a settle failure must NEVER be routed
             // through the catch block below - that block's reschedule/park logic exists for a send that
@@ -234,4 +242,9 @@ public class OutboxDispatcher : IOutboxDispatcher
     }
 
     private static string DescribeError(Exception ex) => $"{ex.GetType().Name}: {ex.Message}";
+
+    /// <summary>The relay's send returned an unsuccessful result - routed through the same reschedule/park path as a thrown send.</summary>
+    private sealed class OutboxSendFailedException(string topic, Benzene.Abstractions.Results.IBenzeneResult result)
+        : Exception($"Sending to '{topic}' returned {result.Status}" +
+                    (result.Errors.Count > 0 ? $": {string.Join("; ", result.Errors.Select(x => x.Message))}" : string.Empty));
 }

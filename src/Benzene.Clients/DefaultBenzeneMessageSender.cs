@@ -37,11 +37,28 @@ internal class DefaultBenzeneMessageSender : IBenzeneMessageSender
         }
 
         var context = new OutboundContext(topic, request!, headers);
-        await pipeline.HandleAsync(context, _serviceResolver);
+        try
+        {
+            await pipeline.HandleAsync(context, _serviceResolver);
+        }
+        catch (TimeoutException exception)
+        {
+            // The route's own deadline (a UseTimeout() on the route) elapsed before the transport answered:
+            // a timeout result, not an exception (transport-bindings §1, spec 1.1).
+            return TransportFailure.ToResult<TResponse>(exception);
+        }
 
         if (context.Response is IBenzeneResult<TResponse> typedResponse)
         {
             return typedResponse;
+        }
+
+        // The route's transport failed before a reply (or, one-way, before the broker accepted the
+        // message): a timeout/service-unavailable result, not an exception (transport-bindings §1, spec 1.1).
+        // Any TResponse - a failure carries no payload.
+        if (context.Response is TransportFailure transportFailure)
+        {
+            return transportFailure.ToResult<TResponse>();
         }
 
         // A transport whose MapResponseAsync couldn't produce an already-typed IBenzeneResult<TResponse>

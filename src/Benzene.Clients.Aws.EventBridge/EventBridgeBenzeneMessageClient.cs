@@ -77,7 +77,7 @@ public class EventBridgeBenzeneMessageClient : IBenzeneMessageClient
         catch (Exception ex)
         {
             _logger.LogError(ex, "Publishing event {receiverTopic} to EventBridge source {source} failed", request.Topic, _source);
-            return BenzeneResult.ServiceUnavailable<TResponse>(ex.Message);
+            return TransportFailure.ToResult<TResponse>(ex);
         }
     }
 

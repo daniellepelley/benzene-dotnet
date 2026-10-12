@@ -21,7 +21,7 @@ namespace Benzene.Clients.Azure.EventGrid;
 /// converter produces is always <see cref="IBenzeneResult{Void}"/> - a topic routed here must be sent
 /// via <c>IBenzeneMessageSender.SendAsync&lt;TRequest,Void&gt;</c>.
 /// </remarks>
-public class OutboundEventGridContextConverter : IContextConverter<OutboundContext, EventGridSendMessageContext>
+public class OutboundEventGridContextConverter : IContextConverter<OutboundContext, EventGridSendMessageContext>, ITransportFailureMapper<OutboundContext>
 {
     private readonly string _source;
     private readonly ISerializer _serializer;
@@ -74,5 +74,15 @@ public class OutboundEventGridContextConverter : IContextConverter<OutboundConte
     {
         contextIn.Response = BenzeneResult.Accepted<Void>();
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// A send that fails in transport becomes a <see cref="TransportFailure"/> on the outbound context rather than an exception (transport-bindings.md §1, spec 1.1).
+    /// </summary>
+    /// <param name="contextIn">The context to set the result on.</param>
+    /// <param name="exception">What the send threw.</param>
+    public void MapTransportFailure(OutboundContext contextIn, Exception exception)
+    {
+        contextIn.Response = TransportFailure.From(exception);
     }
 }

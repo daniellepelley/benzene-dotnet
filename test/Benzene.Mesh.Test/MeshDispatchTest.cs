@@ -647,4 +647,68 @@ public class AwsLambdaMeshServiceDispatcherTest
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             dispatcher.DispatchAsync(entry, new MeshDispatchEnvelope("t", new Dictionary<string, string>(), ""), CancellationToken.None));
     }
+
+    // --- transport-bindings §1 (spec 1.1): a dispatch that fails before any reply is a result ---
+
+    private sealed class ThrowingHttpMessageHandler(Exception exception) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            throw exception;
+    }
+
+    [Fact]
+    public async Task HttpDispatch_NoConnection_IsAServiceUnavailableResult_NotAnException()
+    {
+        var dispatcher = new HttpMeshServiceDispatcher(new HttpClient(new ThrowingHttpMessageHandler(new HttpRequestException("Connection refused"))));
+
+        var result = await dispatcher.DispatchAsync(new MeshServiceRegistryEntry("orders", "https://orders.example/spec", "https://orders.example/health"),
+            new MeshDispatchEnvelope("t", new Dictionary<string, string>(), "{}"), CancellationToken.None);
+
+        Assert.Equal("service-unavailable", result.StatusCode);
+        Assert.False(result.IsSuccessful);
+        Assert.Equal("Connection refused", result.Body);
+    }
+
+    [Fact]
+    public async Task HttpDispatch_HttpClientTimeout_IsATimeoutResult()
+    {
+        var dispatcher = new HttpMeshServiceDispatcher(new HttpClient(new ThrowingHttpMessageHandler(
+            new TaskCanceledException("HttpClient.Timeout elapsed", new TimeoutException()))));
+
+        var result = await dispatcher.DispatchAsync(new MeshServiceRegistryEntry("orders", "https://orders.example/spec", "https://orders.example/health"),
+            new MeshDispatchEnvelope("t", new Dictionary<string, string>(), "{}"), CancellationToken.None);
+
+        Assert.Equal("timeout", result.StatusCode);
+        Assert.False(result.IsSuccessful);
+    }
+
+    [Fact]
+    public async Task HttpDispatch_TheCallersOwnCancellation_StillPropagates()
+    {
+        // #185: a UseTimeout() deadline on the dispatch is the caller's, and still surfaces as one.
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var dispatcher = new HttpMeshServiceDispatcher(new HttpClient(new ThrowingHttpMessageHandler(new OperationCanceledException(cts.Token))));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => dispatcher.DispatchAsync(new MeshServiceRegistryEntry("orders", "https://orders.example/spec", "https://orders.example/health"),
+            new MeshDispatchEnvelope("t", new Dictionary<string, string>(), "{}"), cts.Token));
+    }
+
+    [Fact]
+    public async Task LambdaDispatch_InvokeFailsBeforeAReply_IsAServiceUnavailableResult()
+    {
+        var client = new Mock<IAwsLambdaClient>();
+        client.Setup(x => x.SendMessageAsync<BenzeneMessageClientRequest, BenzeneMessageClientResponse>(
+                It.IsAny<BenzeneMessageClientRequest>(), It.IsAny<string>(), It.IsAny<InvocationType>()))
+            .ThrowsAsync(new HttpRequestException("Connection refused"));
+        var dispatcher = new AwsLambdaMeshServiceDispatcher(client.Object);
+        var entry = new MeshServiceRegistryEntry("orders", "", "", MeshServiceSource.AwsLambdaInvoke,
+            new Dictionary<string, string> { ["functionName"] = "orders-fn" });
+
+        var result = await dispatcher.DispatchAsync(entry,
+            new MeshDispatchEnvelope("order:create", new Dictionary<string, string>(), "{}"), CancellationToken.None);
+
+        Assert.Equal("service-unavailable", result.StatusCode);
+        Assert.False(result.IsSuccessful);
+    }
 }

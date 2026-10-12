@@ -15,7 +15,7 @@ namespace Benzene.Clients.Aws.Lambda;
 /// that a Benzene client pipeline can invoke messages via AWS Lambda.
 /// </summary>
 /// <typeparam name="T">The type of the outgoing message.</typeparam>
-public class LambdaContextConverter<T> : IContextConverter<IBenzeneClientContext<T, Void>, LambdaSendMessageContext>
+public class LambdaContextConverter<T> : IContextConverter<IBenzeneClientContext<T, Void>, LambdaSendMessageContext>, ITransportFailureMapper<IBenzeneClientContext<T, Void>>
 {
     private readonly ISerializer _serializer;
 
@@ -123,5 +123,15 @@ public class LambdaContextConverter<T> : IContextConverter<IBenzeneClientContext
         }
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// A send that fails in transport becomes a <c>timeout</c>/<c>service-unavailable</c> result (<see cref="TransportFailure"/>) rather than an exception (transport-bindings.md §1, spec 1.1).
+    /// </summary>
+    /// <param name="contextIn">The context to set the result on.</param>
+    /// <param name="exception">What the send threw.</param>
+    public void MapTransportFailure(IBenzeneClientContext<T, Void> contextIn, Exception exception)
+    {
+        contextIn.Response = TransportFailure.ToResult<Void>(exception);
     }
 }

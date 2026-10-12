@@ -40,9 +40,20 @@ public class AwsLambdaMeshServiceDispatcher : IMeshServiceDispatcher
         var functionName = ResolveFunctionName(entry);
         var request = new BenzeneMessageClientRequest(envelope.Topic, envelope.Headers, envelope.Body);
 
-        var response = await _client.Value
-            .SendMessageAsync<BenzeneMessageClientRequest, BenzeneMessageClientResponse>(request, functionName, InvocationType.RequestResponse)
-            .WaitAsync(cancellationToken);
+        BenzeneMessageClientResponse response;
+        try
+        {
+            response = await _client.Value
+                .SendMessageAsync<BenzeneMessageClientRequest, BenzeneMessageClientResponse>(request, functionName, InvocationType.RequestResponse)
+                .WaitAsync(cancellationToken);
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested && exception is not AwsLambdaFunctionErrorException)
+        {
+            // The invoke failed before the function replied (no connection, throttled/refused, the SDK's own
+            // timeout): a result, not an exception (transport-bindings §1, spec 1.1). A FunctionError is the
+            // function's reply and the caller's own cancellation is the caller's - both still propagate.
+            return MeshDispatchResult.TransportFailed(exception);
+        }
 
         return new MeshDispatchResult(response.StatusCode, response.Body, response.Headers, response.IsSuccessful);
     }

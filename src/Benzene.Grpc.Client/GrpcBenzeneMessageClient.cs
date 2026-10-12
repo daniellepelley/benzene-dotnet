@@ -105,12 +105,12 @@ public class GrpcBenzeneMessageClient : IBenzeneMessageClient
             // (GrpcMethodHandler.RunPipelineAsync, no log) rather than falling into the catch-all
             // below. Classified the same way an actual mid-flight RpcException(Cancelled) already
             // resolves via DefaultGrpcStatusReverseMapper, so both cancellation surfaces agree.
-            return BenzeneResult.ServiceUnavailable<TResponse>(ex.Message);
+            return TransportFailure.ToResult<TResponse>(ex);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Sending message {topic} failed", request.Topic);
-            return BenzeneResult.ServiceUnavailable<TResponse>(ex.Message);
+            return TransportFailure.ToResult<TResponse>(ex);
         }
     }
 

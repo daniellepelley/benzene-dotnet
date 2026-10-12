@@ -110,7 +110,7 @@ public class StepFunctionsClient : IStepFunctionsClient
         catch (Exception ex)
         {
             _logger.LogError(ex, "Sending message to {receiver} failed", _stateMachineArn);
-            return BenzeneResult.ServiceUnavailable<TResponse>(ex.Message);
+            return TransportFailure.ToResult<TResponse>(ex);
         }
     }
 
@@ -152,7 +152,7 @@ public class StepFunctionsClient : IStepFunctionsClient
             _logger.LogError(ex,
                 "Execution name {name} on {receiver} already exists, but DescribeExecution to verify its input failed",
                 name, _stateMachineArn);
-            return BenzeneResult.ServiceUnavailable<TResponse>(ex.Message);
+            return TransportFailure.ToResult<TResponse>(ex);
         }
 
         if (existingExecution.Input == input)

@@ -28,7 +28,7 @@ namespace Benzene.Clients.Aws.EventBridge;
 /// <see cref="IBenzeneResult{Void}"/> — a topic routed here must be sent via
 /// <c>IBenzeneMessageSender.SendAsync&lt;TRequest,Void&gt;</c>.
 /// </remarks>
-public class OutboundEventBridgeContextConverter : IContextConverter<OutboundContext, EventBridgeSendMessageContext>
+public class OutboundEventBridgeContextConverter : IContextConverter<OutboundContext, EventBridgeSendMessageContext>, ITransportFailureMapper<OutboundContext>
 {
     /// <summary>Must match the inbound binding's <c>EventBridgeMessageHeadersGetter.EmbeddedHeadersKey</c>.</summary>
     public const string EmbeddedHeadersKey = EventBridgeContextConverter<object>.EmbeddedHeadersKey;
@@ -121,5 +121,15 @@ public class OutboundEventBridgeContextConverter : IContextConverter<OutboundCon
 
         detail[EmbeddedHeadersKey] = embedded;
         return detail.ToJsonString();
+    }
+
+    /// <summary>
+    /// A send that fails in transport becomes a <see cref="TransportFailure"/> on the outbound context rather than an exception (transport-bindings.md §1, spec 1.1).
+    /// </summary>
+    /// <param name="contextIn">The context to set the result on.</param>
+    /// <param name="exception">What the send threw.</param>
+    public void MapTransportFailure(OutboundContext contextIn, Exception exception)
+    {
+        contextIn.Response = TransportFailure.From(exception);
     }
 }

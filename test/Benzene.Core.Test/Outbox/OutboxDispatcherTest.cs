@@ -114,6 +114,25 @@ public class OutboxDispatcherTest
     }
 
     [Fact]
+    public async Task RunOnceAsync_ASendThatReturnsAFailedResult_IsRescheduled_NotMarkedDispatched()
+    {
+        // transport-bindings §1 (spec 1.1): a route's transport failure is a service-unavailable result, not
+        // an exception - the relay must still treat it as an unsent message.
+        var (factory, store) = BuildFactory(routing => routing
+            .Route("test:topic", pipeline => pipeline.OnRequest(ctx =>
+                ctx.Response = Benzene.Clients.TransportFailure.From(new System.Net.Http.HttpRequestException("Connection refused")))));
+        await store.AddAsync([NewEnvelope()]);
+
+        var dispatcher = new OutboxDispatcher(store, factory, new OutboxOptions { MaxAttempts = 5, BackoffBase = TimeSpan.FromSeconds(30) });
+        var result = await dispatcher.RunOnceAsync();
+
+        Assert.Equal(0, result.Dispatched);
+        Assert.Equal(1, result.Rescheduled);
+
+        factory.Dispose();
+    }
+
+    [Fact]
     public async Task RunOnceAsync_MaxAttemptsReached_Parks()
     {
         var (factory, store) = BuildFactory(routing => routing

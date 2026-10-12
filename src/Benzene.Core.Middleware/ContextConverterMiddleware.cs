@@ -35,7 +35,34 @@ public class ContextConverterMiddleware<TContext, TContextOut>(
     public async Task HandleAsync(TContext context, Func<Task> next)
     {
         var contextOut = await converter.CreateRequestAsync(context);
-        await middlewarePipeline.HandleAsync(contextOut, serviceResolver);
+        if (converter is ITransportFailureMapper<TContext> failureMapper)
+        {
+            // A converter whose inner pipeline is a transport send turns a send that fails in transport
+            // into a result rather than an exception (transport-bindings §1, spec 1.1). Only the send is
+            // covered: building the request above and reading a reply below still propagate.
+            try
+            {
+                await middlewarePipeline.HandleAsync(contextOut, serviceResolver);
+            }
+            catch (Exception exception) when (!IsAmbientCancellation(exception))
+            {
+                failureMapper.MapTransportFailure(context, exception);
+                return;
+            }
+        }
+        else
+        {
+            await middlewarePipeline.HandleAsync(contextOut, serviceResolver);
+        }
+
         await converter.MapResponseAsync(context, contextOut);
+    }
+
+    // The caller's own cancellation - the ambient token (an upstream cancel, or a UseTimeout() deadline
+    // around the send) - is not a transport failure: it propagates to whoever owns the token, as before.
+    private bool IsAmbientCancellation(Exception exception)
+    {
+        return exception is OperationCanceledException
+            && serviceResolver.TryGetService<ICancellationTokenAccessor>()?.CancellationToken.IsCancellationRequested == true;
     }
 }

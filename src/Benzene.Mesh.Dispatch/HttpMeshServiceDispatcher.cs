@@ -77,7 +77,19 @@ public class HttpMeshServiceDispatcher : IMeshServiceDispatcher
         });
 
         using var content = new StringContent(payload, Encoding.UTF8, "application/json");
-        using var response = await _httpClient.PostAsync(url, content, cancellationToken);
+        HttpResponseMessage sent;
+        try
+        {
+            sent = await _httpClient.PostAsync(url, content, cancellationToken);
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            // No reply arrived (no connection, refused/reset, HttpClient.Timeout): a result, not an
+            // exception (transport-bindings §1, spec 1.1). The caller's own cancellation still propagates.
+            return MeshDispatchResult.TransportFailed(exception);
+        }
+
+        using var response = sent;
         var responseBody = await ReadCappedAsync(response.Content, MaxResponseBytes, cancellationToken);
 
         // The envelope in the body is the outcome, whatever the HTTP status: the envelope endpoint answers
