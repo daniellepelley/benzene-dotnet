@@ -100,7 +100,7 @@ If, say, the role step in stage 3 fails, the orchestrator undoes the user (stage
 company and the tenant (stage 1) — in reverse — and returns `RolledBack`. No orphaned records.
 
 This is the full worked example — runnable, with a fake API that shows the store ending up empty
-after a rollback — in [`examples/Saga`](../../examples/Saga/Benzene.Example.Saga).
+after a rollback — in [`examples/Saga`](../../examples/Saga/Benzene.Examples.Saga).
 
 ## Passing data between stages: `SagaContext`
 
@@ -280,5 +280,5 @@ forward-throws case — worth a read as executable documentation.
 
 ## Further reading
 
-- [`examples/Saga`](../../examples/Saga/Benzene.Example.Saga) — the runnable signup saga.
+- [`examples/Saga`](../../examples/Saga/Benzene.Examples.Saga) — the runnable signup saga.
 - `src/Benzene.Saga/CLAUDE.md` — the type-by-type reference and design decisions.

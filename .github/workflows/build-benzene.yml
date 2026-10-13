@@ -102,13 +102,13 @@ jobs:
     - name: Test in-memory examples
       run: |
         dotnet test examples/App/Benzene.Examples.App.Test/Benzene.Examples.App.Test.csproj --no-build --verbosity normal
-        dotnet test examples/Asp/Benzene.Example.Asp.Test/Benzene.Example.Asp.Test.csproj --no-build --verbosity normal
+        dotnet test examples/Asp/Benzene.Examples.Asp.Test/Benzene.Examples.Asp.Test.csproj --no-build --verbosity normal
         dotnet test examples/Aws/Benzene.Examples.Aws.Tests/Benzene.Examples.Aws.Tests.csproj --no-build --verbosity normal
         dotnet test examples/Aws/Benzene.Examples.Aws.Minimal.Tests/Benzene.Examples.Aws.Minimal.Tests.csproj --no-build --verbosity normal
-        dotnet test examples/Azure/Benzene.Example.Azure.Test/Benzene.Example.Azure.Test.csproj --no-build --verbosity normal
-        dotnet test examples/Grpc/Benzene.Example.Grpc.Test/Benzene.Example.Grpc.Test.csproj --no-build --verbosity normal
+        dotnet test examples/Azure/Benzene.Examples.Azure.Test/Benzene.Examples.Azure.Test.csproj --no-build --verbosity normal
+        dotnet test examples/Grpc/Benzene.Examples.Grpc.Test/Benzene.Examples.Grpc.Test.csproj --no-build --verbosity normal
         dotnet test examples/OpenTelemetry/Benzene.Examples.OpenTelemetry.Test/Benzene.Examples.OpenTelemetry.Test.csproj --no-build --verbosity normal
-        dotnet test examples/Saga/Benzene.Example.Saga.Tests/Benzene.Example.Saga.Tests.csproj --no-build --verbosity normal
+        dotnet test examples/Saga/Benzene.Examples.Saga.Tests/Benzene.Examples.Saga.Tests.csproj --no-build --verbosity normal
         dotnet test examples/Google/Benzene.Examples.Google.Tests/Benzene.Examples.Google.Tests.csproj --no-build --verbosity normal
         dotnet test examples/Versioning/Benzene.Examples.Versioning.Tests/Benzene.Examples.Versioning.Tests.csproj --no-build --verbosity normal
 
@@ -143,7 +143,7 @@ jobs:
     - name: Build GoogleCloudMesh
       run: dotnet build examples/GoogleCloudMesh/Benzene.Examples.GoogleCloudMesh.sln
     - name: Build AzureFunctionsMesh
-      run: dotnet build examples/AzureFunctionsMesh/Benzene.Example.AzureFunctionsMesh.sln
+      run: dotnet build examples/AzureFunctionsMesh/Benzene.Examples.AzureFunctionsMesh.sln
 
   # Real-dependency tier for the AWS example: runs its SQS egress demo end-to-end against a real
   # LocalStack SQS queue (Benzene.Examples.Aws.Dev.Test). Mirrors the library-level
@@ -175,7 +175,7 @@ jobs:
       run: dotnet test examples/Aws/Benzene.Examples.Aws.Dev.Test/Benzene.Examples.Aws.Dev.Test.csproj --no-build --verbosity normal
 
   # Real-dependency tier for the Azure example: runs its Service Bus egress demo end-to-end against a
-  # real Azure Service Bus emulator (Benzene.Example.Azure.Dev.Test). The Service Bus counterpart of
+  # real Azure Service Bus emulator (Benzene.Examples.Azure.Dev.Test). The Service Bus counterpart of
   # examples-aws-localstack-tests, mirroring the library-level azure-integration-tests job (which
   # already stands up this same emulator). The .Dev.Test project is deliberately NOT in
   # Benzene.Examples.sln (it needs Docker), so it's restored/built directly here.
@@ -234,11 +234,11 @@ jobs:
         fi
         docker-compose version
     - name: Restore
-      run: dotnet restore examples/Azure/Benzene.Example.Azure.Dev.Test/Benzene.Example.Azure.Dev.Test.csproj
+      run: dotnet restore examples/Azure/Benzene.Examples.Azure.Dev.Test/Benzene.Examples.Azure.Dev.Test.csproj
     - name: Build
-      run: dotnet build examples/Azure/Benzene.Example.Azure.Dev.Test/Benzene.Example.Azure.Dev.Test.csproj --no-restore
+      run: dotnet build examples/Azure/Benzene.Examples.Azure.Dev.Test/Benzene.Examples.Azure.Dev.Test.csproj --no-restore
     - name: Test
-      run: dotnet test examples/Azure/Benzene.Example.Azure.Dev.Test/Benzene.Example.Azure.Dev.Test.csproj --no-build --verbosity normal
+      run: dotnet test examples/Azure/Benzene.Examples.Azure.Dev.Test/Benzene.Examples.Azure.Dev.Test.csproj --no-build --verbosity normal
 
   azure-integration-tests:
 

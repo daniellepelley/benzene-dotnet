@@ -91,7 +91,7 @@ surface in `AttributeData` unless explicitly set).
   transport's `RegisterSourceOutput` (reference-equality of the untouched transport's generated
   `SyntaxTree` across an incremental edit).
 
-End-to-end proof is `functions.metadata` from building `examples/Azure/Benzene.Example.Azure` (which
+End-to-end proof is `functions.metadata` from building `examples/Azure/Benzene.Examples.Azure` (which
 declares its HTTP/Queue/Service Bus triggers).
 
 ## Important conventions

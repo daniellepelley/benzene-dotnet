@@ -121,7 +121,7 @@ the value is that the whole thing **builds and wires up** and each Function star
 
 ```bash
 # from examples/AzureFunctionsMesh
-dotnet build Benzene.Example.AzureFunctionsMesh.sln
+dotnet build Benzene.Examples.AzureFunctionsMesh.sln
 # a service (each is its own project now — Orders/Payments/Shipping/Inventory/Notifications/Analytics)
 cd Orders && func start
 # mesh (needs MESH_BLOB_URI + az login); serves /mesh-ui

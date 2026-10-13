@@ -1,4 +1,4 @@
-// Thin Worker that proxies every request into the Benzene.Example.Cloudflare container - see
+// Thin Worker that proxies every request into the Benzene.Examples.Cloudflare container - see
 // ../wrangler.toml and docs/getting-started-cloudflare.md. Not deployed/validated from this
 // environment; review before production use.
 

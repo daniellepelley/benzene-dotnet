@@ -225,7 +225,7 @@ instead of through `BenzeneStartUp` (see below).
 If you'd rather keep a classic ASP.NET Core `Startup` class (`ConfigureServices`/`Configure`) —
 for example, an existing app being migrated incrementally — you can call the same building blocks
 directly instead of deriving from `BenzeneStartUp`. This is how
-[`examples/Asp/Benzene.Example.Asp`](../examples/Asp/Benzene.Example.Asp) is wired:
+[`examples/Asp/Benzene.Examples.Asp`](../examples/Asp/Benzene.Examples.Asp) is wired:
 
 ```csharp
 public void ConfigureServices(IServiceCollection services)

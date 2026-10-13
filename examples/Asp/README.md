@@ -5,7 +5,7 @@ The ASP.NET Core host example — also where the Spec UI (`/benzene/spec-ui`) an
 ## Running
 
 ```bash
-dotnet run --project Benzene.Example.Asp --urls http://localhost:5000
+dotnet run --project Benzene.Examples.Asp --urls http://localhost:5000
 ```
 
 - `GET /benzene/spec` — the derived Benzene spec document

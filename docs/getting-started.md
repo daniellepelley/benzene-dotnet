@@ -17,7 +17,7 @@ actually deploying to** — pick it below.
 | **Azure Functions** — HTTP + Service Bus, Event Hubs, Event Grid, Cosmos DB, Timer | [Getting Started: Azure Functions](azure-functions.md) | [`examples/Azure`](https://github.com/daniellepelley/benzene-dotnet/tree/main/examples/Azure) |
 | **Google Cloud Functions** — HTTP + Pub/Sub | [Getting Started: Google Cloud Functions](getting-started-google.md) | [`examples/Google`](https://github.com/daniellepelley/benzene-dotnet/tree/main/examples/Google) |
 | **Kubernetes** — HTTP, SQS, Kafka, one handler in a single container/Deployment | [Getting Started: Kubernetes](getting-started-kubernetes.md) | [`examples/K8sTransports`](https://github.com/daniellepelley/benzene-dotnet/tree/main/examples/K8sTransports) |
-| **ASP.NET Core** — a plain web app or API | [Getting Started: ASP.NET Core](getting-started-aspnet.md) | [`examples/Asp/Benzene.Example.Asp.Minimal`](https://github.com/daniellepelley/benzene-dotnet/tree/main/examples/Asp/Benzene.Example.Asp.Minimal) |
+| **ASP.NET Core** — a plain web app or API | [Getting Started: ASP.NET Core](getting-started-aspnet.md) | [`examples/Asp/Benzene.Examples.Asp.Minimal`](https://github.com/daniellepelley/benzene-dotnet/tree/main/examples/Asp/Benzene.Examples.Asp.Minimal) |
 
 Other hosts have their own guides too: [Worker Services](getting-started-worker.md) (Kafka, HTTP,
 Service Bus, Event Hubs, Cosmos DB Change Feed in a long-running process), [gRPC](getting-started-grpc.md),

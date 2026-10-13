@@ -36,7 +36,7 @@ Add the Azure Functions isolated-worker properties to the `.csproj` (`OutputType
 First, the standard Microsoft packages every isolated-worker Function App needs — these must be
 referenced directly in your function app project (not just transitively) so the Functions SDK's
 build step can discover them and generate the worker's extension manifest. The versions below are
-the ones Benzene itself builds and tests against (see `examples/Azure/Benzene.Example.Azure/Benzene.Example.Azure.csproj`):
+the ones Benzene itself builds and tests against (see `examples/Azure/Benzene.Examples.Azure/Benzene.Examples.Azure.csproj`):
 
 ```bash
 dotnet add package Microsoft.Azure.Functions.Worker --version 2.2.0
@@ -296,14 +296,14 @@ your `routePrefix` setting) to confirm the handler responds.
 ### Deploying with Bicep
 
 For a repeatable, declarative deployment instead of the `az` commands above, see
-[`examples/Azure/Benzene.Example.Azure/main.bicep`](https://github.com/daniellepelley/benzene-dotnet/blob/main/examples/Azure/Benzene.Example.Azure/main.bicep) -
+[`examples/Azure/Benzene.Examples.Azure/main.bicep`](https://github.com/daniellepelley/benzene-dotnet/blob/main/examples/Azure/Benzene.Examples.Azure/main.bicep) -
 it provisions the Storage Account, workspace-based Application Insights resource, Consumption
 hosting plan, and Function App an HTTP-triggered example like this one needs:
 
 ```bash
 az group create --name my-function-rg --location eastus
 az deployment group create --resource-group my-function-rg \
-  --template-file examples/Azure/Benzene.Example.Azure/main.bicep \
+  --template-file examples/Azure/Benzene.Examples.Azure/main.bicep \
   --parameters functionAppName=my-benzene-function
 ```
 
@@ -313,14 +313,14 @@ Bus, Cosmos DB, Storage, or Event Grid if you wire up those triggers too (see th
 ### Deploying with Terraform
 
 The same infrastructure is also available as Terraform, in
-[`examples/Azure/Benzene.Example.Azure/main.tf`](https://github.com/daniellepelley/benzene-dotnet/blob/main/examples/Azure/Benzene.Example.Azure/main.tf) -
+[`examples/Azure/Benzene.Examples.Azure/main.tf`](https://github.com/daniellepelley/benzene-dotnet/blob/main/examples/Azure/Benzene.Examples.Azure/main.tf) -
 resource-for-resource equivalent to the Bicep template (Storage Account, workspace-based
 Application Insights, Consumption plan, Linux isolated-worker Function App with a
 system-assigned managed identity), plus a sketched `azurerm_role_assignment` for when you add
 identity-based trigger connections:
 
 ```bash
-cd examples/Azure/Benzene.Example.Azure
+cd examples/Azure/Benzene.Examples.Azure
 terraform init
 terraform apply -var function_app_name=my-benzene-function
 ```
@@ -896,7 +896,7 @@ returns the native `FunctionContext`.
 ### Application Insights
 
 `Microsoft.ApplicationInsights.WorkerService` plus `Microsoft.Azure.Functions.Worker.ApplicationInsights`
-(both referenced by `examples/Azure/Benzene.Example.Azure`) is the standard way to get Functions-host
+(both referenced by `examples/Azure/Benzene.Examples.Azure`) is the standard way to get Functions-host
 telemetry — cold starts, invocation duration, dependency calls — into Application Insights, wired in
 `Program.cs`:
 

@@ -325,7 +325,7 @@ resource serviceBusReceiverRole 'Microsoft.Authorization/roleAssignments@2022-04
 Cosmos data-plane roles have their own Bicep resource type
 (`Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments`) — same ids as the CLI table above.
 
-The example template `examples/Azure/Benzene.Example.Azure/main.bicep` enables a system-assigned
+The example template `examples/Azure/Benzene.Examples.Azure/main.bicep` enables a system-assigned
 identity on the Function App and outputs its `principalId`, ready for exactly these assignments.
 
 ## Local development

@@ -1,4 +1,4 @@
-# Cloudflare-side config for routing traffic into the Benzene.Example.Cloudflare container.
+# Cloudflare-side config for routing traffic into the Benzene.Examples.Cloudflare container.
 #
 # Authored against current Cloudflare Containers documentation, but NOT run through
 # `wrangler deploy` and not validated against a live Cloudflare account from this environment -

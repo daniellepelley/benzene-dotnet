@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Every example is `Benzene.Examples.*`.** The singular `Benzene.Example.*` examples (Asp, Azure,
+  Grpc, Saga, Cloudflare, Cqrs, Outbox, and the Kafka and AzureFunctionsMesh solutions) are renamed:
+  folders, projects, assemblies, namespaces and solutions, with the CI and deploy workflows and the
+  Cloudflare Dockerfile following. Examples are not published packages; a fork or local checkout that
+  scripts against an old path or assembly name (e.g. `Benzene.Example.Asp.dll`) needs the new one.
+
 ### Fixed
 - **Breaking: `UseTimeout` records a `timeout` result instead of throwing.** A deadline that fired
   surfaced as a thrown `TimeoutException`, which nothing converted when `UseTimeout` sat in front of

@@ -33,11 +33,11 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Core.Middleware", "
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Asp", "Asp", "{276D32C5-B7B9-D025-362D-2F3B2FB2A8E3}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Example.Asp", "examples\Asp\Benzene.Example.Asp\Benzene.Example.Asp.csproj", "{DF958B11-2B57-46C5-AEA3-865E0FA810BD}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Examples.Asp", "examples\Asp\Benzene.Examples.Asp\Benzene.Examples.Asp.csproj", "{DF958B11-2B57-46C5-AEA3-865E0FA810BD}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Cloudflare", "Cloudflare", "{D0206354-D069-4053-A0BB-7E37834DD86A}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Example.Cloudflare", "examples\Cloudflare\Benzene.Example.Cloudflare\Benzene.Example.Cloudflare.csproj", "{B71EA9BD-47A0-49F7-81B5-18E4E878C9CB}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Examples.Cloudflare", "examples\Cloudflare\Benzene.Examples.Cloudflare\Benzene.Examples.Cloudflare.csproj", "{B71EA9BD-47A0-49F7-81B5-18E4E878C9CB}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.AspNet.Core", "src\Benzene.AspNet.Core\Benzene.AspNet.Core.csproj", "{F06266A7-5E77-4D70-A65D-AC98F511270B}"
 EndProject
@@ -53,7 +53,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Schema.OpenApi", "s
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Abstractions.Pipelines", "src\Benzene.Abstractions.Pipelines\Benzene.Abstractions.Pipelines.csproj", "{A397EE48-5D41-43D2-B0CD-3B3DF6C869BF}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Example.Asp.Test", "examples\Asp\Benzene.Example.Asp.Test\Benzene.Example.Asp.Test.csproj", "{19D418D8-A556-46BB-99F1-9DAED60B12D9}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Examples.Asp.Test", "examples\Asp\Benzene.Examples.Asp.Test\Benzene.Examples.Asp.Test.csproj", "{19D418D8-A556-46BB-99F1-9DAED60B12D9}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Xml", "src\Benzene.Xml\Benzene.Xml.csproj", "{77FB2A77-328A-45F2-8A1B-6669BC47BD81}"
 EndProject
@@ -87,7 +87,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Testing", "src\Benz
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Azure", "Azure", "{E2289313-1D71-4F6C-7541-ADB3F9CAD814}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Example.Azure", "examples\Azure\Benzene.Example.Azure\Benzene.Example.Azure.csproj", "{8DC40A21-A3FC-41DA-93E2-F496C475A070}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Examples.Azure", "examples\Azure\Benzene.Examples.Azure\Benzene.Examples.Azure.csproj", "{8DC40A21-A3FC-41DA-93E2-F496C475A070}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Azure.Function.AspNet", "src\Benzene.Azure.Function.AspNet\Benzene.Azure.Function.AspNet.csproj", "{40F5B3E9-BB16-4F0E-94A0-6A459E83646F}"
 EndProject
@@ -107,13 +107,13 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Examples.Google.Tes
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Grpc", "Grpc", "{43FED183-F597-CA40-879C-FD59A5B85693}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Example.Grpc", "examples\Grpc\Benzene.Example.Grpc\Benzene.Example.Grpc.csproj", "{4C2A135F-2B2F-450E-87AA-424DC17AC4AD}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Examples.Grpc", "examples\Grpc\Benzene.Examples.Grpc\Benzene.Examples.Grpc.csproj", "{4C2A135F-2B2F-450E-87AA-424DC17AC4AD}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Grpc", "src\Benzene.Grpc\Benzene.Grpc.csproj", "{070E5101-8101-42E0-8A9E-3CF4B7F145F9}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Grpc.AspNet", "src\Benzene.Grpc.AspNet\Benzene.Grpc.AspNet.csproj", "{EFAD9D82-699B-460C-B684-31731FEE556E}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Example.Grpc.Client", "examples\Grpc\Benzene.Example.Grpc.Client\Benzene.Example.Grpc.Client.csproj", "{0893C220-6384-431E-BCBB-5CBE8F78152B}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Examples.Grpc.Client", "examples\Grpc\Benzene.Examples.Grpc.Client\Benzene.Examples.Grpc.Client.csproj", "{0893C220-6384-431E-BCBB-5CBE8F78152B}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Kafka", "Kafka", "{60FA65BB-222F-FC9B-1408-BBBCDE1A35D6}"
 EndProject
@@ -159,7 +159,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Examples.Mesh.Share
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Mesh.Wire", "src\Benzene.Mesh.Wire\Benzene.Mesh.Wire.csproj", "{E9E1FA80-F0CA-49DC-A6CA-DC828A1D6180}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Example.Azure.Worker", "examples\Azure\Benzene.Example.Azure.Worker\Benzene.Example.Azure.Worker.csproj", "{656EC1FB-77EB-41AB-A49F-07BF51313C35}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Examples.Azure.Worker", "examples\Azure\Benzene.Examples.Azure.Worker\Benzene.Examples.Azure.Worker.csproj", "{656EC1FB-77EB-41AB-A49F-07BF51313C35}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Azure.EventHub", "src\Benzene.Azure.EventHub\Benzene.Azure.EventHub.csproj", "{FC8B9ECD-043F-4357-97FB-054E7941FDFD}"
 EndProject
@@ -167,17 +167,17 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Azure.ServiceBus", 
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Saga", "Saga", "{70D1295B-88D7-8F50-7CB2-B38C549D3EE9}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Example.Saga", "examples\Saga\Benzene.Example.Saga\Benzene.Example.Saga.csproj", "{413F3066-EE7A-4810-898C-8F6491787A15}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Examples.Saga", "examples\Saga\Benzene.Examples.Saga\Benzene.Examples.Saga.csproj", "{413F3066-EE7A-4810-898C-8F6491787A15}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Saga", "src\Benzene.Saga\Benzene.Saga.csproj", "{2D5CF5A5-706A-4BA5-B64E-5F0F2189270E}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Saga", "Saga", "{C3CA4413-DFB8-2631-51F4-46394FAD4AC1}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Example.Saga.Tests", "examples\Saga\Benzene.Example.Saga.Tests\Benzene.Example.Saga.Tests.csproj", "{D1C6AB41-161F-448B-A56C-B70DE182419D}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Examples.Saga.Tests", "examples\Saga\Benzene.Examples.Saga.Tests\Benzene.Examples.Saga.Tests.csproj", "{D1C6AB41-161F-448B-A56C-B70DE182419D}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Azure", "Azure", "{C35B3F86-D513-DC96-F441-B40E8BE042A1}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Example.Azure.Test", "examples\Azure\Benzene.Example.Azure.Test\Benzene.Example.Azure.Test.csproj", "{61964E72-3474-4B21-B1AB-71F3752BF302}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Examples.Azure.Test", "examples\Azure\Benzene.Examples.Azure.Test\Benzene.Examples.Azure.Test.csproj", "{61964E72-3474-4B21-B1AB-71F3752BF302}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Azure.Function.Core.TestHelpers", "src\Benzene.Azure.Function.Core.TestHelpers\Benzene.Azure.Function.Core.TestHelpers.csproj", "{B1D11A32-028E-4C8F-AC94-334EDD83335B}"
 EndProject
@@ -195,9 +195,9 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Examples.OpenTeleme
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Grpc", "Grpc", "{08DC2ACD-026E-2FF5-1356-DEFA40FC63B3}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Example.Grpc.Test", "examples\Grpc\Benzene.Example.Grpc.Test\Benzene.Example.Grpc.Test.csproj", "{1821DC77-9884-4D18-B33A-D6871E1B4546}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Examples.Grpc.Test", "examples\Grpc\Benzene.Examples.Grpc.Test\Benzene.Examples.Grpc.Test.csproj", "{1821DC77-9884-4D18-B33A-D6871E1B4546}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Example.Asp.Minimal", "examples\Asp\Benzene.Example.Asp.Minimal\Benzene.Example.Asp.Minimal.csproj", "{CEC7C384-9A00-4B36-81B7-299435E61625}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Examples.Asp.Minimal", "examples\Asp\Benzene.Examples.Asp.Minimal\Benzene.Examples.Asp.Minimal.csproj", "{CEC7C384-9A00-4B36-81B7-299435E61625}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Versioning", "Versioning", "{8C22A546-23BB-4506-5981-1BD4774DF7DB}"
 EndProject
@@ -219,7 +219,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Examples.Aws.Minima
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Cqrs", "Cqrs", "{4B70F6AD-3596-B658-1452-2D066701BC26}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Example.Cqrs", "examples\Cqrs\Benzene.Example.Cqrs\Benzene.Example.Cqrs.csproj", "{8A8BA362-22A0-4B5F-A9E5-B4B0FFA93434}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Examples.Cqrs", "examples\Cqrs\Benzene.Examples.Cqrs\Benzene.Examples.Cqrs.csproj", "{8A8BA362-22A0-4B5F-A9E5-B4B0FFA93434}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Outbox", "src\Benzene.Outbox\Benzene.Outbox.csproj", "{07854D91-466C-49E0-B69A-6663DBF769C4}"
 EndProject
@@ -231,7 +231,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Examples.K8sTranspo
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Outbox", "Outbox", "{8C80749A-00D4-6C7F-5C0B-A0FAA605E00D}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Example.Outbox", "examples\Outbox\Benzene.Example.Outbox\Benzene.Example.Outbox.csproj", "{151DB54B-3376-48E7-B754-CB830FCF0520}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benzene.Examples.Outbox", "examples\Outbox\Benzene.Examples.Outbox\Benzene.Examples.Outbox.csproj", "{151DB54B-3376-48E7-B754-CB830FCF0520}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

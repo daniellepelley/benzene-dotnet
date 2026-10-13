@@ -6,7 +6,7 @@ running in a container that speaks HTTP. Deploying to Lambda or Functions instea
 [AWS Lambda](getting-started-aws.md) or [Azure Functions](azure-functions.md) — the handler you write is
 identical, only the host wiring differs.
 
-> **Runnable version:** this guide is [`examples/Asp/Benzene.Example.Asp.Minimal`](https://github.com/daniellepelley/benzene-dotnet/tree/main/examples/Asp/Benzene.Example.Asp.Minimal)
+> **Runnable version:** this guide is [`examples/Asp/Benzene.Examples.Asp.Minimal`](https://github.com/daniellepelley/benzene-dotnet/tree/main/examples/Asp/Benzene.Examples.Asp.Minimal)
 > — the smallest thing that works, ready to `dotnet run`.
 
 ## What you'll build

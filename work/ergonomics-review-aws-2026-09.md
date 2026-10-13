@@ -416,7 +416,7 @@ demonstration of the explicit form, which MUST say so in a comment."
   byte-for-byte the default, in "the smallest thing that works", with no comment.
 - Five more with `.SetBasePath(Directory.GetCurrentDirectory())` + `.AddEnvironmentVariables()` and
   no file provider, so the base path does nothing: `examples/Aws/Benzene.Examples.Aws/StartUp.cs:35-41`,
-  `examples/Cloudflare/Benzene.Example.Cloudflare/StartUp.cs:22-28`,
+  `examples/Cloudflare/Benzene.Examples.Cloudflare/StartUp.cs:22-28`,
   `templates/content/aws-apigateway/StartUp.cs:18-24`, `aws-sqs/StartUp.cs:17-23`,
   `aws-sns/StartUp.cs:17-23`. (Repo-wide: 20 overrides, 11 of them with `SetBasePath`.)
 
@@ -732,10 +732,10 @@ comment. Per §4.1 either delete or mark "deliberate demonstration of a custom l
 
 ### 22. Small ceremonies in `Outbox` and `Saga`  [POLISH]
 
-- `examples/Outbox/Benzene.Example.Outbox/Program.cs:37` and `:124`
+- `examples/Outbox/Benzene.Examples.Outbox/Program.cs:37` and `:124`
   `services.AddTransient<ISerializer, JsonSerializer>();` - `AddOutbox()` should `TryAdd` its own
   serializer default; the user should not have to know the engine needs one.
-- `examples/Saga/Benzene.Example.Saga/SignupSaga.cs:28,34,43,51` - four copies of
+- `examples/Saga/Benzene.Examples.Saga/SignupSaga.cs:28,34,43,51` - four copies of
   `ArgumentNullException.ThrowIfNull(x); return api.DeleteXAsync(x.Id);` inside `Compensate`, with a
   comment (17-21) explaining that compensation "only ever runs for a step that already succeeded, so
   the forward payload is always present". A `Compensate(Func<SagaContext, T, Task<IBenzeneResult>>)`
@@ -746,7 +746,7 @@ comment. Per §4.1 either delete or mark "deliberate demonstration of a custom l
 
 ### 23. `Cloudflare/StartUp.cs` hand-registers the `/livez` route  [POLISH - verify]
 
-`examples/Cloudflare/Benzene.Example.Cloudflare/StartUp.cs:37-38` registers
+`examples/Cloudflare/Benzene.Examples.Cloudflare/StartUp.cs:37-38` registers
 `new HttpEndpointDefinition("GET", "/livez", Constants.DefaultLivenessTopic)` and then calls
 `UseLivenessCheck(...)` (`:44`). `Benzene.Aws.Lambda.ApiGateway`'s `UseLivenessCheck` defaults to
 `GET /livez` with no separate definition (`src/Benzene.Aws.Lambda.ApiGateway/CLAUDE.md`, "Health

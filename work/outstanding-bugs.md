@@ -101,7 +101,7 @@ first). **[PERF]** performance hygiene, not a correctness bug. **[RESOLVED]** ve
 > rounds 12–13 land separately.
 > - **[RESOLVED] Examples solution membership (#193)** — `examples/Cqrs/**` and
 >   `examples/K8sTransports/**` were never members of `Benzene.Examples.sln`, so a compile break in
->   either was invisible to anyone building the examples solution. Added both (`Benzene.Example.Cqrs`,
+>   either was invisible to anyone building the examples solution. Added both (`Benzene.Examples.Cqrs`,
 >   `Benzene.Examples.K8sTransports.App`, `Benzene.Examples.K8sTransports.Domain`) as proper solution
 >   items, mirroring the `Cloudflare` folder's structure (solution folder + project GUID +
 >   `ProjectConfigurationPlatforms` + `NestedProjects` entries). Explicit `AGENTS.md` solution-edit
@@ -127,7 +127,7 @@ first). **[PERF]** performance hygiene, not a correctness bug. **[RESOLVED]** ve
 >   `App/HttpStartup.cs` and `App/WorkerStartup.cs`, neither of which exists (only `App/Startup.cs`
 >   does). Fixed the doc comment to point at the real file.
 > - **[RESOLVED] Dead CQRS request types** — `CreateTenantRequest`/`CreateUserRequest`
->   (`examples/Cqrs/Benzene.Example.Cqrs/Domain/Commands.cs`) were never dispatched anywhere (grep
+>   (`examples/Cqrs/Benzene.Examples.Cqrs/Domain/Commands.cs`) were never dispatched anywhere (grep
 >   confirmed the only references were their own declarations) and confusing precisely because this is
 >   a CQRS example meant to be copied; the write side calls `Tenants.Add`/`Users.Add` directly instead.
 >   Deleted the file.
@@ -1624,7 +1624,7 @@ practice, landed after WP-V (which touches the same `MessageGetter.cs`).
   `GrpcClientIntegrationTest`, `MeshAggregateMessageHandlerTest`, `MeshCollectorStoreTest`,
   `MeshDispatchTest`) fixed with `?.` or `Assert.IsType<T>(...)`, matching the pattern already used
   elsewhere in the test suite. The same ripple reached the (separately-built) example solution:
-  `examples/Saga/Benzene.Example.Saga/SignupSaga.cs`'s four `Compensate` lambdas now
+  `examples/Saga/Benzene.Examples.Saga/SignupSaga.cs`'s four `Compensate` lambdas now
   `ArgumentNullException.ThrowIfNull` their payload before use (compensation only ever runs for an
   already-succeeded step, so this is a checked assumption, not a behavior change), and
   `InMemoryOrderDbClientTest`/`OrderServiceTest` got the same `?.` treatment. Full solution build
@@ -3631,11 +3631,11 @@ example-local fixes. Verified per-project rather than via one whole-`Benzene.Exa
 (the review host was under extreme, unrelated contention from concurrent sessions for the whole
 session — load average 100–165 — making a several-hundred-project solution build impractically
 slow, up to 38 minutes wall-clock for a single example's full dependency chain even though CPU time
-consumed was seconds): `examples/Cqrs/Benzene.Example.Cqrs.csproj` (a newly-added `Benzene.Examples.sln`
+consumed was seconds): `examples/Cqrs/Benzene.Examples.Cqrs.csproj` (a newly-added `Benzene.Examples.sln`
 member, pulling in the also-newly-added `src/Benzene.Outbox`) built clean (0 warnings, 0 errors);
 `examples/K8sTransports/App/Benzene.Examples.K8sTransports.App.csproj` (the other newly-added member,
 pulling in `Domain`) built clean (0 errors, 17 pre-existing warnings unrelated to this WP, all in
-`Benzene.Kafka.Core`/`Benzene.Aws.Sqs`); `examples/Asp/Benzene.Example.Asp.csproj` built clean and its
+`Benzene.Kafka.Core`/`Benzene.Aws.Sqs`); `examples/Asp/Benzene.Examples.Asp.csproj` built clean and its
 6 integration tests passed; `examples/GoogleCloudMesh/Benzene.Examples.GoogleCloudMesh.sln` built
 clean. The Cloudflare worker's `npm install` + `npx wrangler deploy --dry-run` both pass with no
 deprecated-config warning.
@@ -3685,7 +3685,7 @@ deprecated-config warning.
   line that dropped ZooKeeper support. Pinned both images to `7.4.4`, the exact tag the example's own
   test-harness compose file (`Benzene.Examples.Kafka.Test/docker-compose.yaml`) already uses as its
   last-ZK-compatible precedent.
-- **[RESOLVED] #218 + #222 — `examples/Asp/Benzene.Example.Asp/Startup.cs:52` hardcoded an Application
+- **[RESOLVED] #218 + #222 — `examples/Asp/Benzene.Examples.Asp/Startup.cs:52` hardcoded an Application
   Insights instrumentation key in source, and `config.json` shipped a dummy DB connection string with a
   plaintext placeholder password that nothing reads** (confirmed by grep across the whole repo before
   removal — only `Program.cs`'s non-optional `AddJsonFile("config.json")` load references the file
@@ -3715,7 +3715,7 @@ deprecated-config warning.
   `MeshServiceWiring.cs` uses the identical `Action<...>? configureBenzene = null` shape correctly).
   Added `#nullable enable` at the top of the file (scoped to this one file rather than flipping the
   whole project) — the warning is gone and no new nullable warnings were introduced.
-- **[RESOLVED] #223 — `examples/Asp/Benzene.Example.Asp/Startup.cs` emitted ASP0001 ("The call to
+- **[RESOLVED] #223 — `examples/Asp/Benzene.Examples.Asp/Startup.cs` emitted ASP0001 ("The call to
   UseAuthorization should appear between app.UseRouting() and app.UseEndpoints(..)")**, copied
   verbatim into every adopter's project since this file is used as a template. Root cause: the
   `app.Map("/protected", ...)`/`app.Map("/slow", ...)` branches each called their own `protectedApp`/
@@ -3732,7 +3732,7 @@ deprecated-config warning.
   `UseRouting()`. No behavior change: `WeatherForecastController` (the only thing ever dispatched
   through the real `UseEndpoints`) is unauthenticated either way, and the `/protected`/`/slow` branches
   never touched ASP.NET Core's own authorization/endpoint-routing machinery to begin with. Verified:
-  the ASP0001 warning is gone from a clean rebuild of `Benzene.Example.Asp.csproj` (0 errors, only the
+  the ASP0001 warning is gone from a clean rebuild of `Benzene.Examples.Asp.csproj` (0 errors, only the
   pre-existing, unrelated `NU1510` package-pruning warning remains).
 
 ## Round 15 + rounds 12–14: two integration bugs found only by the post-merge baseline (2026-08-30)
@@ -4883,9 +4883,9 @@ declared) but **not locally compiled**; CI (`build-benzene.yml`'s `examples-buil
   "NOT part of the primary CI gate" and "not compile-checked by the main build".** Rewritten to state
   what `build-benzene.yml` actually runs: the `examples-build` job builds `Benzene.Examples.sln` on
   every push/PR, then a `dotnet test` step runs the ten in-memory example test projects
-  (`Benzene.Examples.App.Test`, `Benzene.Example.Asp.Test`, `Benzene.Examples.Aws.Tests`,
-  `Benzene.Examples.Aws.Minimal.Tests`, `Benzene.Example.Azure.Test`, `Benzene.Example.Grpc.Test`,
-  `Benzene.Examples.OpenTelemetry.Test`, `Benzene.Example.Saga.Tests`, `Benzene.Examples.Google.Tests`,
+  (`Benzene.Examples.App.Test`, `Benzene.Examples.Asp.Test`, `Benzene.Examples.Aws.Tests`,
+  `Benzene.Examples.Aws.Minimal.Tests`, `Benzene.Examples.Azure.Test`, `Benzene.Examples.Grpc.Test`,
+  `Benzene.Examples.OpenTelemetry.Test`, `Benzene.Examples.Saga.Tests`, `Benzene.Examples.Google.Tests`,
   `Benzene.Examples.Versioning.Tests`) — named explicitly since the workflow lists them by project
   path rather than `dotnet test <sln>`. See WP-K.
 - **[RESOLVED] #272 + #214 — `AwsMesh` (7 projects) and `AzureMesh` (1 project) were members of no
@@ -4907,7 +4907,7 @@ declared) but **not locally compiled**; CI (`build-benzene.yml`'s `examples-buil
   verification loop. See WP-K.
 - **[RESOLVED] #215 — `examples/Outbox` was not a member of any solution file.** Unlike AwsMesh/AzureMesh
   it is in-memory with no cloud SDK dependency, so it joins `Benzene.Examples.sln` directly (new
-  `Outbox` solution folder + `Benzene.Example.Outbox` project entry, plus `Benzene.Outbox`'s src/
+  `Outbox` solution folder + `Benzene.Examples.Outbox` project entry, plus `Benzene.Outbox`'s src/
   project entry which the main solution's `src` folder didn't carry yet), mirroring the pattern round
   12's #193 used for `Cqrs`/`K8sTransports`. See WP-K.
 - **[RESOLVED] #216 — `examples/GoogleCloudMesh` was entirely undocumented in `examples/CLAUDE.md`,
@@ -4917,7 +4917,7 @@ declared) but **not locally compiled**; CI (`build-benzene.yml`'s `examples-buil
   ZooKeeper topology; Docker Hub's `latest` no longer supports ZK.** Pinned both the `zookeeper` and
   `kafka` images to `7.4.4`, matching the version `Benzene.Examples.Kafka.Test/docker-compose.yaml`
   (the example's own test-harness compose file) already correctly pins. See WP-K.
-- **[RESOLVED] #218 + #222 — `examples/Asp/Benzene.Example.Asp/Startup.cs` hardcoded an Application
+- **[RESOLVED] #218 + #222 — `examples/Asp/Benzene.Examples.Asp/Startup.cs` hardcoded an Application
   Insights instrumentation key in source, and `config.json` shipped a dummy DB connection string with
   a plaintext placeholder password.** Both moved to obvious placeholders with an explanatory comment:
   the instrumentation key now reads from `Configuration["APPINSIGHTS_INSTRUMENTATIONKEY"]` (config.json
@@ -4940,7 +4940,7 @@ declared) but **not locally compiled**; CI (`build-benzene.yml`'s `examples-buil
   parameter type, which is only meaningful in a nullable context. Removed the `?` (parameter keeps its
   `= null` default; behaviourally identical) rather than flipping the project-wide `Nullable` setting,
   to keep the fix scoped to the one warning. See WP-K.
-- **[RESOLVED] #223 — `examples/Asp/Benzene.Example.Asp/Startup.cs` emitted an ASP0001
+- **[RESOLVED] #223 — `examples/Asp/Benzene.Examples.Asp/Startup.cs` emitted an ASP0001
   middleware-ordering warning.** Moved `app.UseAuthorization()` to sit immediately before the final
   `app.UseEndpoints(...)` call, with nothing (including the `app.Map("/protected", ...)` /
   `app.Map("/slow", ...)` branches) between them, matching the canonical
@@ -4953,7 +4953,7 @@ declared) but **not locally compiled**; CI (`build-benzene.yml`'s `examples-buil
   unexplained, unreferenced binary.** Confirmed via repo-wide grep for `some.dll` that no `.csproj`
   referenced it (only mentioned in `work/` docs) before deleting it. See WP-K.
 - **[RESOLVED] #274 — `examples/CLAUDE.md`'s "own solution" list omitted `Benzene.Examples.GoogleCloudMesh.sln`
-  and `Benzene.Example.AzureFunctionsMesh.sln`.** Added both, plus the two new solutions from #272
+  and `Benzene.Examples.AzureFunctionsMesh.sln`.** Added both, plus the two new solutions from #272
   (`Benzene.Examples.AwsMesh.sln`, `Benzene.Examples.AzureMesh.sln`). See WP-K.
 - **[RESOLVED] #275 — `deploy/Mesh/helm/benzene-mesh/` had zero CI validation.** Added a `helm-lint`
   job to `.github/workflows/build-mesh-host.yml` (the workflow that builds the host this chart

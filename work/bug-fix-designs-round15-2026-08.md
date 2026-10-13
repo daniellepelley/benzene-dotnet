@@ -679,7 +679,7 @@ entire examples/ tree. This pass: 3 worth-fixing, 2 minor.**
 
 **Minor:**
 - **#274** — `examples/CLAUDE.md`'s "own solution" list omits `Benzene.Examples.GoogleCloudMesh.sln`
-  and `Benzene.Example.AzureFunctionsMesh.sln`, both of which exist on disk.
+  and `Benzene.Examples.AzureFunctionsMesh.sln`, both of which exist on disk.
 - **#275** — `deploy/Mesh/helm/benzene-mesh/` has zero CI validation of any kind (no `helm lint`/
   `helm template`/`--dry-run` anywhere) — the one artifact in `deploy/` within scope shipping no
   automated verification; internally consistent on static read, so a coverage gap, not a known break.

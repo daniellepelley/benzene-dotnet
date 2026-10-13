@@ -267,7 +267,7 @@ that backing. I did not modify any source, doc or example.
 - **Clause:** §4.1 "Building a host ... [is] the framework's work"; examples rule "the third copy
   is a backlog item, the fourth is choosing not to fix it".
 - **Evidence.** `grep -rl "ConfigureFunctionsWebApplication()" examples` = 8 files:
-  `examples/Azure/Benzene.Example.Azure/Program.cs:7-17` and all seven
+  `examples/Azure/Benzene.Examples.Azure/Program.cs:7-17` and all seven
   `examples/AzureFunctionsMesh/*/Program.cs:7-12`. Each is the same five statements:
   ```csharp
   var host = new HostBuilder()
@@ -278,7 +278,7 @@ that backing. I did not modify any source, doc or example.
   ```
   The other two hosts already have the shorthand — `src/Benzene.HostedService/BenzeneHost.cs:87`
   `BenzeneHost.RunAsync<TStartUp>(args, configureHost)` and
-  `src/Benzene.AspNet.Core/BenzeneWebHost.cs:92` — and `examples/Azure/Benzene.Example.Azure.Worker/Program.cs:7-10`
+  `src/Benzene.AspNet.Core/BenzeneWebHost.cs:92` — and `examples/Azure/Benzene.Examples.Azure.Worker/Program.cs:7-10`
   shows the one-liner is possible on the same machine. The preamble also carries two documented
   traps the shorthand would erase: the `IHostBuilder.UseBenzene<TStartUp>` name collision between
   `Benzene.HostedService` and `Benzene.Azure.Function.Core` (`docs/getting-started-worker.md`
@@ -364,7 +364,7 @@ that backing. I did not modify any source, doc or example.
   (`docs/azure-functions.md:1009-1011`: *"handlers are discovered by reflection over that
   assembly [`AddMessageHandlers`], not auto-registered globally"*). The finder is `TryAddSingleton`
   (`src/Benzene.Core.MessageHandlers/DI/Extensions.cs:211`) — first registration wins, which
-  `examples/Azure/Benzene.Example.Azure/DependenciesBuilder.cs:60-67` documents as a trap it fell
+  `examples/Azure/Benzene.Examples.Azure/DependenciesBuilder.cs:60-67` documents as a trap it fell
   into. The only start-up verification is `EmptyHandlerRegistryStartUpCheck`
   (`StartUpChecks/EmptyHandlerRegistryStartUpCheck.cs:32-45`), which logs (does not throw) and
   only when **zero** handlers were found; a partially-registered set passes.
@@ -455,11 +455,11 @@ that backing. I did not modify any source, doc or example.
 - **Clause:** examples rule ("the second copy is a signal").
 - **Evidence.** `class FakeBenzeneMessageSender` exists in
   `examples/Aws/Benzene.Examples.Aws.Tests/Helpers/FakeBenzeneMessageSender.cs` and
-  `examples/Azure/Benzene.Example.Azure.Test/Helpers/FakeBenzeneMessageSender.cs`; `Benzene.Testing`
+  `examples/Azure/Benzene.Examples.Azure.Test/Helpers/FakeBenzeneMessageSender.cs`; `Benzene.Testing`
   has no `IBenzeneMessageSender` type (grep). Separately, the Azure example constructs a real
-  `ServiceBusClient` eagerly (`examples/Azure/Benzene.Example.Azure/DependenciesBuilder.cs:55-58`),
+  `ServiceBusClient` eagerly (`examples/Azure/Benzene.Examples.Azure/DependenciesBuilder.cs:55-58`),
   so both test projects must plant a fake connection string before building the host
-  (`Benzene.Example.Azure.Test/StartUpTest.cs:28-36`, `Benzene.Example.Azure.Dev.Test/PublishOrderCreatedServiceBusTest.cs:34-37`)
+  (`Benzene.Examples.Azure.Test/StartUpTest.cs:28-36`, `Benzene.Examples.Azure.Dev.Test/PublishOrderCreatedServiceBusTest.cs:34-37`)
   — while the sibling Azure example registers senders lazily
   (`examples/AzureFunctionsMesh/Shared/MeshServiceWiring.cs:101-108`). Two Azure examples, two
   patterns for one thing.
@@ -495,9 +495,9 @@ that backing. I did not modify any source, doc or example.
 - **Clause:** examples rule.
 - **Evidence.**
   - `GetConfiguration()` overrides reproducing the base default:
-    `examples/Azure/Benzene.Example.Azure/StartUp.cs:19-22` → `DependenciesBuilder.cs:24-30`
+    `examples/Azure/Benzene.Examples.Azure/StartUp.cs:19-22` → `DependenciesBuilder.cs:24-30`
     (`SetBasePath` with no file provider is a no-op); `examples/Google/Benzene.Examples.Google/Startup.cs:25-31`;
-    `Benzene.Example.Azure.Worker/StartUp.cs:23-26` (this one legitimately adds `config.json`).
+    `Benzene.Examples.Azure.Worker/StartUp.cs:23-26` (this one legitimately adds `config.json`).
     `BenzeneStartUp.cs:19-22` names this exact body as the ceremony the virtual default removed.
   - `DependenciesBuilder.cs:44-47` hand-registers the `benzene:spec` `IMessageHandlerDefinition`/
     `HttpEndpointDefinition` that `UseSpec()` already registers
@@ -569,12 +569,12 @@ missing shorthand (→ finding) or a deliberate demonstration (→ needs a comme
 
 | File | D | I | P | The plumbing, and which category |
 |---|---|---|---|---|
-| `examples/Azure/Benzene.Example.Azure/Program.cs` | 0 | 1 | 6 | HostBuilder/ConfigureFunctionsWebApplication/AppInsights x2/Build/Run → missing shorthand (F6) |
+| `examples/Azure/Benzene.Examples.Azure/Program.cs` | 0 | 1 | 6 | HostBuilder/ConfigureFunctionsWebApplication/AppInsights x2/Build/Run → missing shorthand (F6) |
 | `.../StartUp.cs` | 0 | 12 | 7 | `GetConfiguration` override (3), delegation to `DependenciesBuilder` (3), `strip-api` (1) → F16 |
 | `.../Triggers.cs` | 0 | 3 | 0 | clean — the shorthand working as intended |
 | `.../DependenciesBuilder.cs` | 0 | 6 | 19 | `GetConfiguration` (5), `CreateServiceResolverFactory` (5), `AddSingleton(configuration)` (1), spec definition duplicate (4), eager `ServiceBusClient`/sender (4) → F14, F16 |
 | `.../PublishOrderCreatedMessageHandler.cs` | 10 | 2 | 0 | clean |
-| `examples/Azure/Benzene.Example.Azure.Worker/Program.cs` | 0 | 1 | 0 | clean — `BenzeneHost.RunAsync` is the shorthand F6 asks for on Functions |
+| `examples/Azure/Benzene.Examples.Azure.Worker/Program.cs` | 0 | 1 | 0 | clean — `BenzeneHost.RunAsync` is the shorthand F6 asks for on Functions |
 | `.../Worker/StartUp.cs` | 0 | 12 | 16 | `GetConfiguration` (3), delegation (3), `EventProcessorClient` construction incl. blob container create (10) → the last is the documented factory seam and carries a comment: deliberate |
 | `.../Worker/DependenciesBuilder.cs` | 0 | 3 | 11 | `GetConfiguration` (6), `AddSingleton(configuration)`/`AddLogging` (2), timer factory (3) → F16 |
 | `examples/AzureFunctionsMesh/<svc>/Program.cs` (x7) | 0 | 1 | 4 | identical preamble x7 → F6 |

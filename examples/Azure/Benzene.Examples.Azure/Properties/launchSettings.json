@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "Benzene.Examples.Azure": {
+      "commandName": "Project",
+      "commandLineArgs": "--port 7144 --verbose"
+    }
+  }
+}

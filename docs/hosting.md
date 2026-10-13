@@ -492,7 +492,7 @@ await BenzeneWebHost.RunAsync<StartUp>(args, builder => builder.WebHost.UseUrls(
 own ASP.NET middleware goes, since it has to sit in front of Benzene's terminal wiring.
 
 Nothing here is load-bearing: it is a shorthand for the five lines above, and they remain the
-supported explicit form ([`examples/Asp/Benzene.Example.Asp.Minimal`](../examples/Asp/Benzene.Example.Asp.Minimal/Program.cs)
+supported explicit form ([`examples/Asp/Benzene.Examples.Asp.Minimal`](../examples/Asp/Benzene.Examples.Asp.Minimal/Program.cs)
 keeps them written out on purpose).
 
 **Which shape should you actually use?** If the process has no ASP.NET surface of its own — no

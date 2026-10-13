@@ -60,8 +60,8 @@ Who is on this path (trace-only):
 |---|---|---|
 | `docs/getting-started-aspnet.md` | 129-131 | `app.UseBenzene(benzene => benzene.UseHttp(http => http.UseMessageHandlers()))` |
 | `templates/content/asp/Program.cs` | 30-34 | same |
-| `examples/Grpc/Benzene.Example.Grpc/Program.cs` | 32-36 | `app.UseBenzene(x => x.UseGrpc(grpc => grpc.UseMessageHandlers()))` |
-| `examples/Asp/Benzene.Example.Asp/Startup.cs` | 103-109, 133, 160 | three `UseBenzene(benzene => …)` calls |
+| `examples/Grpc/Benzene.Examples.Grpc/Program.cs` | 32-36 | `app.UseBenzene(x => x.UseGrpc(grpc => grpc.UseMessageHandlers()))` |
+| `examples/Asp/Benzene.Examples.Asp/Startup.cs` | 103-109, 133, 160 | three `UseBenzene(benzene => …)` calls |
 | `docs/asp-net-core.md` | 242-247 | "Wiring without `BenzeneStartUp`" |
 | `src/Benzene.Grpc.TestHelpers/GrpcTestHostBuilderExtensions.cs` | 46-48 | `new AspApplicationBuilder(app)` — the gRPC test host has no `WithStartUpChecks()` either (it is absent from the grep of every other `*.TestHelpers` `Build*`) |
 
@@ -157,7 +157,7 @@ Every discovered handler is already registered scoped by `AddMessageHandlers(Typ
 | Copy | Lines of plumbing |
 |---|---|
 | `templates/content/asp/BenzeneStarter.Tests/HelloWorldMessageHandlerTests.cs:21-41` | 13 |
-| `examples/Cqrs/Benzene.Example.Cqrs/Program.cs:29-45, 72-74` | 12 |
+| `examples/Cqrs/Benzene.Examples.Cqrs/Program.cs:29-45, 72-74` | 12 |
 | `examples/OpenTelemetry/Benzene.Examples.OpenTelemetry/Program.cs` | (outside territory; counted) |
 | `examples/Mesh/Benzene.Examples.Mesh.Shared/EnvelopeHost.cs` | (outside territory; counted) |
 | `docs/getting-started-worker.md:171-175` and `:281-283` | 4 + 3 |
@@ -266,7 +266,7 @@ After:
 |---|---|
 | `templates/content/{aws-apigateway,aws-sqs,aws-sns,azure-http,azure-servicebus,azure-eventhub,azure-eventgrid,azure-queuestorage}/StartUp.cs` | `.SetBasePath(Directory.GetCurrentDirectory()).AddEnvironmentVariables().Build()` — `SetBasePath` affects file providers only; with environment variables as the sole source it is a no-op |
 | `templates/content/{kafka-worker,rabbitmq-worker,servicebus-worker}/StartUp.cs` | `.AddEnvironmentVariables().Build()` — the default, verbatim |
-| `examples/Asp/Benzene.Example.Asp.Minimal/StartUp.cs:19-22` | the default, verbatim — in "the smallest thing that works" |
+| `examples/Asp/Benzene.Examples.Asp.Minimal/StartUp.cs:19-22` | the default, verbatim — in "the smallest thing that works" |
 | `examples/Versioning/Benzene.Examples.Versioning/StartUp.cs:41-46` | the default, verbatim |
 
 That is 4–5 plumbing lines per StartUp, 13 times, and the `hosting.md:204-208` snippet already shows the intended shape ("`GetConfiguration()` not overridden: the default reads environment variables").
@@ -345,12 +345,12 @@ The doc's other gRPC trap — handler types registered only inside `UseGrpc(...)
 | Artefact | Shape | Benzene calls |
 |---|---|---|
 | `docs/getting-started-aspnet.md:113-134` | inline, legacy `UseBenzene(Action)` | 2 (`UsingBenzene(AddMessageHandlers)`, `UseBenzene(UseHttp(UseMessageHandlers))`) |
-| `examples/Asp/Benzene.Example.Asp.Minimal` (which the doc at line 9 calls "the runnable version of this guide") | `StartUp : BenzeneStartUp` + `builder.UseBenzene<StartUp>()` + `app.UseBenzene()` | 5 across two files |
+| `examples/Asp/Benzene.Examples.Asp.Minimal` (which the doc at line 9 calls "the runnable version of this guide") | `StartUp : BenzeneStartUp` + `builder.UseBenzene<StartUp>()` + `app.UseBenzene()` | 5 across two files |
 | `templates/content/asp/Program.cs` | inline legacy + diagnostics + enrichment + log-result | 5 in one file |
 
 The doc says "There are only two Benzene calls" (`:136`); the "runnable version" has a `StartUp` class the doc never mentions; the template has three calls the doc never mentions. None of the three names `BenzeneWebHost` or `UseAspNet` as the level above/below except the Minimal example's comment (`Program.cs:5-8`, which is exemplary) and one aside in "Why not just a minimal API?" (`:207-210`).
 
-**Proposed change.** Pick one shape for the first service (the `StartUp` + `BenzeneWebHost.RunAsync` shape is the one that gets checks and a single provider; see F1), make the doc, the Minimal example and the template *identical* the way the handler file already is (the template pack diffs `HelloWorldMessageHandler.cs` across templates in CI — `templates/README.md:112-130`; extend the same diff to `Program.cs`/`StartUp.cs` against `examples/Asp/Benzene.Example.Asp.Minimal`), and in the doc write the ladder out once:
+**Proposed change.** Pick one shape for the first service (the `StartUp` + `BenzeneWebHost.RunAsync` shape is the one that gets checks and a single provider; see F1), make the doc, the Minimal example and the template *identical* the way the handler file already is (the template pack diffs `HelloWorldMessageHandler.cs` across templates in CI — `templates/README.md:112-130`; extend the same diff to `Program.cs`/`StartUp.cs` against `examples/Asp/Benzene.Examples.Asp.Minimal`), and in the doc write the ladder out once:
 
 > `BenzeneWebHost.RunAsync<StartUp>(args)` is `WebApplication.CreateBuilder(args)` → `builder.UseBenzene<StartUp>()` → `Build()` → `app.UseBenzene()` → `Run()`; `UseHttp(...)` is `AddAspNetMessageHandlers()` + `Create<AspNetContext>()` + `Add(new AspNetApplication(...))`. Drop one level whenever you need to put your own middleware in between.
 
@@ -413,7 +413,7 @@ Recommendation: one naming rule in `AGENTS.md` ("`Add*` registers, `Use*` mounts
 
 ---
 
-### F14 — POLISH — `examples/Asp/Benzene.Example.Asp/Startup.cs:111-115` states the router is "unconditionally terminal … always answers, even NotFound"; the code, the doc and the test say the opposite for unmatched routes
+### F14 — POLISH — `examples/Asp/Benzene.Examples.Asp/Startup.cs:111-115` states the router is "unconditionally terminal … always answers, even NotFound"; the code, the doc and the test say the opposite for unmatched routes
 
 **Evidence (trace-only).** `AspNetMessageTopicGetter` returns a null-id topic for an unmatched route (`AspNetMessageTopicGetter.cs:31-32`); the router turns it into the `<missing>` sentinel; `AspMessageHandlerResultSetter : ResponseIfHandledMessageHandlerResultSetter` writes nothing when the topic is `<missing>` (`Core.MessageHandlers/Response/ResponseIfHandledMessageHandlerResultSetter.cs:35-39`); `AspApplicationBuilder.Add` then calls `next()` because the response has not started (`AspApplicationBuilder.cs:120-127`). `asp-net-core.md:19-20, 154-156` and `AspNetUnifiedStartUpTest.cs:109` describe exactly this. The example comment is right only about a *matched* route whose handler returns NotFound. Since the comment is the rationale for the `app.Map("/protected", …)` pattern, fix the sentence: "a request that matches a route in this pipeline is answered here, even with NotFound; an unmatched request falls through".
 
@@ -423,7 +423,7 @@ Recommendation: one naming rule in `AGENTS.md` ("`Add*` registers, `Use*` mounts
 
 - `docs/getting-started-templates.md:4` lists "self-hosted HTTP" among the templates; there is no such template (12 templates, `templates/README.md:9-28`; none uses `UseAspNet`). Given `hosting.md:498-503` and `BenzeneWebHost`'s own remarks say `UseAspNet` + `BenzeneHost` is the *right* shape when ASP.NET is only the HTTP host, the missing template is the one the framework itself recommends.
 - `:62` "The other nine work today": 12 − 4 = 8.
-- `examples/Grpc/Benzene.Example.Grpc/Program.cs:31` keeps `dotnet new grpc`'s `app.MapGet("/", …)` scaffold line, and `Services/GreeterService.cs:14-20` overrides `SayHello` with a body that never runs because the Benzene handler claims the route — the doc explicitly recommends *not* overriding claimed methods (`getting-started-grpc.md:75-87`). Both are plumbing without a "deliberate" comment.
+- `examples/Grpc/Benzene.Examples.Grpc/Program.cs:31` keeps `dotnet new grpc`'s `app.MapGet("/", …)` scaffold line, and `Services/GreeterService.cs:14-20` overrides `SayHello` with a body that never runs because the Benzene handler claims the route — the doc explicitly recommends *not* overriding claimed methods (`getting-started-grpc.md:75-87`). Both are plumbing without a "deliberate" comment.
 - `templates/content/asp/README.md:23-25` links "Full guide: getting-started.md" — the ASP.NET guide is `getting-started-aspnet.md`.
 
 ---
@@ -461,10 +461,10 @@ Counting rule: statements only (no `using`, blank, comment or brace-only lines; 
 | `templates/servicebus-worker/StartUp.cs` (+`Program.cs`) | 1 | 11+1 | 9+3 | same, `AddServiceBusConsumer` (RED) |
 | `examples/Asp/…Minimal/Program.cs` | 0 | 1 | 4 | `CreateBuilder`/`Build`/`UseBenzene()`/`Run` — **DEL**, comment names `BenzeneWebHost` (`:5-8`). Exemplary. |
 | `examples/Asp/…Minimal/StartUp.cs` | 0 | 3 | 4 | `GetConfiguration` ×3 (RED, F5), `UsingBenzene(` wrapper |
-| `examples/Asp/Benzene.Example.Asp/Program.cs` | 0 | 0 | 8 | classic-host preamble (DEL? — `examples/CLAUDE.md` justifies `Startup.cs`, not `Program.cs`) |
-| `examples/Asp/Benzene.Example.Asp/Startup.cs` (approx.) | ~10 | ~20 | ~22 | Serilog/AppInsights block ×9 (DEL — "Demo-only" comment), spec hand-registration ×5 (RED, F6), `AddLogging`/`AddScoped<ILogger>`/`AddSingleton(Configuration)` ×3, ASP.NET pipeline calls ×5 (necessary for controllers; DEL per `examples/CLAUDE.md`) |
-| `examples/Grpc/Benzene.Example.Grpc/Program.cs` (+`GreeterService.cs`) | 2 | 5 | 7+6 | `UsingBenzene(`, `AddGrpcMessageHandlers` (RED), `MapGet("/")` scaffold, `UseBenzene(` legacy (F1), `CreateBuilder`/`Build`/`Run`; dead `SayHello` override (F15) |
-| `examples/Cqrs/Benzene.Example.Cqrs/Program.cs` (approx.) | ~50 | ~8 | ~35 | hand-rolled in-process host ×12 (MS, F3), `DeliverToReadSideAsync` + two `.Use(async …)` bridges ×12 (MS — `Benzene.Clients.InProcess.UseInProcess` exists for exactly this dispatch by its own description, `Core.MessageHandlers/DI/Extensions.cs:51-53`; trace-only), `QueryReadModelAsync` hand-built request/response ×8 (MS — an in-process client), null-then-assign factory ×2 |
+| `examples/Asp/Benzene.Examples.Asp/Program.cs` | 0 | 0 | 8 | classic-host preamble (DEL? — `examples/CLAUDE.md` justifies `Startup.cs`, not `Program.cs`) |
+| `examples/Asp/Benzene.Examples.Asp/Startup.cs` (approx.) | ~10 | ~20 | ~22 | Serilog/AppInsights block ×9 (DEL — "Demo-only" comment), spec hand-registration ×5 (RED, F6), `AddLogging`/`AddScoped<ILogger>`/`AddSingleton(Configuration)` ×3, ASP.NET pipeline calls ×5 (necessary for controllers; DEL per `examples/CLAUDE.md`) |
+| `examples/Grpc/Benzene.Examples.Grpc/Program.cs` (+`GreeterService.cs`) | 2 | 5 | 7+6 | `UsingBenzene(`, `AddGrpcMessageHandlers` (RED), `MapGet("/")` scaffold, `UseBenzene(` legacy (F1), `CreateBuilder`/`Build`/`Run`; dead `SayHello` override (F15) |
+| `examples/Cqrs/Benzene.Examples.Cqrs/Program.cs` (approx.) | ~50 | ~8 | ~35 | hand-rolled in-process host ×12 (MS, F3), `DeliverToReadSideAsync` + two `.Use(async …)` bridges ×12 (MS — `Benzene.Clients.InProcess.UseInProcess` exists for exactly this dispatch by its own description, `Core.MessageHandlers/DI/Extensions.cs:51-53`; trace-only), `QueryReadModelAsync` hand-built request/response ×8 (MS — an in-process client), null-then-assign factory ×2 |
 | `examples/Versioning/…/StartUp.cs` | 1 | ~24 | ~11 | `GetConfiguration` ×3 (RED), `AddSingleton(configuration)`, `AddLogging` (host adds it), `AddHttpMessageHandlers` (RED), `AddContextItems` (RED), explicit `Create<BenzeneMessageContext>()`+`UseBenzeneMessage(pipeline)` ×3 where the inline overload exists, `_ => { }` ×4 (F13) |
 | `examples/App/Benzene.Examples.App/Handlers/*.cs` | all | — | 0 | the handler shape is pure intent: attribute, interface, one `HandleAsync`. Nothing to strip. |
 
@@ -500,7 +500,7 @@ Totals for the 12 templates' `StartUp`/`Program` files alone: **~112 plumbing st
 
 - **The start-up-check phase** (`Benzene.Core.MessageHandlers/StartUpChecks/*`). Every failure reported at once, the exception text names the softening knob, `TerminalMiddlewareStartUpCheck`'s `UseSqs(sqs => { })` rationale, `DuplicateTopicStartUpCheck` explaining why the runtime was inconsistent, `EmptyHandlerRegistryStartUpCheck` logging rather than throwing with the reason stated, `UnroutedHttpEndpointCheck`'s message ("Add a `[Message("topic")]` attribute … or register it explicitly with …"). This is §4.1's "names what was looked for, where, and what to add" done properly. F1/F2/F7/F8 are about *coverage*, not design.
 - **`BenzeneHost` and `BenzeneWebHost`** (`Benzene.HostedService/BenzeneHost.cs`, `Benzene.AspNet.Core/BenzeneWebHost.cs`). The XML docs show the explicit form verbatim, say "nothing here can do anything you could not write yourself", say when *not* to use the shorthand, and expose `Build` as the escape hatch and test seam. This is the reference implementation of "the ladder is visible from the top"; the other ports should copy the prose.
-- **`examples/Asp/Benzene.Example.Asp.Minimal/Program.cs:5-8`** — "DELIBERATELY the explicit form … The one-line shorthand over exactly these calls is `BenzeneWebHost.RunAsync<StartUp>(args)`". Exactly the comment §4.1 requires; the only example in the territory that has it.
+- **`examples/Asp/Benzene.Examples.Asp.Minimal/Program.cs:5-8`** — "DELIBERATELY the explicit form … The one-line shorthand over exactly these calls is `BenzeneWebHost.RunAsync<StartUp>(args)`". Exactly the comment §4.1 requires; the only example in the territory that has it.
 - **`BenzeneStartUp.GetConfiguration()` virtual default** and its remark ("23 of the 50 StartUps … A steer should cost a line when you want something different"). Correct reasoning; F5 is only that the templates were not updated to collect.
 - **`AddMessageHandlers` guaranteeing `AddBenzene()`** (`DI/Extensions.cs:175-182`) — "the old footgun surfaced far from its cause" — and the transports' `Use*` self-registering their `Add*`. The framework already removed the ceremony; F6 is the templates still paying it.
 - **The handler shape.** `[Message("hello:world")]` + `IMessageHandler<TReq,TRes>` + `BenzeneResult.Ok(...)`: three lines of pure intent, byte-identical across 12 templates, with a CI diff check (`templates/README.md:112-130`) that keeps it so. The message-handlers.md/message-result.md pair documents every rung underneath it (finders, mappers, renderers, status mapping) without leaking any of it into the handler.

@@ -523,7 +523,7 @@ public interface IContextConverter<TContextIn, TContextOut>
 ## Runnable example: the ingress↔egress symmetry
 
 `examples/Aws/Benzene.Examples.Aws`'s `PublishOrderCreatedMessageHandler` and
-`examples/Azure/Benzene.Example.Azure`'s handler of the same name are copy-runnable, minimal
+`examples/Azure/Benzene.Examples.Azure`'s handler of the same name are copy-runnable, minimal
 demonstrations of egress alongside the ingress each host already has: both wire
 `AddOutboundRouting(...)` in their `DependenciesBuilder` (SQS reusing the same localstack queue the
 SQS ingress trigger talks to; Service Bus reusing the same `orders` queue the Service Bus trigger

@@ -19,11 +19,11 @@ handler/logic in `Benzene.Examples.App` and wiring it from the hosts, rather tha
 ## Layout (one folder per host/transport)
 - **`App/`** — shared handlers/validators/services (above); the reused core.
 - **`Asp/`** — ASP.NET Core host. Two projects:
-  - `Benzene.Example.Asp.Minimal` — the smallest thing that works: the runnable version of
+  - `Benzene.Examples.Asp.Minimal` — the smallest thing that works: the runnable version of
     [docs/getting-started-aspnet.md](../docs/getting-started-aspnet.md) (`GET /hello/{name}` only), using the
     documented `BenzeneStartUp` + `WebApplicationBuilder.UseBenzene<StartUp>()` model. Start ASP.NET
     newcomers here; the [platform picker](../docs/getting-started.md) routes other platforms to their guide.
-  - `Benzene.Example.Asp` — the fuller host: Spec UI (`/benzene/spec-ui`) + `spec` endpoint, FluentValidation,
+  - `Benzene.Examples.Asp` — the fuller host: Spec UI (`/benzene/spec-ui`) + `spec` endpoint, FluentValidation,
     Serilog, controllers, and an OAuth2-protected `/protected/ping` route. It wires Benzene by hand via
     `IApplicationBuilder.UseBenzene(builder => builder.UseHttp(...))` (the other documented ASP.NET path,
     see [docs/hosting.md](../docs/hosting.md)) because it needs native ASP.NET plumbing —
@@ -122,11 +122,11 @@ handler/logic in `Benzene.Examples.App` and wiring it from the hosts, rather tha
 
 ## How these build (important)
 - Examples build via **`Benzene.Examples.sln`** at the repo root — **not** the main `Benzene.sln`. Several
-  folders also have their own solution: `Benzene.Example.Asp.sln`, `Benzene.Examples.Aws.sln`,
-  `Benzene.Example.Azure.sln`, `Benzene.Example.Grpc.sln`, `Benzene.Example.Kafka.sln`,
-  `Benzene.Examples.Versioning.sln`, `Benzene.Example.Cloudflare.sln`, plus the four mesh-topology
+  folders also have their own solution: `Benzene.Examples.Asp.sln`, `Benzene.Examples.Aws.sln`,
+  `Benzene.Examples.Azure.sln`, `Benzene.Examples.Grpc.sln`, `Benzene.Examples.Kafka.sln`,
+  `Benzene.Examples.Versioning.sln`, `Benzene.Examples.Cloudflare.sln`, plus the four mesh-topology
   examples' own solutions — `Benzene.Examples.GoogleCloudMesh.sln`,
-  `Benzene.Example.AzureFunctionsMesh.sln`, `Benzene.Examples.AwsMesh.sln`, and
+  `Benzene.Examples.AzureFunctionsMesh.sln`, `Benzene.Examples.AwsMesh.sln`, and
   `Benzene.Examples.AzureMesh.sln` (the last two added by #272; deliberately kept out of
   `Benzene.Examples.sln` itself — see below).
 - **The examples ARE part of the primary CI gate — `build-benzene.yml` has a real `examples-build`
@@ -134,9 +134,9 @@ handler/logic in `Benzene.Examples.App` and wiring it from the hosts, rather tha
   `Benzene.Examples.sln` in full (every folder that solution lists — AWS, Asp, Azure Functions +
   Worker, Grpc, Kafka, Saga, Mesh, CodeGen, Cloudflare, Versioning, and Google), then runs `dotnet test`
   against the in-memory example test projects (no external dependency, so they run on a plain runner):
-  `Benzene.Examples.App.Test`, `Benzene.Example.Asp.Test`, `Benzene.Examples.Aws.Tests`,
-  `Benzene.Examples.Aws.Minimal.Tests`, `Benzene.Example.Azure.Test`, `Benzene.Example.Grpc.Test`,
-  `Benzene.Examples.OpenTelemetry.Test`, `Benzene.Example.Saga.Tests`, `Benzene.Examples.Google.Tests`,
+  `Benzene.Examples.App.Test`, `Benzene.Examples.Asp.Test`, `Benzene.Examples.Aws.Tests`,
+  `Benzene.Examples.Aws.Minimal.Tests`, `Benzene.Examples.Azure.Test`, `Benzene.Examples.Grpc.Test`,
+  `Benzene.Examples.OpenTelemetry.Test`, `Benzene.Examples.Saga.Tests`, `Benzene.Examples.Google.Tests`,
   and `Benzene.Examples.Versioning.Tests`. Two further jobs run real-dependency tiers that need Docker
   (`examples-aws-localstack-tests` against LocalStack SQS, `examples-azure-servicebus-tests` against the
   Service Bus emulator) — those `.Dev.Test` projects are deliberately NOT in `Benzene.Examples.sln`.
@@ -164,21 +164,21 @@ handler/logic in `Benzene.Examples.App` and wiring it from the hosts, rather tha
   dependency like localstack/kafka). Keep new example tests in the same shape.
 
 ## Known quirks — do not "tidy" casually
-- **Inconsistent naming:** some folders use `Benzene.Example.*` (singular — Asp, Grpc, Azure) and others
-  `Benzene.Examples.*` (plural — Aws, Google, Kafka, App, CodeGen, OpenTelemetry). Leave it unless asked;
-  renaming a project touches its `.csproj`, every `.sln` that lists it, and every `ProjectReference` to it.
-  (The former `Kakfa` misspelling under `examples/Kafka` was corrected to `Benzene.Examples.Kafka` /
-  `Benzene.Examples.Kafka.Producer` — release plan 4.1.)
+- **One naming convention:** every example project is `Benzene.Examples.*` (plural). The singular
+  `Benzene.Example.*` projects (Asp, Azure, Grpc, Saga, Cloudflare, Cqrs, Outbox, and the Kafka and
+  AzureFunctionsMesh solutions) were renamed on 2026-10-13 (release plan 4.2); name a new example
+  `Benzene.Examples.<Name>`. (The former `Kakfa` misspelling under `examples/Kafka` was corrected to
+  `Benzene.Examples.Kafka` / `Benzene.Examples.Kafka.Producer` — release plan 4.1.)
 
 ## Startup model
 Host examples use the platform-neutral `BenzeneStartUp` (`Configure(IBenzeneApplicationBuilder app, …)`),
 wired onto a transport inside `app.UseAwsLambda(…)` / `app.UseHttp(…)` / `app.UseWorker(…)` etc. The old
 host-specific startup base classes (`AwsLambdaStartUp`, `BenzeneWorkerStartup`,
 `BenzeneHostedServiceStartup`, and the example-local `AutofacAwsStartUp`) have been removed.
-- **`Asp/Benzene.Example.Asp.Minimal`** — `StartUp : BenzeneStartUp` hosted via
+- **`Asp/Benzene.Examples.Asp.Minimal`** — `StartUp : BenzeneStartUp` hosted via
   `WebApplicationBuilder.UseBenzene<StartUp>()` + `app.UseBenzene()` in `Program.cs`. The canonical ASP.NET
   reference for a newcomer.
-- **`Asp/Benzene.Example.Asp`** — the one deliberate exception: it wires Benzene by hand with
+- **`Asp/Benzene.Examples.Asp`** — the one deliberate exception: it wires Benzene by hand with
   `IApplicationBuilder.UseBenzene(builder => builder.UseHttp(...))` rather than a `BenzeneStartUp`, because
   its controllers, Spec UI, and `app.Map("/protected", ...)` auth branch need native ASP.NET plumbing a
   `BenzeneStartUp.Configure(IBenzeneApplicationBuilder, …)` can't express. Its integration tests use

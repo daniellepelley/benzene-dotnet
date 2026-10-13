@@ -7,11 +7,11 @@ on:
   workflow_dispatch:
 
 env:
-  # This app (Function App "benzene-example") is examples/Asp/Benzene.Example.Asp - same deploy
+  # This app (Function App "benzene-example") is examples/Asp/Benzene.Examples.Asp - same deploy
   # target as deploy-asp-example.yml. The repo root itself has no single project/solution to build
   # (it holds both Benzene.sln and Benzene.Examples.sln), so '.' here made `dotnet build`
   # ambiguous (MSB1011) and this workflow could never succeed as written.
-  AZURE_FUNCTIONAPP_PACKAGE_PATH: 'examples/Asp/Benzene.Example.Asp' # path to the web app project
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: 'examples/Asp/Benzene.Examples.Asp' # path to the web app project
   DOTNET_VERSION: '10.0.x' # set this to the dotnet version to use
 
 jobs:

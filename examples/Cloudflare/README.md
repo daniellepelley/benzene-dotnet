@@ -1,4 +1,4 @@
-# Benzene.Example.Cloudflare
+# Benzene.Examples.Cloudflare
 
 > **⚠️ The Cloudflare-side deployment config here is documentation-verified, not live-verified**
 > (see the note at the bottom of this file). The Benzene side carries no separate caveat: it is

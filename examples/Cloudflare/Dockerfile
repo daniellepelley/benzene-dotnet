@@ -5,7 +5,7 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 COPY . .
-RUN dotnet publish examples/Cloudflare/Benzene.Example.Cloudflare/Benzene.Example.Cloudflare.csproj -c Release -o /app
+RUN dotnet publish examples/Cloudflare/Benzene.Examples.Cloudflare/Benzene.Examples.Cloudflare.csproj -c Release -o /app
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
@@ -15,4 +15,4 @@ COPY --from=build /app .
 ENV ASPNETCORE_URLS=http://0.0.0.0:8080
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s CMD curl -f http://localhost:8080/livez || exit 1
-ENTRYPOINT ["dotnet", "Benzene.Example.Cloudflare.dll"]
+ENTRYPOINT ["dotnet", "Benzene.Examples.Cloudflare.dll"]
