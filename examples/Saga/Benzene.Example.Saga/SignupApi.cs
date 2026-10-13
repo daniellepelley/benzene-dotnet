@@ -25,6 +25,12 @@ public class SignupApi
     /// <summary>Set to a record kind (e.g. "user") to force that create to fail, to demonstrate rollback.</summary>
     public string? FailAt { get; set; }
 
+    /// <summary>
+    /// Set to a record kind (e.g. "tenant") to make that record's compensation fail too, so the saga
+    /// cannot undo it: a <c>PartiallyRolledBack</c> outcome, with the record left behind as an orphan.
+    /// </summary>
+    public string? FailCompensationOf { get; set; }
+
     public SignupApi(Store store)
     {
         _store = store;
@@ -63,6 +69,12 @@ public class SignupApi
 
     private Task<IBenzeneResult> Delete(string kind, string id)
     {
+        if (FailCompensationOf == kind)
+        {
+            Console.WriteLine($"  ✗ compensate {kind} {id} FAILED - left behind");
+            return Task.FromResult(BenzeneResult.ServiceUnavailable());
+        }
+
         _store.Remove(kind, id);
         Console.WriteLine($"  ↩ compensated: deleted {kind} {id}");
         return Task.FromResult(BenzeneResult.Deleted());

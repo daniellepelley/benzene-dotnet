@@ -140,8 +140,9 @@ handler/logic in `Benzene.Examples.App` and wiring it from the hosts, rather tha
   and `Benzene.Examples.Versioning.Tests`. Two further jobs run real-dependency tiers that need Docker
   (`examples-aws-localstack-tests` against LocalStack SQS, `examples-azure-servicebus-tests` against the
   Service Bus emulator) — those `.Dev.Test` projects are deliberately NOT in `Benzene.Examples.sln`.
-  `Benzene.Examples.Kafka.Test`, despite its name, connects to a real Kafka broker and is excluded from
-  the in-memory test step for the same reason.
+  `Benzene.Examples.Kafka.Test`, despite its name, connects to a real Kafka broker, so it is excluded
+  from the in-memory test step and runs in its own job, `examples-kafka-tests`, beside a broker from the
+  test project's docker-compose.
 - **The four mesh-topology examples build in their own CI job, `mesh-examples-build`** (added by
   #272), which runs `dotnet build` against all four of their per-folder `.sln`s on every push/PR —
   they are **not** folded into `Benzene.Examples.sln`'s own build, because that would drag AWS/Azure/GCP

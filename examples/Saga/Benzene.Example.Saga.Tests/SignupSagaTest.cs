@@ -69,4 +69,23 @@ public class SignupSagaTest
         // fails - it must be compensated too, not left orphaned.
         Assert.Empty(store.Snapshot());
     }
+
+    [Fact]
+    public async Task RunAsync_ACompensationAlsoFails_IsPartiallyRolledBackAndNamesTheOrphan()
+    {
+        var store = new Store();
+        // The user step fails, so stage 1's tenant and okta-company must be undone - but deleting the
+        // tenant fails as well. The saga must say so rather than report a clean rollback.
+        var api = new SignupApi(store) { FailAt = "user", FailCompensationOf = "tenant" };
+
+        var result = await SignupSaga.Build(api, "Acme Ltd").RunAsync();
+
+        Assert.Equal(SagaOutcome.PartiallyRolledBack, result.Outcome);
+        Assert.False(result.IsSuccess);
+        Assert.Equal(1, result.FailedStageIndex);
+        // The okta-company compensation still ran; only the tenant is left behind, and it is named.
+        var orphan = Assert.Single(store.Snapshot());
+        Assert.StartsWith("tenant", orphan);
+        Assert.Single(result.CompensationFailures);
+    }
 }

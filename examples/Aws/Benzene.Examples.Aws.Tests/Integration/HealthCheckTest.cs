@@ -1,8 +1,13 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Amazon.Lambda.APIGatewayEvents;
+using Amazon.Lambda.SQSEvents;
+using Benzene.Core.Messages.BenzeneMessage;
+using Benzene.Results;
 using Amazon.Lambda.TestUtilities;
 using Benzene.Examples.App.Data;
 using Benzene.Examples.Aws.Tests.Helpers;
@@ -36,7 +41,11 @@ public class HealthCheckTest : InMemoryOrdersTestBase
 
         var snsEvent = AwsEventBuilder.CreateSnsEvent(HealthCheckTopic, null);
 
-        await TestLambdaHosting.SendEventAsync(snsEvent);
+        // The SNS binding throws on a failure result (so AWS retries the notification); a health query
+        // that settles cleanly completes without one.
+        var exception = await Record.ExceptionAsync(() => TestLambdaHosting.SendEventAsync(snsEvent));
+
+        Assert.Null(exception);
     }
 
     [Fact]
@@ -44,7 +53,24 @@ public class HealthCheckTest : InMemoryOrdersTestBase
     {
         var sqsEvent = AwsEventBuilder.CreateSqsEvent(HealthCheckTopic, null);
 
-        await TestLambdaHosting.SendEventAsync(sqsEvent);
+        var response = await TestLambdaHosting.SendEventAsync<SQSBatchResponse>(sqsEvent);
+
+        // Answered, so acknowledged: no batch-item failure, nothing redelivered.
+        Assert.Empty(response?.BatchItemFailures ?? new List<SQSBatchResponse.BatchItemFailure>());
+    }
+
+    [Fact]
+    public async Task HealthCheck_BenzeneMessage_ReportsHealthy()
+    {
+        var request = BenzeneMessageBuilder.Create(HealthCheckTopic, new { });
+
+        var response = await TestLambdaHosting.SendEventAsync<BenzeneMessageResponse>(request);
+
+        // wire-contracts §5: a health query answers ok whether or not the service is healthy;
+        // isHealthy in the report is the verdict.
+        Assert.Equal(BenzeneResultStatus.Ok, response.StatusCode);
+        using var report = JsonDocument.Parse(response.Body);
+        Assert.True(report.RootElement.GetProperty("isHealthy").GetBoolean());
     }
 
     [Fact]

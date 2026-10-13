@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Xunit;
@@ -77,6 +78,43 @@ public class SendEndpointTest : IClassFixture<WebApplicationFactory<GreetingRequ
         var result = await response.Content.ReadFromJsonAsync<SendResult>();
         Assert.NotEqual("ok", result!.StatusCode);
         Assert.NotEqual("created", result.StatusCode);
+    }
+
+    [Fact]
+    public async Task Send_WithATraceparent_ThePipelineJoinsTheCallersTrace()
+    {
+        // UseW3CTraceContext (the first middleware in the example's pipeline) must start the pipeline's
+        // root span as a child of the inbound traceparent, so a trace continues across services
+        // rather than starting afresh at every hop.
+        const string traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+        const string parentSpanId = "00f067aa0ba902b7";
+        var joined = new List<Activity>();
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == "Benzene",
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+            ActivityStopped = activity =>
+            {
+                if (activity.OperationName == "W3CTraceContext.Root" && activity.TraceId.ToHexString() == traceId)
+                {
+                    lock (joined) joined.Add(activity);
+                }
+            },
+        };
+        ActivitySource.AddActivityListener(listener);
+        var client = _factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/send", new
+        {
+            topic = "greeting",
+            body = "{\"name\":\"acme\"}",
+            headers = new Dictionary<string, string> { ["traceparent"] = $"00-{traceId}-{parentSpanId}-01" },
+        });
+
+        response.EnsureSuccessStatusCode();
+        var root = Assert.Single(joined);
+        Assert.Equal(parentSpanId, root.ParentSpanId.ToHexString());
+        Assert.True(root.HasRemoteParent);
     }
 
     private record TopicRow(string Topic, string Version, string Handler, string RequestType);
