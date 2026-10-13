@@ -1,7 +1,13 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Benzene.Abstractions.DI;
+using Benzene.Abstractions.MessageHandlers;
+using Benzene.Abstractions.MessageHandlers.Mappers;
+using Benzene.Abstractions.Messages;
+using Benzene.Core.Messages;
+using Benzene.Results;
 using Benzene.Abstractions.Middleware;
 using Benzene.Core;
 using Benzene.Core.MessageHandlers.DI;
@@ -233,5 +239,83 @@ public class TimeoutMiddlewareTest
         using var scope = new MicrosoftServiceResolverFactory(services).CreateScope();
 
         await Assert.ThrowsAsync<TimeoutException>(() => pipeline.HandleAsync("context", scope));
+    }
+
+    // --- A result, not an exception: with a result setter, the deadline is recorded as `timeout` ---
+
+    private sealed class RecordingResultSetter<TContext> : IMessageHandlerResultSetter<TContext>
+    {
+        public List<IMessageHandlerResult> Results { get; } = new();
+
+        public Task SetResultAsync(TContext context, IMessageHandlerResult messageHandlerResult)
+        {
+            Results.Add(messageHandlerResult);
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class FixedTopicGetter : IMessageTopicGetter<object>
+    {
+        public ITopic? GetTopic(object context) => new Topic("order:place");
+    }
+
+    [Fact]
+    public async Task HandleAsync_WithAResultSetter_RecordsATimeoutResultInsteadOfThrowing()
+    {
+        var accessor = new CancellationTokenAccessor();
+        var setter = new RecordingResultSetter<object>();
+        var middleware = new TimeoutMiddleware<object>(accessor, TimeSpan.FromMilliseconds(50), setter, new FixedTopicGetter());
+
+        await middleware.HandleAsync(new object(), async () =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5), accessor.CancellationToken);
+        });
+
+        var result = Assert.Single(setter.Results);
+        Assert.Equal(BenzeneResultStatus.Timeout, result.BenzeneResult.Status);
+        Assert.False(result.BenzeneResult.IsSuccessful);
+        Assert.Equal("order:place", result.Topic!.Id);
+        // Non-null, so an HTTP transport renders the problem document rather than an empty body.
+        Assert.NotNull(result.MessageHandlerDefinition);
+        Assert.Equal(CancellationToken.None, accessor.CancellationToken);
+    }
+
+    [Fact]
+    public async Task HandleAsync_WithAResultSetter_HostCancellationStillPropagatesAndRecordsNothing()
+    {
+        using var hostCts = new CancellationTokenSource();
+        var accessor = new CancellationTokenAccessor { CancellationToken = hostCts.Token };
+        var setter = new RecordingResultSetter<object>();
+        var middleware = new TimeoutMiddleware<object>(accessor, TimeSpan.FromSeconds(30), setter, null);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => middleware.HandleAsync(new object(), () =>
+        {
+            hostCts.Cancel();
+            throw new OperationCanceledException(accessor.CancellationToken);
+        }));
+
+        // A genuine cancellation is redelivered by the transport, never reported as a timeout.
+        Assert.Empty(setter.Results);
+    }
+
+    [Fact]
+    public async Task UseTimeout_WithTheTransportsResultSetterRegistered_RecordsTheTimeoutResult()
+    {
+        var services = new ServiceCollection();
+        var setter = new RecordingResultSetter<string>();
+        services.AddSingleton<IMessageHandlerResultSetter<string>>(setter);
+        var container = new MicrosoftBenzeneServiceContainer(services);
+        container.AddBenzene();
+
+        var builder = new MiddlewarePipelineBuilder<string>(container);
+        builder.UseTimeout(TimeSpan.FromMilliseconds(50));
+        builder.Use(resolver => new SlowMiddleware(resolver.GetService<ICancellationTokenAccessor>()));
+        var pipeline = builder.Build();
+
+        using var scope = new MicrosoftServiceResolverFactory(services).CreateScope();
+        await pipeline.HandleAsync("context", scope);
+
+        var result = Assert.Single(setter.Results);
+        Assert.Equal(BenzeneResultStatus.Timeout, result.BenzeneResult.Status);
     }
 }

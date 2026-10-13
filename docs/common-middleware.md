@@ -494,9 +494,11 @@ public static IMiddlewarePipelineBuilder<TContext> UseTimeout<TContext>(
 app.UseTimeout(TimeSpan.FromSeconds(5));
 ```
 
-**The timeout-vs-cancellation line.** If the *timer* fires, `UseTimeout` translates that into a
-`TimeoutException` rather than letting an `OperationCanceledException` escape — a
-`BenzeneResultStatus.Timeout` (`"timeout"`) failure result, not a raw cancellation. If the *host's*
+**The timeout-vs-cancellation line.** If the *timer* fires, `UseTimeout` records a
+`BenzeneResultStatus.Timeout` (`"timeout"`) failure result on the message, the same way the router
+records `not-found`: an HTTP caller gets a 504 problem document, and a queue binding settles it as a
+failure, so it is redelivered. (On a pipeline whose context has no message-handling transport, and so
+no result setter, it throws a `TimeoutException` instead.) If the *host's*
 own token fires first (shutdown, client disconnect), the original `OperationCanceledException`
 propagates untouched, so queue/settle/ack transports still redeliver the interrupted work exactly as
 they would without `UseTimeout` in the pipeline. `timeout` is a transient status but not
@@ -515,7 +517,9 @@ deadline governs while inside it, and each layer restores exactly the token it s
 The deadline is armed each time the middleware runs, so ordering against `.UseRetry(...)` matters:
 `.UseRetry(...).UseTimeout(...)` (retry outside) re-arms the deadline on every retry attempt — each
 attempt gets the full timeout — while `.UseTimeout(...).UseRetry(...)` (timeout outside) arms it
-once, so the single deadline spans all attempts combined.
+once, so the single deadline spans all attempts combined. Because a timed-out attempt is a *result*,
+not an exception, `.UseRetry(...)` outside `.UseTimeout(...)` retries it only when its
+`shouldRetryContext` says to; by default it does not retry a completed result.
 
 ---
 

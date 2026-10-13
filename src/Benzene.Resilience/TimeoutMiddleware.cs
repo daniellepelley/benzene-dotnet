@@ -1,16 +1,33 @@
 using System.Threading;
+using Benzene.Abstractions.MessageHandlers;
+using Benzene.Abstractions.MessageHandlers.Mappers;
+using Benzene.Abstractions.Messages;
 using Benzene.Abstractions.Middleware;
+using Benzene.Abstractions.Results;
 using Benzene.Core;
+using Benzene.Results;
 
 namespace Benzene.Resilience;
 
 /// <summary>
 /// Wraps the downstream pipeline in a deadline: if <c>next()</c> has not completed within
-/// <paramref name="timeout"/>, the pipeline is cancelled and the middleware translates that into a
-/// service-side <see cref="TimeoutException"/> rather than letting an
+/// <paramref name="timeout"/>, the pipeline is cancelled and the middleware records a
+/// <c>timeout</c> failure result (<c>BenzeneResultStatus.Timeout</c>) rather than letting an
 /// <see cref="OperationCanceledException"/> escape.
 /// </summary>
 /// <remarks>
+/// <para>
+/// <b>A result, not an exception.</b> When the transport registers an
+/// <see cref="IMessageHandlerResultSetter{TContext}"/> (every message-handling transport does; the
+/// router writes <c>not-found</c> through the same seam), the deadline is recorded as a
+/// <c>timeout</c> result on the context and the middleware returns normally: an HTTP caller gets a
+/// 504 problem document, a queue binding settles it as a failure (redelivered, transport-bindings §1
+/// obligation 8). Without a result setter (a pipeline over a context with no message-handling
+/// transport) it throws a <see cref="TimeoutException"/> instead. Either way the host's own
+/// cancellation still propagates untouched (below). Because the deadline is a result,
+/// <c>.UseRetry(...)</c> placed outside <c>.UseTimeout(...)</c> retries a timed-out attempt only when
+/// its <c>shouldRetryContext</c> says so.
+/// </para>
 /// <para>
 /// <b>Composition, not replacement.</b> This middleware never invents cancellation out of nothing -
 /// it reads the ambient <see cref="Benzene.Abstractions.DI.ICancellationTokenAccessor"/>'s current
@@ -67,11 +84,28 @@ public class TimeoutMiddleware<TContext> : IMiddleware<TContext>
 {
     private readonly CancellationTokenAccessor _accessor;
     private readonly TimeSpan _timeout;
+    private readonly IMessageHandlerResultSetter<TContext>? _resultSetter;
+    private readonly IMessageTopicGetter<TContext>? _topicGetter;
 
     public TimeoutMiddleware(CancellationTokenAccessor accessor, TimeSpan timeout)
+        : this(accessor, timeout, null, null)
+    {
+    }
+
+    /// <param name="accessor">The ambient cancellation-token accessor this middleware wraps.</param>
+    /// <param name="timeout">The deadline for the downstream pipeline.</param>
+    /// <param name="resultSetter">
+    /// Where a deadline is recorded as a <c>timeout</c> result. <see langword="null"/> makes the
+    /// middleware throw a <see cref="TimeoutException"/> instead.
+    /// </param>
+    /// <param name="topicGetter">Names the timed-out message's topic on the result, when available.</param>
+    public TimeoutMiddleware(CancellationTokenAccessor accessor, TimeSpan timeout,
+        IMessageHandlerResultSetter<TContext>? resultSetter, IMessageTopicGetter<TContext>? topicGetter)
     {
         _accessor = accessor;
         _timeout = timeout;
+        _resultSetter = resultSetter;
+        _topicGetter = topicGetter;
     }
 
     public string Name => "Timeout";
@@ -90,11 +124,56 @@ public class TimeoutMiddleware<TContext> : IMiddleware<TContext>
             when (!original.IsCancellationRequested)
         {
             // The timer fired, not the host: a service-side timeout, not a genuine cancellation.
-            throw new TimeoutException($"Pipeline exceeded the configured timeout of {_timeout}.", ex);
+            var detail = $"Pipeline exceeded the configured timeout of {_timeout}.";
+            if (_resultSetter is null)
+            {
+                throw new TimeoutException(detail, ex);
+            }
+
+            await _resultSetter.SetResultAsync(context, new TimeoutResult(TryGetTopic(context), BenzeneResult.Timeout(detail)));
         }
         finally
         {
             _accessor.CancellationToken = original;
         }
+    }
+
+    private ITopic? TryGetTopic(TContext context)
+    {
+        try
+        {
+            return _topicGetter?.GetTopic(context);
+        }
+        catch
+        {
+            // The topic only labels the result; a context that cannot name one still gets its timeout.
+            return null;
+        }
+    }
+
+    private sealed class TimeoutResult(ITopic? topic, IBenzeneResult result) : IMessageHandlerResult
+    {
+        public ITopic? Topic { get; } = topic;
+
+        // Non-null, like the router's own failure results (MessageHandlerDefinition.Empty()): a null
+        // definition tells the response mappers there is nothing to render, which would drop the
+        // problem document from an HTTP timeout response.
+        public IMessageHandlerDefinition? MessageHandlerDefinition { get; } = new TimeoutDefinition(topic);
+
+        public IBenzeneResult BenzeneResult { get; } = result;
+    }
+
+    private sealed class TimeoutDefinition(ITopic? topic) : IMessageHandlerDefinition
+    {
+        public ITopic Topic { get; } = topic ?? new MissingTopic();
+        public Type RequestType => typeof(Benzene.Abstractions.Results.Void);
+        public Type ResponseType => typeof(Benzene.Abstractions.Results.Void);
+        public Type HandlerType => typeof(Benzene.Abstractions.Results.Void);
+    }
+
+    private sealed class MissingTopic : ITopic
+    {
+        public string Id => Constants.Missing;
+        public string Version => string.Empty;
     }
 }

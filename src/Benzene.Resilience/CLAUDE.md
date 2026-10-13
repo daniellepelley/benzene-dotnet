@@ -39,8 +39,12 @@ where retry/timeout fit and when to reach for `Benzene.Resilience.Polly` (circui
   links a new `CancellationTokenSource` to it, arms it with `CancelAfter(timeout)`, sets the linked
   token as ambient for the duration of `next()`, and restores the original token in a `finally`
   (`using` on the linked source, so it — and its timer, and its registration on the original token —
-  is disposed on every path). If the timer fires it translates the resulting
-  `OperationCanceledException` into a `TimeoutException`; if the *original* token was already
+  is disposed on every path). If the timer fires it records a `timeout` failure result through the
+  context's `IMessageHandlerResultSetter<TContext>` (resolved optionally by `UseTimeout`, with
+  `IMessageTopicGetter<TContext>` to name the topic - the seam the router writes `not-found` through)
+  and returns normally; with no setter registered for the context (an outbound pipeline, a bare
+  context) it throws a `TimeoutException` instead, which outbound clients map to a `timeout` result
+  themselves. If the *original* token was already
   cancelled (a genuine host cancellation, e.g. shutdown or client disconnect) the
   `OperationCanceledException` is left to propagate untouched, so queue/settle/ack transports still
   redeliver interrupted work exactly as they would without this middleware in the pipeline. Nested
@@ -54,7 +58,10 @@ where retry/timeout fit and when to reach for `Benzene.Resilience.Polly` (circui
   (`.UseRetry`).
 - When you want a hard deadline around the downstream pipeline that turns into a precise
   `BenzeneResultStatus.Timeout` failure result rather than an opaque hang or aborted call
-  (`.UseTimeout`) — see `MessageHandler`'s `catch (TimeoutException)` for the status mapping.
+  (`.UseTimeout`). It records that result itself on any message-handling transport (an HTTP caller
+  gets 504 + a problem document); a timeout thrown *inside* a handler is mapped by `MessageHandler`'s
+  `catch (TimeoutException)`. Since the deadline is a result, `.UseRetry(...)` outside it retries a
+  timed-out attempt only via `shouldRetryContext`.
 
 ## Deliberate boundaries (this package)
 - **This package is retry + a simple deadline-based timeout, and stays that way.** No circuit
@@ -82,7 +89,7 @@ where retry/timeout fit and when to reach for `Benzene.Resilience.Polly` (circui
   `ICancellationTokenAccessor.CancellationToken`. Downstream code has to actually pass the token into
   its own I/O (an HTTP call, `Task.Delay`, a DB query) for the deadline to have a visible effect.
 - **The timeout-vs-cancellation line is load-bearing.** A fired *timer* becomes a
-  `TimeoutException` → `BenzeneResultStatus.Timeout` failure result. A fired *host* token (the
+  `BenzeneResultStatus.Timeout` failure result (recorded, or a `TimeoutException` with no setter). A fired *host* token (the
   original, pre-existing ambient token) must keep propagating as an untouched
   `OperationCanceledException` — do not weaken the `when (!original.IsCancellationRequested)` filter
   in `TimeoutMiddleware.HandleAsync`, it's what tells the two apart. **#61 deliberately dropped the

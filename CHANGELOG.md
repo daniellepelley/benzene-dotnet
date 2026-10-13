@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Breaking: `UseTimeout` records a `timeout` result instead of throwing.** A deadline that fired
+  surfaced as a thrown `TimeoutException`, which nothing converted when `UseTimeout` sat in front of
+  `UseMessageHandlers` (the handler's cancellation is rethrown by `MessageHandler` as a genuine one):
+  the ASP.NET example's `/slow` route answered a plain-text 500 with a stack trace, not the
+  `timeout` (504) its docs promised. `TimeoutMiddleware` now writes `BenzeneResultStatus.Timeout`
+  through the transport's `IMessageHandlerResultSetter<TContext>` (as the router writes `not-found`),
+  so an HTTP caller gets a 504 problem document and a queue binding settles a failure (redelivered).
+  With no result setter for the context (outbound pipelines) it still throws `TimeoutException`. A
+  host cancellation still propagates untouched. **Behaviour change:** `.UseRetry(...)` outside
+  `.UseTimeout(...)` no longer retries a timed-out attempt by default (a completed result is not
+  retried); pass a `shouldRetryContext` to retry it. `Benzene.Resilience` now references
+  `Benzene.Abstractions.MessageHandlers`. Covered by `TimeoutMiddlewareTest` and the Asp example's
+  `TimeoutRouteTest`.
+
 ## [0.1.0-alpha.1] - 2026-10-12
 
 The first release on the `0.1.0` base (`version.txt`), which marks the move to the language-neutral
