@@ -97,8 +97,8 @@ jobs:
     # This turns the examples from compile-only into a real regression gate: a src/ change that breaks
     # an example's behaviour now fails the build. Listed explicitly rather than `dotnet test <sln>`
     # because Benzene.Examples.Kafka.Test, despite its name, connects to a real Kafka broker (it's
-    # effectively a .Dev.Test) and can't run here; the true real-dependency tiers live in *.Dev.Test
-    # projects kept out of the solution entirely.
+    # effectively a .Dev.Test): it runs in its own job, examples-kafka-tests, beside a broker. The
+    # other real-dependency tiers live in *.Dev.Test projects kept out of the solution entirely.
     - name: Test in-memory examples
       run: |
         dotnet test examples/App/Benzene.Examples.App.Test/Benzene.Examples.App.Test.csproj --no-build --verbosity normal
@@ -179,6 +179,42 @@ jobs:
   # examples-aws-localstack-tests, mirroring the library-level azure-integration-tests job (which
   # already stands up this same emulator). The .Dev.Test project is deliberately NOT in
   # Benzene.Examples.sln (it needs Docker), so it's restored/built directly here.
+  examples-kafka-tests:
+    # The Kafka example end to end against a real broker: Benzene.Examples.Kafka.Test publishes
+    # order_create/order_delete and asserts the worker consumed them. Brought up from the test
+    # project's own docker-compose (Zookeeper + Kafka, host listener localhost:29092).
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 10.0.x
+    - name: Start Kafka
+      run: |
+        set -euo pipefail
+        compose=examples/Kafka/Benzene.Examples.Kafka.Test/docker-compose.yaml
+        docker compose -f "$compose" up -d zookeeper kafka
+        for i in $(seq 1 60); do
+          if docker compose -f "$compose" exec -T kafka kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
+            echo "broker ready"; exit 0
+          fi
+          sleep 2
+        done
+        docker compose -f "$compose" logs kafka
+        echo "::error::Kafka never became ready"; exit 1
+    - name: Restore
+      run: dotnet restore examples/Kafka/Benzene.Examples.Kafka.Test/Benzene.Examples.Kafka.Test.csproj
+    - name: Build
+      run: dotnet build examples/Kafka/Benzene.Examples.Kafka.Test/Benzene.Examples.Kafka.Test.csproj --no-restore
+    - name: Test
+      run: dotnet test examples/Kafka/Benzene.Examples.Kafka.Test/Benzene.Examples.Kafka.Test.csproj --no-build --verbosity normal
+    - name: Stop Kafka
+      if: always()
+      run: docker compose -f examples/Kafka/Benzene.Examples.Kafka.Test/docker-compose.yaml down -v || true
+
   examples-azure-servicebus-tests:
 
     runs-on: ubuntu-latest

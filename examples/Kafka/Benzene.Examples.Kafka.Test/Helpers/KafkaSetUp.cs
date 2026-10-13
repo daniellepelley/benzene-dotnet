@@ -8,6 +8,16 @@ public static class KafkaSetUp
 {
     private static KafkaSender _sender;
 
+    /// <summary>
+    /// The test broker: this project's docker-compose advertises its host listener on localhost:29092.
+    /// KAFKA_BOOTSTRAP_SERVERS overrides it; <see cref="WorkerSetUp"/> hands the same value to the
+    /// worker, so the producer and the consumer under test always talk to one broker.
+    /// </summary>
+    public static string BootstrapServers =>
+        Environment.GetEnvironmentVariable("KAFKA_BOOTSTRAP_SERVERS") is { Length: > 0 } configured
+            ? configured
+            : "localhost:29092";
+
     public static async Task SendAsync(string topic, object message)
     {
         await _sender.SendAsync(topic, message);
@@ -17,7 +27,7 @@ public static class KafkaSetUp
     {
         ProducerConfig producerConfig = new()
         {
-            BootstrapServers = "localhost:29092",
+            BootstrapServers = BootstrapServers,
             SaslMechanism = SaslMechanism.Plain,
             SecurityProtocol = SecurityProtocol.Plaintext,
         };
@@ -32,7 +42,7 @@ public static class KafkaSetUp
     {
         ProducerConfig producerConfig = new()
         {
-            BootstrapServers = "localhost:29092",
+            BootstrapServers = BootstrapServers,
             SaslMechanism = SaslMechanism.Plain,
             SecurityProtocol = SecurityProtocol.Plaintext,
         };

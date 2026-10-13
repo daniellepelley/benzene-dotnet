@@ -29,7 +29,9 @@ public abstract class InMemoryOrdersTestBase : IDisposable
 
     public void Dispose()
     {
-        KafkaSetUp.TearDownAsync().Wait();
+        // Stop the worker before deleting its topics: a consumer whose subscribed topics vanish
+        // under it does not stop within the host's shutdown timeout.
         WorkerSetUp.TearDownAsync().Wait();
+        KafkaSetUp.TearDownAsync().Wait();
     }
 }

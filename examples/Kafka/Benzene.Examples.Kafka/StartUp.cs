@@ -1,5 +1,6 @@
 using Benzene.Abstractions.Hosting;
 using Benzene.Core.MessageHandlers;
+using Benzene.Examples.App.Handlers;
 using Benzene.FluentValidation;
 using Benzene.Kafka.Core;
 using Benzene.Microsoft.Dependencies;
@@ -26,13 +27,17 @@ public class StartUp : BenzeneStartUp
         {
             ConsumerConfig = new ConsumerConfig
             {
-                BootstrapServers = "localhost:9092",
+                // The broker address, from configuration (KAFKA_BOOTSTRAP_SERVERS in the environment),
+                // defaulting to this example's own docker-compose broker.
+                BootstrapServers = configuration["KAFKA_BOOTSTRAP_SERVERS"] ?? "localhost:9092",
                 SaslMechanism = SaslMechanism.Plain,
                 SecurityProtocol = SecurityProtocol.Plaintext,
                 GroupId = Guid.NewGuid().ToString(),
                 AutoOffsetReset = AutoOffsetReset.Earliest
             },
-            Topics = new[] { "order_create" }
+            // The commands that make sense fire-and-forget over Kafka; get/getall are
+            // request/response and have no reply channel on a Kafka topic.
+            Topics = new[] { MessageTopicNames.OrderCreate, MessageTopicNames.OrderUpdate, MessageTopicNames.OrderDelete }
         };
 
         app.UseWorker(worker => worker

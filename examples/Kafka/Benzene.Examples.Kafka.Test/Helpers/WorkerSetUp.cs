@@ -11,6 +11,8 @@ public static class WorkerSetUp
 
     public static void SetUp()
     {
+        // The worker reads its broker from configuration; point it at the test broker.
+        Environment.SetEnvironmentVariable("KAFKA_BOOTSTRAP_SERVERS", KafkaSetUp.BootstrapServers);
         _cancellationTokenSource = new CancellationTokenSource();
         _thread = new Thread(async () =>
         {
