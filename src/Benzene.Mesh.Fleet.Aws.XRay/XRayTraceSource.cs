@@ -291,7 +291,11 @@ public class XRayTraceSource : IMeshTraceSource
         StartedAt = events.Min(e => e.StartedAt),
         Events = events.Count,
         // The flow's entry topic: the earliest mapped event's (Map returns events in start order).
-        Topic = events[0].Topic
+        Topic = events[0].Topic,
+        // The flow's status (spec §4), from the segments' mapped benzene.status. The failure flag is X-Ray's
+        // own, so a flow it flags failed with no Benzene-failing event (the fault sits in an uninstrumented
+        // segment) has no status to name - null, omitted.
+        Status = MeshFlowStatus.Of(events, summary.HasError || summary.HasFault)
     };
 
     private static TraceSummary ToSummaryPlaneRow(Amazon.XRay.Model.TraceSummary summary) => new()
@@ -307,7 +311,9 @@ public class XRayTraceSource : IMeshTraceSource
             .Distinct()
             .ToList() ?? new List<string>(),
         StartedAt = ParseTraceStart(summary.Id),
-        Events = 0 // X-Ray summaries carry no span count; the drill-in trace has it.
+        // X-Ray summaries carry no span count (the drill-in trace has it) and no Benzene status, so the
+        // flow's status (spec §4) is unknown on this row: left null, omitted.
+        Events = 0
     };
 
     /// <summary>An X-Ray trace id is <c>1-{8 hex epoch seconds}-{24 hex}</c>; the middle group is the

@@ -200,6 +200,8 @@ public class JaegerTraceSource : IMeshTraceSource
     {
         var startedAt = trace.Events.Min(e => e.StartedAt);
         var end = trace.Events.Max(e => e.StartedAt + TimeSpan.FromMilliseconds(e.DurationMs));
+        // Same success class the in-memory collector's trace summaries use (unknown/empty = failure).
+        var failed = trace.Events.Any(e => !BenzeneResultStatusExtensions.IsSuccess(e.Status));
         return new TraceSummary
         {
             TraceId = trace.TraceId,
@@ -208,8 +210,9 @@ public class JaegerTraceSource : IMeshTraceSource
                 .Select(e => e.Service!).Distinct().OrderBy(s => s, StringComparer.Ordinal).ToList(),
             StartedAt = startedAt,
             DurationMs = (end - startedAt).TotalMilliseconds,
-            // Same success class the in-memory collector's trace summaries use (unknown/empty = failure).
-            Failed = trace.Events.Any(e => !BenzeneResultStatusExtensions.IsSuccess(e.Status)),
+            Failed = failed,
+            // The mapper reads each span's benzene.status, so the flow's status (spec §4) is known here.
+            Status = MeshFlowStatus.Of(trace.Events, failed),
             // The flow's entry topic: the earliest mapped event's.
             Topic = trace.Events.OrderBy(e => e.StartedAt).First().Topic
         };

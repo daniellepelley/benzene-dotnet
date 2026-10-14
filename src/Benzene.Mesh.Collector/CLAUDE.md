@@ -72,6 +72,22 @@
 > `work/archive/mesh-drains-up-review-2026-07.md`). Pinned by `conformance/mesh-issue-cases.json` (claims-gated — a
 > collector without the feed stays collector-conformant); Go collector parity pending.
 
+> **Spec candidate 1.2 (2026-10): issue error detail and a flow's status.** `AddIssues` merges each
+> incoming issue's `errors` into the held one with `MeshIssueErrors.Merge` (`Benzene.Mesh.Wire`): by
+> (`field`, `code`) identity, `count += delta`, then the 10-entry bound and order (count desc, field, code,
+> ordinal, absent first); `FleetView.Issues` snapshot-copies them and omits `errors` when none are held.
+> Malformed entries never reach the store — `MeshIssueErrorsJsonConverter` skips them at decode, and
+> `Merge` skips any an in-process caller hands in (null, neither member, non-positive count); the issue and
+> batch are still accepted. `TraceSummary.Status` (null-omitted) is the flow's status per mesh.md §4 —
+> `MeshFlowStatus.Of(events, failed)`: the earliest-started failing event's status when the flow failed
+> (failing = outside the §3 success class, exactly what sets `Failed`), else the earliest-started event's;
+> equal start times keep receipt order (stable sort over the ring); empty or no failing event to name →
+> null. Set by the ring summaries, Jaeger rows, and X-Ray's enriched rows; Tempo rows and X-Ray
+> summary-plane rows hold no Benzene status and leave it null. `CompositeMeshFleetReadModel` passes the
+> source's rows through unchanged. Pinned by `mesh-issue-cases.json`'s three error-detail cases and
+> `mesh-collector-cases.json`'s two flow-status cases; covered by `MeshCollectorStoreTest`'s
+> `FleetFlowStatus_*` cases and `Wire/MeshIssueErrorsTest`.
+
 ## What this package does
 The spec collector of `docs/specification/mesh.md` §4-§6 - an ordinary Benzene service
 (dogfooded message handlers) that ingests the three mesh wire topics and answers the

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Benzene.Abstractions.DI;
+using Benzene.Abstractions.MessageHandlers;
 using Benzene.Abstractions.MessageHandlers.Info;
 using Benzene.Abstractions.MessageHandlers.Mappers;
 using Benzene.Clients;
@@ -197,7 +198,7 @@ public static class Extensions
             catch (Exception ex)
             {
                 // A propagating exception IS the failure — report, then rethrow untouched.
-                Report(resolver, context, "exception", ex.GetType().FullName, null);
+                Report(resolver, context, "exception", ex.GetType().FullName, null, readResultErrors: false);
                 throw;
             }
 
@@ -209,14 +210,21 @@ public static class Extensions
             if (!MeshStatusClass.IsSuccess(status))
             {
                 var errorState = resolver.TryGetService<MessageErrorState>();
-                Report(resolver, context, status, errorState?.ExceptionTypeName, errorState?.Hint);
+                Report(resolver, context, status, errorState?.ExceptionTypeName, errorState?.Hint, readResultErrors: true);
             }
         }));
 
-        void Report(IServiceResolver resolver, TContext context, string status, string? exceptionType, string? hint)
+        void Report(IServiceResolver resolver, TContext context, string status, string? exceptionType, string? hint,
+            bool readResultErrors)
         {
             try
             {
+                // The failing result's structured errors, as (field, code) pairs only - the message never
+                // leaves the service (spec §4.1). Read off any context that records its result (every
+                // transport whose result-setter calls MessageResultRecorder); none for a propagating throw.
+                var errors = readResultErrors && context is IHasMessageResult { MessageResult: { } result }
+                    ? MeshIssueErrors.FromResultErrors(result.Errors)
+                    : null;
                 var topic = resolver.GetService<IMessageGetter<TContext>>().GetTopic(context);
                 var transport = resolver.TryGetService<ICurrentTransport>();
                 exporter!.Export(new MeshIssueOccurrence
@@ -229,7 +237,8 @@ public static class Extensions
                     ExceptionType = exceptionType,
                     ResolutionHint = hint,
                     TraceId = MeshSpan.Current?.TraceId,
-                    At = DateTimeOffset.UtcNow
+                    At = DateTimeOffset.UtcNow,
+                    Errors = errors
                 });
             }
             catch

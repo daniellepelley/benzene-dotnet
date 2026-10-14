@@ -17,7 +17,10 @@ and the fleet view's recent-flows from a **Jaeger query service**, reusing the *
   - `GetRecentFlowsAsync` → a per-service recent search, deduped, mapped to `TraceSummary` rows. Because
     Jaeger search returns **full** traces (not summaries), these carry a **real** span count (`Events`),
     touched-service list, and `Failed` flag (via the collector's `BenzeneResultStatusExtensions.IsSuccess`
-    success class) — richer than the Tempo/X-Ray summary path, with no second fetch.
+    success class) — richer than the Tempo/X-Ray summary path, with no second fetch. They also carry the
+    flow's `Status` (spec candidate 1.2, mesh.md §4 — `MeshFlowStatus.Of`: the earliest failing event's
+    status when the flow failed, else the earliest event's), since the mapper reads each span's
+    `benzene.status`.
   - Reachable-but-unsuccessful (HTTP error / malformed body) → null/empty (the topology adapter's rule); a
     connection failure throws and the composite's fetch-isolation degrades that slice.
   - **Per-service fetch isolation (#189, round 12-13).** `SearchAcrossServicesAsync`'s per-service search

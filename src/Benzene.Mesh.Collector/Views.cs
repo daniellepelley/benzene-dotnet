@@ -155,6 +155,13 @@ public class TraceSummary
     /// per-row trace fetch; omitted from the wire when null.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Topic { get; set; }
+
+    /// <summary>How the flow ended for its caller (spec §4): the status of its earliest-started failing
+    /// event when it <see cref="Failed"/>, otherwise of its earliest-started event — see
+    /// <see cref="MeshFlowStatus.Of"/>. Null (omitted) when unknown: a plane built from a trace store that
+    /// doesn't hold the events' Benzene status leaves it out, and readers tolerate its absence.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Status { get; set; }
 }
 
 /// <summary>The <c>mesh:query:service</c> response: the fleet row plus the registered contract

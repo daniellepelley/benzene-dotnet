@@ -108,6 +108,13 @@ view** map full segments and have always shown real names. (**Tempo** still shar
 caveat — enriching it means 20 unbatched trace GETs, a heavier fan-out, deferred; **Jaeger** never had the
 caveat — its recent-flows returns full traces already.)
 
+**Flow status (spec candidate 1.2, mesh.md §4).** An enriched row carries `TraceSummary.Status` from the
+mapped segments' `benzene.status` (`MeshFlowStatus.Of`): the earliest Benzene-failing event's status when
+X-Ray flags the flow failed (`HasError`/`HasFault`), else the earliest event's. A flow X-Ray flags failed
+whose mapped Benzene events all succeeded (the fault sits in an uninstrumented segment) has no failing
+event to name, so its status is null (omitted) rather than a misleading `ok`. A summary-plane row holds no
+Benzene status: null.
+
 ## Verification caveat
 The mapper, correlation search, and recent-flows mapping are unit-tested against representative X-Ray
 JSON (`test/Benzene.Mesh.Test/XRayTraceSourceTest.cs`, mocked `IAmazonXRay`), covering both the

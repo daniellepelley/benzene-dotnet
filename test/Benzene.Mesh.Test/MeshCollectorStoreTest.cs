@@ -85,6 +85,71 @@ public class MeshCollectorStoreTest
         Assert.Equal("topic", fleet.Traces[0].Topic); // the flow's entry topic (earliest event's)
     }
 
+    [Fact]
+    public void FleetFlowStatus_FailedFlow_NamesTheEarliestFailingEvent_EqualStartsKeepReceiptOrder()
+    {
+        var store = new MeshCollectorStore();
+        var t = DateTimeOffset.UtcNow;
+        store.AddEvents(new[]
+        {
+            Event("trace-1", "s3", "audit", "audit:log", t.AddMilliseconds(5), "service-unavailable"),
+            Event("trace-1", "s1", "frontdoor", "welcome", t, "ok"),
+            // Same start as the ok entry event: receipt order decides between the two failing ones.
+            Event("trace-1", "s2a", "greeter", "greet", t.AddMilliseconds(1), "validation-error"),
+            Event("trace-1", "s2b", "greeter", "greet", t.AddMilliseconds(1), "not-found")
+        });
+
+        var flow = Assert.Single(store.Fleet().Traces);
+
+        Assert.True(flow.Failed);
+        Assert.Equal("validation-error", flow.Status); // not the entry's "ok", not the later failure
+    }
+
+    [Fact]
+    public void FleetFlowStatus_SuccessfulFlow_IsItsEarliestEvents_EqualStartsKeepReceiptOrder()
+    {
+        var store = new MeshCollectorStore();
+        var t = DateTimeOffset.UtcNow;
+        store.AddEvents(new[]
+        {
+            Event("trace-1", "s2", "greeter", "greet", t.AddMilliseconds(5), "created"),
+            Event("trace-1", "s1a", "frontdoor", "welcome", t, "accepted"),
+            Event("trace-1", "s1b", "frontdoor", "welcome", t, "ok")
+        });
+
+        var flow = Assert.Single(store.Fleet().Traces);
+
+        Assert.False(flow.Failed);
+        Assert.Equal("accepted", flow.Status);
+    }
+
+    [Fact]
+    public void FleetFlowStatus_Unknown_IsOmittedFromTheWire()
+    {
+        // An empty status is a failure (the §3 wiring gap) but names nothing: the flow's status is
+        // unknown, so the wire omits it rather than carrying "".
+        var store = new MeshCollectorStore();
+        store.AddEvents(new[] { Event("trace-1", "s1", "svc", "topic", DateTimeOffset.UtcNow, "") });
+
+        var flow = Assert.Single(store.Fleet().Traces);
+
+        Assert.True(flow.Failed);
+        Assert.Null(flow.Status);
+        Assert.DoesNotContain("\"status\"", MeshJson.Serialize(flow));
+    }
+
+    [Fact]
+    public void MeshFlowStatus_FailedWithNoFailingEvent_IsUnknown()
+    {
+        // A plane whose failure flag comes from elsewhere (X-Ray's HasError/HasFault) may flag a flow
+        // whose mapped Benzene events all succeeded: there is no failing event to name.
+        var events = new[] { Event("trace-1", "s1", "svc", "topic", DateTimeOffset.UtcNow) };
+
+        Assert.Null(MeshFlowStatus.Of(events, failed: true));
+        Assert.Equal("ok", MeshFlowStatus.Of(events, failed: false));
+        Assert.Null(MeshFlowStatus.Of(Array.Empty<MeshTraceEvent>(), failed: false));
+    }
+
     private static List<MeshRegisteredEntry> Entries(string[]? topics) =>
         (topics ?? Array.Empty<string>()).Select(id => new MeshRegisteredEntry { Topic = id }).ToList();
 

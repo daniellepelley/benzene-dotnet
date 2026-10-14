@@ -20,6 +20,11 @@ public class MeshIssueOccurrence
     public string? ResolutionHint { get; set; }
     public string? TraceId { get; set; }
     public DateTimeOffset At { get; set; }
+
+    /// <summary>The failing result's structured errors as (field, code) pairs, one count each — never
+    /// the message (spec §4.1); see <see cref="MeshIssueErrors.FromResultErrors"/>. Null when the
+    /// failure carried none (or nothing but messages).</summary>
+    public IReadOnlyList<MeshIssueError>? Errors { get; set; }
 }
 
 /// <summary>
@@ -50,6 +55,10 @@ public sealed class HttpMeshIssueExporter : IMeshIssueExporter, IAsyncDisposable
     private readonly TimeSpan _flushInterval;
     private readonly object _lock = new();
     private readonly Dictionary<string, MeshIssue> _accumulator = new();
+    // Per fingerprint: the window's (field, code) counts. Bounded to MeshIssueErrors.MaxEntries only at
+    // the flush (a pair frequent late in the window isn't evicted early); capped at
+    // MeshIssueErrors.MaxPendingPairs distinct pairs per issue, so a window's memory stays bounded.
+    private readonly Dictionary<string, Dictionary<(string? Field, string? Code), long>> _pendingErrors = new();
     private readonly CancellationTokenSource _stopping = new();
     private readonly Task _pump;
     private int _disposed;
@@ -114,6 +123,42 @@ public sealed class HttpMeshIssueExporter : IMeshIssueExporter, IAsyncDisposable
                     issue.ExemplarTraceIds.RemoveAt(0);
                 }
             }
+            AccumulateErrors(fingerprint, occurrence.Errors);
+        }
+    }
+
+    /// <summary>Counts an occurrence's (field, code) pairs into its issue's window. Caller holds the lock.</summary>
+    private void AccumulateErrors(string fingerprint, IReadOnlyList<MeshIssueError>? errors)
+    {
+        if (errors is not { Count: > 0 })
+        {
+            return;
+        }
+        if (!_pendingErrors.TryGetValue(fingerprint, out var counts))
+        {
+            counts = new Dictionary<(string? Field, string? Code), long>();
+            _pendingErrors[fingerprint] = counts;
+        }
+        foreach (var error in errors)
+        {
+            if (error == null)
+            {
+                continue;
+            }
+            var pair = (MeshIssueErrors.Normalize(error.Field), MeshIssueErrors.Normalize(error.Code));
+            if (pair.Item1 == null && pair.Item2 == null)
+            {
+                continue; // an error with neither member is not counted (spec §4.1)
+            }
+            if (counts.TryGetValue(pair, out var count))
+            {
+                counts[pair] = count + Math.Max(error.Count, 1);
+            }
+            else if (counts.Count < MeshIssueErrors.MaxPendingPairs)
+            {
+                counts[pair] = Math.Max(error.Count, 1);
+            }
+            // else: past the distinct-pair cap a new pair is not admitted - bounded memory, lossy by design
         }
     }
 
@@ -167,7 +212,15 @@ public sealed class HttpMeshIssueExporter : IMeshIssueExporter, IAsyncDisposable
         lock (_lock)
         {
             issues = _accumulator.Values.ToList();
+            foreach (var issue in issues)
+            {
+                // The window's error detail, bounded and ordered for the wire (spec §4.1); null omits it.
+                issue.Errors = _pendingErrors.TryGetValue(issue.Fingerprint, out var counts)
+                    ? MeshIssueErrors.Bound(counts)
+                    : null;
+            }
             _accumulator.Clear(); // counts are deltas: each flush starts a fresh window
+            _pendingErrors.Clear();
         }
         try
         {

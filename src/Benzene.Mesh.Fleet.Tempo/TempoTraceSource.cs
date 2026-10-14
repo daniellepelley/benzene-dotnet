@@ -138,7 +138,8 @@ public class TempoTraceSource : IMeshTraceSource
                 StartedAt = m.StartedAt,
                 Services = string.IsNullOrEmpty(m.RootServiceName) ? new List<string>() : new List<string> { m.RootServiceName! },
                 // Tempo's search summary carries no aggregate error flag and no span count; the failure
-                // colouring and accurate event count come from the drill-in trace (GetTraceAsync).
+                // colouring and accurate event count come from the drill-in trace (GetTraceAsync). No span
+                // statuses either, so the flow's status (spec §4) is unknown here: left null, omitted.
                 Failed = false,
                 Events = 0
             })

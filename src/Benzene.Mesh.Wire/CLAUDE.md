@@ -86,6 +86,25 @@ pipeline: this package is the *wire contract*; the aggregator remains the pull-b
   set test. Tests: `test/Benzene.Mesh.Test/Wire/MeshIssuesTest.cs` (incl. the end-to-end
   converted-exception → both-feeds proof), `test/Benzene.Conformance.Test/MeshIssueConformanceTest.cs`
   over `conformance/mesh-issue-cases.json`. **Go reference parity: pending** (named deferral).
+- **Issue error detail (spec candidate 1.2, mesh.md §4.1).** `MeshIssue.Errors` (`List<MeshIssueError>?`,
+  null-omitted): the (`field`, `code`) pairs behind the failures an issue counts, **never the message**,
+  each with a DELTA `count`. `UseMeshIssues` reads the failing result off any context implementing
+  `IHasMessageResult` (`result.Errors`, inside its guarded `Report`) and hands
+  `MeshIssueErrors.FromResultErrors` (one count per error; an error with neither member is dropped) to the
+  occurrence's `Errors`; a propagating exception has no result, so no detail. `HttpMeshIssueExporter`
+  counts pairs per fingerprint per window (`_pendingErrors`, capped at `MeshIssueErrors.MaxPendingPairs` =
+  100 distinct pairs — new pairs past it are not admitted, held ones keep counting) and bounds them only
+  at the flush (`MeshIssueErrors.Bound`): the `MaxEntries` = 10 highest counts, ordered count descending,
+  then field, then code, ordinal, absent first. `MeshIssueErrors.Merge` is the same rule for the
+  collector. An **empty `field`/`code` is an absent one** (the spec's amendment, 97d40669), normalized
+  everywhere. `MeshIssueErrorsJsonConverter` (attribute on the property, so it applies under any STJ
+  options, including Benzene's default serializer the collector's request mapper uses) decodes leniently:
+  a non-array `errors` reads as null; a non-object entry, one with neither member (or a non-string
+  member), or a `count` that is not a positive integer (`0`, `-1`, `1.5`, `2.0`, `"2"`) is skipped — the
+  issue and batch are kept. Not part of the fingerprint. The `SHOULD drop field when member names are
+  data` clause is not implemented (no way to tell from a result). Tests:
+  `test/Benzene.Mesh.Test/Wire/MeshIssueErrorsTest.cs`; fixtures: the three error-detail cases in
+  `mesh-issue-cases.json`.
 
 ## Important conventions
 - **The spec wins.** These shapes are pinned by `docs/specification/conformance/mesh-*.json`;

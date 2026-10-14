@@ -522,6 +522,9 @@ public class XRayTraceSourceTest
         Assert.True(flow.Failed);                                    // summary's HasError flag is kept
         Assert.Equal(250, flow.DurationMs, 3);                       // summary duration (seconds → ms)
         Assert.Equal("benzene:mesh:aggregate", flow.Topic);                  // entry topic from the earliest mapped event
+        // X-Ray flags the flow failed but every mapped Benzene event is ok: no failing event to name, so
+        // the flow's status is unknown (omitted) rather than a misleading "ok".
+        Assert.Null(flow.Status);
     }
 
     [Fact]
@@ -603,6 +606,8 @@ public class XRayTraceSourceTest
         Assert.Equal("orders-api", Assert.Single(flows[1].Services)); // ServiceIds name
         Assert.Equal(0, flows[1].Events);                            // no span count on the summary plane
         Assert.Null(flows[1].Topic);                                 // no Benzene span mapped → no topic attribution
+        Assert.Equal("ok", flows[0].Status);                         // enriched, not failed: its first event's status
+        Assert.Null(flows[1].Status);                                // summary plane: no Benzene status, omitted
     }
 
     [Fact]

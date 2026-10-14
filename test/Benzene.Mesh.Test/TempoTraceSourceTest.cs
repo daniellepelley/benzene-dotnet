@@ -206,6 +206,7 @@ public class TempoTraceSourceTest
         Assert.Equal(55, flows[0].DurationMs, 3);
         Assert.Equal("billing-api", Assert.Single(flows[0].Services));
         Assert.Equal(0, flows[0].Events);
+        Assert.Null(flows[0].Status);            // search summaries carry no span status: unknown, omitted
         Assert.Equal("old", flows[1].TraceId);
         Assert.Equal(1, handler.Requests);       // recent flows is a single search, no per-row fetch
     }

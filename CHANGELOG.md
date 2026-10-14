@@ -14,6 +14,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in transport is a result, not an exception, so `UseRetry` without one never retried a failed send:
   `.UseRetry(3, shouldRetryContext: OutboundRetry.Transient).UseSqs(queueUrl)`. The AWS example's
   `order_created` route uses it, proved by `PublishOrderCreatedTest`.
+- **Issue error detail and a flow's status** (spec candidate 1.2, mesh.md §4 and §4.1;
+  `Benzene.Mesh.Wire`, `Benzene.Mesh.Collector`, `Benzene.Mesh.Fleet.*`). A mesh issue carries optional
+  `errors`: the (`field`, `code`) pairs behind the failures it counts, never the message, each with a delta
+  count. `UseMeshIssues` takes them from the failing result's structured errors; `HttpMeshIssueExporter`
+  counts them per window (at most 100 distinct pairs per issue) and sends the 10 highest (count, then
+  field, then code, absent first); the collector merges them by identity under the same bound and decodes
+  them leniently, skipping a malformed entry without rejecting the issue or batch (`MeshIssueError`,
+  `MeshIssueErrors`, `MeshIssueErrorsJsonConverter`). A fleet view's `TraceSummary` carries `status`: the
+  flow's earliest failing event's status when it failed, else its earliest event's (`MeshFlowStatus`),
+  from the push collector, Jaeger and enriched X-Ray rows, and omitted where the trace store holds no
+  Benzene status (Tempo, X-Ray summary rows). The candidate's fixtures are vendored and pass;
+  `SPEC_VERSION` is re-pinned once the spec release is tagged.
 
 ### Changed
 - **Every example is `Benzene.Examples.*`.** The singular `Benzene.Example.*` examples (Asp, Azure,

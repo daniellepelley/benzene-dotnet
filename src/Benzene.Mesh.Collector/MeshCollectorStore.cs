@@ -372,8 +372,8 @@ public class MeshCollectorStore : IMeshFleetReadModel
     }
 
     /// <summary>Ingests an issue batch (spec §4.1): fingerprint-keyed delta merge (<c>count += delta</c>,
-    /// <c>firstSeen = min</c>, <c>lastSeen = max</c>, exemplars keep the newest ≤3, other fields
-    /// latest-wins), bounded (evict oldest <c>lastSeen</c> when full). Invalid entries (no fingerprint
+    /// <c>firstSeen = min</c>, <c>lastSeen = max</c>, exemplars keep the newest ≤3, error detail merged by
+    /// (field, code) and bounded to <see cref="MeshIssueErrors.MaxEntries"/>, other fields latest-wins), bounded (evict oldest <c>lastSeen</c> when full). Invalid entries (no fingerprint
     /// or topic) are skipped, never rejected; an empty batch is the feed's liveness assertion and marks
     /// the service's issue feed as wired. Returns how many entries were accepted.</summary>
     public int AddIssues(MeshIssueBatch batch)
@@ -449,6 +449,10 @@ public class MeshCollectorStore : IMeshFleetReadModel
                         issue.ExemplarTraceIds.RemoveAt(0); // keep the newest
                     }
                 }
+                // Error detail (spec §4.1): merge by (field, code) identity, count += delta, then the same
+                // bound and order the emitter applies. Malformed wire entries were already skipped by the
+                // lenient decoder; Merge skips any an in-process caller hands in.
+                issue.Errors = MeshIssueErrors.Merge(issue.Errors, incoming.Errors);
                 accepted++;
             }
             return accepted;
@@ -490,7 +494,10 @@ public class MeshCollectorStore : IMeshFleetReadModel
                         FirstSeen = x.FirstSeen,
                         LastSeen = x.LastSeen,
                         ExemplarTraceIds = x.ExemplarTraceIds.ToList(),
-                        ResolutionHint = x.ResolutionHint
+                        ResolutionHint = x.ResolutionHint,
+                        Errors = x.Errors?
+                            .Select(e => new MeshIssueError { Field = e.Field, Code = e.Code, Count = e.Count })
+                            .ToList()
                     })
                     .ToList(),
                 Window = CollectorWindow(window)
@@ -908,6 +915,7 @@ public class MeshCollectorStore : IMeshFleetReadModel
             {
                 var startedAt = group.Min(x => x.StartedAt);
                 var end = group.Max(x => x.StartedAt + TimeSpan.FromMilliseconds(x.DurationMs));
+                var failed = group.Any(x => !BenzeneResultStatusExtensions.IsSuccess(x.Status));
                 return new TraceSummary
                 {
                     TraceId = group.Key,
@@ -916,7 +924,8 @@ public class MeshCollectorStore : IMeshFleetReadModel
                         .Select(x => x.Service!).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList(),
                     StartedAt = startedAt,
                     DurationMs = (end - startedAt).TotalMilliseconds,
-                    Failed = group.Any(x => !BenzeneResultStatusExtensions.IsSuccess(x.Status)),
+                    Failed = failed,
+                    Status = MeshFlowStatus.Of(group, failed),
                     // The flow's entry topic: the earliest event's. Ring events always carry a topic.
                     Topic = group.OrderBy(x => x.StartedAt)
                         .Select(x => x.Topic).FirstOrDefault(t => !string.IsNullOrEmpty(t))
@@ -947,5 +956,24 @@ public static class BenzeneResultStatusExtensions
     public static bool IsSuccess(string? status)
     {
         return status != null && SuccessStatuses.Contains(status);
+    }
+}
+
+/// <summary>A flow's <c>status</c> on the fleet view (spec §4): how it ended for its caller.</summary>
+public static class MeshFlowStatus
+{
+    /// <summary>The status of the earliest-started failing event when the flow <paramref name="failed"/>
+    /// (an event fails exactly when it makes the summary failed: outside the wire-contracts §3 success
+    /// class), otherwise of the earliest-started event. Equal start times keep the order of
+    /// <paramref name="events"/> (receipt order; the sort is stable). Null when unknown — no events, an
+    /// empty status, or a flow flagged failed with no failing event to name (a plane whose failure flag
+    /// comes from somewhere other than the events' Benzene status) — so the wire omits it.</summary>
+    public static string? Of(IEnumerable<MeshTraceEvent> events, bool failed)
+    {
+        var ordered = events.OrderBy(x => x.StartedAt);
+        var status = failed
+            ? ordered.FirstOrDefault(x => !BenzeneResultStatusExtensions.IsSuccess(x.Status))?.Status
+            : ordered.FirstOrDefault()?.Status;
+        return string.IsNullOrEmpty(status) ? null : status;
     }
 }

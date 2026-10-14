@@ -52,6 +52,33 @@ public class MeshIssue
     /// <c>deserialization</c>) — never prose. Unknown keys are tolerated by readers.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ResolutionHint { get; set; }
+
+    /// <summary>Optional error detail (spec §4.1): the (<c>field</c>, <c>code</c>) pairs behind the
+    /// failures this issue counts — never the message — each with a DELTA count like <see cref="Count"/>,
+    /// bounded to <see cref="MeshIssueErrors.MaxEntries"/> in <see cref="MeshIssueErrors"/>' order. Null
+    /// (omitted) when there are none. Decoded leniently (<see cref="MeshIssueErrorsJsonConverter"/>): a
+    /// malformed entry is skipped, never costing the issue or its batch. Not part of the fingerprint.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonConverter(typeof(MeshIssueErrorsJsonConverter))]
+    public List<MeshIssueError>? Errors { get; set; }
+}
+
+/// <summary>One entry of an issue's error detail (spec §4.1). Its identity is the (<see cref="Field"/>,
+/// <see cref="Code"/>) pair — an absent member (null) is distinct from every string; at least one is
+/// present. <see cref="Count"/> is a DELTA on the wire, exactly as the issue's own count is.</summary>
+public class MeshIssueError
+{
+    /// <summary>The error's field — a JSON Pointer into the request (wire-contracts §1.3) — or null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Field { get; set; }
+
+    /// <summary>The error's machine-readable rule code, or null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Code { get; set; }
+
+    /// <summary>How many counted errors carried this pair — a DELTA since the emitter's previous flush
+    /// on the wire, cumulative on a collector's merged issue.</summary>
+    public long Count { get; set; }
 }
 
 /// <summary>The body of a <c>mesh:issues</c> message (spec §4.1): one emitter flush. The batch-level

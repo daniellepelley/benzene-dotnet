@@ -170,9 +170,12 @@ are deliberately not merged into one taxonomy:
   plus the captured exception type, independently of `type`/`code`.
 
 Neither `type` nor `code` ever enters the mesh issue fingerprint, and `classification` is never sent
-to a caller — see the cross-language spec's [mesh
-contracts](https://benzene.app/docs/specification/mesh.html) for the full classification rules; this
-page doesn't re-derive them.
+to a caller. An issue does carry its failures' structured detail alongside the fingerprint: `errors`,
+the counted (`field`, `code`) pairs of the failing results (the top 10 by count) — so "which field,
+which rule" is answerable from the feed without reproducing a failure. The error **message** never
+leaves the service: it is free text a validator may have built from the payload. See the
+cross-language spec's [mesh contracts](https://benzene.app/docs/specification/mesh.html) for the full
+classification and error-detail rules; this page doesn't re-derive them.
 
 ## What you get with nothing wired
 

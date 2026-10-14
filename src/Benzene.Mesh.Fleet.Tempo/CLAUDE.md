@@ -44,7 +44,8 @@ either, both, or neither.
     recent-flows window → `TraceSummary` rows (traceID; `durationMs`; start from `startTimeUnixNano`;
     `rootServiceName` → `Services`), newest first, capped. `Failed=false` and `Events=0`: Tempo's search
     summary carries no aggregate error flag or span count — the failure colouring and accurate event count
-    come from the drill-in trace (`GetTraceAsync`). No per-trace fetch on a fleet load.
+    come from the drill-in trace (`GetTraceAsync`). No per-trace fetch on a fleet load. For the same reason
+    the flow's `Status` (spec candidate 1.2, mesh.md §4) is unknown and left null — omitted on the wire.
   - Reachable-but-unsuccessful (HTTP error / unexpected body) → null/empty, not a throw (the topology
     adapter's "one bad query shouldn't fault the build" rule); a genuine connection failure still throws
     and the composite's fetch-isolation degrades that slice.
