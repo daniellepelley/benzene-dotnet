@@ -1,6 +1,7 @@
 ﻿using System.IO;
 using Amazon;
 using Amazon.SQS;
+using Benzene.Idempotency;
 using FluentValidation;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -75,6 +76,9 @@ public static class DependenciesBuilder
 
         services.AddValidatorsFromAssemblyContaining<GetOrderMessageValidator>();
         services.UsingBenzene(x => x
+            // The SQS pipeline de-duplicates redelivered messages (StartUp). In-memory suits one Lambda
+            // execution environment and tests; a fleet shares Benzene.Idempotency.DynamoDb instead.
+            .AddInMemoryIdempotencyStore()
             // Span per middleware, so a failing stage is marked Error in a trace viewer. The focused
             // opt-in (not AddDiagnostics()) because this example registers its own IProcessTimerFactory
             // below - see docs/diagnosing-failures.md.

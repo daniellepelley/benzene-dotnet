@@ -4,6 +4,8 @@ using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
 using Amazon.Lambda.APIGatewayEvents;
+using Amazon.Lambda.SQSEvents;
+using System.Collections.Generic;
 using Amazon.Lambda.TestUtilities;
 using Benzene.Core.Messages.BenzeneMessage;
 using Benzene.Examples.App.Handlers;
@@ -79,6 +81,41 @@ public class CreateOrderTest : InMemoryOrdersTestBase
         Assert.Single(orders);
         Assert.Equal(Defaults.Order.Status, orders[0].Status);
         Assert.Equal(Defaults.Order.Name, orders[0].Name);
+    }
+
+    [Fact]
+    public async Task CreateOrder_SQSEvent_RedeliveredWithTheSameIdempotencyKey_PlacesOneOrder()
+    {
+        // SQS delivers at least once. The same message arriving twice, keyed, must place one order;
+        // the duplicate is acknowledged (no batch-item failure), so SQS does not deliver it again.
+        var first = AwsEventBuilder.CreateSqsEvent(CreateOrder, CreateCreateOrderMessage());
+        var redelivered = AwsEventBuilder.CreateSqsEvent(CreateOrder, CreateCreateOrderMessage());
+        foreach (var sqsEvent in new[] { first, redelivered })
+        {
+            sqsEvent.Records[0].MessageAttributes["idempotency-key"] =
+                new SQSEvent.MessageAttribute { StringValue = "order-request-1", DataType = "String" };
+        }
+
+        var firstResponse = await TestLambdaHosting.SendEventAsync<SQSBatchResponse>(first);
+        var redeliveredResponse = await TestLambdaHosting.SendEventAsync<SQSBatchResponse>(redelivered);
+
+        Assert.Single(GetPersistedOrders());
+        Assert.Empty(firstResponse?.BatchItemFailures ?? new List<SQSBatchResponse.BatchItemFailure>());
+        Assert.Empty(redeliveredResponse?.BatchItemFailures ?? new List<SQSBatchResponse.BatchItemFailure>());
+    }
+
+    [Fact]
+    public async Task CreateOrder_SQSEvent_DifferentIdempotencyKeys_PlacesBothOrders()
+    {
+        var one = AwsEventBuilder.CreateSqsEvent(CreateOrder, CreateCreateOrderMessage());
+        var two = AwsEventBuilder.CreateSqsEvent(CreateOrder, CreateCreateOrderMessage());
+        one.Records[0].MessageAttributes["idempotency-key"] = new SQSEvent.MessageAttribute { StringValue = "order-request-1", DataType = "String" };
+        two.Records[0].MessageAttributes["idempotency-key"] = new SQSEvent.MessageAttribute { StringValue = "order-request-2", DataType = "String" };
+
+        await TestLambdaHosting.SendEventAsync(one);
+        await TestLambdaHosting.SendEventAsync(two);
+
+        Assert.Equal(2, GetPersistedOrders().Length);
     }
 
     [Fact]

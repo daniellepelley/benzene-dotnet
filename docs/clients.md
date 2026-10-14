@@ -530,6 +530,9 @@ SQS ingress trigger talks to; Service Bus reusing the same `orders` queue the Se
 talks to, on the distinct `order_created` topic) and both handlers do nothing but call
 `IBenzeneMessageSender.SendAsync(...)` — the same transport-agnostic port a generated client uses.
 See each project's `DependenciesBuilder.cs` for the wiring and the handler itself for the call site.
+The AWS example closes the loop: its own SQS trigger routes the published `order_created` message to
+`OrderCreatedNotificationHandler`, and `Benzene.Examples.Aws.Dev.Test` proves the round trip against
+a real LocalStack queue — what the egress wrote is what the ingress reads.
 
 ## See Also
 

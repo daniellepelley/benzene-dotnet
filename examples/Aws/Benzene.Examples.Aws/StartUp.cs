@@ -18,6 +18,7 @@ using Benzene.Examples.Aws.Logging;
 using Benzene.FluentValidation;
 using Benzene.HealthChecks;
 using Benzene.HealthChecks.Core;
+using Benzene.Idempotency;
 using Benzene.Http.BenzeneMessage;
 using Benzene.Microsoft.Dependencies;
 using Benzene.Xml;
@@ -98,6 +99,11 @@ public class StartUp : BenzeneStartUp
                 .UseBenzeneEnrichment()
                 .UseXml()
                 .UseHealthCheck(healthCheckTopic, healthChecks)
+                // SQS is at-least-once: a message carrying an idempotency-key attribute is handled once,
+                // and a redelivered copy is acknowledged without running the handler again. Messages
+                // without a key pass through untracked (no body hashing), so two genuinely separate
+                // orders with the same content are both placed.
+                .UseIdempotency(options => options.HashBodyWhenNoHeader = false)
                 .UseMessageHandlers(router => router
                     .UseFluentValidation()
                 )

@@ -1,3 +1,5 @@
+using System.Linq;
+using Amazon.Lambda.SQSEvents;
 using Amazon.Lambda.APIGatewayEvents;
 using Amazon.Runtime;
 using Amazon.SQS;
@@ -33,7 +35,7 @@ public class PublishOrderCreatedLocalStackTest : IClassFixture<LocalStackFixture
         new AmazonSQSClient(new BasicAWSCredentials(AccessKey, SecretKey), new AmazonSQSConfig { ServiceURL = ServiceUrl });
 
     [Fact]
-    public async Task PublishOrderCreated_ActuallySendsToTheRealSqsQueue()
+    public async Task PublishOrderCreated_GoesThroughTheRealQueue_AndBackInThroughTheSqsTrigger()
     {
         // 1. Create the real queue in LocalStack and capture its URL.
         var sqs = CreateSqsClient();
@@ -72,6 +74,29 @@ public class PublishOrderCreatedLocalStackTest : IClassFixture<LocalStackFixture
         var delivered = JsonConvert.DeserializeObject<OrderCreatedEvent>(message.Body);
         Assert.Equal(orderCreated.Id, delivered!.Id);
         Assert.Equal("acme", delivered.Name);
+
+        // 5. Close the loop: hand the message exactly as SQS delivered it (body and attributes) to this
+        //    function's own SQS trigger. What the egress wrote must be what the ingress reads - the topic
+        //    attribute routes it to OrderCreatedNotificationHandler, and the message is acknowledged.
+        var sqsEvent = new SQSEvent
+        {
+            Records = new List<SQSEvent.SQSMessage>
+            {
+                new()
+                {
+                    MessageId = message.MessageId,
+                    Body = message.Body,
+                    EventSource = "aws:sqs",
+                    MessageAttributes = message.MessageAttributes.ToDictionary(
+                        a => a.Key,
+                        a => new SQSEvent.MessageAttribute { StringValue = a.Value.StringValue, DataType = a.Value.DataType }),
+                },
+            },
+        };
+        var batch = await host.SendEventAsync<SQSBatchResponse>(sqsEvent);
+
+        Assert.Empty(batch?.BatchItemFailures ?? new List<SQSBatchResponse.BatchItemFailure>());
+        Assert.Contains(orderCreated.Id, OrderCreatedNotificationHandler.Notified);
     }
 
     private static async Task<List<Message>> ReceiveAllAsync(IAmazonSQS sqs, string queueUrl)

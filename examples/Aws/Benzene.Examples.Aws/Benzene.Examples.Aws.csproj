@@ -37,6 +37,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Benzene.Autofac\Benzene.Autofac.csproj" />
+    <ProjectReference Include="..\..\..\src\Benzene.Idempotency\Benzene.Idempotency.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Aws.Lambda.ApiGateway\Benzene.Aws.Lambda.ApiGateway.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Aws.Lambda.Core\Benzene.Aws.Lambda.Core.csproj" />
     <ProjectReference Include="..\..\..\src\Benzene.Aws.Lambda.EventBridge\Benzene.Aws.Lambda.EventBridge.csproj" />

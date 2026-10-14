@@ -1,6 +1,8 @@
+using System.Collections.Generic;
 using System;
 using System.Threading.Tasks;
 using Amazon.Lambda.APIGatewayEvents;
+using Amazon.Lambda.SQSEvents;
 using Benzene.Aws.Lambda.Core.TestHelpers;
 using Benzene.Clients;
 using Benzene.Examples.App.Handlers;
@@ -51,4 +53,21 @@ public class PublishOrderCreatedTest
         Assert.Equal(orderCreated.Id, sent.Id);
         Assert.Equal("acme", sent.Name);
     }
+
+    [Fact]
+    public async Task OrderCreated_SQSEvent_ReachesTheNotificationHandler()
+    {
+        // The ingress half: the order_created message the egress demo publishes is routed by this
+        // function's SQS trigger to OrderCreatedNotificationHandler.
+        EnvironmentSetUp.SetUp();
+        using var testLambdaHosting = BenzeneTestHost.Create<StartUp>().BuildAwsLambdaTestHost();
+        var orderCreated = new OrderCreatedEvent { Id = Guid.NewGuid(), Name = "acme" };
+
+        var response = await testLambdaHosting.SendEventAsync<SQSBatchResponse>(
+            AwsEventBuilder.CreateSqsEvent(MessageTopicNames.OrderCreated, orderCreated));
+
+        Assert.Empty(response?.BatchItemFailures ?? new List<SQSBatchResponse.BatchItemFailure>());
+        Assert.Contains(orderCreated.Id, OrderCreatedNotificationHandler.Notified);
+    }
+
 }
