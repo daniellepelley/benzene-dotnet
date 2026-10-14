@@ -288,9 +288,9 @@ resource "aws_lambda_function" "service" {
   # ~1769 MB). Bumping 512 -> 1024 roughly halves that init/JIT wall time - the single biggest
   # cold-start lever once ReadyToRun is already on (see the publish step + README "Cold-start tuning").
   # Dial to 1769 for the shortest possible cold start (1 vCPU), or back to 512 to minimise cost.
-  memory_size      = 1024
-  timeout          = 30
-  layers           = local.collector_layers
+  memory_size = 1024
+  timeout     = 30
+  layers      = local.collector_layers
 
   # Always emit exactly one environment block with a non-empty variables map. A *conditional*
   # (dynamic) environment block whose values are only known after apply (the SQS queue URLs, created
@@ -326,24 +326,24 @@ resource "aws_lambda_function" "service" {
 locals {
   service_env = {
     orders = {
-      PAYMENTS_QUEUE_URL       = aws_sqs_queue.payments.url
-      ORDER_PLACED_TOPIC_ARN   = aws_sns_topic.order_placed.arn
+      PAYMENTS_QUEUE_URL     = aws_sqs_queue.payments.url
+      ORDER_PLACED_TOPIC_ARN = aws_sns_topic.order_placed.arn
       # The outbox pair (work/archive/outbox-plan-2026-08.md Phase 3): the order row + the atomically-committed
       # captured envelopes for payments:capture/order:placed.
       ORDERS_TABLE_NAME        = aws_dynamodb_table.orders.name
       ORDERS_OUTBOX_TABLE_NAME = aws_dynamodb_table.orders_outbox.name
       # The claim-check dogfood's sending side (work/archive/claim-check-plan-2026-08.md Phase 6): offloads an
       # oversized payments:capture send here instead of inlining it on the SQS message.
-      CLAIM_CHECK_BUCKET       = aws_s3_bucket.claim_checks.id
+      CLAIM_CHECK_BUCKET = aws_s3_bucket.claim_checks.id
     }
     payments = {
-      SHIPPING_QUEUE_URL              = aws_sqs_queue.shipping.url
-      EVENT_BUS_NAME                  = aws_cloudwatch_event_bus.bus.name
+      SHIPPING_QUEUE_URL = aws_sqs_queue.shipping.url
+      EVENT_BUS_NAME     = aws_cloudwatch_event_bus.bus.name
       # The consume side of the outbox+idempotency pair: dedups payments:capture redeliveries.
       PAYMENTS_IDEMPOTENCY_TABLE_NAME = aws_dynamodb_table.payments_idempotency.name
       # The claim-check dogfood's hydrating side: resolves the benzene-claim-check reference back to
       # the real body before the handler runs. Same bucket orders-api writes to.
-      CLAIM_CHECK_BUCKET               = aws_s3_bucket.claim_checks.id
+      CLAIM_CHECK_BUCKET = aws_s3_bucket.claim_checks.id
     }
     shipping      = { EVENT_BUS_NAME = aws_cloudwatch_event_bus.bus.name }
     inventory     = {}
@@ -522,9 +522,9 @@ resource "aws_dynamodb_table" "payments_idempotency" {
 resource "aws_lambda_event_source_mapping" "orders_outbox_stream" {
   event_source_arn       = aws_dynamodb_table.orders_outbox.stream_arn
   function_name          = aws_lambda_function.service["orders"].arn
-  starting_position       = "LATEST"
-  batch_size              = 1
-  maximum_retry_attempts  = 3
+  starting_position      = "LATEST"
+  batch_size             = 1
+  maximum_retry_attempts = 3
 }
 
 # Scheduled sweep: the required backstop (work/archive/outbox-plan-2026-08.md §2.5 option 2) — retries what the stream
