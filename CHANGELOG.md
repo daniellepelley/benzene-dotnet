@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`OutboundRetry`** (`Benzene.Clients`): `shouldRetryContext` predicates for retrying an outbound
+  send on its result - `Transient` (`service-unavailable`, `too-many-requests`; `timeout` is left
+  out because the send may have been applied), `Unsuccessful`, and `OnStatus(...)`. A send that fails
+  in transport is a result, not an exception, so `UseRetry` without one never retried a failed send:
+  `.UseRetry(3, shouldRetryContext: OutboundRetry.Transient).UseSqs(queueUrl)`. The AWS example's
+  `order_created` route uses it, proved by `PublishOrderCreatedTest`.
+
 ### Changed
 - **Every example is `Benzene.Examples.*`.** The singular `Benzene.Example.*` examples (Asp, Azure,
   Grpc, Saga, Cloudflare, Cqrs, Outbox, and the Kafka and AzureFunctionsMesh solutions) are renamed:
@@ -15,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scripts against an old path or assembly name (e.g. `Benzene.Example.Asp.dll`) needs the new one.
 
 ### Fixed
+- **Outbound retry docs put `UseRetry` where it never runs.** `docs/clients.md`, `docs/resilience.md`
+  and `AddOutboundRouting`'s XML example registered `.UseRetry(...)` after the transport
+  (`.UseSqs(queueUrl).UseRetry(3)`). The transport ends the pipeline, so that retry never ran. The docs
+  now register it before the transport, and `OutboundRetryTest` pins both placements. Code written from
+  the old docs should move the `UseRetry` call ahead of its `Use<Transport>` call.
 - **Breaking: `UseTimeout` records a `timeout` result instead of throwing.** A deadline that fired
   surfaced as a thrown `TimeoutException`, which nothing converted when `UseTimeout` sat in front of
   `UseMessageHandlers` (the handler's cancellation is rethrown by `MessageHandler` as a genuine one):

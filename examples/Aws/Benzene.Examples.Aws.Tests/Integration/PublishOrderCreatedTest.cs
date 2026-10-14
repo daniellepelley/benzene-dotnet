@@ -3,6 +3,10 @@ using System;
 using System.Threading.Tasks;
 using Amazon.Lambda.APIGatewayEvents;
 using Amazon.Lambda.SQSEvents;
+using System.Net;
+using System.Threading;
+using Amazon.SQS;
+using Amazon.SQS.Model;
 using Benzene.Aws.Lambda.Core.TestHelpers;
 using Benzene.Clients;
 using Benzene.Examples.App.Handlers;
@@ -10,6 +14,7 @@ using Benzene.Examples.App.Model.Messages;
 using Benzene.Examples.Aws.Tests.Helpers;
 using Benzene.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using Moq;
 using Xunit;
 
 namespace Benzene.Examples.Aws.Tests.Integration;
@@ -70,4 +75,57 @@ public class PublishOrderCreatedTest
         Assert.Contains(orderCreated.Id, OrderCreatedNotificationHandler.Notified);
     }
 
+    [Fact]
+    public async Task PublishOrderCreated_TheQueueFailsOnce_TheSendIsRetriedAndTheCallerNeverSeesTheFailure()
+    {
+        // The route's UseRetry(OutboundRetry.Transient): the first SendMessage fails in transport, which
+        // the SQS converter records as service-unavailable; the retry sends again and the second attempt
+        // is accepted.
+        EnvironmentSetUp.SetUp();
+        var sqs = SqsFailingTimes(1);
+        using var testLambdaHosting = BenzeneTestHost.Create<StartUp>()
+            .WithServices(services => services.AddSingleton(sqs.Object))
+            .BuildAwsLambdaTestHost();
+
+        var response = await testLambdaHosting.SendEventAsync<APIGatewayProxyResponse>(PublishRequest());
+
+        // 200, not the 202 of the fake-sender test above: the real SQS route maps SendMessage's HTTP
+        // 200 to ok.
+        Assert.Equal(200, response.StatusCode);
+        sqs.Verify(x => x.SendMessageAsync(It.IsAny<SendMessageRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task PublishOrderCreated_TheQueueKeepsFailing_GivesUpAfterTheRetriesAndAnswers503()
+    {
+        EnvironmentSetUp.SetUp();
+        var sqs = SqsFailingTimes(int.MaxValue);
+        using var testLambdaHosting = BenzeneTestHost.Create<StartUp>()
+            .WithServices(services => services.AddSingleton(sqs.Object))
+            .BuildAwsLambdaTestHost();
+
+        var response = await testLambdaHosting.SendEventAsync<APIGatewayProxyResponse>(PublishRequest());
+
+        Assert.Equal(503, response.StatusCode);
+        // One attempt plus the route's two retries.
+        sqs.Verify(x => x.SendMessageAsync(It.IsAny<SendMessageRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
+    }
+
+    private static APIGatewayProxyRequest PublishRequest()
+    {
+        return new ApiGatewayProxyRequestBuilder("POST", "/orders/publish-created")
+            .WithBody(new OrderCreatedEvent { Id = Guid.NewGuid(), Name = "acme" })
+            .Build();
+    }
+
+    private static Mock<IAmazonSQS> SqsFailingTimes(int failures)
+    {
+        var calls = 0;
+        var sqs = new Mock<IAmazonSQS>();
+        sqs.Setup(x => x.SendMessageAsync(It.IsAny<SendMessageRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(() => Interlocked.Increment(ref calls) <= failures
+                ? throw new AmazonSQSException("Service Unavailable")
+                : Task.FromResult(new SendMessageResponse { HttpStatusCode = HttpStatusCode.OK }));
+        return sqs;
+    }
 }

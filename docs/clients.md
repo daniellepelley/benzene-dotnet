@@ -29,7 +29,7 @@ Add the core client abstractions, plus whichever transport package(s) you need:
 | `Benzene.RabbitMq` | The `.UseRabbitMq(...)` route extension and `RabbitMqBenzeneMessageClient`, alongside the self-hosted consumer worker. |
 | `Benzene.Grpc.Client` | `GrpcBenzeneMessageClient` (gRPC transport). |
 | `Benzene.Clients.Http` | The `.UseBenzeneMessageOverHttp(...)` route extension and `HttpBenzeneMessageClient` (the BenzeneMessage envelope over HTTP), plus `HttpContextConverter`/`HttpClientMiddleware` — the lower-level building blocks for a plain REST call (see [HTTP](#http-benzenemessage-envelope) below). |
-| `Benzene.Resilience` | `RetryMiddleware<TContext>`/`.UseRetry(...)` — works on `OutboundContext` unmodified. |
+| `Benzene.Resilience` | `RetryMiddleware<TContext>`/`.UseRetry(...)` — works on `OutboundContext` unmodified; `Benzene.Clients`' `OutboundRetry` predicates tell it which failed sends to retry. |
 
 ## Basic usage
 
@@ -101,23 +101,25 @@ Cross-cutting concerns are ordinary `IMiddleware<OutboundContext>`, added to a r
 
 | Extension | Middleware | Behavior |
 |---|---|---|
-| `.UseRetry(n)` (`Benzene.Resilience`) | `RetryMiddleware<OutboundContext>` | Retries the whole pipeline beneath it up to `n` times. Pass `shouldRetryContext: ctx => ((IBenzeneResult)ctx.Response).IsServiceUnavailable()` (or similar) to retry on a specific result status, and/or `shouldRetry` to retry specific exceptions. Fully generic — this is the same `RetryMiddleware<TContext>` used elsewhere in Benzene, not something built specifically for outbound clients. |
+| `.UseRetry(n, shouldRetryContext: OutboundRetry.Transient)` (`Benzene.Resilience`) | `RetryMiddleware<OutboundContext>` | Retries the whole pipeline after it up to `n` times. A send that fails in transport is a result, not an exception, so pass a `shouldRetryContext` - without one a failed send is never retried. `OutboundRetry` (`Benzene.Clients`) has three: `Transient` (`service-unavailable`, `too-many-requests`; `timeout` is left out because the send may have been applied), `Unsuccessful` (any failure), and `OnStatus(...)` (the statuses you name, e.g. adding `timeout` for an idempotent send). Fully generic — this is the same `RetryMiddleware<TContext>` used elsewhere in Benzene, not something built specifically for outbound clients. |
 | `.UseCorrelationId(correlationKey = null)` (`Benzene.Clients.CorrelationId`) | `CorrelationIdMiddleware` | Stamps the current `ICorrelationId.Get()` value onto `OutboundContext.Headers` under `x-correlation-id` by default (`CorrelationHeaderDefaults.HeaderKey`) — unless a header under the same key is already present (an explicit per-call header wins). See [Correlation IDs](correlation-ids.md). |
 | `.UseMeshTraceContext()` (`Benzene.Mesh.Wire`; per route, or on the `OutboundRoutingBuilder` for every route) | `MeshTraceContextMiddleware` | **For a meshed service.** Stamps the mesh span - `MeshSpan.Current`, the span the invocation's mesh TraceEvent records - as `traceparent` (and the joined `tracestate`) and pins it, so the downstream TraceEvent names it as `parentSpanId` (mesh.md §3, M2) whatever other tracing also runs; `UseW3CTraceContext()` on the same route leaves it alone. `AddOutboundRouting(routing => routing.UseMeshTraceContext()...)` covers sends and published events on every route and is what the Cloud Service's M2 self-check reads. No mesh span → nothing stamped. |
 | `.UseW3CTraceContext()` (`Benzene.Clients.TraceContext`) | `W3CTraceContextMiddleware` | **For OpenTelemetry without the mesh.** Stamps `Activity.Current`'s W3C `traceparent`/`tracestate` onto `OutboundContext.Headers`, so the receiving service can continue the same distributed trace (`Activity.Current` is not the mesh span, so it does not satisfy the mesh's M2 - use `UseMeshTraceContext()` there). See [Monitoring & Diagnostics — W3C Trace Context](monitoring.md#w3c-trace-context). No-ops (leaves headers unchanged) when there's no ambient `Activity`. Same method name as `Benzene.Diagnostics.UseW3CTraceContext<TContext>()` (the *inbound* trace-context-extraction middleware) — they run in opposite directions, don't confuse the two. |
 
 There's no dedicated headers middleware — `IBenzeneMessageSender.SendAsync`'s per-call `headers` parameter already covers ambient/per-request header state without a decorator.
 
-Put retry outermost so a failed attempt retries the whole pipeline beneath it, including header stamping:
+Middleware runs in the order it is registered, and the transport (`UseSqs`, `UseSns`, ...) ends the pipeline: anything registered after it never runs. Register retry before the transport, so each attempt runs everything after it, header stamping included:
 
 ```csharp
 services.UsingBenzene(x => x.AddOutboundRouting(routing => routing
     .Route("order:create", pipeline => pipeline
+        .UseRetry(3, shouldRetryContext: OutboundRetry.Transient)
         .UseCorrelationId()
         .UseW3CTraceContext()
-        .UseSqs(queueUrl)
-        .UseRetry(3))));
+        .UseSqs(queueUrl))));
 ```
+
+The AWS example's `order_created` route does this, and `Benzene.Examples.Aws.Tests`' `PublishOrderCreatedTest` proves it end to end: a queue that fails once is retried and the caller sees success; one that keeps failing is given up on after the retries and answers 503.
 
 ### Writing a custom middleware
 

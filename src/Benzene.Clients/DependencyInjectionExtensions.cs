@@ -17,7 +17,7 @@ public static class DependencyInjectionExtensions
     /// <example>
     /// <code>
     /// services.AddOutboundRouting(routing =&gt; routing
-    ///     .Route("order:create", pipeline =&gt; pipeline.UseSqs(queueUrl).UseRetry(3))
+    ///     .Route("order:create", pipeline =&gt; pipeline.UseRetry(3, shouldRetryContext: OutboundRetry.Transient).UseSqs(queueUrl))
     ///     .Route("audit:log", pipeline =&gt; pipeline.UseSns(topicArn)));
     /// </code>
     /// </example>

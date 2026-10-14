@@ -40,7 +40,8 @@ handler/logic in `Benzene.Examples.App` and wiring it from the hosts, rather tha
     — see [docs/clients.md](../docs/clients.md#runnable-example-the-ingressegress-symmetry) — and its
     own SQS trigger consumes the published event (`OrderCreatedNotificationHandler`). The SQS pipeline
     de-duplicates redelivered messages that carry an `idempotency-key` attribute (`UseIdempotency`,
-    in-memory store).
+    in-memory store). The `order_created` outbound route retries a send that fails in transport
+    (`UseRetry(2, shouldRetryContext: OutboundRetry.Transient)`, registered before `UseSqs`).
 - **`Azure/`** — Azure Functions host. Same egress demonstration as `Aws/` above, via Service Bus.
 - **`Versioning/`** — payload schema versioning demo ([docs/specification/versioning.md](../docs/specification/versioning.md)),
   self-contained (does **not** use the shared `App` domain). One AWS Lambda `StartUp` over four transports

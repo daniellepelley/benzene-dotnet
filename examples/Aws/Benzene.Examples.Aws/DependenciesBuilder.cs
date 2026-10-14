@@ -1,4 +1,5 @@
-﻿using System.IO;
+﻿using System;
+using System.IO;
 using Amazon;
 using Amazon.SQS;
 using Benzene.Idempotency;
@@ -25,6 +26,7 @@ using Benzene.Examples.App.Model.Messages;
 using Benzene.Examples.App.Services;
 using Benzene.Examples.App.Validators;
 using Benzene.Microsoft.Dependencies;
+using Benzene.Resilience;
 using Newtonsoft.Json;
 using Serilog;
 
@@ -94,9 +96,13 @@ public static class DependenciesBuilder
             // Egress demo (release plan Tier 2.3): publishes OrderCreatedEvent to the same
             // localstack queue (MY_QUEUE_URL) the SQS ingress trigger above already talks to, on a
             // distinct topic ("order_created") - see PublishOrderCreatedMessageHandler. Reuses the
-            // IAmazonSQS singleton registered above.
+            // IAmazonSQS singleton registered above. A send that fails in transport comes back as a
+            // service-unavailable result, not an exception, so the retry is told to retry on that result
+            // (OutboundRetry.Transient). It goes before UseSqs: the transport ends the pipeline.
             .AddOutboundRouting(routing => routing
-                .Route(MessageTopicNames.OrderCreated, pipeline => pipeline.UseSqs(configuration["MY_QUEUE_URL"]))));
+                .Route(MessageTopicNames.OrderCreated, pipeline => pipeline
+                    .UseRetry(2, initialDelay: TimeSpan.FromMilliseconds(100), shouldRetryContext: OutboundRetry.Transient)
+                    .UseSqs(configuration["MY_QUEUE_URL"]))));
         
         services.AddScoped<IProcessTimerFactory>(x =>
             new CompositeProcessTimerFactory(

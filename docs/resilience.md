@@ -20,17 +20,19 @@ Because it's a normal Benzene middleware (`IMiddleware<TContext>`), `UseRetry(..
 
 Retrying an outbound call — e.g. a `Benzene.Clients` route that returns `service-unavailable` — is not
 a separate mechanism. `.UseRetry(...)` works on `OutboundContext` unmodified, since `RetryMiddleware<TContext>`
-is fully generic:
+is fully generic. A send that fails in transport comes back as a failure result, not an exception, so
+tell the retry which results to retry - `Benzene.Clients`' `OutboundRetry.Transient` retries
+`service-unavailable` and `too-many-requests`:
 
 ```csharp
 services.UsingBenzene(x => x.AddOutboundRouting(routing => routing
     .Route("order:create", pipeline => pipeline
-        .UseSqs(queueUrl)
-        .UseRetry(3, shouldRetryContext: ctx => ((IBenzeneResult)ctx.Response).IsServiceUnavailable()))));
+        .UseRetry(3, shouldRetryContext: OutboundRetry.Transient)
+        .UseSqs(queueUrl))));
 ```
 
-Put `.UseRetry(...)` *after* the transport middleware in the pipeline (outermost in the chain) so a
-failed attempt retries the whole send beneath it, including any header-stamping middleware. See
+Put `.UseRetry(...)` *before* the transport: middleware runs in registration order and the transport
+ends the pipeline, so a retry registered after it never runs. See
 [Clients — Outbound middleware](clients.md#outbound-middleware) for the full reference.
 
 ## Prerequisites

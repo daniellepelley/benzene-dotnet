@@ -56,10 +56,13 @@ explicitly deferred (see that package's `CLAUDE.md`).
 ### Outbound middleware (current, 2026-07-17)
 The middleware-ification of the old `ClientBuilder`/`IDependencyWrapper<T>` decorators, for use on
 an `OutboundRoutingBuilder.Route(...)` pipeline:
-- **Retry** - no new type needed. `Benzene.Resilience.RetryMiddleware<TContext>`/
-  `.UseRetry<TContext>(...)` (already existed, fully generic) works on `OutboundContext` unmodified -
-  pass `shouldRetryContext: ctx => ((IBenzeneResult)ctx.Response).IsServiceUnavailable() || ...`
-  to match `RetryBenzeneMessageClient`'s old default retry predicate.
+- **Retry** - `Benzene.Resilience.RetryMiddleware<TContext>`/`.UseRetry<TContext>(...)` (fully
+  generic) works on `OutboundContext` unmodified. A failed send is a result, not an exception, so it
+  needs a `shouldRetryContext`; `OutboundRetry` (this package) supplies them: `Transient`
+  (`service-unavailable`/`too-many-requests` - `RetryBenzeneMessageClient`'s old default, `timeout`
+  excluded as not retry-safe), `Unsuccessful`, `OnStatus(...)`. **Register `UseRetry` before the
+  transport** - the transport converter is terminal, so a retry after it never runs (the docs showed
+  it after until 2026-10-14; `OutboundRetryTest` pins both placements).
 - `CorrelationIdMiddleware` (`Benzene.Clients.CorrelationId`) / `.UseCorrelationId(correlationKey = "correlationId")` -
   stamps the current `ICorrelationId.Get()` value onto `OutboundContext.Headers`. Converted from
   `CorrelationIdBenzeneMessageClient`.
@@ -196,6 +199,9 @@ entirely outside this redesign's scope, and was never obsoleted.
 - Used by HTTP and AWS clients
 
 ## Tests
+- `test/Benzene.Core.Test/Clients/OutboundRetryTest.cs` - the `OutboundRetry` predicates, and
+  `UseRetry` through a real `.UseSqs(...)` route: before the transport a failed send is retried,
+  after it the retry never runs.
 - `test/Benzene.Core.Test/Clients/OutboundRoutingBuilderTest.cs` - one pipeline per topic,
   duplicate-topic throws `DuplicateOutboundRouteException`, no routes -> empty table.
 - `test/Benzene.Core.Test/Clients/DefaultBenzeneMessageSenderTest.cs` - routes to the right topic's

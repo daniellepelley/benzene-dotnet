@@ -83,6 +83,10 @@ where retry/timeout fit and when to reach for `Benzene.Resilience.Polly` (circui
 - **Retry re-invokes the whole downstream pipeline.** Do not place it on an inbound context that has
   already written a response (e.g. an inbound HTTP context) — a re-invocation would run those steps
   again. It is intended for outbound/port calls that are safe to re-run.
+- **On an outbound route, a failed send is a result, not an exception**, so retry needs a
+  `shouldRetryContext` - `Benzene.Clients`' `OutboundRetry.Transient`/`Unsuccessful`/`OnStatus(...)`
+  - and goes **before** the transport (`.UseRetry(...).UseSqs(...)`): the transport converter is
+  terminal, so a retry registered after it never runs.
 - `OperationCanceledException` is not retried by default (respects cancellation).
 - **`UseTimeout` only interrupts cooperative work.** It sets the ambient cancellation token; it does
   not forcibly abort a handler or middleware that never reads
