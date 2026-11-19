@@ -49,6 +49,15 @@ public static class HttpBuilderExtensions
             request.Headers.Add(header.Key, new StringValues(header.Value));
         }
 
+        if (source is IHttpQueryBuilder { Query.Count: > 0 } queryBuilder)
+        {
+            var query = queryBuilder.Query
+                .GroupBy(x => x.Key)
+                .ToDictionary(x => x.Key, x => new StringValues(x.Select(y => y.Value).ToArray()));
+            request.Query = new QueryCollection(query);
+            request.QueryString = QueryString.Create(queryBuilder.Query);
+        }
+
         return request;
     }
 

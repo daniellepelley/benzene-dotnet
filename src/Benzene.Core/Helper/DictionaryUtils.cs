@@ -1,3 +1,5 @@
+using System.Collections;
+using System.Collections.Concurrent;
 using System.Linq.Expressions;
 
 namespace Benzene.Core.Helper;
@@ -228,6 +230,41 @@ public static class DictionaryUtils
             return originalValue;
         }
 
+        // A collection property (string[], List<T>, IReadOnlyList<T>, ...) takes every value: a
+        // repeated query key arrives from the enrichers as a string[], a single one as a string.
+        var collection = CollectionShape.For(propertyType);
+        if (collection != null)
+        {
+            return collection.Build(originalValue);
+        }
+
+        // A scalar property given several values (a repeated query key) takes the first, so a scalar
+        // keeps the first-value-wins binding it has always had.
+        if (originalValue is string[] values)
+        {
+            if (values.Length == 0 || values[0] == null)
+            {
+                return DefaultOf(propertyType);
+            }
+
+            originalValue = values[0];
+        }
+
+        return ConvertScalar(originalValue, propertyType);
+    }
+
+    private static object DefaultOf(Type type)
+    {
+        return type.IsValueType && Nullable.GetUnderlyingType(type) == null ? Activator.CreateInstance(type) : null;
+    }
+
+    private static object ConvertScalar(object originalValue, Type propertyType)
+    {
+        if (originalValue.GetType() == propertyType)
+        {
+            return originalValue;
+        }
+
         // Enrichers feed string values (route params, query-string, headers, claims) that need to be
         // coerced to the DTO's property type. Convert.ChangeType only handles the IConvertible
         // primitives, so Guid, enum and any Nullable<T> target threw InvalidCastException. Unwrap the
@@ -253,6 +290,74 @@ public static class DictionaryUtils
         }
 
         return Convert.ChangeType(originalValue, targetType);
+    }
+
+    /// <summary>
+    /// How to build one collection property type from enriched values: its element type and a factory.
+    /// Supports <c>T[]</c> and <c>List&lt;T&gt;</c>, plus the interfaces a <c>List&lt;T&gt;</c>
+    /// satisfies (<c>IList</c>, <c>ICollection</c>, <c>IEnumerable</c>, <c>IReadOnlyList</c>,
+    /// <c>IReadOnlyCollection</c>). <c>string</c> is not a collection here, though it is an
+    /// <c>IEnumerable&lt;char&gt;</c>. Any other type is not a collection and binds as a scalar, as before.
+    /// Built once per property type.
+    /// </summary>
+    private sealed class CollectionShape
+    {
+        private static readonly ConcurrentDictionary<Type, CollectionShape?> Cache = new();
+
+        private static readonly HashSet<Type> ListInterfaces = new()
+        {
+            typeof(List<>), typeof(IList<>), typeof(ICollection<>), typeof(IEnumerable<>),
+            typeof(IReadOnlyList<>), typeof(IReadOnlyCollection<>)
+        };
+
+        private readonly Type _elementType;
+        private readonly bool _isArray;
+
+        private CollectionShape(Type elementType, bool isArray)
+        {
+            _elementType = elementType;
+            _isArray = isArray;
+        }
+
+        public static CollectionShape? For(Type propertyType)
+        {
+            return Cache.GetOrAdd(propertyType, Create);
+        }
+
+        private static CollectionShape? Create(Type type)
+        {
+            if (type == typeof(string))
+            {
+                return null;
+            }
+
+            if (type.IsArray && type.GetArrayRank() == 1)
+            {
+                return new CollectionShape(type.GetElementType()!, isArray: true);
+            }
+
+            if (type.IsGenericType && ListInterfaces.Contains(type.GetGenericTypeDefinition()))
+            {
+                return new CollectionShape(type.GetGenericArguments()[0], isArray: false);
+            }
+
+            return null;
+        }
+
+        public object Build(object value)
+        {
+            var items = value is IEnumerable enumerable and not string
+                ? enumerable.Cast<object>().ToList()
+                : new List<object> { value };
+
+            var array = Array.CreateInstance(_elementType, items.Count);
+            for (var i = 0; i < items.Count; i++)
+            {
+                array.SetValue(items[i] == null ? DefaultOf(_elementType) : ConvertScalar(items[i], _elementType), i);
+            }
+
+            return _isArray ? array : Activator.CreateInstance(typeof(List<>).MakeGenericType(_elementType), array)!;
+        }
     }
 
     /// <summary>

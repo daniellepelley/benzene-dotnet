@@ -55,4 +55,8 @@ use `Benzene.AspNet.Core`).
   front and `AspNetMessageBodyGetter` serves it from the scoped `HttpRequestBodyBuffer` instead of
   blocking a thread on `ReadToEndAsync().Result`. `EnableBuffering()` keeps the body re-readable
   downstream. Non-breaking - falls back to the synchronous read if the middleware isn't wired.
-- Coverage: `AspNetPipelineTest.cs` and, for the unified host-builder path, `AzureUnifiedStartUpTest.cs`.
+- **Repeated query keys bind every value.** `AspNetContextRequestEnricher` emits a `string` for one
+  value and a `string[]` for a repeated key; the binder gives a collection property all of them and a
+  scalar the first, as on every other HTTP host (FR-1). Before FR-1 it comma-joined a repeated key
+  into one string (`"a,b"`).
+- Coverage: `AspNetPipelineTest.cs`, `test/Benzene.Core.Test/Http/RepeatedQueryKeyBindingTest.cs` and, for the unified host-builder path, `AzureUnifiedStartUpTest.cs`.

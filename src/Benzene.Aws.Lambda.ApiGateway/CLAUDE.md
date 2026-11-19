@@ -122,12 +122,15 @@ Parallel `ApiGatewayV2*` set mirroring the v1 adapters against `ApiGatewayV2Cont
   pattern), so `authorization`/`origin`/`cookie` lookups by auth/CORS middleware (which read by
   lowercase literal key) work on a raw `Map()` result without `HttpRequest.AsLowerCase()` — see
   `docs/hosting.md`/round-7-10 finding #89.
-- **Repeated query-string keys resolve first-value-wins**, matching `AspNetRequestEnricher`. v1's
+- **Repeated query-string keys bind every value**, matching `AspNetRequestEnricher` (FR-1). The
+  enrichers emit a `string` for one value and a `string[]` for a repeated key, via
+  `QueryStringValuesMapper`; `DictionaryUtils.Enrich` binds a collection property to all of them and a
+  scalar to the first, so scalars keep the first-value-wins policy of round-7-10 finding #90. v1's
   `ApiGatewayRequestEnricher` reads `MultiValueQueryStringParameters` (falling back to the single-value
-  `QueryStringParameters` map when the multi-value one is absent) via `QueryStringFirstWinsMapper.ForV1`;
-  v2's `ApiGatewayV2RequestEnricher` takes the first comma-separated segment of `QueryStringParameters`
-  via `QueryStringFirstWinsMapper.ForV2` (v2 has no multi-value map — AWS itself comma-joins repeated
-  values before Lambda sees the event). See round-7-10 finding #90.
+  `QueryStringParameters` map when the multi-value one is absent) via `QueryStringValuesMapper.ForV1`;
+  v2's `ApiGatewayV2RequestEnricher` splits `QueryStringParameters` on commas via
+  `QueryStringValuesMapper.ForV2` (v2 has no multi-value map — AWS itself comma-joins repeated values
+  before Lambda sees the event, so a single value containing a comma also splits).
 - **Base64-encoded request bodies are decoded.** When API Gateway sets `IsBase64Encoded` (binary media
   types, or any payload it can't treat as text), `ApiGatewayMessageBodyGetter` base64-decodes the body back
   to its real text (UTF-8) so the handler never sees base64; a normal text body is returned verbatim.

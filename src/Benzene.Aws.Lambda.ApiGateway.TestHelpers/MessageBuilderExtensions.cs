@@ -32,13 +32,34 @@ public static class MessageBuilderExtensions
     public static APIGatewayProxyRequest AsApiGatewayRequest<T>(this IHttpBuilder<T> source, ISerializer serializer)
         where T : class
     {
-        return new APIGatewayProxyRequest
+        var request = new APIGatewayProxyRequest
         {
             HttpMethod = source.Method,
             Path = source.Path,
             Body = source.Message != null ? serializer.Serialize(source.Message) : null,
             Headers = source.Headers
         };
+
+        // Fill both query maps the way a real REST API event does: every value, in order, in the
+        // multi-value map, and the LAST value of each key in the single-value map.
+        if (source is IHttpQueryBuilder { Query.Count: > 0 } queryBuilder)
+        {
+            request.MultiValueQueryStringParameters = new Dictionary<string, IList<string>>();
+            request.QueryStringParameters = new Dictionary<string, string>();
+            foreach (var (key, value) in queryBuilder.Query)
+            {
+                if (!request.MultiValueQueryStringParameters.TryGetValue(key, out var values))
+                {
+                    values = new List<string>();
+                    request.MultiValueQueryStringParameters[key] = values;
+                }
+
+                values.Add(value);
+                request.QueryStringParameters[key] = value;
+            }
+        }
+
+        return request;
     }
 
     /// <summary>

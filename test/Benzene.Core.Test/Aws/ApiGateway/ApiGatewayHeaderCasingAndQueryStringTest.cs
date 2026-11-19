@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Amazon.Lambda.APIGatewayEvents;
 using Benzene.Aws.Lambda.ApiGateway;
+using Benzene.Core.Helper;
 using Benzene.Http.Routing;
 using Moq;
 using Xunit;
@@ -125,13 +126,19 @@ public class ApiGatewayHttpRequestAdapterHeaderCasingTest
     }
 }
 
-// #90 (worth-fixing): AspNetRequestEnricher takes the FIRST value for a repeated query key, while
-// the API Gateway v1/v2 enrichers passed QueryStringParameters through as-is - which, per AWS's
-// payload shapes, effectively keeps only the LAST value for v1 (the single-value map) and a
-// comma-joined value for v2. Chosen policy: first-value-wins everywhere (matching AspNet, the more
-// common convention). Verifies the policy is now applied identically across all three enrichers.
-public class ApiGatewayQueryStringFirstWinsTest
+// #90 made a repeated query key bind the same on every transport (first value wins); FR-1 (adopter
+// feature requests) kept that for scalar properties and gave collection properties every value. The
+// enrichers now emit a string for one value and a string[] for a repeated key; DictionaryUtils.Enrich
+// binds a scalar to the first and a collection to all of them. These tests pin both, per payload shape.
+public class ApiGatewayQueryStringValuesTest
 {
+    private class Query
+    {
+        public string Status { get; set; }
+        public string[] Statuses { get; set; }
+        public List<string> StatusList { get; set; }
+    }
+
     private static Mock<IRouteFinder> RouteFinderMatchingAnything()
     {
         var routeFinder = new Mock<IRouteFinder>();
@@ -148,8 +155,34 @@ public class ApiGatewayQueryStringFirstWinsTest
         return mappings;
     }
 
+    // The same values under the three property names, so one request exercises scalar and collection
+    // binding together.
+    private static IDictionary<string, object> SameValuesUnderEveryName(IDictionary<string, object> enriched)
+    {
+        var value = enriched["status"];
+        return new Dictionary<string, object> { ["status"] = value, ["statuses"] = value, ["statuslist"] = value };
+    }
+
+    private static Query Bind(IDictionary<string, object> enriched)
+    {
+        return DictionaryUtils.Enrich(new Query(), SameValuesUnderEveryName(enriched));
+    }
+
+    private static APIGatewayHttpApiV2ProxyRequest V2Request(string status)
+    {
+        return new APIGatewayHttpApiV2ProxyRequest
+        {
+            RawPath = "/example",
+            QueryStringParameters = new Dictionary<string, string> { ["status"] = status },
+            RequestContext = new APIGatewayHttpApiV2ProxyRequest.ProxyRequestContext
+            {
+                Http = new APIGatewayHttpApiV2ProxyRequest.HttpDescription { Method = "GET", Path = "/example" }
+            }
+        };
+    }
+
     [Fact]
-    public void V1_RepeatedQueryKey_MultiValueMapAvailable_FirstValueWins()
+    public void V1_RepeatedQueryKey_MultiValueMapAvailable_ScalarTakesFirst_CollectionTakesAll()
     {
         // Real API Gateway REST API (v1) proxy events populate BOTH maps: QueryStringParameters
         // (single value - AWS keeps the LAST occurrence) and MultiValueQueryStringParameters (every
@@ -168,11 +201,37 @@ public class ApiGatewayQueryStringFirstWinsTest
         var enricher = new ApiGatewayRequestEnricher(RouteFinderMatchingAnything().Object, NoHeaderMappings().Object);
         var dictionary = enricher.Enrich<object>(null, new ApiGatewayContext(request));
 
-        Assert.Equal("active", dictionary["status"]);
+        Assert.Equal(new[] { "active", "inactive" }, dictionary["status"]);
+        var bound = Bind(dictionary);
+        Assert.Equal("active", bound.Status);
+        Assert.Equal(new[] { "active", "inactive" }, bound.Statuses);
+        Assert.Equal(new List<string> { "active", "inactive" }, bound.StatusList);
     }
 
     [Fact]
-    public void V1_RepeatedQueryKey_NoMultiValueMap_FallsBackToSingleValueMap()
+    public void V1_SingleQueryValue_StaysAString()
+    {
+        var request = new APIGatewayProxyRequest
+        {
+            Path = "/example",
+            HttpMethod = "GET",
+            MultiValueQueryStringParameters = new Dictionary<string, IList<string>>
+            {
+                ["status"] = new List<string> { "active" }
+            }
+        };
+
+        var dictionary = new ApiGatewayRequestEnricher(RouteFinderMatchingAnything().Object, NoHeaderMappings().Object)
+            .Enrich<object>(null, new ApiGatewayContext(request));
+
+        Assert.Equal("active", dictionary["status"]);
+        var bound = Bind(dictionary);
+        Assert.Equal("active", bound.Status);
+        Assert.Equal(new[] { "active" }, bound.Statuses);
+    }
+
+    [Fact]
+    public void V1_NoMultiValueMap_FallsBackToSingleValueMap()
     {
         // A hand-built payload (or a genuinely single-valued request) that only sets the single-value
         // field must still work.
@@ -190,31 +249,33 @@ public class ApiGatewayQueryStringFirstWinsTest
     }
 
     [Fact]
-    public void V2_RepeatedQueryKey_CommaJoinedByApiGateway_FirstSegmentWins()
+    public void V2_RepeatedQueryKey_CommaJoinedByApiGateway_ScalarTakesFirst_CollectionTakesAll()
     {
         // API Gateway HTTP API (v2, payload format 2.0) joins repeated values for the same key into
         // one comma-separated string before Lambda ever sees the event - there is no multi-value map.
-        var request = new APIGatewayHttpApiV2ProxyRequest
-        {
-            RawPath = "/example",
-            QueryStringParameters = new Dictionary<string, string> { ["status"] = "active,inactive" },
-            RequestContext = new APIGatewayHttpApiV2ProxyRequest.ProxyRequestContext
-            {
-                Http = new APIGatewayHttpApiV2ProxyRequest.HttpDescription { Method = "GET", Path = "/example" }
-            }
-        };
-
         var enricher = new ApiGatewayV2RequestEnricher(RouteFinderMatchingAnything().Object, NoHeaderMappings().Object);
-        var dictionary = enricher.Enrich<object>(null, new ApiGatewayV2Context(request));
+        var dictionary = enricher.Enrich<object>(null, new ApiGatewayV2Context(V2Request("active,inactive")));
+
+        Assert.Equal(new[] { "active", "inactive" }, dictionary["status"]);
+        var bound = Bind(dictionary);
+        Assert.Equal("active", bound.Status);
+        Assert.Equal(new[] { "active", "inactive" }, bound.Statuses);
+    }
+
+    [Fact]
+    public void V2_SingleQueryValue_StaysAString()
+    {
+        var dictionary = new ApiGatewayV2RequestEnricher(RouteFinderMatchingAnything().Object, NoHeaderMappings().Object)
+            .Enrich<object>(null, new ApiGatewayV2Context(V2Request("active")));
 
         Assert.Equal("active", dictionary["status"]);
     }
 
     [Fact]
-    public void V1AndV2AndAspNet_AgreeOnFirstWinsPolicy()
+    public void V1AndV2_BindTheSameRepeatedKeyTheSameWay()
     {
-        // Documents the cross-transport parity #90 asks for: given the same logical repeated query
-        // key, all three transports resolve to the SAME (first) value for the identical route.
+        // Cross-transport parity (#90): given the same logical repeated query key, both payload shapes
+        // bind the same scalar and the same collection for the identical route.
         var v1Request = new APIGatewayProxyRequest
         {
             Path = "/example",
@@ -224,22 +285,13 @@ public class ApiGatewayQueryStringFirstWinsTest
                 ["status"] = new List<string> { "active", "inactive" }
             }
         };
-        var v1Dictionary = new ApiGatewayRequestEnricher(RouteFinderMatchingAnything().Object, NoHeaderMappings().Object)
-            .Enrich<object>(null, new ApiGatewayContext(v1Request));
+        var v1 = Bind(new ApiGatewayRequestEnricher(RouteFinderMatchingAnything().Object, NoHeaderMappings().Object)
+            .Enrich<object>(null, new ApiGatewayContext(v1Request)));
+        var v2 = Bind(new ApiGatewayV2RequestEnricher(RouteFinderMatchingAnything().Object, NoHeaderMappings().Object)
+            .Enrich<object>(null, new ApiGatewayV2Context(V2Request("active,inactive"))));
 
-        var v2Request = new APIGatewayHttpApiV2ProxyRequest
-        {
-            RawPath = "/example",
-            QueryStringParameters = new Dictionary<string, string> { ["status"] = "active,inactive" },
-            RequestContext = new APIGatewayHttpApiV2ProxyRequest.ProxyRequestContext
-            {
-                Http = new APIGatewayHttpApiV2ProxyRequest.HttpDescription { Method = "GET", Path = "/example" }
-            }
-        };
-        var v2Dictionary = new ApiGatewayV2RequestEnricher(RouteFinderMatchingAnything().Object, NoHeaderMappings().Object)
-            .Enrich<object>(null, new ApiGatewayV2Context(v2Request));
-
-        Assert.Equal("active", v1Dictionary["status"]);
-        Assert.Equal("active", v2Dictionary["status"]);
+        Assert.Equal(v1.Status, v2.Status);
+        Assert.Equal(v1.Statuses, v2.Statuses);
+        Assert.Equal(v1.StatusList, v2.StatusList);
     }
 }

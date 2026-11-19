@@ -21,6 +21,22 @@ public class DictionaryUtilsTest
         Blue
     }
 
+    // FR-1: collection properties bind every value of a repeated query key.
+    private class CollectionEnrichable
+    {
+        public string[] Ids { get; set; }
+        public List<int> Numbers { get; set; }
+        public IReadOnlyList<Colour> Colours { get; set; }
+        public IEnumerable<Guid> Guids { get; set; }
+        public ICollection<int?> Optional { get; set; }
+        public IList<string> Names { get; set; }
+        public IReadOnlyCollection<string> Tags { get; set; }
+        public HashSet<string> Unsupported { get; set; }
+        public string Scalar { get; set; }
+        public int Count { get; set; }
+        public List<string> FromBody { get; set; } = new() { "body" };
+    }
+
     private class TypedEnrichable
     {
         public Guid Id { get; set; }
@@ -277,5 +293,91 @@ public class DictionaryUtilsTest
 
         Assert.Equal("alice", first.Name);
         Assert.Equal("bob", second.Name);
+    }
+
+    [Fact]
+    public void Enrich_ArrayProperty_FromSeveralValues_TakesAllInOrder()
+    {
+        var result = DictionaryUtils.Enrich(new CollectionEnrichable(),
+            new Dictionary<string, object> { { "ids", new[] { "a", "b" } } });
+
+        Assert.Equal(new[] { "a", "b" }, result.Ids);
+    }
+
+    [Fact]
+    public void Enrich_CollectionProperty_FromOneValue_IsOneElement()
+    {
+        var result = DictionaryUtils.Enrich(new CollectionEnrichable(),
+            new Dictionary<string, object> { { "ids", "a" }, { "numbers", "7" } });
+
+        Assert.Equal(new[] { "a" }, result.Ids);
+        Assert.Equal(new List<int> { 7 }, result.Numbers);
+    }
+
+    [Fact]
+    public void Enrich_CollectionProperties_ConvertEachElement()
+    {
+        var guid = Guid.NewGuid();
+        var result = DictionaryUtils.Enrich(new CollectionEnrichable(), new Dictionary<string, object>
+        {
+            { "numbers", new[] { "1", "2" } },
+            { "colours", new[] { "red", "BLUE" } },
+            { "guids", new[] { guid.ToString() } },
+            { "optional", new[] { "3", "4" } },
+            { "names", new[] { "x", "y" } },
+            { "tags", new[] { "t" } }
+        });
+
+        Assert.Equal(new List<int> { 1, 2 }, result.Numbers);
+        Assert.Equal(new[] { Colour.Red, Colour.Blue }, result.Colours);
+        Assert.Equal(new[] { guid }, result.Guids);
+        Assert.Equal(new int?[] { 3, 4 }, result.Optional);
+        Assert.Equal(new[] { "x", "y" }, result.Names);
+        Assert.Equal(new[] { "t" }, result.Tags);
+    }
+
+    [Fact]
+    public void Enrich_ScalarProperty_FromSeveralValues_TakesTheFirst()
+    {
+        var result = DictionaryUtils.Enrich(new CollectionEnrichable(), new Dictionary<string, object>
+        {
+            { "scalar", new[] { "a", "b" } },
+            { "count", new[] { "5", "6" } }
+        });
+
+        Assert.Equal("a", result.Scalar);
+        Assert.Equal(5, result.Count);
+    }
+
+    [Fact]
+    public void Enrich_StringProperty_IsNotTreatedAsACollection()
+    {
+        var result = DictionaryUtils.Enrich(new CollectionEnrichable(),
+            new Dictionary<string, object> { { "scalar", "abc" } });
+
+        Assert.Equal("abc", result.Scalar);
+    }
+
+    [Fact]
+    public void Enrich_CollectionProperty_WithNoMatchingKey_KeepsItsValue()
+    {
+        var result = DictionaryUtils.Enrich(new CollectionEnrichable(),
+            new Dictionary<string, object> { { "scalar", "abc" } });
+
+        Assert.Equal(new List<string> { "body" }, result.FromBody);
+    }
+
+    [Fact]
+    public void Enrich_CollectionProperty_ElementThatDoesNotConvert_Throws()
+    {
+        Assert.ThrowsAny<FormatException>(() => DictionaryUtils.Enrich(new CollectionEnrichable(),
+            new Dictionary<string, object> { { "numbers", new[] { "1", "x" } } }));
+    }
+
+    [Fact]
+    public void Enrich_UnsupportedCollectionType_ThrowsAsBefore()
+    {
+        Assert.Throws<InvalidCastException>(() => DictionaryUtils.Enrich(new CollectionEnrichable(),
+            new Dictionary<string, object> { { "unsupported", new[] { "a" } } }));
     }
 }

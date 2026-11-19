@@ -46,9 +46,8 @@ public class ApiGatewayV2RequestEnricher : IRequestEnricher<ApiGatewayV2Context>
 
         var dictionary = new Dictionary<string, object>();
 
-        // First-value-wins for a repeated query key, matching AspNetRequestEnricher - see
-        // QueryStringFirstWinsMapper.
-        DictionaryUtils.MapOnto(dictionary, QueryStringFirstWinsMapper.ForV2(context.ApiGatewayProxyRequest.QueryStringParameters));
+        // Every value of a repeated query key, matching AspNetRequestEnricher - see QueryStringValuesMapper.
+        DictionaryUtils.MapOnto(dictionary, QueryStringValuesMapper.ForV2(context.ApiGatewayProxyRequest.QueryStringParameters));
         DictionaryUtils.MapOnto(dictionary, context.ApiGatewayProxyRequest.PathParameters);
 
         DictionaryUtils.MapOnto(dictionary, DictionaryUtils.FilterAndReplace(context.CombinedHeaders(), _httpHeaderMappings.GetMappings()));

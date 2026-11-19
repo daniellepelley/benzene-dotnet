@@ -357,8 +357,10 @@ How requests are matched and bound today:
 - **Path.** The route is matched against the path in the event, with nothing stripped. A request
   that arrives through a custom-domain API mapping (such as `/tasks`) or a stage other than the
   default can carry that prefix, and the route then has to include it.
-- **Repeated query keys.** The first value wins: `?id=a&id=b` binds `a`, and a collection property
-  can't bind from the query string.
+- **Repeated query keys.** A collection property (`string[]`, `List<int>`, `IReadOnlyList<Status>`, …)
+  binds every value: `?id=a&id=b` gives `["a","b"]`. A scalar property binds the first, `a`. On an
+  HTTP API (v2), AWS comma-joins a repeated key before the function sees it, so a single value that
+  contains a comma also arrives as two.
 - **Repeated headers.** A header sent more than once keeps one value.
 
 Not built yet:

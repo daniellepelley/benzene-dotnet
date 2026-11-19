@@ -40,6 +40,9 @@ and does not aim for minimal-API/MVC feature parity.
 - Register with `UseBenzene<TStartUp>()` on the `WebApplicationBuilder`, then `UseBenzene()` on the built
   app; or wire `IApplicationBuilder.UseBenzene(builder => builder.UseHttp(...))` by hand.
 - Uses ASP.NET Core's built-in (MEL) DI container.
+- **Repeated query keys bind every value.** `AspNetRequestEnricher` emits a `string` for one value and a
+  `string[]` for a repeated key; the binder gives a collection property all of them and a scalar the
+  first, the same as the API Gateway enrichers (FR-1).
 - Async/await throughout.
 - **Async request-body read**: `UseHttp(...)` auto-wires `Benzene.Http.RequestBody`'s
   `BufferRequestBodyMiddleware<AspNetContext>` as the first middleware, so the request body is read

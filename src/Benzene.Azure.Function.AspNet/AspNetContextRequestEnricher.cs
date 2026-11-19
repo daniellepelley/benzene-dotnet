@@ -43,12 +43,23 @@ public class AspNetContextRequestEnricher : IRequestEnricher<AspNetContext>
 
         var dictionary = new Dictionary<string, object>();
 
-        DictionaryUtils.MapOnto(dictionary, context.HttpRequest.Query?.ToDictionary(x => x.Key, x => x.Value.ToString()));
+        // Every value of a repeated query key: a string for one value, a string[] for several. The binder
+        // gives a collection property all of them and a scalar the first, as on every other host. (This
+        // used to comma-join a repeated key into one string.)
+        DictionaryUtils.MapOnto(dictionary, context.HttpRequest.Query?.ToDictionary(x => x.Key, x => QueryValue(x.Value)));
         DictionaryUtils.MapOnto(dictionary, _headersToBodyGetter.GetHeaders(context));
         DictionaryUtils.MapOnto(dictionary, CleanUp(route.Parameters));
         // DictionaryUtils.MapOnto(dictionary, DictionaryUtils.JsonToDictionary(context.ApiGatewayProxyRequest.Body));
 
         return dictionary;
+    }
+
+    // One value stays a string (what every enricher has always emitted); several become a string[] in
+    // request order, which DictionaryUtils.Enrich binds to a collection property or, for a scalar, takes
+    // the first of.
+    private static object QueryValue(global::Microsoft.Extensions.Primitives.StringValues values)
+    {
+        return values.Count > 1 ? values.ToArray() : values.ToString();
     }
 
     private static IDictionary<string, object> CleanUp(IDictionary<string, object> source)

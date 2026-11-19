@@ -89,8 +89,9 @@ public class HelloWorldResponse
 
 `[Message]` maps the handler to a topic; `[HttpEndpoint]` maps an HTTP method and path to that same
 topic — the `{name}` route parameter is bound onto `HelloWorldRequest.Name` automatically, the same
-way query string parameters and mapped headers are. Both attributes are discovered by reflection,
-so there is nothing further to register per-handler.
+way query string parameters and mapped headers are. A repeated query key (`?tag=a&tag=b`) binds
+every value to a collection property such as `string[] Tag`, and its first value to a scalar. Both
+attributes are discovered by reflection, so there is nothing further to register per-handler.
 
 ## 3. Define your StartUp
 

@@ -26,8 +26,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from the push collector, Jaeger and enriched X-Ray rows, and omitted where the trace store holds no
   Benzene status (Tempo, X-Ray summary rows). The candidate's fixtures are vendored and pass;
   `SPEC_VERSION` is re-pinned once the spec release is tagged.
+- **Repeated query keys bind to collections** (FR-1 of the adopter feature requests; every HTTP host).
+  `?ids=a&ids=b` binds `["a","b"]` to a `string[]`, `List<T>`, `IList<T>`, `ICollection<T>`,
+  `IEnumerable<T>`, `IReadOnlyList<T>` or `IReadOnlyCollection<T>` property, converting each element
+  like a scalar (`int`, `Guid`, enums, `Nullable<T>`). Before, a collection property whose name matched
+  a query key failed the request with `bad-request`. A scalar property still binds the first value. The
+  enrichers emit a `string` for one value and a `string[]` for a repeated key
+  (`QueryStringValuesMapper` replaces the internal `QueryStringFirstWinsMapper`), and
+  `DictionaryUtils.Enrich` builds the collection. On API Gateway HTTP APIs (v2), which comma-join a
+  repeated key, a single value containing a comma also splits. Test helpers: `HttpBuilder.WithQuery`
+  and the optional `IHttpQueryBuilder`, filled into `AsApiGatewayRequest` and `AsAspNetCoreHttpRequest`.
 
 ### Changed
+- **Behaviour change: Azure Functions binds a repeated query key's first value to a scalar.** It
+  comma-joined the values (`?id=a&id=b` bound `"a,b"`), unlike every other host. It now binds `"a"`, and
+  a collection property gets both. Code that relied on the joined string should declare the property
+  as `string[]`.
 - **Every example is `Benzene.Examples.*`.** The singular `Benzene.Example.*` examples (Asp, Azure,
   Grpc, Saga, Cloudflare, Cqrs, Outbox, and the Kafka and AzureFunctionsMesh solutions) are renamed:
   folders, projects, assemblies, namespaces and solutions, with the CI and deploy workflows and the

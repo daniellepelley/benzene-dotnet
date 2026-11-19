@@ -2,12 +2,17 @@
 
 namespace Benzene.Testing;
 
-public class HttpBuilder<T> : IHttpBuilder<T>
+public class HttpBuilder<T> : IHttpBuilder<T>, IHttpQueryBuilder
 {
     public IDictionary<string, string> Headers { get; private set; }
     public string Method { get; }
     public string Path { get; }
     public T? Message { get; }
+
+    /// <inheritdoc />
+    public IReadOnlyList<KeyValuePair<string, string>> Query => _query;
+
+    private readonly List<KeyValuePair<string, string>> _query = new();
 
     internal HttpBuilder(string method, string path, T? message)
     {
@@ -31,6 +36,23 @@ public class HttpBuilder<T> : IHttpBuilder<T>
         foreach (var header in headers)
         {
             Headers[header.Key] = header.Value;
+        }
+
+        return this;
+    }
+
+    /// <summary>
+    /// Adds query-string values for <paramref name="key"/>. Each value is one occurrence of the key, so
+    /// several values, or several calls, make a repeated query key (<c>?id=a&amp;id=b</c>).
+    /// </summary>
+    /// <param name="key">The query-string key.</param>
+    /// <param name="values">The values, in order.</param>
+    /// <returns>This builder, for chaining.</returns>
+    public HttpBuilder<T> WithQuery(string key, params string[] values)
+    {
+        foreach (var value in values)
+        {
+            _query.Add(new KeyValuePair<string, string>(key, value));
         }
 
         return this;

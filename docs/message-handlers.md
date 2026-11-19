@@ -256,6 +256,14 @@ always using the one default serializer. `EnrichingRequestMapper<TContext>` laye
 `IRequestEnricher<TContext>` to merge extra context-derived fields into the deserialized request
 object.
 
+On the HTTP hosts the enrichers supply route parameters, query values and mapped headers, matched to
+properties ignoring case. They overwrite a value the body set. A value converts to the property's
+type (`int`, `Guid`, an enum ignoring case, `Nullable<T>`). A repeated query key arrives as every
+value, in order: a collection property (`T[]`, `List<T>`, `IList<T>`, `ICollection<T>`,
+`IEnumerable<T>`, `IReadOnlyList<T>`, `IReadOnlyCollection<T>`) takes them all, converting each
+element, and a scalar property takes the first. A value that won't convert fails the request as
+`bad-request`.
+
 ### Content negotiation (`IMediaFormat<TContext>` / `IMediaFormatNegotiator<TContext>`)
 
 A single `IMediaFormat<TContext>` registration describes one wire format for *both* directions:
