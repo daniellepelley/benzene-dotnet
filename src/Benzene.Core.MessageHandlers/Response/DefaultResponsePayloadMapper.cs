@@ -10,61 +10,48 @@ namespace Benzene.Core.MessageHandlers.Response;
 /// <summary>
 /// Default <see cref="IResponsePayloadMapper{TContext}"/> implementation: serializes the handler's
 /// success payload using its declared response type, or an RFC 9457 <see cref="ProblemDetails"/>
-/// document on failure - a handler-authored document (<see cref="IHasProblemDetails"/>, e.g.
-/// <see cref="BenzeneResult.Problem{T}"/>) emitted verbatim after coherence fill-in, or one
-/// synthesized from the result's status and errors (<see cref="ProblemTypes.From"/>) otherwise.
+/// document on failure (<see cref="ProblemTypes.ForResult"/>: a handler-authored document emitted
+/// after coherence fill-in, or one synthesized from the result's status and errors). A registered
+/// <see cref="IProblemFormatter{TContext}"/> replaces the failure body's format.
 /// </summary>
 /// <typeparam name="TContext">The transport-specific context type the result was produced for.</typeparam>
 public class DefaultResponsePayloadMapper<TContext> : IResponsePayloadMapper<TContext>
 {
+    private readonly IProblemFormatter<TContext>? _problemFormatter;
+
+    /// <summary>Initializes a new instance of the <see cref="DefaultResponsePayloadMapper{TContext}"/> class.</summary>
+    /// <param name="problemFormatter">The context's failure-body formatter, when the application registered one.</param>
+    public DefaultResponsePayloadMapper(IProblemFormatter<TContext>? problemFormatter = null)
+    {
+        _problemFormatter = problemFormatter;
+    }
+
     /// <summary>
     /// Maps a handler's result into a serialized response body: the success payload if
-    /// <see cref="IBenzeneResult.IsSuccessful"/>, otherwise a serialized problem document
-    /// (see <see cref="BuildProblem"/>).
+    /// <see cref="IBenzeneResult.IsSuccessful"/>, otherwise the failure body.
     /// </summary>
-    /// <param name="context">Unused; the mapping does not depend on the transport context.</param>
+    /// <param name="context">The transport context, passed to the problem formatter.</param>
     /// <param name="messageHandlerResult">The outcome of routing and invoking the handler.</param>
     /// <param name="serializer">The serializer to use to produce the response body.</param>
     /// <returns>
-    /// The serialized response body, or <c>null</c> if <see cref="IMessageHandlerResultBase.MessageHandlerDefinition"/>
-    /// is <c>null</c> (no handler was resolved) or the success payload itself is <c>null</c>.
+    /// The serialized response body. A failure always has one (wire-contracts §1.3), including a
+    /// rejection made before any handler was resolved. A success has none when the payload is
+    /// <c>null</c> or no handler was resolved, because there is no response type to serialize it with.
     /// </returns>
     public string Map(TContext context, IMessageHandlerResult messageHandlerResult, ISerializer serializer)
     {
+        var result = messageHandlerResult.BenzeneResult;
+        if (!result.IsSuccessful)
+        {
+            return ProblemPayloads.Serialize(context, result, ProblemTypes.ForResult(result), serializer, _problemFormatter);
+        }
+
         if (messageHandlerResult.MessageHandlerDefinition == null)
         {
             return null;
         }
 
-        return messageHandlerResult.BenzeneResult.IsSuccessful
-            ? SerializePayload(messageHandlerResult.MessageHandlerDefinition.ResponseType, messageHandlerResult.BenzeneResult.PayloadAsObject, serializer)
-            : serializer.Serialize(BuildProblem(messageHandlerResult.BenzeneResult));
-    }
-
-    /// <summary>
-    /// Builds the problem document to emit for a failed result (work/archive/problem-details-plan-2026-08.md Phase 3
-    /// step 4): when the result implements <see cref="IHasProblemDetails"/> with a non-null
-    /// <see cref="IHasProblemDetails.Problem"/> - a handler that deliberately authored one via
-    /// <see cref="BenzeneResult.Problem{T}"/> (custom <see cref="ProblemDetails.Type"/>/<see
-    /// cref="ProblemDetails.Instance"/>, or an application subclass carrying extension members) - that
-    /// exact instance is returned (preserving its runtime type, so subclass extension members still
-    /// serialize) with any member the handler left absent backfilled from the registry, keyed by the
-    /// same <see cref="IBenzeneResult.Status"/> the envelope/HTTP status line already uses so the two
-    /// can never disagree. Every other failed result (the overwhelming majority) gets a document
-    /// synthesized fresh via <see cref="ProblemTypes.From"/>.
-    /// </summary>
-    private static ProblemDetails BuildProblem(IBenzeneResult result)
-    {
-        if (result is IHasProblemDetails { Problem: { } problem })
-        {
-            problem.Type ??= ProblemTypes.TypeFor(result.Status);
-            problem.Title ??= ProblemTypes.TitleFor(result.Status);
-            problem.BenzeneStatus ??= result.Status;
-
-            return problem;
-        }
-
-        return ProblemTypes.From(result);
+        return SerializePayload(messageHandlerResult.MessageHandlerDefinition.ResponseType, result.PayloadAsObject, serializer);
     }
 
     private string SerializePayload(Type type, object? payload, ISerializer serializer)

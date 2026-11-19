@@ -23,8 +23,8 @@ OpenAPI feature (that is `Benzene.Schema.OpenApi`).
   `Benzene.FluentValidation`'s `DefaultValidationStatusMapper`) it honours `[ValidationStatus]` on
   the topic's resolved handler type; absent a registered mapper, falls back to
   `defaultStatuses.ValidationError`, same as before this mapper existed. The topic's handler
-  definition is attached to the result so the response payload mapper writes a body (it skips
-  definition-less results); the wire body itself (`ProblemDetails`, via `ProblemTypes.From`) carries
+  definition is attached to the result (the mappers used to skip definition-less failures; since FR-9
+  every failure gets a body either way); the wire body itself (`ProblemDetails`, via `ProblemTypes.From`) carries
   both the joined message text (`detail`) and the structured `Field`/`Code` per error (`errors`) -
   see `Benzene.Results/CLAUDE.md`.
 - `JsonSchemaValidationErrors.Format(EvaluationResults) : IReadOnlyList<BenzeneError>` - flattens a

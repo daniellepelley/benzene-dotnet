@@ -214,6 +214,13 @@ result automatically; HTTP-facing transports additionally fill in `status` from 
 decides the actual HTTP response code, so the two can never disagree (see
 [Transport mapping](#transport-mapping) below). `SerializerResponseRenderer` also rewrites the
 response `content-type` to `application/problem+json` (or `application/problem+xml`) on failure.
+Every failure has this body, including one rejected before a handler ran (an unmatched route, an
+authorization or rate-limit rejection).
+
+To write failures on your HTTP routes in an error format your callers already depend on, register a
+problem formatter for that context (`AddProblemFormatter<ApiGatewayContext>(...)`). It isn't
+conformant, so keep it off the envelope endpoint; see
+[Keeping an existing error body format](cookbooks/custom-error-body.md).
 
 ### Returning a rich problem with BenzeneResult.Problem
 

@@ -69,7 +69,11 @@ Provides HTTP abstractions and utilities for building HTTP-based Benzene applica
   decorator-over-DI shape as `Benzene.Core.Versioning`'s `UsePayloadVersionCasting`) - every real
   HTTP-facing transport calls this (`Benzene.AspNet.Core`, `Benzene.Aws.Lambda.ApiGateway` v1/v2,
   `Benzene.Azure.Function.AspNet`); the `BenzeneMessage` envelope context deliberately does not, so
-  its inner problem body stays transport-neutral even when the envelope travels over HTTP.
+  its inner problem body stays transport-neutral even when the envelope travels over HTTP. Builds the
+  document with `ProblemTypes.ForResult` (a handler's own `BenzeneResult.Problem` document as authored,
+  serialized by its runtime type), writes one for a failure with no handler definition too (an early
+  rejection; it used to write none), and hands it to the context's `IProblemFormatter<TContext>` when one
+  is registered (FR-9).
 
 ### Headers
 - `IHttpHeaderMappings` - Maps custom headers to constants

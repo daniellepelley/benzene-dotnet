@@ -77,7 +77,18 @@ Provides complete implementation of message handler infrastructure for command/q
   serialization/negotiation entirely — the response transport handles the encoding (API Gateway
   base64 + `IsBase64Encoded`, self-host raw bytes). Covered by `RawBytesResponseRenderingTest`.
 - `ResponseHandlerContainer<TContext>` - Contains response handlers
-- `DefaultResponsePayloadMapper<TContext>` - Maps response payloads
+- `DefaultResponsePayloadMapper<TContext>` - Maps response payloads: the success payload by the handler's
+  response type, or the failure's problem document (`ProblemTypes.ForResult`). Every failure gets a body,
+  including one with no handler definition (an early rejection); a success with no definition gets none.
+- `ProblemPayloads` - the one rule for writing a failure body, shared with `Benzene.Http`'s mapper: the
+  problem document serialized by its runtime type (so a `ProblemDetails` subclass keeps its extension
+  members), or the context's `IProblemFormatter<TContext>` output when one is registered and applies.
+  `SerializerResponseRenderer` asks the same `Applies` question to use the formatter's content type
+  instead of `application/problem+json`.
+- `DelegateProblemFormatter<TContext>` + `ProblemFormatterExtensions.AddProblemFormatter<TContext>(...)`
+  (FR-9) - register a failure-body format for one context type. Not conformant (wire-contracts §1.3), so
+  for the HTTP-native contexts only; `docs/cookbooks/custom-error-body.md`. Tests:
+  `test/Benzene.Core.Test/Http/ProblemFormatterTest.cs`.
 - `ResponseIfHandledMessageHandlerResultSetter<TContext>` - Sets result if handled
 - `ResponseMessageHandlerResultSetterBase<TContext>` - Base for result setters
 - `DefaultMessageHandlerResultSetterBase<TContext>` - Default result setter base

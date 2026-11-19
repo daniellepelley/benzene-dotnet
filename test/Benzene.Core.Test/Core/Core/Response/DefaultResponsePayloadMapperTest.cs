@@ -115,10 +115,24 @@ public class DefaultResponsePayloadMapperTest
     }
 
     [Fact]
-    public void Map_NoHandlerDefinition_ReturnsNull()
+    public void Map_NoHandlerDefinition_AFailureStillHasAProblemDocument()
     {
+        // FR-9: a rejection made before any handler was resolved used to have no body. wire-contracts
+        // §1.3 makes a failure's body its problem document, so it has one.
         var mapper = new DefaultResponsePayloadMapper<object>();
         var result = new MessageHandlerResult(BenzeneResult.NotFound());
+
+        var body = mapper.Map(new object(), result, Serializer);
+
+        Assert.Contains(ProblemTypes.NotFound, body);
+        Assert.DoesNotContain("\"status\"", body);
+    }
+
+    [Fact]
+    public void Map_NoHandlerDefinition_ASuccessHasNoBody()
+    {
+        var mapper = new DefaultResponsePayloadMapper<object>();
+        var result = new MessageHandlerResult(BenzeneResult.Ok());
 
         Assert.Null(mapper.Map(new object(), result, Serializer));
     }

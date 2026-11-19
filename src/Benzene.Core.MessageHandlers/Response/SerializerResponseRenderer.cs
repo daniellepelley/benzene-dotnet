@@ -21,6 +21,7 @@ public class SerializerResponseRenderer<TContext> : IResponseRenderer<TContext> 
     private readonly IResponsePayloadMapper<TContext> _responsePayloadMapper;
     private readonly IMediaFormatNegotiator<TContext> _mediaFormatNegotiator;
     private readonly IServiceResolver _serviceResolver;
+    private readonly IProblemFormatter<TContext>? _problemFormatter;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SerializerResponseRenderer{TContext}"/> class.
@@ -28,14 +29,17 @@ public class SerializerResponseRenderer<TContext> : IResponseRenderer<TContext> 
     /// <param name="responsePayloadMapper">Maps the handler's result into a serialized response body.</param>
     /// <param name="mediaFormatNegotiator">Selects which format to write the response in.</param>
     /// <param name="serviceResolver">Resolver used to obtain the negotiated format's serializer.</param>
+    /// <param name="problemFormatter">The context's failure-body formatter, whose content type replaces the problem media type.</param>
     public SerializerResponseRenderer(
         IResponsePayloadMapper<TContext> responsePayloadMapper,
         IMediaFormatNegotiator<TContext> mediaFormatNegotiator,
-        IServiceResolver serviceResolver)
+        IServiceResolver serviceResolver,
+        IProblemFormatter<TContext>? problemFormatter = null)
     {
         _responsePayloadMapper = responsePayloadMapper;
         _mediaFormatNegotiator = mediaFormatNegotiator;
         _serviceResolver = serviceResolver;
+        _problemFormatter = problemFormatter;
     }
 
     /// <summary>The catch-all: always applies, so this must be registered last.</summary>
@@ -77,7 +81,7 @@ public class SerializerResponseRenderer<TContext> : IResponseRenderer<TContext> 
         }
 
         response.SetBody(context, body);
-        response.SetContentType(context, ResolveContentType(result, format));
+        response.SetContentType(context, ResolveContentType(context, result, format));
 
         return Task.CompletedTask;
     }
@@ -88,13 +92,19 @@ public class SerializerResponseRenderer<TContext> : IResponseRenderer<TContext> 
     /// (<c>application/json</c> → <c>application/problem+json</c>, <c>application/xml</c> →
     /// <c>application/problem+xml</c> per RFC 9457 §11.2; any other negotiated format is left as-is -
     /// this framework only defines a problem media type for the two it ships signalling for);
-    /// otherwise the negotiated format's ordinary media type.
+    /// otherwise the negotiated format's ordinary media type. A failure an
+    /// <see cref="IProblemFormatter{TContext}"/> wrote takes that formatter's content type instead.
     /// </summary>
-    private static string ResolveContentType(IMessageHandlerResult result, IMediaFormat<TContext> format)
+    private string ResolveContentType(TContext context, IMessageHandlerResult result, IMediaFormat<TContext> format)
     {
         if (result.BenzeneResult.PayloadAsObject is IRawContentMessage rawContentMessage)
         {
             return rawContentMessage.ContentType;
+        }
+
+        if (ProblemPayloads.Applies(_problemFormatter, context, result.BenzeneResult))
+        {
+            return _problemFormatter!.ContentType;
         }
 
         return result.BenzeneResult.IsSuccessful ? format.ContentType : ProblemContentType(format.ContentType);

@@ -33,6 +33,7 @@ Cookbooks are step-by-step guides that show you how to solve specific problems w
 ### Validation & Error Handling
 - [FluentValidation with Custom Rules](fluentvalidation-custom-rules.md) - Cross-field rules, async DB validation, and per-rule status overrides
 - [Global Error Handling](global-error-handling.md) - Centralized error handling and logging
+- [Keeping an Existing Error Body Format](custom-error-body.md) - Write failures on your HTTP routes in the error shape your callers already parse, with `AddProblemFormatter`, while the envelope endpoint keeps the spec's problem documents
 - [Request/Response Transformations](../middleware.md) - Transform messages in the pipeline via `.Convert()` / `ContextConverterMiddleware`
 
 ### Data & Persistence

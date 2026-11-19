@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using Benzene.Abstractions.Results;
 
@@ -104,6 +104,29 @@ public static class ProblemTypes
     public static int HttpStatusFor(string? status)
     {
         return status != null && Registry.TryGetValue(status, out var row) ? row.HttpStatus : UnknownHttpStatus;
+    }
+
+    /// <summary>
+    /// The problem document a failed <paramref name="result"/> is written as. A handler-authored one
+    /// (<see cref="IHasProblemDetails"/>, from <see cref="BenzeneResult.Problem{T}"/>) is returned as
+    /// that same instance, so a subclass keeps its extension members, with any member the handler left
+    /// out filled in from the registry for the result's status. Any other result gets a fresh document
+    /// from <see cref="From"/>. Every response mapper uses this, so a handler's own document is written
+    /// the same way on every transport.
+    /// </summary>
+    /// <param name="result">The unsuccessful result to build a problem document for.</param>
+    public static ProblemDetails ForResult(IBenzeneResult result)
+    {
+        if (result is IHasProblemDetails { Problem: { } problem })
+        {
+            problem.Type ??= TypeFor(result.Status);
+            problem.Title ??= TitleFor(result.Status);
+            problem.BenzeneStatus ??= result.Status;
+
+            return problem;
+        }
+
+        return From(result);
     }
 
     /// <summary>

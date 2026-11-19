@@ -55,6 +55,7 @@ Defines abstractions for message-based request/response handling in Benzene. Pro
 - `IResponseHandlerContainer<TContext>` - Contains response handlers
 - `IBenzeneResponseAdapter<TContext>` - Adapts responses to transport format
 - `IResponsePayloadMapper<TContext>` - Maps response payloads
+- `IProblemFormatter<TContext>` - writes one context's failure bodies in an application's own format, from the problem document Benzene built (`ContentType`, `Applies` (default: every failure), `Format`); FR-9
 - `IMessageHandlerResultSetter<TContext>` - Sets result on context
 
 ### Routing

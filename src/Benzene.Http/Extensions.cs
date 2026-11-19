@@ -92,7 +92,8 @@ public static class Extensions
         services.TryAddScoped<IResponsePayloadMapper<TContext>>(resolver =>
             new HttpProblemDetailsResponsePayloadMapper<TContext>(
                 resolver.GetService<DefaultResponsePayloadMapper<TContext>>(),
-                resolver.GetService<IHttpStatusCodeMapper>()));
+                resolver.GetService<IHttpStatusCodeMapper>(),
+                resolver.TryGetService<IProblemFormatter<TContext>>()));
         return services;
     }
 

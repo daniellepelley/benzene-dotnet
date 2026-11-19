@@ -1,4 +1,4 @@
-using Benzene.Abstractions.Results;
+﻿using Benzene.Abstractions.Results;
 using Benzene.Core.MessageHandlers;
 using Benzene.Core.MessageHandlers.Response;
 using Benzene.Core.Messages;
@@ -108,10 +108,24 @@ public class HttpProblemDetailsResponsePayloadMapperTest
     }
 
     [Fact]
-    public void Map_NoHandlerDefinition_ReturnsNull()
+    public void Map_NoHandlerDefinition_AFailureStillHasAProblemDocument()
     {
+        // FR-9: a rejection made before any handler was resolved used to have no body. wire-contracts
+        // §1.3 makes a failure's body its problem document, so it has one, with the HTTP status.
         var mapper = CreateMapper();
         var result = new MessageHandlerResult(BenzeneResult.NotFound());
+
+        var body = mapper.Map(new object(), result, Serializer);
+
+        Assert.Contains("\"status\":404", body);
+        Assert.Contains(ProblemTypes.NotFound, body);
+    }
+
+    [Fact]
+    public void Map_NoHandlerDefinition_ASuccessHasNoBody()
+    {
+        var mapper = CreateMapper();
+        var result = new MessageHandlerResult(BenzeneResult.Ok());
 
         Assert.Null(mapper.Map(new object(), result, Serializer));
     }

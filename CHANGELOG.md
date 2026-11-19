@@ -81,6 +81,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     comparison, `Strong`/`Weak` builders) in `Benzene.Http.Conditional`.
   - `If-Match` and `If-None-Match` bind onto request properties named `IfMatch` and `IfNoneMatch`
     (`ConditionalRequestEnricher`).
+- **Keeping an existing error body format** (FR-9 of the adopter feature requests).
+  `AddProblemFormatter<TContext>((problem, result) => ...)`, or an `IProblemFormatter<TContext>` class,
+  writes one context's failure bodies in the application's own format, from the problem document
+  Benzene built (`status` filled in on HTTP), with its own `content-type` and an optional `applies`
+  filter. Success payloads, status codes and headers are unchanged. It doesn't conform to
+  wire-contracts §1.3, so register it for the HTTP-native contexts only; the envelope endpoint keeps
+  its problem documents. Cookbook: `docs/cookbooks/custom-error-body.md`.
 - **Per-endpoint authorization** (FR-5 of the adopter feature requests; `Benzene.Auth.Core.Endpoints`).
   `[RequireScope]`, `[RequireRole]`, `[RequirePolicy]` and `[AllowAnonymous]` on a handler class, or
   `options.ForTopic(...)`, are enforced by `UseEndpointAuthorization()`:
@@ -107,6 +114,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scripts against an old path or assembly name (e.g. `Benzene.Example.Asp.dll`) needs the new one.
 
 ### Fixed
+- **A failure rejected before a handler ran could have no body.** The response payload mappers wrote
+  nothing for a result with no handler definition, so a rate-limit rejection of an unknown topic (and
+  any custom middleware that set a failure without one) answered with an empty body, against
+  wire-contracts §1.3. Every failure now has its problem document; a success with no definition still
+  has no body.
+- **HTTP dropped a handler-authored problem document.** On every HTTP host the problem mapper rebuilt
+  the document from the status, so `BenzeneResult.Problem(...)`'s own `type`, `title`, `instance` and
+  extension members never reached the caller. It now writes the handler's document, with `status`
+  filled in.
+- **A `ProblemDetails` subclass lost its extension members on every transport.** The document was
+  serialized as `ProblemDetails`, so `docs/message-result.md`'s own `OutOfStockProblem.AvailableQuantity`
+  example never reached the wire. It is now serialized by its runtime type.
 - **Outbound retry docs put `UseRetry` where it never runs.** `docs/clients.md`, `docs/resilience.md`
   and `AddOutboundRouting`'s XML example registered `.UseRetry(...)` after the transport
   (`.UseSqs(queueUrl).UseRetry(3)`). The transport ends the pipeline, so that retry never ran. The docs
