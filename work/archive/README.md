@@ -261,3 +261,4 @@ shipped:
 - `fr-3-response-headers-plan-2026-11.md` — response headers from handler results (`605225f`).
 - `fr-2-base-path-and-request-url-plan-2026-11.md` — base path stripping and `IRequestUrl` (`81361e4`).
 - `fr-4-authorizer-identity-plan-2026-11.md` — the caller from an API Gateway authorizer (`9d7096d`).
+- `fr-5-endpoint-authorization-plan-2026-11.md` — per-endpoint authorization (`8fcf5dd`).

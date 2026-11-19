@@ -1,7 +1,10 @@
+> ARCHIVED 2026-11-19: actioned in `8fcf5dd`, with the owner's decisions D1-D4 as recommended. Not done:
+> OpenAPI `security` per operation (step 5), left to FR-13; and honouring ASP.NET Core's
+> `[AllowAnonymous]` by name (optional under D4).
+
 # FR-5 — Per-endpoint authorization (plan)
 
-**Status: plan for review, 2026-11-19. Decisions D1–D4 below need the owner's call before any
-code.** The request is FR-5 of the adopter feature requests,
+**Status: done, 2026-11-19** (`8fcf5dd`); D1-D4 decided as recommended. The request is FR-5 of the adopter feature requests,
 [`Benzene/work/adopter-feature-requests.md`](https://github.com/daniellepelley/Benzene/blob/main/work/adopter-feature-requests.md).
 It depends on FR-4 for a caller from an API Gateway authorizer, though not for one from
 `UseOAuth2Bearer`. No spec change. Code references are to `main` at `031b7d8`.
