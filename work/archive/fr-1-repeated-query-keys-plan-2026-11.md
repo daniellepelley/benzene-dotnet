@@ -1,6 +1,10 @@
+> ARCHIVED 2026-11-19: actioned in `131898d`; the design shipped as written. The `MapOnto` overload
+> for `object` values already existed, so step 1 needed none. Not done: the benchmark run (step 5) and
+> the optional spec sentence (step 7), both still open in Benzene's `work/adopter-feature-requests.md`.
+
 # FR-1 — Repeated query keys bind to collections (plan)
 
-**Status: plan, 2026-11-19.** The request is FR-1 of the adopter feature requests,
+**Status: done, 2026-11-19** (`131898d`). The request is FR-1 of the adopter feature requests,
 [`Benzene/work/adopter-feature-requests.md`](https://github.com/daniellepelley/Benzene/blob/main/work/adopter-feature-requests.md).
 No spec change. Code references are to `main` at `be33941`.
 

@@ -251,3 +251,11 @@ in [`../outstanding-bugs.md`](../outstanding-bugs.md) (search "Round 15"), each 
 review doc above for the full record. One deliberate scope correction: #227's fourth named transport,
 Kinesis, was found structurally unable to support preset topics and was left unfixed by design — see
 the WP-B resolved entry.
+
+## Adopter feature requests (2026-11)
+
+Implementation plans for items of Benzene's `work/adopter-feature-requests.md`, archived as each
+shipped:
+
+- `fr-1-repeated-query-keys-plan-2026-11.md` — repeated query keys bind to collections (`131898d`).
+- `fr-3-response-headers-plan-2026-11.md` — response headers from handler results (`605225f`).

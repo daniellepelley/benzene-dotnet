@@ -1,6 +1,11 @@
+> ARCHIVED 2026-11-19: actioned in `605225f`; the design shipped as written, except the response
+> handler doesn't log skipped headers (one constructor, nothing extra to resolve). Not done:
+> surfacing received headers on a client result (§2.4, optional), and a dedicated test that a
+> versioned response keeps its headers (the cast forwards them; covered by code, not a test).
+
 # FR-3 — Response headers from handler results (plan)
 
-**Status: plan, 2026-11-19.** The request is FR-3 of the adopter feature requests,
+**Status: done, 2026-11-19** (`605225f`). The request is FR-3 of the adopter feature requests,
 [`Benzene/work/adopter-feature-requests.md`](https://github.com/daniellepelley/Benzene/blob/main/work/adopter-feature-requests.md).
 No spec change: the envelope already has response `headers`. Code references are to `main` at `be33941`.
 
