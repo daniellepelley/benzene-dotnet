@@ -87,6 +87,26 @@ with the source generator (step 1) reduces that risk.
 For endpoints that can't tolerate any cold start, use AWS **provisioned concurrency** to keep warm
 instances ready. It has a cost trade-off, so reserve it for latency-critical functions.
 
+### 6. Turn on Benzene's warm-up
+
+Opt in, and Benzene does the first-message work during Lambda's init phase instead of on the first
+invocation. It builds the serializer metadata for every handler's request and response types, and
+the validators when FluentValidation is in use:
+
+```csharp
+public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
+{
+    services.UsingBenzene(x => x.AddBenzeneWarmUp());
+}
+```
+
+Warm-up dispatches no message, so it produces no logs, metrics or traces, and a task that fails only
+means the first real message pays that cost. Add your own work by registering an `IWarmUpTask`. It
+runs once, at init, on a throwaway scope.
+
+Benzene has no SnapStart support yet: nothing registers work to run before the snapshot or after a
+restore.
+
 ## Testing / measuring
 
 Measure before and after — cold-start optimization is easy to guess wrong:

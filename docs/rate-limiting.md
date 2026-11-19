@@ -17,6 +17,11 @@ this deliberately *not* an exact science:
   Management policies, your ingress/WAF — where one limit covers every instance.
 - Use this package as **defense-in-depth**: a cheap floor of protection for endpoints that would
   otherwise ship with none, and for deployments that don't have a gateway in front of them yet.
+- **On AWS Lambda,** each concurrent execution environment has its own limiter. To cap a whole
+  function, use Lambda's reserved concurrency. To cap callers, use API Gateway throttling and usage
+  plans. Benzene has no limiter that shares its state across instances yet. A `ConcurrencyLimiter`
+  plugs in like any other ([Bring your own limiter](#bring-your-own-limiter)), but it too counts
+  within one instance.
 
 ## Quick start
 

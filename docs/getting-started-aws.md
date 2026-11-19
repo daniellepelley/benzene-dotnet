@@ -331,6 +331,44 @@ shape of the incoming payload:
 - **Kinesis**: `eventPipeline.UseKinesisStream(...)`, in `Benzene.Aws.Lambda.Kinesis` (Data
   Streams; the whole batch is processed as one ordered *stream*, not fanned out per record)
 
+### API Gateway
+
+`UseApiGateway` takes REST API events (payload format 1.0) and `UseApiGatewayV2` takes HTTP API
+events (2.0). Each routes a request to the handler whose `[HttpEndpoint]` matches it. Most of what an
+HTTP API needs is already built:
+
+| Need | Use | Read |
+|---|---|---|
+| Validate a bearer token or Basic credentials; require scopes or roles (401 and 403 kept apart) | `UseOAuth2Bearer`, `UseBasicAuth`, `RequireScope`, `RequireRole` | [Auth patterns](cookbooks/auth-patterns.md) |
+| CORS | `UseCors` | [Common middleware](common-middleware.md) |
+| Result statuses mapped to HTTP status codes, with a replaceable mapping | `IHttpStatusCodeMapper` | [Message results](message-result.md) |
+| RFC 9457 problem documents for failures, with a replaceable body | `IResponsePayloadMapper` | [Message handlers](message-handlers.md) |
+| Header-based versioning | the `benzene-version` header | [Message versioning](cookbooks/message-versioning.md) |
+| Idempotent writes, with a DynamoDB store | `Benzene.Idempotency`, `Benzene.Idempotency.DynamoDb` | [Idempotency](cookbooks/idempotency.md) |
+| Rate limiting, per instance | `Benzene.RateLimiting` | [Rate limiting](rate-limiting.md) |
+| Newtonsoft.Json instead of System.Text.Json | `Benzene.NewtonsoftJson` | [the package](https://github.com/daniellepelley/benzene-dotnet/tree/main/src/Benzene.NewtonsoftJson) |
+| An OpenAPI document | `UseSpec` | [Spec](spec.md) |
+| Warm-up during Lambda init | `AddBenzeneWarmUp` | [Cold-start optimization](cookbooks/lambda-cold-start-optimization.md) |
+
+How requests are matched and bound today:
+
+- **Case.** The method and literal path segments match ignoring case. Route parameter values keep
+  their case.
+- **Path.** The route is matched against the path in the event, with nothing stripped. A request
+  that arrives through a custom-domain API mapping (such as `/tasks`) or a stage other than the
+  default can carry that prefix, and the route then has to include it.
+- **Repeated query keys.** The first value wins: `?id=a&id=b` binds `a`, and a collection property
+  can't bind from the query string.
+- **Repeated headers.** A header sent more than once keeps one value.
+
+Not built yet:
+- response headers set by a handler (only middleware can set them);
+- a caller identity taken from an API Gateway authorizer's context (Benzene validates the token
+  itself);
+- authorization per endpoint (auth middleware covers the whole pipeline);
+- conditional requests (`ETag`, `If-Match`, `If-None-Match`);
+- SnapStart hooks.
+
 ### SQS
 
 ```csharp
@@ -589,9 +627,13 @@ SQS/SNS/Kafka's per-message batch dispatch (each message gets its own nested DI 
 don't expect it to resolve inside those handlers even after adding it upstream.
 
 **Handler never gets called / 404 from API Gateway** — check that `[HttpEndpoint("METHOD",
-"/path")]` matches exactly, including case and any route parameters (`{name}`), and that the
-handler's assembly was passed to `AddMessageHandlers(...)` (or that you called the
-no-argument `AddMessageHandlers()` overload, which scans the calling assembly).
+"/path")]` matches the path the function actually receives, segment for segment, including any
+route parameters (`{name}`). Case doesn't matter: the method and literal segments match ignoring
+case. Nothing is stripped from the path either, so behind a custom-domain API mapping or a
+non-default stage, log the path the event carries and make the route match it (see
+[API Gateway](#api-gateway)). Then check that the handler's assembly was passed to
+`AddMessageHandlers(...)` (or that you called the no-argument `AddMessageHandlers()` overload, which
+scans the calling assembly).
 
 **SQS/SNS message never routes to a handler** — both transports resolve the topic from a
 message attribute (`topic` for SNS by convention, or an explicit attribute set by the
