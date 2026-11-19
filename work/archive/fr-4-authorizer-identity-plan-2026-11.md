@@ -1,7 +1,11 @@
+> ARCHIVED 2026-11-19: actioned in `9d7096d`, with the owner's decisions D1-D3 as recommended. The
+> step-1 type check found a v1 detail the plan didn't: the authorizer context is a
+> `Dictionary<string, object>` whose values the Lambda serializer leaves as `JsonElement`, and
+> `PrincipalId` is obsolete in the SDK, so the mapping reads the dictionary.
+
 # FR-4 — Caller identity from the API Gateway authorizer (plan)
 
-**Status: plan for review, 2026-11-19. Decisions D1–D3 below need the owner's call before any
-code.** The request is FR-4 of the adopter feature requests,
+**Status: done, 2026-11-19** (`9d7096d`); D1-D3 decided as recommended. The request is FR-4 of the adopter feature requests,
 [`Benzene/work/adopter-feature-requests.md`](https://github.com/daniellepelley/Benzene/blob/main/work/adopter-feature-requests.md).
 No spec change. Code references are to `main` at `031b7d8`.
 
