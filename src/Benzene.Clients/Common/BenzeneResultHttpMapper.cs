@@ -43,6 +43,7 @@ public static class BenzeneResultHttpMapper
         {
             case "200":
             case "204":
+            case "304":
                 return BenzeneResultStatus.Ok;
             case "201":
                 return BenzeneResultStatus.Created;
@@ -60,6 +61,10 @@ public static class BenzeneResultHttpMapper
                 return BenzeneResultStatus.Timeout;
             case "409":
                 return BenzeneResultStatus.Conflict;
+            case "412":
+                return BenzeneResultStatus.PreconditionFailed;
+            case "428":
+                return BenzeneResultStatus.PreconditionRequired;
             case "422":
                 return BenzeneResultStatus.ValidationError;
             case "429":

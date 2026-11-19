@@ -115,6 +115,44 @@ name means one cookie per result. A relative `Location` is valid HTTP. For an ab
 `IRequestUrl` (`Benzene.Http.RequestUrl`, with `UseRequestUrl()` in the pipeline) and use
 `requestUrl.Absolute($"/tasks/{task.Id}")`.
 
+### Conditional requests — `ETag`, `If-Match`, `If-None-Match`
+
+**Reads (304).** Give a successful result an `ETag`, and the HTTP hosts answer `304 Not Modified`
+when the caller already has that version:
+
+```csharp
+return BenzeneResult.Ok(task).WithHeader("ETag", EntityTags.Strong(task.Version));
+```
+
+A `GET` or `HEAD` whose `If-None-Match` matches the result's `ETag` gets 304 with no body. The match
+is a weak comparison, and a list or `*` counts. The `ETag` and the result's other headers stay on the
+304. 304 isn't a status: the result is still `ok`, and only the HTTP response changes (spec
+wire-contracts §4.1).
+
+**Writes (412, 428).** For optimistic concurrency, check `If-Match` against the current tag before
+changing anything:
+
+```csharp
+public class UpdateTask
+{
+    public string Id { get; set; }
+    public string Title { get; set; }
+    public string IfMatch { get; set; }    // the If-Match header binds here
+}
+
+var failed = Preconditions.CheckIfMatch<TaskDto>(request.IfMatch, EntityTags.Strong(task.Version));
+if (failed != null) return failed;
+```
+
+- `precondition-required` (428): there is no `If-Match`. Pass `required: false` to let such requests
+  through.
+- `precondition-failed` (412): the `If-Match` tag is stale. The match is a strong comparison.
+
+Both are failures, answered with a problem document. On every HTTP host, the `If-Match` and
+`If-None-Match` headers bind onto request properties named `IfMatch` and `IfNoneMatch`.
+`EntityTags.IfMatch` and `EntityTags.IfNoneMatch` (`Benzene.Http.Conditional`) do the comparisons for
+anything else. Over gRPC, both statuses are `FailedPrecondition`.
+
 ## Problem documents (RFC 9457)
 
 Whenever a result is unsuccessful, the payload it would have carried is replaced on the wire by a
@@ -253,6 +291,8 @@ public static class BenzeneResultStatus
     public const string NotImplemented = "not-implemented";
     public const string UnexpectedError = "unexpected-error";
     public const string Conflict = "conflict";
+    public const string PreconditionFailed = "precondition-failed";
+    public const string PreconditionRequired = "precondition-required";
     public const string Forbidden = "forbidden";
     public const string Unauthorized = "unauthorized";
 }
@@ -310,7 +350,9 @@ the result's `IsSuccessful` is `true`, else `500` (a null status is always `500`
 | `forbidden` | 403 |
 | `not-found` | 404 |
 | `conflict` | 409 |
+| `precondition-failed` | 412 |
 | `validation-error` | 422 |
+| `precondition-required` | 428 |
 | `unexpected-error`, or unmapped + `IsSuccessful == false` | 500 |
 | unmapped + `IsSuccessful == true` | 200 |
 | `not-implemented` | 501 |

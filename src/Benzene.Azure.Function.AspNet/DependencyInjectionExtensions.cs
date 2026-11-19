@@ -13,6 +13,7 @@ using Benzene.Core.MessageHandlers.Info;
 using Benzene.Core.MessageHandlers.MediaFormats;
 using Benzene.Core.MessageHandlers.Response;
 using Benzene.Core.Middleware;
+using Benzene.Http.Conditional;
 using Benzene.Http.RequestUrl;
 using Benzene.Http;
 using Benzene.Http.RequestBody;
@@ -103,6 +104,8 @@ public static class DependencyInjectionExtensions
         services.AddScoped<IResponseHandler<AspNetContext>, RendererResponseHandler<AspNetContext>>();
         // After the renderer: the result's own headers never replace the pipeline's (FR-3).
         services.AddScoped<IResponseHandler<AspNetContext>, ResultHeadersResponseHandler<AspNetContext>>();
+        // Last: a matching If-None-Match turns a successful GET with an ETag into 304 (FR-6).
+        services.AddScoped<IResponseHandler<AspNetContext>, ConditionalGetResponseHandler<AspNetContext>>();
         services.AddMediaFormatNegotiation<AspNetContext>();
         // A failed result's problem document carries the numeric HTTP `status` member, filled in from
         // the same IHttpStatusCodeMapper the response status line uses - work/archive/problem-details-plan-2026-08.md
@@ -111,6 +114,7 @@ public static class DependencyInjectionExtensions
 
         // services.AddScoped<ResponseMiddleware<AspNetContext>>();
         services.AddScoped<IRequestEnricher<AspNetContext>, AspNetContextRequestEnricher>();
+        services.AddScoped<IRequestEnricher<AspNetContext>, ConditionalRequestEnricher<AspNetContext>>();
 
         // Declare this transport for ITransportsInfo (the same name the per-invocation current-transport
         // records), matching Benzene.AspNet.Core - it was previously omitted here.

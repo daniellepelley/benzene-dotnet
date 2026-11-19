@@ -23,6 +23,15 @@ public static class BenzeneResultStatus
     public const string NotImplemented = "not-implemented";
     public const string UnexpectedError = "unexpected-error";
     public const string Conflict = "conflict";
+
+    /// <summary>
+    /// A precondition the request set on the target's current state does not hold - e.g. an
+    /// <c>If-Match</c> entity tag that is no longer current. HTTP 412. Spec 1.3.
+    /// </summary>
+    public const string PreconditionFailed = "precondition-failed";
+
+    /// <summary>The operation requires a precondition (e.g. <c>If-Match</c>) and none was sent. HTTP 428. Spec 1.3.</summary>
+    public const string PreconditionRequired = "precondition-required";
     public const string Forbidden = "forbidden";
     public const string Unauthorized = "unauthorized";
     public const string TooManyRequests = "too-many-requests";
@@ -46,6 +55,8 @@ public static class BenzeneResultStatus
         Forbidden,
         NotFound,
         Conflict,
+        PreconditionFailed,
+        PreconditionRequired,
         TooManyRequests,
         Timeout,
         NotImplemented,

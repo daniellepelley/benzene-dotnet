@@ -67,6 +67,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Options name the caller's claim and the role claims (`cognito:groups`). No authorizer context means
   no caller, and a caller already set by another authenticator is kept. It trusts API Gateway, so the
   function must not be invocable another way.
+- **Conditional requests, and spec 1.3's two statuses** (FR-6 of the adopter feature requests;
+  `SPEC_VERSION` re-pinned to `spec-1.3.0`):
+  - `BenzeneResultStatus.PreconditionFailed` (`precondition-failed`, HTTP 412) and
+    `PreconditionRequired` (`precondition-required`, HTTP 428) are failures, with `BenzeneResult`
+    factories, problem types, `Is*` predicates and the gRPC mapping (`FailedPrecondition`, both
+    ways). HTTP clients read 412, 428 and 304 (as `ok`).
+  - The HTTP 304 rule: a successful `GET`/`HEAD` result with an `ETag` header whose value
+    `If-None-Match` matches answers 304 with no body (`ConditionalGetResponseHandler`, registered on
+    every HTTP host).
+  - `Preconditions.CheckIfMatch<T>(ifMatch, currentETag, required)` and `EntityTags` (strong and weak
+    comparison, `Strong`/`Weak` builders) in `Benzene.Http.Conditional`.
+  - `If-Match` and `If-None-Match` bind onto request properties named `IfMatch` and `IfNoneMatch`
+    (`ConditionalRequestEnricher`).
 - **Per-endpoint authorization** (FR-5 of the adopter feature requests; `Benzene.Auth.Core.Endpoints`).
   `[RequireScope]`, `[RequireRole]`, `[RequirePolicy]` and `[AllowAnonymous]` on a handler class, or
   `options.ForTopic(...)`, are enforced by `UseEndpointAuthorization()`:

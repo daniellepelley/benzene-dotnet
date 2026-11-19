@@ -10,6 +10,7 @@ status string rather than thrown exceptions. Transport adapters map the status t
 ## Key types/interfaces
 - `BenzeneResult` - static factory for building results. Named helpers (`Ok`, `Created`, `Accepted`,
   `Updated`, `Deleted`, `Ignored`, `NotFound`, `BadRequest`, `ValidationError`, `Conflict`,
+  `PreconditionFailed`, `PreconditionRequired` (spec 1.3),
   `Forbidden`, `Unauthorized`, `ServiceUnavailable`, `NotImplemented`, `UnexpectedError`,
   `TooManyRequests`, `Timeout`), plus low-level `Set(...)` overloads including
   `Set<T>(status, payload, isSuccessful)` for the case where the success class must not be derived

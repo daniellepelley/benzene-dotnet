@@ -45,6 +45,8 @@ the HTTP status code HTTP transports map it to (via `DefaultHttpStatusCodeMapper
 | `BenzeneResult.Forbidden()` | `forbidden` | `403` | Authenticated but not permitted. |
 | `BenzeneResult.NotFound<T>()` | `not-found` | `404` | Resource does not exist. |
 | `BenzeneResult.Conflict()` | `conflict` | `409` | Conflicts with current state. |
+| `BenzeneResult.PreconditionFailed()` | `precondition-failed` | `412` | A precondition the request set (e.g. `If-Match`) doesn't hold. See [conditional requests](../message-result.md#conditional-requests--etag-if-match-if-none-match). |
+| `BenzeneResult.PreconditionRequired()` | `precondition-required` | `428` | The operation needs a precondition (e.g. `If-Match`) and none was sent. |
 | `BenzeneResult.ValidationError(message)` | `validation-error` | `422` | Request failed validation. Returned automatically by [validation middleware](middleware.md#message-router-middleware). |
 | `BenzeneResult.TooManyRequests()` | `too-many-requests` | `429` | Throttled / rate limited; transient — back off and retry. |
 | `BenzeneResult.UnexpectedError(message)` | `unexpected-error` | `500` | Unhandled/unexpected failure. |
@@ -155,6 +157,8 @@ application-defined one:
 | `forbidden` | `forbidden` | Forbidden | 403 |
 | `not-found` | `not-found` | Not found | 404 |
 | `conflict` | `conflict` | Conflict | 409 |
+| `precondition-failed` | `precondition-failed` | Precondition failed | 412 |
+| `precondition-required` | `precondition-required` | Precondition required | 428 |
 | `validation-error` | `validation-error` | Validation failed | 422 |
 | `too-many-requests` | `too-many-requests` | Too many requests | 429 |
 | `unexpected-error` | `unexpected-error` | Unexpected error | 500 |

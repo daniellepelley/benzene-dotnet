@@ -16,6 +16,7 @@ using Benzene.Core.Messages;
 using Benzene.Core.Middleware;
 using Benzene.HealthChecks;
 using Benzene.HealthChecks.Core;
+using Benzene.Http.Conditional;
 using Benzene.Http.RequestUrl;
 using Benzene.Http;
 using Benzene.Http.Routing;
@@ -55,6 +56,7 @@ public static class DependencyInjectionExtensions
             .TryAddScoped<IRequestMapper<ApiGatewayContext>,
                 MultiSerializerOptionsRequestMapper<ApiGatewayContext>>();
         services.AddScoped<IRequestEnricher<ApiGatewayContext>, ApiGatewayRequestEnricher>();
+        services.AddScoped<IRequestEnricher<ApiGatewayContext>, ConditionalRequestEnricher<ApiGatewayContext>>();
         services.TryAddScoped<IHttpRequestAdapter<ApiGatewayContext>, ApiGatewayHttpRequestAdapter>();
         services.TryAddScoped<IBenzeneResponseAdapter<ApiGatewayContext>, ApiGatewayResponseAdapter>();
         services.TryAddScoped<IHttpRequestLocation<ApiGatewayContext>, ApiGatewayHttpRequestLocation>();
@@ -64,6 +66,8 @@ public static class DependencyInjectionExtensions
         services.AddScoped<IResponseHandler<ApiGatewayContext>, RendererResponseHandler<ApiGatewayContext>>();
         // After the renderer: the result's own headers never replace the pipeline's (FR-3).
         services.AddScoped<IResponseHandler<ApiGatewayContext>, ResultHeadersResponseHandler<ApiGatewayContext>>();
+        // Last: a matching If-None-Match turns a successful GET with an ETag into 304 (FR-6).
+        services.AddScoped<IResponseHandler<ApiGatewayContext>, ConditionalGetResponseHandler<ApiGatewayContext>>();
         services.AddMediaFormatNegotiation<ApiGatewayContext>();
 
         services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.ApiGateway));
@@ -104,6 +108,7 @@ public static class DependencyInjectionExtensions
             .TryAddScoped<IRequestMapper<ApiGatewayV2Context>,
                 MultiSerializerOptionsRequestMapper<ApiGatewayV2Context>>();
         services.AddScoped<IRequestEnricher<ApiGatewayV2Context>, ApiGatewayV2RequestEnricher>();
+        services.AddScoped<IRequestEnricher<ApiGatewayV2Context>, ConditionalRequestEnricher<ApiGatewayV2Context>>();
         services.TryAddScoped<IHttpRequestAdapter<ApiGatewayV2Context>, ApiGatewayV2HttpRequestAdapter>();
         services.TryAddScoped<IBenzeneResponseAdapter<ApiGatewayV2Context>, ApiGatewayV2ResponseAdapter>();
         services.TryAddScoped<IHttpRequestLocation<ApiGatewayV2Context>, ApiGatewayV2HttpRequestLocation>();
@@ -112,6 +117,7 @@ public static class DependencyInjectionExtensions
         services.AddScoped<IResponseRenderer<ApiGatewayV2Context>, SerializerResponseRenderer<ApiGatewayV2Context>>();
         services.AddScoped<IResponseHandler<ApiGatewayV2Context>, RendererResponseHandler<ApiGatewayV2Context>>();
         services.AddScoped<IResponseHandler<ApiGatewayV2Context>, ResultHeadersResponseHandler<ApiGatewayV2Context>>();
+        services.AddScoped<IResponseHandler<ApiGatewayV2Context>, ConditionalGetResponseHandler<ApiGatewayV2Context>>();
         services.AddMediaFormatNegotiation<ApiGatewayV2Context>();
 
         services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.ApiGateway));

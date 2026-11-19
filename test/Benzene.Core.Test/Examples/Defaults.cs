@@ -20,6 +20,7 @@ public static class Defaults
     public const string AuthPlainPath = "/auth-plain";
     public const string AuthAdminPath = "/auth-admin";
     public const string AuthPolicyPath = "/auth-policy";
+    public const string ETagTaskPath = "/etag-task";
     public const string PathWithParam = "/example/{id}";
     public const string PathNoResponse = "/example-no-response";
     public const string Method = "GET";

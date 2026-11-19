@@ -29,6 +29,12 @@ public static class ProblemTypes
     /// <summary>The <see cref="ProblemDetails.Type"/> URI for <see cref="BenzeneResultStatus.Conflict"/>.</summary>
     public const string Conflict = BaseUri + "conflict";
 
+    /// <summary>The <see cref="ProblemDetails.Type"/> URI for <see cref="BenzeneResultStatus.PreconditionFailed"/>.</summary>
+    public const string PreconditionFailed = BaseUri + "precondition-failed";
+
+    /// <summary>The <see cref="ProblemDetails.Type"/> URI for <see cref="BenzeneResultStatus.PreconditionRequired"/>.</summary>
+    public const string PreconditionRequired = BaseUri + "precondition-required";
+
     /// <summary>The <see cref="ProblemDetails.Type"/> URI for <see cref="BenzeneResultStatus.ValidationError"/>.</summary>
     public const string ValidationError = BaseUri + "validation-error";
 
@@ -60,6 +66,8 @@ public static class ProblemTypes
         [BenzeneResultStatus.Forbidden] = new(Forbidden, "Forbidden", 403),
         [BenzeneResultStatus.NotFound] = new(NotFound, "Not found", 404),
         [BenzeneResultStatus.Conflict] = new(Conflict, "Conflict", 409),
+        [BenzeneResultStatus.PreconditionFailed] = new(PreconditionFailed, "Precondition failed", 412),
+        [BenzeneResultStatus.PreconditionRequired] = new(PreconditionRequired, "Precondition required", 428),
         [BenzeneResultStatus.ValidationError] = new(ValidationError, "Validation failed", 422),
         [BenzeneResultStatus.TooManyRequests] = new(TooManyRequests, "Too many requests", 429),
         [BenzeneResultStatus.UnexpectedError] = new(UnexpectedError, "Unexpected error", 500),

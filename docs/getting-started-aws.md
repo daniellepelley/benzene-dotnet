@@ -350,6 +350,7 @@ HTTP API needs is already built:
 | Rate limiting, per instance | `Benzene.RateLimiting` | [Rate limiting](rate-limiting.md) |
 | Newtonsoft.Json instead of System.Text.Json | `Benzene.NewtonsoftJson` | [the package](https://github.com/daniellepelley/benzene-dotnet/tree/main/src/Benzene.NewtonsoftJson) |
 | Response headers from a handler (`Location`, `ETag`) | `result.WithHeader(...)` | [Message results](message-result.md#response-headers--withheader) |
+| Conditional requests: `304` on `If-None-Match`, and `412`/`428` for `If-Match` | `WithHeader("ETag", …)`, `Preconditions.CheckIfMatch` | [Conditional requests](message-result.md#conditional-requests--etag-if-match-if-none-match) |
 | An OpenAPI document | `UseSpec` | [Spec](spec.md) |
 | Warm-up during Lambda init | `AddBenzeneWarmUp` | [Cold-start optimization](cookbooks/lambda-cold-start-optimization.md) |
 
@@ -384,9 +385,7 @@ How requests are matched and bound today:
 A handler sets response headers on its result: `BenzeneResult.Created(task).WithHeader("Location", …)`
 (see [Message results](message-result.md#response-headers--withheader)).
 
-Not built yet:
-- conditional requests (`ETag`, `If-Match`, `If-None-Match`);
-- SnapStart hooks.
+Not built yet: SnapStart hooks.
 
 ### SQS
 

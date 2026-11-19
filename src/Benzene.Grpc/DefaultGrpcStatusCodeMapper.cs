@@ -31,6 +31,8 @@ public class DefaultGrpcStatusCodeMapper : IGrpcStatusCodeMapper
             { BenzeneResultStatus.Forbidden, StatusCode.PermissionDenied },
             { BenzeneResultStatus.NotFound, StatusCode.NotFound },
             { BenzeneResultStatus.Conflict, StatusCode.AlreadyExists },
+            { BenzeneResultStatus.PreconditionFailed, StatusCode.FailedPrecondition },
+            { BenzeneResultStatus.PreconditionRequired, StatusCode.FailedPrecondition },
             { BenzeneResultStatus.NotImplemented, StatusCode.Unimplemented },
             { BenzeneResultStatus.ServiceUnavailable, StatusCode.Unavailable },
             { BenzeneResultStatus.TooManyRequests, StatusCode.ResourceExhausted },

@@ -30,7 +30,9 @@ public class DefaultHttpStatusCodeMapper : IHttpStatusCodeMapper
     /// <item><description>Forbidden → 403 (Forbidden)</description></item>
     /// <item><description>NotFound → 404 (Not Found)</description></item>
     /// <item><description>Conflict → 409 (Conflict)</description></item>
+    /// <item><description>PreconditionFailed → 412 (Precondition Failed)</description></item>
     /// <item><description>ValidationError → 422 (Unprocessable Entity)</description></item>
+    /// <item><description>PreconditionRequired → 428 (Precondition Required)</description></item>
     /// <item><description>TooManyRequests → 429 (Too Many Requests)</description></item>
     /// <item><description>UnexpectedError → 500 (Internal Server Error)</description></item>
     /// <item><description>NotImplemented → 501 (Not Implemented)</description></item>
@@ -53,7 +55,9 @@ public class DefaultHttpStatusCodeMapper : IHttpStatusCodeMapper
             { BenzeneResultStatus.Forbidden, "403"},
             { BenzeneResultStatus.NotFound, "404"},
             { BenzeneResultStatus.Conflict, "409"},
+            { BenzeneResultStatus.PreconditionFailed, "412"},
             { BenzeneResultStatus.ValidationError, "422"},
+            { BenzeneResultStatus.PreconditionRequired, "428"},
             { BenzeneResultStatus.TooManyRequests, "429"},
             { BenzeneResultStatus.UnexpectedError, "500"},
             { BenzeneResultStatus.NotImplemented, "501"},

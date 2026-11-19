@@ -13,6 +13,7 @@ using Benzene.Core.MessageHandlers.Request;
 using Benzene.Core.MessageHandlers.Response;
 using Benzene.Core.MessageHandlers.Serialization;
 using Benzene.Core.Middleware;
+using Benzene.Http.Conditional;
 using Benzene.Http.RequestUrl;
 using Benzene.Http;
 using Benzene.Http.RequestBody;
@@ -60,12 +61,15 @@ public static class DependencyInjectionExtensions
         services.AddScoped<IResponseHandler<AspNetContext>, RendererResponseHandler<AspNetContext>>();
         // After the renderer: the result's own headers never replace the pipeline's (FR-3).
         services.AddScoped<IResponseHandler<AspNetContext>, ResultHeadersResponseHandler<AspNetContext>>();
+        // Last: a matching If-None-Match turns a successful GET with an ETag into 304 (FR-6).
+        services.AddScoped<IResponseHandler<AspNetContext>, ConditionalGetResponseHandler<AspNetContext>>();
         services.AddScoped<MessageRouter<AspNetContext>>();
         services.AddMediaFormatNegotiation<AspNetContext>();
         services
             .TryAddScoped<IRequestMapper<AspNetContext>,
                 MultiSerializerOptionsRequestMapper<AspNetContext>>();
         services.AddScoped<IRequestEnricher<AspNetContext>, AspNetRequestEnricher>();
+        services.AddScoped<IRequestEnricher<AspNetContext>, ConditionalRequestEnricher<AspNetContext>>();
         services.TryAddScoped<IHttpRequestAdapter<AspNetContext>, AspNetHttpRequestAdapter>();
         services.TryAddScoped<IBenzeneResponseAdapter<AspNetContext>, AspNetResponseAdapter>();
         services.TryAddScoped<IHttpRequestLocation<AspNetContext>, AspNetHttpRequestLocation>();

@@ -128,6 +128,17 @@ matching, credential-safe wildcards, preflight header validation, Vary caching h
   `"*"` the middleware omits `Access-Control-Allow-Credentials` (matching ASP.NET Core, which throws
   on `AllowAnyOrigin()` + `AllowCredentials()`) so a credentialed response can't leak to any origin
 
+### Conditional requests (`Conditional/`, FR-6, spec 1.3)
+- `ConditionalGetResponseHandler<TContext>` - the HTTP 304 rule (wire-contracts §4.1). It runs last
+  in every HTTP host's response handlers, after `ResultHeadersResponseHandler`. On a successful
+  `GET`/`HEAD` whose result carries an `ETag` header matching the request's `If-None-Match`, it sets
+  the status to 304 and empties the body. The result's status stays `ok`.
+- `ConditionalRequestEnricher<TContext>` - binds `If-Match`/`If-None-Match` onto request properties
+  `IfMatch`/`IfNoneMatch`, registered after each host's own enricher. It deliberately does not go
+  through `IHttpHeaderMappings`: those also rename the message headers middleware sees.
+- `Preconditions.CheckIfMatch<T>` (428 with no `If-Match` when required, 412 when stale) and
+  `EntityTags` (strong `IfMatch`, weak `IfNoneMatch`, `*` and lists).
+
 ### Base path and request URL (`RequestUrl/`)
 - `UseBasePath("/tasks")` / `UseRequestUrl(options)` → `BasePathMiddleware<TContext>` (FR-2). Placed first
   in the HTTP pipeline, it strips the base path from the host's own request, once, through the host's

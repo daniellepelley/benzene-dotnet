@@ -26,6 +26,7 @@ public class DefaultGrpcStatusReverseMapper : IGrpcStatusReverseMapper
             { StatusCode.PermissionDenied, BenzeneResultStatus.Forbidden },
             { StatusCode.NotFound, BenzeneResultStatus.NotFound },
             { StatusCode.AlreadyExists, BenzeneResultStatus.Conflict },
+            { StatusCode.FailedPrecondition, BenzeneResultStatus.PreconditionFailed },
             { StatusCode.Unimplemented, BenzeneResultStatus.NotImplemented },
             { StatusCode.Unavailable, BenzeneResultStatus.ServiceUnavailable },
             { StatusCode.ResourceExhausted, BenzeneResultStatus.TooManyRequests },

@@ -387,6 +387,33 @@ public static class BenzeneResult
         return ServiceBenzeneResultInternal<Void>.ConflictInternal(errors);
     }
 
+    /// <summary>
+    /// A failed result: a precondition the request set does not hold, e.g. an <c>If-Match</c> entity
+    /// tag that is no longer current (HTTP 412).
+    /// </summary>
+    public static IBenzeneResult<T> PreconditionFailed<T>(params string[] errors)
+    {
+        return ServiceBenzeneResultInternal<T>.Internal(BenzeneResultStatus.PreconditionFailed, errors);
+    }
+
+    /// <inheritdoc cref="PreconditionFailed{T}"/>
+    public static IBenzeneResult PreconditionFailed(params string[] errors)
+    {
+        return ServiceBenzeneResultInternal<Void>.Internal(BenzeneResultStatus.PreconditionFailed, errors);
+    }
+
+    /// <summary>A failed result: the operation requires a precondition (e.g. <c>If-Match</c>) and none was sent (HTTP 428).</summary>
+    public static IBenzeneResult<T> PreconditionRequired<T>(params string[] errors)
+    {
+        return ServiceBenzeneResultInternal<T>.Internal(BenzeneResultStatus.PreconditionRequired, errors);
+    }
+
+    /// <inheritdoc cref="PreconditionRequired{T}"/>
+    public static IBenzeneResult PreconditionRequired(params string[] errors)
+    {
+        return ServiceBenzeneResultInternal<Void>.Internal(BenzeneResultStatus.PreconditionRequired, errors);
+    }
+
     public static IBenzeneResult<T> Unauthorized<T>(params string[] errors)
     {
         return ServiceBenzeneResultInternal<T>.UnauthorizedInternal(errors);

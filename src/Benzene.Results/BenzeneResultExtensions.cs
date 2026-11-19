@@ -201,6 +201,14 @@ public static class BenzeneResultExtensions
     {
         return serviceBenzeneResult.Status == BenzeneResultStatus.Conflict;
     }
+    public static bool IsPreconditionFailed(this IBenzeneResult serviceBenzeneResult)
+    {
+        return serviceBenzeneResult.Status == BenzeneResultStatus.PreconditionFailed;
+    }
+    public static bool IsPreconditionRequired(this IBenzeneResult serviceBenzeneResult)
+    {
+        return serviceBenzeneResult.Status == BenzeneResultStatus.PreconditionRequired;
+    }
     public static bool IsForbidden(this IBenzeneResult serviceBenzeneResult)
     {
         return serviceBenzeneResult.Status == BenzeneResultStatus.Forbidden;
@@ -316,6 +324,9 @@ public static class BenzeneResultExtensions
             HttpStatusCode.NotFound => BenzeneResult.NotFound(),
             HttpStatusCode.BadRequest => BenzeneResult.BadRequest(),
             HttpStatusCode.Conflict => BenzeneResult.Conflict(),
+            HttpStatusCode.PreconditionFailed => BenzeneResult.PreconditionFailed(),
+            HttpStatusCode.PreconditionRequired => BenzeneResult.PreconditionRequired(),
+            HttpStatusCode.NotModified => BenzeneResult.Ok(),
             HttpStatusCode.Forbidden => BenzeneResult.Forbidden(),
             HttpStatusCode.Unauthorized => BenzeneResult.Unauthorized(),
             HttpStatusCode.UnprocessableEntity => BenzeneResult.ValidationError(),
@@ -335,11 +346,14 @@ public static class BenzeneResultExtensions
         {
             HttpStatusCode.Accepted => BenzeneResult.Accepted(payload),
             HttpStatusCode.OK => BenzeneResult.Ok(payload),
+            HttpStatusCode.NotModified => BenzeneResult.Ok(payload),
             HttpStatusCode.Created => BenzeneResult.Created(payload),
             HttpStatusCode.NoContent => BenzeneResult.Deleted(payload),
             HttpStatusCode.NotFound => BenzeneResult.NotFound<T>(),
             HttpStatusCode.BadRequest => BenzeneResult.BadRequest<T>(),
             HttpStatusCode.Conflict => BenzeneResult.Conflict<T>(),
+            HttpStatusCode.PreconditionFailed => BenzeneResult.PreconditionFailed<T>(),
+            HttpStatusCode.PreconditionRequired => BenzeneResult.PreconditionRequired<T>(),
             HttpStatusCode.Forbidden => BenzeneResult.Forbidden<T>(),
             HttpStatusCode.Unauthorized => BenzeneResult.Unauthorized<T>(),
             HttpStatusCode.UnprocessableEntity => BenzeneResult.ValidationError<T>(),
@@ -359,11 +373,14 @@ public static class BenzeneResultExtensions
         {
             HttpStatusCode.Accepted => BenzeneResult.Accepted<T>(),
             HttpStatusCode.OK => BenzeneResult.Ok<T>(),
+            HttpStatusCode.NotModified => BenzeneResult.Ok<T>(),
             HttpStatusCode.Created => BenzeneResult.Created<T>(),
             HttpStatusCode.NoContent => BenzeneResult.Deleted<T>(),
             HttpStatusCode.NotFound => BenzeneResult.NotFound<T>(),
             HttpStatusCode.BadRequest => BenzeneResult.BadRequest<T>(),
             HttpStatusCode.Conflict => BenzeneResult.Conflict<T>(),
+            HttpStatusCode.PreconditionFailed => BenzeneResult.PreconditionFailed<T>(),
+            HttpStatusCode.PreconditionRequired => BenzeneResult.PreconditionRequired<T>(),
             HttpStatusCode.Forbidden => BenzeneResult.Forbidden<T>(),
             HttpStatusCode.Unauthorized => BenzeneResult.Unauthorized<T>(),
             HttpStatusCode.UnprocessableEntity => BenzeneResult.ValidationError<T>(),
