@@ -5,6 +5,12 @@ using Benzene.Results;
 namespace Benzene.Clients.Common;
 
 /// <summary>Maps a numeric HTTP status code (as a string or <see cref="HttpStatusCode"/>) onto a Benzene result.</summary>
+/// <remarks>
+/// <see cref="Map{T}(string)"/>, <see cref="MapBenzeneResultStatus"/> and <see cref="NormalizeStatus"/>
+/// cover the same codes, so a 304, 412 or 428 reads the same whichever path a client takes
+/// (wire-contracts §3, spec 1.3: 412 <c>precondition-failed</c>, 428 <c>precondition-required</c>, 304
+/// <c>ok</c>).
+/// </remarks>
 public static class BenzeneResultHttpMapper
 {
     /// <summary>Maps a numeric HTTP status code string onto an <see cref="IBenzeneResult{T}"/>, classifying it as successful or not.</summary>
@@ -16,6 +22,7 @@ public static class BenzeneResultHttpMapper
             case "201":
             case "202":
             case "204":
+            case "304":
                 return BenzeneResult.Set<T>(MapBenzeneResultStatus(statusCode), true);
             case "400":
             case "401":
@@ -23,7 +30,9 @@ public static class BenzeneResultHttpMapper
             case "404":
             case "408":
             case "409":
+            case "412":
             case "422":
+            case "428":
             case "429":
             case "500":
             case "501":
@@ -119,13 +128,16 @@ public static class BenzeneResultHttpMapper
             case "201":
             case "202":
             case "204":
+            case "304":
             case "400":
             case "401":
             case "403":
             case "404":
             case "408":
             case "409":
+            case "412":
             case "422":
+            case "428":
             case "429":
             case "500":
             case "501":

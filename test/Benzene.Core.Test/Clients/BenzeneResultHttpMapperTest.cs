@@ -20,6 +20,18 @@ public class BenzeneResultHttpMapperTest
         Assert.False(result.IsSuccessful);
     }
 
+    [Theory]
+    [InlineData("412", BenzeneResultStatus.PreconditionFailed, false)]
+    [InlineData("428", BenzeneResultStatus.PreconditionRequired, false)]
+    [InlineData("304", BenzeneResultStatus.Ok, true)]
+    public void Map_ConditionalRequestCodes_MapToTheirStatuses(string httpCode, string expectedStatus, bool isSuccessful)
+    {
+        var result = BenzeneResultHttpMapper.Map<string>(httpCode);
+
+        Assert.Equal(expectedStatus, result.Status);
+        Assert.Equal(isSuccessful, result.IsSuccessful);
+    }
+
     [Fact]
     public void Map_UnmappedCode_ReportsTheActualCodeInTheError()
     {
@@ -42,6 +54,9 @@ public class BenzeneResultHttpMapperTest
     [InlineData("429", BenzeneResultStatus.TooManyRequests)]
     [InlineData("504", BenzeneResultStatus.Timeout)]
     [InlineData("502", BenzeneResultStatus.ServiceUnavailable)]
+    [InlineData("412", BenzeneResultStatus.PreconditionFailed)]
+    [InlineData("428", BenzeneResultStatus.PreconditionRequired)]
+    [InlineData("304", BenzeneResultStatus.Ok)]
     public void NormalizeStatus_MapsNumericCodes(string httpCode, string expectedStatus)
     {
         Assert.Equal(expectedStatus, BenzeneResultHttpMapper.NormalizeStatus(httpCode));

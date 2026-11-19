@@ -72,7 +72,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `BenzeneResultStatus.PreconditionFailed` (`precondition-failed`, HTTP 412) and
     `PreconditionRequired` (`precondition-required`, HTTP 428) are failures, with `BenzeneResult`
     factories, problem types, `Is*` predicates and the gRPC mapping (`FailedPrecondition`, both
-    ways). HTTP clients read 412, 428 and 304 (as `ok`).
+    ways). HTTP clients read 412, 428 and 304 (as `ok`) on every path of `BenzeneResultHttpMapper`:
+    `Map`, `MapBenzeneResultStatus` and `NormalizeStatus` (the first and last missed them at first).
   - The HTTP 304 rule: a successful `GET`/`HEAD` result with an `ETag` header whose value
     `If-None-Match` matches answers 304 with no body (`ConditionalGetResponseHandler`, registered on
     every HTTP host).
