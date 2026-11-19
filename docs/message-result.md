@@ -111,8 +111,9 @@ How they reach the response:
 - **Queues and other transports with no response headers:** ignored.
 
 On API Gateway HTTP APIs (v2), `Set-Cookie` goes to the response's `cookies` array. One value per
-name means one cookie per result. A relative `Location` is valid HTTP. Benzene doesn't make it
-absolute.
+name means one cookie per result. A relative `Location` is valid HTTP. For an absolute one, inject
+`IRequestUrl` (`Benzene.Http.RequestUrl`, with `UseRequestUrl()` in the pipeline) and use
+`requestUrl.Absolute($"/tasks/{task.Id}")`.
 
 ## Problem documents (RFC 9457)
 
