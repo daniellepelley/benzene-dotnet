@@ -1,6 +1,10 @@
+> ARCHIVED 2026-11-19: actioned in `81361e4`; the design shipped as written. Not done: an end-to-end
+> ASP.NET Core pipeline test (its pipeline test is commented out; the PathBase move is unit-tested),
+> and folding the OIDC package's internal `RequestUrl` into `IRequestUrl`.
+
 # FR-2 — Base path and the request URL (plan)
 
-**Status: plan, 2026-11-19.** The request is FR-2 of the adopter feature requests,
+**Status: done, 2026-11-19** (`81361e4`). The request is FR-2 of the adopter feature requests,
 [`Benzene/work/adopter-feature-requests.md`](https://github.com/daniellepelley/Benzene/blob/main/work/adopter-feature-requests.md).
 No spec change. Code references are to `main` at `605225f`.
 

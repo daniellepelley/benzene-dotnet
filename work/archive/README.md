@@ -259,3 +259,4 @@ shipped:
 
 - `fr-1-repeated-query-keys-plan-2026-11.md` — repeated query keys bind to collections (`131898d`).
 - `fr-3-response-headers-plan-2026-11.md` — response headers from handler results (`605225f`).
+- `fr-2-base-path-and-request-url-plan-2026-11.md` — base path stripping and `IRequestUrl` (`81361e4`).
