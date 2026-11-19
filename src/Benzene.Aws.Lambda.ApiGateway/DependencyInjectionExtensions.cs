@@ -16,6 +16,7 @@ using Benzene.Core.Messages;
 using Benzene.Core.Middleware;
 using Benzene.HealthChecks;
 using Benzene.HealthChecks.Core;
+using Benzene.Http.RequestUrl;
 using Benzene.Http;
 using Benzene.Http.Routing;
 
@@ -56,6 +57,7 @@ public static class DependencyInjectionExtensions
         services.AddScoped<IRequestEnricher<ApiGatewayContext>, ApiGatewayRequestEnricher>();
         services.TryAddScoped<IHttpRequestAdapter<ApiGatewayContext>, ApiGatewayHttpRequestAdapter>();
         services.TryAddScoped<IBenzeneResponseAdapter<ApiGatewayContext>, ApiGatewayResponseAdapter>();
+        services.TryAddScoped<IHttpRequestLocation<ApiGatewayContext>, ApiGatewayHttpRequestLocation>();
         services.TryAddScoped<IHttpHeaderMappings, DefaultHttpHeaderMappings>();
         services.AddScoped<IResponseHandler<ApiGatewayContext>, HttpStatusCodeResponseHandler<ApiGatewayContext>>();
         services.AddScoped<IResponseRenderer<ApiGatewayContext>, SerializerResponseRenderer<ApiGatewayContext>>();
@@ -104,6 +106,7 @@ public static class DependencyInjectionExtensions
         services.AddScoped<IRequestEnricher<ApiGatewayV2Context>, ApiGatewayV2RequestEnricher>();
         services.TryAddScoped<IHttpRequestAdapter<ApiGatewayV2Context>, ApiGatewayV2HttpRequestAdapter>();
         services.TryAddScoped<IBenzeneResponseAdapter<ApiGatewayV2Context>, ApiGatewayV2ResponseAdapter>();
+        services.TryAddScoped<IHttpRequestLocation<ApiGatewayV2Context>, ApiGatewayV2HttpRequestLocation>();
         services.TryAddScoped<IHttpHeaderMappings, DefaultHttpHeaderMappings>();
         services.AddScoped<IResponseHandler<ApiGatewayV2Context>, HttpStatusCodeResponseHandler<ApiGatewayV2Context>>();
         services.AddScoped<IResponseRenderer<ApiGatewayV2Context>, SerializerResponseRenderer<ApiGatewayV2Context>>();

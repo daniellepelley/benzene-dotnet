@@ -13,6 +13,7 @@ using Benzene.Core.MessageHandlers.Info;
 using Benzene.Core.MessageHandlers.MediaFormats;
 using Benzene.Core.MessageHandlers.Response;
 using Benzene.Core.Middleware;
+using Benzene.Http.RequestUrl;
 using Benzene.Http;
 using Benzene.Http.RequestBody;
 using Benzene.Http.Routing;
@@ -92,6 +93,7 @@ public static class DependencyInjectionExtensions
         services.TryAddScoped<IMessageHandlerResultSetter<AspNetContext>, AspNetMessageHandlerResultSetter>();
         services.AddScoped<IHttpRequestAdapter<AspNetContext>, AspNetHttpRequestAdapter>();
         services.AddScoped<IBenzeneResponseAdapter<AspNetContext>, AspNetResponseAdapter>();
+        services.TryAddScoped<IHttpRequestLocation<AspNetContext>, AspNetHttpRequestLocation>();
 
         services.AddScoped<IResponseRenderer<AspNetContext>, SerializerResponseRenderer<AspNetContext>>();
         // Registration order matches the other HTTP transports (Benzene.AspNet.Core, both API

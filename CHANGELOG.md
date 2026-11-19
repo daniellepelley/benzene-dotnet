@@ -48,6 +48,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   implemented by every in-tree adapter. The `As(...)` re-wraps and the versioning response cast now
   keep an attached problem document and the headers, both of which they used to drop.
 
+- **Base path and request URL** (FR-2 of the adopter feature requests; `Benzene.Http.RequestUrl`).
+  `UseBasePath("/tasks")`, first in an HTTP pipeline, strips the prefix from the host's request before
+  routing on API Gateway v1 and v2, ASP.NET Core and Azure Functions, so routes are declared without
+  it; a request outside it answers `not-found`. On Azure Functions, `UseBasePath("/api")` replaces the
+  `OnRequest` strip of the default route prefix. `UseRequestUrl(...)` (included in `UseBasePath`)
+  makes `IRequestUrl` injectable: scheme, host, base path, path and `Absolute("/123")`, from
+  `PublicBaseUrl`, the `Host` header and `X-Forwarded-Proto`; `X-Forwarded-Host` is read only with
+  `TrustForwardedHost`. Each host registers an `IHttpRequestLocation<TContext>`.
+
 ### Changed
 - **Behaviour change: Azure Functions binds a repeated query key's first value to a scalar.** It
   comma-joined the values (`?id=a&id=b` bound `"a,b"`), unlike every other host. It now binds `"a"`, and

@@ -13,6 +13,7 @@ using Benzene.Core.MessageHandlers.Request;
 using Benzene.Core.MessageHandlers.Response;
 using Benzene.Core.MessageHandlers.Serialization;
 using Benzene.Core.Middleware;
+using Benzene.Http.RequestUrl;
 using Benzene.Http;
 using Benzene.Http.RequestBody;
 using Benzene.Http.Routing;
@@ -67,6 +68,7 @@ public static class DependencyInjectionExtensions
         services.AddScoped<IRequestEnricher<AspNetContext>, AspNetRequestEnricher>();
         services.TryAddScoped<IHttpRequestAdapter<AspNetContext>, AspNetHttpRequestAdapter>();
         services.TryAddScoped<IBenzeneResponseAdapter<AspNetContext>, AspNetResponseAdapter>();
+        services.TryAddScoped<IHttpRequestLocation<AspNetContext>, AspNetHttpRequestLocation>();
         services.TryAddScoped<IHttpHeaderMappings, DefaultHttpHeaderMappings>();
 
         services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.Asp));

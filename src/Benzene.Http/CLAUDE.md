@@ -128,6 +128,19 @@ matching, credential-safe wildcards, preflight header validation, Vary caching h
   `"*"` the middleware omits `Access-Control-Allow-Credentials` (matching ASP.NET Core, which throws
   on `AllowAnyOrigin()` + `AllowCredentials()`) so a credentialed response can't leak to any origin
 
+### Base path and request URL (`RequestUrl/`)
+- `UseBasePath("/tasks")` / `UseRequestUrl(options)` → `BasePathMiddleware<TContext>` (FR-2). Placed first
+  in the HTTP pipeline, it strips the base path from the host's own request, once, through the host's
+  `IHttpRequestLocation<TContext>` (v1 rewrites `APIGatewayProxyRequest.Path`, v2
+  `RequestContext.Http.Path`/`RawPath`, ASP.NET Core and Azure Functions move the prefix into `PathBase`
+  as `app.Map` does), so every later reader sees the remainder. A request outside the base path answers
+  `not-found` through `IMessageHandlerResultSetter`.
+- It fills the scoped `RequestUrlHolder`, injectable as `IRequestUrl` (scheme, host, base path, path,
+  `Absolute(relative)`). Host comes from `PublicBaseUrl`, else `X-Forwarded-Host` only when
+  `TrustForwardedHost`, else `Host`. Scheme comes from `PublicBaseUrl`, else `X-Forwarded-Proto`, else
+  the host's own scheme, else `https`. Reading it with no `UseRequestUrl` in the pipeline throws, naming
+  the call.
+
 ### Request body buffering (`RequestBody/`)
 Removes the sync-over-async block from the stream-reading HTTP body getters (ASP.NET Core, Azure
 Functions ASP.NET, self-hosted HttpListener), which used to call `ReadToEndAsync().Result` /

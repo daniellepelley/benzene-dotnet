@@ -355,9 +355,24 @@ How requests are matched and bound today:
 
 - **Case.** The method and literal path segments match ignoring case. Route parameter values keep
   their case.
-- **Path.** The route is matched against the path in the event, with nothing stripped. A request
-  that arrives through a custom-domain API mapping (such as `/tasks`) or a stage other than the
-  default can carry that prefix, and the route then has to include it.
+- **Path.** The route is matched against the path in the event. A request that arrives through a
+  custom-domain API mapping (such as `/tasks`), or a stage other than the default, can carry that
+  prefix. Rather than repeat it on every route, strip it first:
+
+  ```csharp
+  eventPipeline.UseApiGateway(apiGateway => apiGateway
+      .UseBasePath("/tasks")        // first: CORS and routing then see /123, not /tasks/123
+      .UseMessageHandlers());
+  ```
+
+  A request outside the base path answers 404. Stages aren't stripped for you. If a stage shows up in
+  the path, include it: `UseBasePath("/prod/tasks")`.
+- **Absolute links.** Inject `IRequestUrl` (`Benzene.Http.RequestUrl`) into a handler and call
+  `Absolute("/123")` to get `https://api.example.com/tasks/123`, for a `Location` or a `next` link.
+  Add `UseRequestUrl()`, or `UseBasePath(...)`, which includes it, to the pipeline. The host comes
+  from the `Host` header and the scheme from `X-Forwarded-Proto`, which API Gateway sets. Pin both
+  with `UseRequestUrl(o => o.PublicBaseUrl = "https://api.example.com")`. `X-Forwarded-Host` is read
+  only with `o.TrustForwardedHost = true`, since a caller can send any value.
 - **Repeated query keys.** A collection property (`string[]`, `List<int>`, `IReadOnlyList<Status>`, …)
   binds every value: `?id=a&id=b` gives `["a","b"]`. A scalar property binds the first, `a`. On an
   HTTP API (v2), AWS comma-joins a repeated key before the function sees it, so a single value that
@@ -634,8 +649,8 @@ don't expect it to resolve inside those handlers even after adding it upstream.
 **Handler never gets called / 404 from API Gateway** — check that `[HttpEndpoint("METHOD",
 "/path")]` matches the path the function actually receives, segment for segment, including any
 route parameters (`{name}`). Case doesn't matter: the method and literal segments match ignoring
-case. Nothing is stripped from the path either, so behind a custom-domain API mapping or a
-non-default stage, log the path the event carries and make the route match it (see
+case. Behind a custom-domain API mapping or a non-default stage, the path carries that prefix: log
+the path the event carries, and strip the prefix with `UseBasePath(...)` (see
 [API Gateway](#api-gateway)). Then check that the handler's assembly was passed to
 `AddMessageHandlers(...)` (or that you called the no-argument `AddMessageHandlers()` overload, which
 scans the calling assembly).

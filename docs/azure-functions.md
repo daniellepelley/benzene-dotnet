@@ -1005,7 +1005,7 @@ These require a working Docker daemon and aren't run as part of the main `Benzen
 - **404 on every route locally, but the function runs**: check `host.json`'s
   `extensions.http.routePrefix` — Azure Functions defaults to prefixing every HTTP route with
   `/api`, so `/hello/world` needs to be requested as `/api/hello/world` unless you've cleared the
-  prefix.
+  prefix, or strip it in the pipeline with `.UseBasePath("/api")` as the first step of `UseHttp`.
 - **Handler never gets called**: confirm `[Message]`/`[HttpEndpoint]` are both present and that
   the handler's assembly is passed to `AddMessageHandlers(typeof(SomeHandlerInThatAssembly).Assembly)`
   — handlers are discovered by reflection over that assembly, not auto-registered globally.
