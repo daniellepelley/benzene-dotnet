@@ -57,6 +57,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PublicBaseUrl`, the `Host` header and `X-Forwarded-Proto`; `X-Forwarded-Host` is read only with
   `TrustForwardedHost`. Each host registers an `IHttpRequestLocation<TContext>`.
 
+- **The caller from an API Gateway authorizer** (FR-4 of the adopter feature requests; new package
+  `Benzene.Auth.Aws.ApiGateway`). `UseApiGatewayAuthorizerIdentity(...)` on a REST or HTTP API pipeline
+  turns the event's authorizer context into the caller (`AuthenticationHolder.Principal`):
+  - Cognito claims, and a Lambda authorizer's context with its `principalId`, on REST APIs;
+  - JWT claims and scopes, Lambda context and IAM on HTTP APIs.
+
+  `RequireScope`, `RequireRole` and `RequirePolicy` then work without validating the token again.
+  Options name the caller's claim and the role claims (`cognito:groups`). No authorizer context means
+  no caller, and a caller already set by another authenticator is kept. It trusts API Gateway, so the
+  function must not be invocable another way.
+- **`ScopeClaims` is public in `Benzene.Auth.Core`** (moved from an internal type in
+  `Benzene.Auth.OAuth2`), so any authenticator's principal yields scopes the same way.
+
 ### Changed
 - **Behaviour change: Azure Functions binds a repeated query key's first value to a scalar.** It
   comma-joined the values (`?id=a&id=b` bound `"a,b"`), unlike every other host. It now binds `"a"`, and

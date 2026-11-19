@@ -39,9 +39,8 @@ gRPC, Kafka, not only ASP.NET Core).
   `JsonWebTokenHandler.ValidateTokenAsync` to resolve signing keys and to auto-refresh on an
   unrecognized `kid` (verified empirically against a real generated RSA key + loopback JWKS server
   during implementation - no `IssuerSigningKeys`/`IssuerSigningKeyResolver` wiring needed on top).
-- `ScopeClaims` (internal) - `GetGrantedScopes(principal)` normalizes both `scope` (RFC 8693,
-  single space-delimited string) and `scp` (Azure AD - space-delimited string OR JSON array,
-  depending on issuer) into one flat set (design doc §8 Q1's decision: support both).
+- `ScopeClaims` moved to `Benzene.Auth.Core` (public) for FR-4, so a principal from any authenticator
+  (e.g. an API Gateway authorizer) is read the same way. `RequireScope` uses it from there.
 - `Extensions.RequireScope<TContext>(anyOfScopes)` - `FuncWrapperMiddleware`-based (not a named
   class - no scoped constructor dependency beyond the holder it resolves inline). No principal →
   `Unauthorized`; principal but none of `anyOfScopes` granted → `Forbidden`. Lives here, not in

@@ -11,7 +11,7 @@ namespace Benzene.Auth.Core;
 /// </summary>
 /// <remarks>
 /// Unlike OAuth2 scopes (which are always space-delimited within a single claim, see
-/// <c>Benzene.Auth.OAuth2</c>'s <c>ScopeClaims</c>), role names can themselves contain spaces, so a
+/// <see cref="ScopeClaims"/>), role names can themselves contain spaces, so a
 /// role claim value is never space-split — each claim value is one role, except a JSON-array value
 /// which is expanded element by element.
 /// </remarks>

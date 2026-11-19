@@ -41,6 +41,9 @@ permission. All live here (not a mechanism package) because they read a plain `C
 so aren't tied to JWTs the way OAuth2 scopes are; and unconstrained on `TContext` (no `IHttpContext`
 bound) because authorization only reads the principal, so it composes on any transport whose
 pipeline sets one. All are in `AuthorizationExtensions`:
+- `ScopeClaims` (public) - `GetGrantedScopes(principal)` normalizes `scope` (RFC 8693, one
+  space-delimited string) and `scp` (Azure AD - space-delimited OR a JSON array) into one flat set.
+  Moved here from `Benzene.Auth.OAuth2` (FR-4) so any authenticator's principal reads the same way.
 - `RequireRole<TContext>(params string[] anyOfRoles)` - any-one-of role check. Roles via
   `RoleClaims` (internal): `ClaimsPrincipal.IsInRole` **plus** the common role claim types
   (`ClaimTypes.Role`, `role`, `roles`), the `roles` value also accepted as a JSON array (Azure AD

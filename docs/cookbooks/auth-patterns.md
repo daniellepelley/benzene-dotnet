@@ -4,13 +4,14 @@ Add OAuth2 bearer token (JWT) validation or HTTP Basic authentication to a Benze
 
 ## Problem Statement
 
-Most Benzene services run behind something that already handles authentication — API Gateway with a Cognito/Lambda authorizer, an Azure Front Door with auth rules, a load balancer with OIDC. In that setup Benzene shouldn't duplicate that work, and it doesn't: there's nothing to configure.
+Most Benzene services run behind something that already handles authentication — API Gateway with a Cognito/Lambda authorizer, an Azure Front Door with auth rules, a load balancer with OIDC. In that setup Benzene shouldn't duplicate that work, and it doesn't: there's nothing to configure to let API Gateway allow or deny a request. To know *who* the caller is, and check their scopes or roles in the function, see [Using an API Gateway authorizer](#using-an-api-gateway-authorizer).
 
 But not every deployment has that in front of it — a self-hosted worker, a service exposed directly, or a deployment where the gateway's auth story isn't wired up yet. For those, you need authentication at the Benzene level itself, as opt-in middleware you add only where you need it.
 
 This cookbook covers:
 - **`Benzene.Auth.OAuth2`** — validating an inbound `Authorization: Bearer <token>` JWT against an identity provider's JWKS endpoint
 - **`Benzene.Auth.Basic`** — RFC 7617 username/password authentication
+- **`Benzene.Auth.Aws.ApiGateway`** — the caller from an API Gateway authorizer, without validating the token again
 - **`RequireScope`** — scope-based authorization (OAuth2/JWT) once a caller is authenticated
 - **`RequireRole` / `RequirePolicy` / `RequireAuthorization`** (`Benzene.Auth.Core`) — mechanism-agnostic role, named-policy, and resource-based authorization over any authenticated caller
 
@@ -296,6 +297,38 @@ become `[HttpEndpoint("GET", "/report")]` once it's registered inside the `/admi
 `examples/Asp` has a runnable demo wiring `UseOAuth2Bearer` and `RequireScope` against a
 locally-generated fake JWKS server (no real identity provider needed to try it) — see that
 project's `README.md` for exactly how to start it and mint a test token.
+
+## Using an API Gateway authorizer
+
+When API Gateway authenticates the caller (a JWT authorizer on an HTTP API, or a Cognito or Lambda
+authorizer on a REST API), `Benzene.Auth.Aws.ApiGateway` reads what it decided and makes it the
+caller:
+
+```csharp
+eventPipeline.UseApiGatewayV2(api => api
+    .UseApiGatewayAuthorizerIdentity(o => o.RoleClaims.Add("cognito:groups"))
+    .RequireScope("tasks.read")
+    .UseMessageHandlers());
+```
+
+The same call works on `UseApiGateway` (REST APIs). The caller it builds:
+
+| Authorizer | Claims | Name | Scopes |
+|---|---|---|---|
+| Cognito (REST API) | every Cognito claim | `sub` | the `scope` claim |
+| JWT (HTTP API) | every JWT claim | `sub` | the authorizer's `scopes` |
+| Lambda (either) | every context value (numbers and booleans as text) | `sub`, else (REST API) `principalId` | a `scope` value, if the authorizer returns one |
+| IAM (HTTP API) | `userArn`, `callerId`, `accountId` | the user ARN | — |
+
+`RoleClaims` names the claims that hold roles (`cognito:groups` for Cognito). `a,b`, `[a b]` and
+JSON arrays all split into roles. `RequireScope`, `RequireRole` and `RequirePolicy` then work as they
+do for a bearer token. An event with no authorizer context gets no caller, so those checks answer 401.
+A caller another authenticator already set is kept: the first one wins.
+
+**This trusts API Gateway.** It reads what the event says, and anything that can invoke the
+function another way can say anything: a Lambda function URL, a direct `Invoke`, another trigger.
+Allow only API Gateway to invoke the function, through its resource policy, and don't give it a
+function URL.
 
 ## Security Notes
 

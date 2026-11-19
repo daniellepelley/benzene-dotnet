@@ -340,6 +340,7 @@ HTTP API needs is already built:
 | Need | Use | Read |
 |---|---|---|
 | Validate a bearer token or Basic credentials; require scopes or roles (401 and 403 kept apart) | `UseOAuth2Bearer`, `UseBasicAuth`, `RequireScope`, `RequireRole` | [Auth patterns](cookbooks/auth-patterns.md) |
+| The caller from an API Gateway authorizer (Cognito, JWT, Lambda, IAM) | `UseApiGatewayAuthorizerIdentity` (`Benzene.Auth.Aws.ApiGateway`) | [Using an API Gateway authorizer](cookbooks/auth-patterns.md#using-an-api-gateway-authorizer) |
 | CORS | `UseCors` | [Common middleware](common-middleware.md) |
 | Result statuses mapped to HTTP status codes, with a replaceable mapping | `IHttpStatusCodeMapper` | [Message results](message-result.md) |
 | RFC 9457 problem documents for failures, with a replaceable body | `IResponsePayloadMapper` | [Message handlers](message-handlers.md) |
@@ -383,8 +384,6 @@ A handler sets response headers on its result: `BenzeneResult.Created(task).With
 (see [Message results](message-result.md#response-headers--withheader)).
 
 Not built yet:
-- a caller identity taken from an API Gateway authorizer's context (Benzene validates the token
-  itself);
 - authorization per endpoint (auth middleware covers the whole pipeline);
 - conditional requests (`ETag`, `If-Match`, `If-None-Match`);
 - SnapStart hooks.

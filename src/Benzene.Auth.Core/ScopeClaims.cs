@@ -1,16 +1,17 @@
 using System.Security.Claims;
 using System.Text.Json;
 
-namespace Benzene.Auth.OAuth2;
+namespace Benzene.Auth.Core;
 
 /// <summary>
 /// Reads the granted-scopes set off a <see cref="ClaimsPrincipal"/>, normalizing the two
 /// conventions real-world OAuth2/JWT issuers use (per the design doc's §8 Q1 decision - support
 /// both, don't pick one): RFC 8693's single space-delimited <c>scope</c> claim, and Azure AD's
 /// <c>scp</c> claim, which itself appears as either a space-delimited string or a JSON array
-/// depending on issuer.
+/// depending on issuer. Public, in <c>Benzene.Auth.Core</c>, so any authenticator's principal - a
+/// validated bearer token, an API Gateway authorizer's context - is read the same way.
 /// </summary>
-internal static class ScopeClaims
+public static class ScopeClaims
 {
     private const string ScopeClaimType = "scope";
     private const string ScpClaimType = "scp";
