@@ -57,6 +57,8 @@ public static class DependencyInjectionExtensions
         services.AddScoped<IResponseHandler<AspNetContext>, HttpStatusCodeResponseHandler<AspNetContext>>();
         services.AddScoped<IResponseRenderer<AspNetContext>, SerializerResponseRenderer<AspNetContext>>();
         services.AddScoped<IResponseHandler<AspNetContext>, RendererResponseHandler<AspNetContext>>();
+        // After the renderer: the result's own headers never replace the pipeline's (FR-3).
+        services.AddScoped<IResponseHandler<AspNetContext>, ResultHeadersResponseHandler<AspNetContext>>();
         services.AddScoped<MessageRouter<AspNetContext>>();
         services.AddMediaFormatNegotiation<AspNetContext>();
         services

@@ -1,6 +1,7 @@
 using Benzene.Abstractions.MessageHandlers;
 using Benzene.Abstractions.Messages;
 using Benzene.Abstractions.Results;
+using Benzene.Results;
 
 namespace Benzene.Core.Versioning.Response;
 
@@ -24,7 +25,9 @@ internal class CastMessageHandlerResult : IMessageHandlerResult
     public IMessageHandlerDefinition? MessageHandlerDefinition { get; }
     public IBenzeneResult BenzeneResult { get; }
 
-    private class CastBenzeneResult : IBenzeneResult
+    // Forwards the original's attached problem document and response headers too, so a versioned
+    // response keeps its headers (FR-3) and a deliberately-authored problem isn't lost to the cast.
+    private class CastBenzeneResult : IBenzeneResult, IHasProblemDetails, IHasResponseHeaders
     {
         private readonly IBenzeneResult _original;
 
@@ -38,5 +41,7 @@ internal class CastMessageHandlerResult : IMessageHandlerResult
         public bool IsSuccessful => _original.IsSuccessful;
         public IReadOnlyList<BenzeneError> Errors => _original.Errors;
         public object PayloadAsObject { get; }
+        public ProblemDetails? Problem => (_original as IHasProblemDetails)?.Problem;
+        public IReadOnlyDictionary<string, string> ResponseHeaders => _original.GetResponseHeaders();
     }
 }

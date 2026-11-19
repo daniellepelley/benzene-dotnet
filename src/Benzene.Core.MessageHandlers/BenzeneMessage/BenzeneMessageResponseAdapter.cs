@@ -19,6 +19,25 @@ internal class BenzeneMessageResponseAdapter : IBenzeneResponseAdapter<BenzeneMe
     }
 
     /// <inheritdoc />
+    public bool HasResponseHeader(BenzeneMessageContext context, string headerKey)
+    {
+        var headers = context.BenzeneMessageResponse?.Headers;
+        if (headers == null)
+        {
+            return false;
+        }
+
+        foreach (var key in headers.Keys)
+        {
+            if (string.Equals(key, headerKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public void SetContentType(BenzeneMessageContext context, string contentType)
     {
         SetResponseHeader(context, Constants.ContentTypeHeader, contentType);

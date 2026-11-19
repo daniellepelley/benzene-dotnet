@@ -347,6 +347,7 @@ HTTP API needs is already built:
 | Idempotent writes, with a DynamoDB store | `Benzene.Idempotency`, `Benzene.Idempotency.DynamoDb` | [Idempotency](cookbooks/idempotency.md) |
 | Rate limiting, per instance | `Benzene.RateLimiting` | [Rate limiting](rate-limiting.md) |
 | Newtonsoft.Json instead of System.Text.Json | `Benzene.NewtonsoftJson` | [the package](https://github.com/daniellepelley/benzene-dotnet/tree/main/src/Benzene.NewtonsoftJson) |
+| Response headers from a handler (`Location`, `ETag`) | `result.WithHeader(...)` | [Message results](message-result.md#response-headers--withheader) |
 | An OpenAPI document | `UseSpec` | [Spec](spec.md) |
 | Warm-up during Lambda init | `AddBenzeneWarmUp` | [Cold-start optimization](cookbooks/lambda-cold-start-optimization.md) |
 
@@ -363,8 +364,10 @@ How requests are matched and bound today:
   contains a comma also arrives as two.
 - **Repeated headers.** A header sent more than once keeps one value.
 
+A handler sets response headers on its result: `BenzeneResult.Created(task).WithHeader("Location", …)`
+(see [Message results](message-result.md#response-headers--withheader)).
+
 Not built yet:
-- response headers set by a handler (only middleware can set them);
 - a caller identity taken from an API Gateway authorizer's context (Benzene validates the token
   itself);
 - authorization per endpoint (auth middleware covers the whole pipeline);

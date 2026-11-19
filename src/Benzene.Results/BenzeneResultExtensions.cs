@@ -48,6 +48,96 @@ public static class BenzeneResultExtensions
         return ProblemTypes.From(result);
     }
 
+    /// <summary>
+    /// Returns the response headers attached to <paramref name="result"/> with
+    /// <see cref="WithHeader{T}"/>; empty (never <c>null</c>) when there are none.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> GetResponseHeaders(this IBenzeneResult result)
+    {
+        return result is IHasResponseHeaders { ResponseHeaders: { } headers } ? headers : NoResponseHeaders;
+    }
+
+    /// <summary>
+    /// Returns a copy of <paramref name="result"/> that also carries the response header
+    /// <paramref name="name"/>: <c>BenzeneResult.Created(task).WithHeader("Location", $"/tasks/{task.Id}")</c>.
+    /// The result itself is unchanged. A second call for the same name (ignoring case) replaces the
+    /// first. An HTTP transport writes the header after rendering the response, unless the pipeline
+    /// already set it (CORS, <c>content-type</c>); a transport with no response headers ignores it.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is not an HTTP token, or
+    /// <paramref name="name"/> or <paramref name="value"/> contains CR, LF or NUL (which would split the
+    /// header on the wire).</exception>
+    public static IBenzeneResult<T> WithHeader<T>(this IBenzeneResult<T> result, string name, string value)
+    {
+        return WithHeaders(result, new[] { new KeyValuePair<string, string>(name, value) });
+    }
+
+    /// <summary>The non-generic counterpart of <see cref="WithHeader{T}"/>.</summary>
+    public static IBenzeneResult WithHeader(this IBenzeneResult result, string name, string value)
+    {
+        return WithHeaders(result, new[] { new KeyValuePair<string, string>(name, value) });
+    }
+
+    /// <summary>
+    /// Returns a copy of <paramref name="result"/> that also carries every header in
+    /// <paramref name="headers"/>, applied in order; see <see cref="WithHeader{T}"/>.
+    /// </summary>
+    public static IBenzeneResult<T> WithHeaders<T>(this IBenzeneResult<T> result, IEnumerable<KeyValuePair<string, string>> headers)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        return BenzeneResult.Copy(result, AttachedProblem(result), MergeHeaders(result, headers));
+    }
+
+    /// <summary>The non-generic counterpart of <see cref="WithHeaders{T}"/>.</summary>
+    public static IBenzeneResult WithHeaders(this IBenzeneResult result, IEnumerable<KeyValuePair<string, string>> headers)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        return BenzeneResult.Copy(result, AttachedProblem(result), MergeHeaders(result, headers));
+    }
+
+    private static readonly IReadOnlyDictionary<string, string> NoResponseHeaders =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    private static ProblemDetails? AttachedProblem(IBenzeneResult result)
+    {
+        return result is IHasProblemDetails hasProblem ? hasProblem.Problem : null;
+    }
+
+    private static IReadOnlyDictionary<string, string> MergeHeaders(IBenzeneResult result, IEnumerable<KeyValuePair<string, string>> headers)
+    {
+        ArgumentNullException.ThrowIfNull(headers);
+        var merged = new Dictionary<string, string>(result.GetResponseHeaders(), StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, value) in headers)
+        {
+            ValidateHeader(name, value);
+            merged[name] = value;
+        }
+
+        return merged;
+    }
+
+    // RFC 9110 §5.6.2: a field name is a token. A CR, LF or NUL in the value would let a handler (or
+    // whatever fed it the value) split the header on the wire, whatever the host does with it.
+    private static void ValidateHeader(string name, string value)
+    {
+        if (string.IsNullOrEmpty(name) || !name.All(IsTokenChar))
+        {
+            throw new ArgumentException($"'{name}' is not a valid HTTP header name.", nameof(name));
+        }
+
+        ArgumentNullException.ThrowIfNull(value);
+        if (value.IndexOfAny(new[] { '\r', '\n', '\0' }) >= 0)
+        {
+            throw new ArgumentException($"The value of header '{name}' contains CR, LF or NUL.", nameof(value));
+        }
+    }
+
+    private static bool IsTokenChar(char c)
+    {
+        return c is >= 'a' and <= 'z' or >= 'A' and <= 'Z' or >= '0' and <= '9'
+            or '!' or '#' or '$' or '%' or '&' or '\'' or '*' or '+' or '-' or '.' or '^' or '_' or '`' or '|' or '~';
+    }
+
     public static bool IsAccepted(this IBenzeneResult serviceBenzeneResult)
     {
         return serviceBenzeneResult.Status == BenzeneResultStatus.Accepted;
@@ -145,7 +235,7 @@ public static class BenzeneResultExtensions
 
     public static IBenzeneResult<TOutput> As<TOutput>(this IBenzeneResult serviceBenzeneResult)
     {
-        return serviceBenzeneResult.IsSuccessful
+        return CarryOver(serviceBenzeneResult, serviceBenzeneResult.IsSuccessful
            // Set<TOutput>(status, true) → the (string, bool) overload. A single-string
            // Set<TOutput>(status) has no matching overload and silently bound to
            // Set<TOutput>(string, params string[]) with zero errors — the FAILURE constructor — so a
@@ -154,15 +244,23 @@ public static class BenzeneResultExtensions
            ? BenzeneResult.Set<TOutput>(serviceBenzeneResult.Status, true)
            // The structured (IReadOnlyList<BenzeneError>) overload, not SetFailed, so a re-wrap keeps
            // each error's Field/Code intact instead of collapsing to message-only text.
-           : BenzeneResult.Set<TOutput>(serviceBenzeneResult.Status, serviceBenzeneResult.Errors);
+           : BenzeneResult.Set<TOutput>(serviceBenzeneResult.Status, serviceBenzeneResult.Errors));
     }
 
     public static IBenzeneResult<TOutput> As<T, TOutput>(this IBenzeneResult<T> serviceBenzeneResult,
         Func<T?, TOutput> map)
     {
-        return serviceBenzeneResult.IsSuccessful
+        return CarryOver(serviceBenzeneResult, serviceBenzeneResult.IsSuccessful
            ? BenzeneResult.Set(serviceBenzeneResult.Status, map(serviceBenzeneResult.Payload), true)
-           : BenzeneResult.Set<TOutput>(serviceBenzeneResult.Status, serviceBenzeneResult.Errors);
+           : BenzeneResult.Set<TOutput>(serviceBenzeneResult.Status, serviceBenzeneResult.Errors));
+    }
+
+    // A re-wrap keeps the attached problem document and response headers, which Set alone would drop.
+    private static IBenzeneResult<TOutput> CarryOver<TOutput>(IBenzeneResult source, IBenzeneResult<TOutput> target)
+    {
+        var problem = AttachedProblem(source);
+        var headers = source.GetResponseHeaders();
+        return problem == null && headers.Count == 0 ? target : BenzeneResult.Copy(target, problem, headers);
     }
 
     /// <summary>
@@ -173,7 +271,7 @@ public static class BenzeneResultExtensions
     /// </summary>
     public static IBenzeneResult<TOutput> As<TOutput>(this IBenzeneResult serviceBenzeneResult, TOutput value)
     {
-        return BenzeneResult.Set(serviceBenzeneResult.Status, value, serviceBenzeneResult.IsSuccessful);
+        return CarryOver(serviceBenzeneResult, BenzeneResult.Set(serviceBenzeneResult.Status, value, serviceBenzeneResult.IsSuccessful));
     }
 
     public static async Task<IBenzeneResult<TOutput>> As<T, TOutput>(this Task<IBenzeneResult<T>> source,

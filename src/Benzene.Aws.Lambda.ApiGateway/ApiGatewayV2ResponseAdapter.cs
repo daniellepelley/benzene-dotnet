@@ -42,6 +42,35 @@ public class ApiGatewayV2ResponseAdapter : IBenzeneResponseAdapter<ApiGatewayV2C
     /// </summary>
     /// <param name="context">The API Gateway v2 context to set the content type on.</param>
     /// <param name="contentType">The content type value.</param>
+    public bool HasResponseHeader(ApiGatewayV2Context context, string headerKey)
+    {
+        // set-cookie lives in the response's Cookies array, not the header map (see SetResponseHeader).
+        if (string.Equals(headerKey, "set-cookie", StringComparison.OrdinalIgnoreCase))
+        {
+            return context.ApiGatewayProxyResponse?.Cookies is { Length: > 0 };
+        }
+
+        return ContainsIgnoringCase(context.ApiGatewayProxyResponse?.Headers, headerKey);
+    }
+
+    private static bool ContainsIgnoringCase(System.Collections.Generic.IDictionary<string, string>? headers, string headerKey)
+    {
+        if (headers == null)
+        {
+            return false;
+        }
+
+        foreach (var key in headers.Keys)
+        {
+            if (string.Equals(key, headerKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public void SetContentType(ApiGatewayV2Context context, string contentType)
     {
         SetResponseHeader(context, Constants.ContentTypeHeader, contentType);

@@ -15,6 +15,21 @@ public interface IBenzeneResponseAdapter<TContext>
     /// <param name="headerValue">The header value.</param>
     void SetResponseHeader(TContext context, string headerKey, string headerValue);
 
+    /// <summary>
+    /// Whether the outgoing response already has the header <paramref name="headerKey"/> (compared
+    /// ignoring case), including a content type set through <see cref="SetContentType"/>. Lets a writer
+    /// that must not replace the pipeline's own headers - the result-headers response handler, which
+    /// never overrides CORS or the rendered content type - check first. Default <c>false</c>, so an
+    /// adapter that can't tell keeps compiling and every header is written.
+    /// </summary>
+    /// <param name="context">The transport-specific context to read from.</param>
+    /// <param name="headerKey">The header name.</param>
+    /// <returns><c>true</c> when the response already carries the header.</returns>
+    bool HasResponseHeader(TContext context, string headerKey)
+    {
+        return false;
+    }
+
     /// <summary>Sets the content type of the outgoing response.</summary>
     /// <param name="context">The transport-specific context to write to.</param>
     /// <param name="contentType">The content type (e.g. media type) to set.</param>

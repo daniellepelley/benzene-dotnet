@@ -28,6 +28,13 @@ status string rather than thrown exceptions. Transport adapters map the status t
   to/from Benzene statuses, and `ErrorMessages()` - projects a result's structured
   `IBenzeneResult.Errors` (`IReadOnlyList<BenzeneError>`) down to the pre-`BenzeneError` `string[]`
   shape, for callers that only want the message text.
+- `IHasResponseHeaders` + `WithHeader`/`WithHeaders`/`GetResponseHeaders` (on `BenzeneResultExtensions`)
+  - response headers a handler attaches to its result (FR-3): a copy, never a mutation; one value per
+  name, ignoring case; names must be HTTP tokens and CR/LF/NUL in a name or value throws. Like
+  `IHasProblemDetails`, a capability interface rather than an `IBenzeneResult` member (that interface is
+  frozen). The `As` re-wraps keep both the headers and an attached problem. Written by
+  `Benzene.Core.MessageHandlers`' `ResultHeadersResponseHandler`, which never replaces a header the
+  pipeline set.
 - `ProblemDetails` - the RFC 9457 ("Problem Details for HTTP APIs") problem document Benzene emits
   in place of the payload whenever a result is unsuccessful, on every transport (see
   `docs/specification/wire-contracts.md` §1.3/§3.1 in the cross-language Benzene repo): `Type`,

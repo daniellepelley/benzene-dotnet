@@ -99,6 +99,8 @@ public static class DependencyInjectionExtensions
         // runs them in registration order.
         services.AddScoped<IResponseHandler<AspNetContext>, HttpStatusCodeResponseHandler<AspNetContext>>();
         services.AddScoped<IResponseHandler<AspNetContext>, RendererResponseHandler<AspNetContext>>();
+        // After the renderer: the result's own headers never replace the pipeline's (FR-3).
+        services.AddScoped<IResponseHandler<AspNetContext>, ResultHeadersResponseHandler<AspNetContext>>();
         services.AddMediaFormatNegotiation<AspNetContext>();
         // A failed result's problem document carries the numeric HTTP `status` member, filled in from
         // the same IHttpStatusCodeMapper the response status line uses - work/archive/problem-details-plan-2026-08.md

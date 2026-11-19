@@ -60,6 +60,8 @@ public static class DependencyInjectionExtensions
         services.AddScoped<IResponseHandler<ApiGatewayContext>, HttpStatusCodeResponseHandler<ApiGatewayContext>>();
         services.AddScoped<IResponseRenderer<ApiGatewayContext>, SerializerResponseRenderer<ApiGatewayContext>>();
         services.AddScoped<IResponseHandler<ApiGatewayContext>, RendererResponseHandler<ApiGatewayContext>>();
+        // After the renderer: the result's own headers never replace the pipeline's (FR-3).
+        services.AddScoped<IResponseHandler<ApiGatewayContext>, ResultHeadersResponseHandler<ApiGatewayContext>>();
         services.AddMediaFormatNegotiation<ApiGatewayContext>();
 
         services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.ApiGateway));
@@ -106,6 +108,7 @@ public static class DependencyInjectionExtensions
         services.AddScoped<IResponseHandler<ApiGatewayV2Context>, HttpStatusCodeResponseHandler<ApiGatewayV2Context>>();
         services.AddScoped<IResponseRenderer<ApiGatewayV2Context>, SerializerResponseRenderer<ApiGatewayV2Context>>();
         services.AddScoped<IResponseHandler<ApiGatewayV2Context>, RendererResponseHandler<ApiGatewayV2Context>>();
+        services.AddScoped<IResponseHandler<ApiGatewayV2Context>, ResultHeadersResponseHandler<ApiGatewayV2Context>>();
         services.AddMediaFormatNegotiation<ApiGatewayV2Context>();
 
         services.AddSingleton<ITransportInfo>(_ => new TransportInfo(TransportNames.ApiGateway));

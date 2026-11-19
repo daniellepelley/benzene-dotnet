@@ -37,6 +37,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   repeated key, a single value containing a comma also splits. Test helpers: `HttpBuilder.WithQuery`
   and the optional `IHttpQueryBuilder`, filled into `AsApiGatewayRequest` and `AsAspNetCoreHttpRequest`.
 
+- **Response headers from handler results** (FR-3 of the adopter feature requests).
+  `BenzeneResult.Created(task).WithHeader("Location", $"/tasks/{task.Id}")` answers `201` with that
+  header on API Gateway v1 and v2, ASP.NET Core, Azure Functions and Google Cloud Functions, and puts
+  it in the response envelope's `headers` over `/benzene/invoke`. `WithHeader`/`WithHeaders`/
+  `GetResponseHeaders` and the `IHasResponseHeaders` capability interface (`Benzene.Results`) return
+  a copy; names must be HTTP tokens, and CR, LF or NUL throws. The new `ResultHeadersResponseHandler`
+  runs after the renderer and never replaces a header the pipeline set, so CORS and the rendered
+  `content-type` win. `IBenzeneResponseAdapter` gains a default `HasResponseHeader` member (false),
+  implemented by every in-tree adapter. The `As(...)` re-wraps and the versioning response cast now
+  keep an attached problem document and the headers, both of which they used to drop.
+
 ### Changed
 - **Behaviour change: Azure Functions binds a repeated query key's first value to a scalar.** It
   comma-joined the values (`?id=a&id=b` bound `"a,b"`), unlike every other host. It now binds `"a"`, and

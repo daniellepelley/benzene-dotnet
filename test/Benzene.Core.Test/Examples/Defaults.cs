@@ -8,6 +8,10 @@ public static class Defaults
     public const string Path = "/example";
     public const string QueryEchoTopic = "query:echo";
     public const string QueryEchoPath = "/query-echo";
+    public const string HeaderEchoTopic = "header:echo";
+    public const string HeaderEchoPath = "/header-echo";
+    public const string HeaderConflictTopic = "header:conflict";
+    public const string HeaderConflictPath = "/header-conflict";
     public const string PathWithParam = "/example/{id}";
     public const string PathNoResponse = "/example-no-response";
     public const string Method = "GET";

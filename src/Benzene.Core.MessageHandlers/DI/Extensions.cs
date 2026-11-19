@@ -70,6 +70,9 @@ public static class Extensions
         services.TryAddScoped<IResponseRenderer<BenzeneMessageContext>, SerializerResponseRenderer<BenzeneMessageContext>>();
         services.TryAddScoped<IResponseHandler<BenzeneMessageContext>, RendererResponseHandler<BenzeneMessageContext>>();
         services.AddScoped<IResponseHandler<BenzeneMessageContext>, DefaultResponseStatusHandler<BenzeneMessageContext>>();
+        // After the renderer: the result's own headers go into the response envelope's headers, never
+        // replacing one the pipeline set (FR-3).
+        services.AddScoped<IResponseHandler<BenzeneMessageContext>, ResultHeadersResponseHandler<BenzeneMessageContext>>();
         services.TryAddScoped<IResponsePayloadMapper<BenzeneMessageContext>, DefaultResponsePayloadMapper<BenzeneMessageContext>>();
 
         return services;

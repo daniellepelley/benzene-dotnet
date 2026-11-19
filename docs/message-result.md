@@ -85,6 +85,35 @@ handler's result to another shape. It also has `HttpStatusCode.Convert()` / `Con
 extensions that go the other direction: turning a raw `HttpStatusCode` (e.g. from an outbound HTTP
 call inside a handler) into an `IBenzeneResult`/`IBenzeneResult<T>`.
 
+### Response headers — `WithHeader(...)`
+
+A result can carry response headers, for a `Location` on a `201`, an `ETag`, or a `Cache-Control`:
+
+```csharp
+return BenzeneResult.Created(task)
+    .WithHeader("Location", $"/tasks/{task.Id}");
+```
+
+`WithHeader(name, value)` returns a copy: the result it's called on is unchanged. `WithHeaders(...)`
+adds several, and `GetResponseHeaders()` reads them back (empty, never `null`). Names compare ignoring
+case, with one value per name, so a second `WithHeader` for the same name replaces the first. A name
+must be an HTTP token, and a name or value containing CR, LF or NUL throws `ArgumentException`. The
+headers survive the `.As(...)` re-wraps, and failures can carry them too
+(`BenzeneResult.Conflict<T>("taken").WithHeader(...)`).
+
+How they reach the response:
+- **HTTP** (API Gateway v1 and v2, ASP.NET Core, Azure Functions, Google Cloud Functions): written
+  after the status and body. **A header the pipeline already set wins:** CORS headers, written
+  before the handler runs, and the rendered `content-type` are never replaced. A result header with
+  the same name is skipped. Set the body's type through the media formats, not a `Content-Type`
+  header.
+- **The envelope endpoint** (`/benzene/invoke`): in the response envelope's `headers`.
+- **Queues and other transports with no response headers:** ignored.
+
+On API Gateway HTTP APIs (v2), `Set-Cookie` goes to the response's `cookies` array. One value per
+name means one cookie per result. A relative `Location` is valid HTTP. Benzene doesn't make it
+absolute.
+
 ## Problem documents (RFC 9457)
 
 Whenever a result is unsuccessful, the payload it would have carried is replaced on the wire by a

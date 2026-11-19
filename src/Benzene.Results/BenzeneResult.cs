@@ -157,6 +157,33 @@ public static class BenzeneResult
         return ServiceBenzeneResultInternal<T>.ProblemInternal(status, isSuccessful, errors, problem);
     }
 
+    /// <summary>
+    /// Returns a copy of <paramref name="source"/> - same status, success, errors and payload - carrying
+    /// <paramref name="problem"/> and <paramref name="responseHeaders"/>. Internal: the one way the
+    /// <c>WithHeader</c>/<c>As</c> extensions rebuild a result without losing what it carries.
+    /// </summary>
+    internal static IBenzeneResult<T> Copy<T>(IBenzeneResult<T> source, ProblemDetails? problem, IReadOnlyDictionary<string, string> responseHeaders)
+    {
+        return ServiceBenzeneResultInternal<T>.CopyInternal(source.Status, source.IsSuccessful, source.Errors, source.Payload, problem, responseHeaders);
+    }
+
+    /// <summary>
+    /// The non-generic counterpart of <see cref="Copy{T}"/>. A result built by this factory keeps its
+    /// payload; any other <see cref="IBenzeneResult"/> is rebuilt without one, since its payload type
+    /// isn't known here.
+    /// </summary>
+    internal static IBenzeneResult Copy(IBenzeneResult source, ProblemDetails? problem, IReadOnlyDictionary<string, string> responseHeaders)
+    {
+        return source is ICopyableResult copyable
+            ? copyable.CopyWith(problem, responseHeaders)
+            : ServiceBenzeneResultInternal<Void>.CopyInternal(source.Status, source.IsSuccessful, source.Errors, default, problem, responseHeaders);
+    }
+
+    private interface ICopyableResult
+    {
+        IBenzeneResult CopyWith(ProblemDetails? problem, IReadOnlyDictionary<string, string> responseHeaders);
+    }
+
     public static IBenzeneResult Ok()
     {
         return Ok(new Void());
@@ -390,17 +417,33 @@ public static class BenzeneResult
         return ServiceBenzeneResultInternal<Void>.Internal(BenzeneResultStatus.Timeout, errors);
     }
 
-    private class ServiceBenzeneResultInternal<T> : IBenzeneResult<T>, IHasProblemDetails
+    private class ServiceBenzeneResultInternal<T> : IBenzeneResult<T>, IHasProblemDetails, IHasResponseHeaders, ICopyableResult
     {
         // Shared across every successful (and error-less) result so that path allocates nothing for
         // Errors - see work/benzene-result-errors-ruling.md §3.2.
         private static readonly IReadOnlyList<BenzeneError> EmptyErrors = Array.Empty<BenzeneError>();
+
+        // Likewise for the (far more common) result with no response headers.
+        private static readonly IReadOnlyDictionary<string, string> NoHeaders =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         private ServiceBenzeneResultInternal(string status, bool isSuccessful)
         {
             Status = status;
             IsSuccessful = isSuccessful;
             Errors = EmptyErrors;
+            ResponseHeaders = NoHeaders;
+        }
+
+        // The copy constructor behind WithHeader and the As re-wraps: every member explicit.
+        private ServiceBenzeneResultInternal(string status, bool isSuccessful, IReadOnlyList<BenzeneError> errors,
+            T? payload, ProblemDetails? problem, IReadOnlyDictionary<string, string> responseHeaders)
+            : this(status, isSuccessful)
+        {
+            Errors = errors is { Count: > 0 } ? errors : EmptyErrors;
+            Payload = payload;
+            Problem = problem;
+            ResponseHeaders = responseHeaders is { Count: > 0 } ? responseHeaders : NoHeaders;
         }
 
         // IsSuccessful is derived from the status class (see core-concepts.md: "Derived from
@@ -449,6 +492,10 @@ public static class BenzeneResult
         /// <summary>See <see cref="IHasProblemDetails.Problem"/>. <c>null</c> unless attached via
         /// <see cref="BenzeneResult.Problem{T}"/> or the client's received-document path.</summary>
         public ProblemDetails? Problem { get; }
+
+        /// <summary>See <see cref="IHasResponseHeaders.ResponseHeaders"/>. Empty unless attached via
+        /// <see cref="BenzeneResultExtensions.WithHeader{T}"/>.</summary>
+        public IReadOnlyDictionary<string, string> ResponseHeaders { get; }
         public IReadOnlyList<BenzeneError> Errors { get; }
 
         public T? Payload { get; }
@@ -483,6 +530,17 @@ public static class BenzeneResult
         public static IBenzeneResult<T> ProblemInternal(string status, bool isSuccessful, IReadOnlyList<BenzeneError> errors, ProblemDetails? problem)
         {
             return new ServiceBenzeneResultInternal<T>(status, isSuccessful, errors, problem);
+        }
+
+        public static IBenzeneResult<T> CopyInternal(string status, bool isSuccessful, IReadOnlyList<BenzeneError> errors,
+            T? payload, ProblemDetails? problem, IReadOnlyDictionary<string, string> responseHeaders)
+        {
+            return new ServiceBenzeneResultInternal<T>(status, isSuccessful, errors, payload, problem, responseHeaders);
+        }
+
+        public IBenzeneResult CopyWith(ProblemDetails? problem, IReadOnlyDictionary<string, string> responseHeaders)
+        {
+            return new ServiceBenzeneResultInternal<T>(Status, IsSuccessful, Errors, Payload, problem, responseHeaders);
         }
 
         public static IBenzeneResult<T> OkInternal(T payload)

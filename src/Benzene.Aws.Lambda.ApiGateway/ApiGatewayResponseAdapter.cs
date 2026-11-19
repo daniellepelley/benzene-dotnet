@@ -28,6 +28,29 @@ public class ApiGatewayResponseAdapter : IBenzeneResponseAdapter<ApiGatewayConte
     /// </summary>
     /// <param name="context">The API Gateway context to set the content type on.</param>
     /// <param name="contentType">The content type value.</param>
+    public bool HasResponseHeader(ApiGatewayContext context, string headerKey)
+    {
+        return ContainsIgnoringCase(context.ApiGatewayProxyResponse?.Headers, headerKey);
+    }
+
+    private static bool ContainsIgnoringCase(System.Collections.Generic.IDictionary<string, string>? headers, string headerKey)
+    {
+        if (headers == null)
+        {
+            return false;
+        }
+
+        foreach (var key in headers.Keys)
+        {
+            if (string.Equals(key, headerKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public void SetContentType(ApiGatewayContext context, string contentType)
     {
         SetResponseHeader(context, Constants.ContentTypeHeader, contentType);

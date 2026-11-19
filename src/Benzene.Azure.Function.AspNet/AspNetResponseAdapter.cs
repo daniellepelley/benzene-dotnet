@@ -25,6 +25,18 @@ public class AspNetResponseAdapter : IBenzeneResponseAdapter<AspNetContext>
     /// </summary>
     /// <param name="context">The context to set the content type on.</param>
     /// <param name="contentType">The content type.</param>
+    public bool HasResponseHeader(AspNetContext context, string headerKey)
+    {
+        // The content type is held on the ContentResult, not in the header dictionary.
+        if (string.Equals(headerKey, "content-type", StringComparison.OrdinalIgnoreCase)
+            && context.ContentResult?.ContentType != null)
+        {
+            return true;
+        }
+
+        return context.HttpRequest.HttpContext.Response.Headers.ContainsKey(headerKey);
+    }
+
     public void SetContentType(AspNetContext context, string contentType)
     {
         context.EnsureResponseExists();
