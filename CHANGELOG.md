@@ -67,6 +67,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Options name the caller's claim and the role claims (`cognito:groups`). No authorizer context means
   no caller, and a caller already set by another authenticator is kept. It trusts API Gateway, so the
   function must not be invocable another way.
+- **Per-endpoint authorization** (FR-5 of the adopter feature requests; `Benzene.Auth.Core.Endpoints`).
+  `[RequireScope]`, `[RequireRole]`, `[RequirePolicy]` and `[AllowAnonymous]` on a handler class, or
+  `options.ForTopic(...)`, are enforced by `UseEndpointAuthorization()`:
+  - It runs after the authenticators and before `UseMessageHandlers`, and before the body is read:
+    no caller is 401, a failed requirement 403.
+  - A handler with no requirement needs an authenticated caller by default
+    (`RequireAuthenticatedByDefault`), so a forgotten attribute fails closed.
+  - Benzene's reserved spec, ping, health, liveness and readiness topics are anonymous
+    (`AnonymousTopics`).
+  - A topic with no handler still answers `not-found`.
+  - It works on every transport it's added to, the envelope included.
 - **`ScopeClaims` is public in `Benzene.Auth.Core`** (moved from an internal type in
   `Benzene.Auth.OAuth2`), so any authenticator's principal yields scopes the same way.
 

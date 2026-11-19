@@ -251,6 +251,60 @@ decision needs the fully-deserialized request, do that check inside the handler 
 
 ## Protecting Only Some Routes
 
+### Per handler: `UseEndpointAuthorization`
+
+Put the requirement on the handler, and `UseEndpointAuthorization()` enforces it for that handler
+alone. It works on every host and transport, Lambda included:
+
+```csharp
+using Benzene.Auth.Core.Endpoints;
+
+[Message("tasks:list")]
+[HttpEndpoint("GET", "/")]
+[RequireScope("tasks.read")]
+public class ListTasksHandler : IMessageHandler<ListTasks, TaskPage> { … }
+
+[Message("tasks:create")]
+[HttpEndpoint("POST", "/")]
+[RequireScope("tasks.write")]
+public class CreateTaskHandler : IMessageHandler<CreateTask, TaskDto> { … }
+
+[Message("tasks:status")]
+[HttpEndpoint("GET", "/status")]
+[AllowAnonymous]
+public class StatusHandler : IMessageHandler<Status, StatusDto> { … }
+```
+
+```csharp
+eventPipeline.UseApiGatewayV2(api => api
+    .UseApiGatewayAuthorizerIdentity()      // or UseOAuth2Bearer(...): who the caller is
+    .UseEndpointAuthorization()             // what each handler needs
+    .UseMessageHandlers());
+```
+
+- **Requirements:**
+  - `[RequireScope(...)]` and `[RequireRole(...)]` take any one of the listed values.
+  - `[RequirePolicy("name")]` uses a policy registered with `AddAuthorizationPolicy`.
+  - Several attributes on one handler all apply.
+  - `[AllowAnonymous]` overrides the rest.
+- **Results:** no caller is 401, and a failed requirement is 403, as with the pipeline-wide checks.
+- **It runs before the body is read.** A malformed body to a protected handler is 401, not 400. A
+  route with no handler is still 404.
+- **A handler with no attribute needs a caller.** A forgotten attribute fails closed. Turn this off
+  with `o.RequireAuthenticatedByDefault = false`.
+- **Benzene's own topics are anonymous:** the spec, ping, health, liveness and readiness topics
+  (`o.AnonymousTopics`). Remove one to protect it: `o.AnonymousTopics.Remove(BenzeneTopic.Spec)`.
+- **No attributes?** Declare requirements per topic instead:
+  `o.ForTopic("tasks:create").RequireScope("tasks.write")`. They add to the handler's own
+  attributes.
+- **It applies wherever you add it,** `/benzene/invoke` included. A pipeline with no authenticator
+  has no caller, so a queue pipeline should either leave it out or mark its handlers.
+
+These are Benzene's own attributes (`Benzene.Auth.Core.Endpoints`), not ASP.NET Core's. A file that
+also imports `Microsoft.AspNetCore.Authorization` needs to qualify `AllowAnonymous`.
+
+### The whole pipeline
+
 Every `Use*` call here is ordinary middleware — add it in front of the routes that need it, not
 necessarily the whole pipeline. The straightforward way is to protect the entire pipeline (one
 `UseHttp` call, `UseOAuth2Bearer`/`UseBasicAuth` first, `UseMessageHandlers()` last) when every

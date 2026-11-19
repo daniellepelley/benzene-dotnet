@@ -41,6 +41,20 @@ permission. All live here (not a mechanism package) because they read a plain `C
 so aren't tied to JWTs the way OAuth2 scopes are; and unconstrained on `TContext` (no `IHttpContext`
 bound) because authorization only reads the principal, so it composes on any transport whose
 pipeline sets one. All are in `AuthorizationExtensions`:
+- **Endpoint authorization (`Endpoints/`, FR-5).** `[RequireScope]`, `[RequireRole]`, `[RequirePolicy]`,
+  `[AllowAnonymous]` on handler classes, enforced by `UseEndpointAuthorization(options)` →
+  `EndpointAuthorizationMiddleware<TContext>`. It is an outer middleware, deliberately not a per-handler
+  pipeline step, because that pipeline runs after the body is deserialized (400 before 401), and it is
+  empty unless the `router =>` overload is used, so a check there could fail open. It resolves topic →
+  `IMessageHandlerDefinitionLookUp.FindHandler` → `HandlerType` → `EndpointRequirements.For` (cached
+  per type), merged with `options.ForTopic(...)`.
+  - A topic with no handler passes through (the router 404s).
+  - `AnonymousTopics` (default: spec, ping, health, liveness, readiness from `BenzeneTopic`) pass.
+  - `RequireAuthenticatedByDefault` (default true) makes an unannotated handler need a caller.
+  - Every requirement is ANDed; each attribute's values are ORed.
+  - No caller is 401 and a failed requirement 403, via `AuthResults`, the same null-principal test as
+    the pipeline-wide checks.
+  - Tests: `test/Benzene.Core.Test/Http/EndpointAuthorizationTest.cs`.
 - `ScopeClaims` (public) - `GetGrantedScopes(principal)` normalizes `scope` (RFC 8693, one
   space-delimited string) and `scp` (Azure AD - space-delimited OR a JSON array) into one flat set.
   Moved here from `Benzene.Auth.OAuth2` (FR-4) so any authenticator's principal reads the same way.

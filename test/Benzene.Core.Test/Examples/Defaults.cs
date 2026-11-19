@@ -14,6 +14,12 @@ public static class Defaults
     public const string HeaderConflictPath = "/header-conflict";
     public const string RequestUrlTopic = "request:url";
     public const string RequestUrlPath = "/request-url";
+    public const string AuthReadPath = "/auth-read";
+    public const string AuthWritePath = "/auth-write";
+    public const string AuthOpenPath = "/auth-open";
+    public const string AuthPlainPath = "/auth-plain";
+    public const string AuthAdminPath = "/auth-admin";
+    public const string AuthPolicyPath = "/auth-policy";
     public const string PathWithParam = "/example/{id}";
     public const string PathNoResponse = "/example-no-response";
     public const string Method = "GET";
